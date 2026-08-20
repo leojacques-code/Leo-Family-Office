@@ -1,6 +1,6 @@
 # Audit de l'état de l'interface
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`. Périmètre : `src/components/`, `src/app/`.
 
 ## Statut et méthode
@@ -53,7 +53,7 @@ pas à des bugs de calcul.
 - CURRENT BEHAVIOUR : la carte « Cash flow mensuel connu » affiche -142,72 € avec le détail « Avant échéance du prêt · dépenses incomplètes ». L'encart de cash-flow affiche une ligne « Dette dès déc. 2026 » puis un total libellé « Disponible avant prêt » qui vaut également -142,72 €. Le panneau Explain calculation annonce en input « Service de dette actuel : 0,00 € avant le 5 décembre 2026 ».
 - WHY IT IS MISLEADING : `deriveMetrics` retranche bien 284,72 € pour produire -142,72 €. Les trois libellés affirment le contraire. `docs/ASSUMPTIONS.md` annonce de son côté un cash-flow de +142 € par mois. Le produit affiche donc un nombre, son explication affirme qu'il a été calculé autrement, et la documentation en annonce un troisième, de signe opposé.
 - EXPECTED BEHAVIOUR : une seule définition, cohérente entre moteur, libellé, panneau d'explication et documentation. Tant que l'arbitrage n'est pas rendu, le libellé doit dire ce que le moteur fait, pas l'inverse.
-- OWNER : Léo pour le libellé, Paul pour le moteur, après arbitrage.
+- OWNER : Léo pour le libellé ; Paul pour le moteur. L'arbitrage est rendu, voir `FINANCIAL_DEFINITIONS.md` §4.3.
 - PHASE : 1
 - SAFE TEXT-ONLY FIX : oui pour le libellé et le panneau. Non pour l'alignement de fond.
 
@@ -292,7 +292,7 @@ pas à des bugs de calcul.
 - CURRENT BEHAVIOUR : un callout annonce « À partir de la deuxième clôture, le cockpit conservera l'écart avec la prévision précédente ».
 - WHY IT IS MISLEADING : `create_monthly_close` alimente `forecast_net_worth` avec le patrimoine net de la clôture précédente, pas avec une prévision. La variance mesure donc une variation, pas un écart au plan. Le texte promet une capacité de pilotage que le stockage ne permet pas.
 - EXPECTED BEHAVIOUR : reformuler en « écart avec la clôture précédente », ou brancher le champ sur la projection.
-- OWNER : Léo pour le texte, Paul pour la sémantique.
+- OWNER : Léo pour le texte ; Paul pour la source de la prévision ; Tom pour la colonne et son versionnage.
 - PHASE : 12
 - SAFE TEXT-ONLY FIX : oui pour le texte.
 
@@ -318,7 +318,7 @@ pas à des bugs de calcul.
 - CURRENT BEHAVIOUR : « Devise reporting : EUR, Multi-devises prêt », « Devise reporting : EUR », « EUR · France ».
 - WHY IT IS MISLEADING : « Multi-devises prêt » suggère une capacité disponible. En réalité `fxConvert` n'est appelé nulle part, `currency_rates` n'est jamais alimentée, et `deriveMetrics` additionne les soldes sans lire leur devise. Le formulaire d'ajout de compte accepte pourtant n'importe quel code de 3 lettres : un utilisateur peut créer un compte USD et voir son montant compté à parité.
 - EXPECTED BEHAVIOUR : « Devise unique : EUR. Les comptes en devise étrangère ne sont pas encore convertis. » Et, dans l'idéal, restreindre le formulaire à EUR.
-- OWNER : Léo pour le texte, Paul pour le garde-fou.
+- OWNER : Léo pour le texte ; Paul pour le garde-fou de conversion ; Tom pour la table `currency_rates`.
 - PHASE : 2
 - SAFE TEXT-ONLY FIX : oui pour le texte.
 

@@ -1,6 +1,6 @@
 # Registre des hardcodes financiers
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`. Périmètre : `src/`, `scripts/`, `supabase/`.
 
 ## Statut et portée
@@ -34,6 +34,20 @@ réelles versionnées dans un dépôt Git.
 Les constantes purement techniques (tailles maximales de fichier, nombres d'itérations
 de bissection, tolérances numériques, codes couleur, tailles d'icônes) sont hors
 périmètre : elles ne portent aucune sémantique financière.
+
+### Règle d'attribution des propriétaires
+
+Rappel du cadre de collaboration, appliqué uniformément dans ce registre :
+
+| Lane | Périmètre |
+|---|---|
+| Léo | sémantique produit : libellés, périmètres, arbitrages fonctionnels, copie d'interface |
+| Paul | sémantique financière : formules, moteurs, golden cases, tests financiers |
+| Tom et Codex | schéma, repositories, persistance, migrations, sécurité, CI |
+
+Conséquence : un hardcode dont la maison cible est une table, une colonne ou un
+repository n'a jamais Paul pour propriétaire unique. Paul possède la formule qui la
+consomme, pas la structure qui la porte.
 
 ### Catégories
 
@@ -83,8 +97,8 @@ périmètre : elles ne portent aucune sémantique financière.
 - PROVENANCE EXPECTED : dérivée de la date d'observation et de `maturityDate`, jamais littérale
 - CURRENT RISK : la mensualité de 284,72 € est comptée dès la date zéro alors que la première échéance est le 5 décembre 2026, ce que l'interface et `docs/ASSUMPTIONS.md` contredisent tous les deux. Le FCF affiché vaut -142,72 € sous le libellé « avant échéance du prêt ». À partir du 19 août 2027, la constante inverse son effet : tout prêt à première échéance postérieure disparaîtra du service de dette.
 - TEMPORARILY ACCEPTABLE ? Non. C'est le seul hardcode qui produit aujourd'hui un chiffre faux au premier écran du produit.
-- TARGET HOME : `deriveMetrics(asOfDate, …)`, fenêtre `firstPaymentDate <= asOfDate <= maturityDate`
-- OWNER : Paul, après arbitrage produit de Léo
+- TARGET HOME : suppression pure. La définition canonique arrêtée au Checkpoint remplace la fenêtre de dates par la somme des `LoanScheduleEntry.totalCashOut` contractuellement exigibles dans la période, ce qui supprime le besoin de toute borne littérale. Voir INV-D-02.
+- OWNER : Paul pour la dérivation et les tests ; Tom pour le modèle `LoanScheduleEntry` dont elle dépend
 - PRIORITY : P1
 
 ## HC-02 · Année de base du Monte-Carlo
@@ -112,7 +126,7 @@ périmètre : elles ne portent aucune sémantique financière.
 - CURRENT RISK : l'API `/api/projection` ne transmet jamais `startingAge`. La valeur par défaut est donc toujours utilisée. Elle est correcte pour un seul utilisateur, à une seule date.
 - TEMPORARILY ACCEPTABLE ? Oui, tant que l'âge n'est pas affiché. Le champ `age` est présent dans `ProjectionPoint` mais n'est pas rendu par l'interface actuelle.
 - TARGET HOME : table de profil utilisateur
-- OWNER : Paul
+- OWNER : Tom pour la table de profil utilisateur ; Paul pour sa consommation par le moteur
 - PRIORITY : P2
 
 ## HC-04 · Amplitude du stress rare
@@ -280,7 +294,7 @@ périmètre : elles ne portent aucune sémantique financière.
 - CURRENT RISK : modéré. Les seize champs sont modifiables et le badge USER_ASSUMPTION est présent, ce qui est correct. Deux réserves : les hypothèses ne sont jamais persistées, donc tout travail est perdu au rechargement ; et le jeu par défaut est un cas où `loanAmount` (227 600) dépasse `purchasePrice` (220 000), ce qui est précisément la configuration où la formule d'equity investie est la plus fausse. Le produit s'ouvre donc sur son propre pire cas.
 - TEMPORARILY ACCEPTABLE ? Oui pour les valeurs, non pour l'absence de persistance annoncée par un bouton « Sauvegarder l'étude » inactif.
 - TARGET HOME : table `properties`, déjà présente dans le schéma et inutilisée
-- OWNER : Paul
+- OWNER : Paul pour le moteur ; Tom pour la persistance dans `properties`, présente au schéma et inutilisée
 - PRIORITY : P2
 
 ## HC-16 · Trajectoires de carrière
@@ -294,7 +308,7 @@ périmètre : elles ne portent aucune sémantique financière.
 - CURRENT RISK : douze paramètres décident de la forme de six courbes présentées comme des trajectoires de carrière. Aucun n'est sourcé. Le produit affiche un callout « Courbes non sourcées en V1 », ce qui est honnête et doit être maintenu tant que la source manque. Une croissance de 28 % par an sur neuf ans pour l'entrepreneuriat multiplie le fixe par 9,3 : c'est un ordre de grandeur, pas un benchmark.
 - TEMPORARILY ACCEPTABLE ? Oui, grâce au callout.
 - TARGET HOME : table de benchmarks EXTERNAL_DATA, avec source et date de vérification
-- OWNER : Léo pour les sources, Paul pour le moteur
+- OWNER : Léo pour les sources ; Tom pour la table de benchmarks EXTERNAL_DATA ; Paul pour le moteur
 - PRIORITY : P2
 
 ## HC-17 · Croissance du variable de carrière
@@ -350,7 +364,7 @@ périmètre : elles ne portent aucune sémantique financière.
 - CURRENT RISK : faible en patrimoine, le callout « Aucun actif business actuel » est explicite et les valeurs restent isolées du bilan. Réserve de formule : le champ est libellé « Dette nette brute » alors que le calcul fait `EV - dette + cash`, ce qui suppose une dette brute. Un utilisateur qui saisit une dette nette compte le cash deux fois.
 - TEMPORARILY ACCEPTABLE ? Oui pour les valeurs, non pour le libellé.
 - TARGET HOME : tables `businesses` et `business_valuations`, présentes et inutilisées
-- OWNER : Léo pour le libellé, Paul pour le moteur
+- OWNER : Léo pour le libellé ; Paul pour le moteur ; Tom pour les tables `businesses` et `business_valuations`
 - PRIORITY : P2
 
 ## HC-21 · Plus-value PEA annoncée
@@ -392,7 +406,7 @@ périmètre : elles ne portent aucune sémantique financière.
 - CURRENT RISK : cette valeur n'existe nulle part en base. Elle n'est ni vérifiable ni réconciliable depuis le produit. `docs/ASSUMPTIONS.md` note d'ailleurs que 14 300 + 703,12 = 15 003,12, soit 0,01 € sous le total du compte, un second écart ouvert. La donnée est donc à la fois invisible pour le système et porteuse d'une anomalie.
 - TEMPORARILY ACCEPTABLE ? Non.
 - TARGET HOME : table de flux par compte, à créer
-- OWNER : Léo pour le retrait immédiat, Paul pour le modèle de flux
+- OWNER : Léo pour le retrait immédiat ; Tom pour le modèle de flux par compte, à créer
 - PRIORITY : P1
 
 ## HC-24 · Performance affichée du CTO
@@ -532,7 +546,7 @@ périmètre : elles ne portent aucune sémantique financière.
 - CURRENT RISK : neuf boutons cliquables sans effet, portant la mention « Préparé ». Le mot suggère une disponibilité imminente plutôt qu'une absence. « Coming soon » est utilisé ailleurs dans le produit pour le même besoin, ce qui rend l'incohérence visible.
 - TEMPORARILY ACCEPTABLE ? Oui si le libellé devient explicite.
 - TARGET HOME : table `decision_cases`, présente dans le schéma et inutilisée
-- OWNER : Léo
+- OWNER : Léo pour le libellé ; Tom pour la table `decision_cases`
 - PRIORITY : P3
 
 ## HC-34 · Statut d'adapter affiché
@@ -546,7 +560,7 @@ périmètre : elles ne portent aucune sémantique financière.
 - CURRENT RISK : en production sur Vercel, `resolveAdapterName()` retourne `supabase`. L'écran affirme donc à l'utilisateur que ses données sont dans un fichier SQLite local alors qu'elles sont dans PostgreSQL managé. C'est une affirmation fausse sur la localisation de données patrimoniales, sur la page qui porte le bloc « Security ». L'information exacte est disponible : le champ `adapter` existe déjà sur le repository, il n'est simplement pas remonté jusqu'à `DashboardState`.
 - TEMPORARILY ACCEPTABLE ? Non.
 - TARGET HOME : `DashboardState.adapter`, alimenté par `repository.adapter`
-- OWNER : Léo pour le texte, Tom pour la remontée du champ si elle touche le repository
+- OWNER : Léo pour le texte ; Tom pour la remontée de `repository.adapter` jusqu'à `DashboardState`
 - PRIORITY : P1
 
 ---

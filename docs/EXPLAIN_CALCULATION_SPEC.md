@@ -1,6 +1,6 @@
 # Spécification d'Explain Calculation
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`. Aucun code n'est écrit ici.
 
 ## 1. Objet
@@ -93,12 +93,19 @@ FORMULA
     NetWorth(t) = GrossAssets(t) - Liabilities(t)
 
 INPUTS
-- `GrossAssets(t)` : DERIVED, daté, avec sa propre explication ouvrable
-- `Liabilities(t)` : DERIVED, daté, avec sa propre explication ouvrable
+- `GrossAssets(t)` : DERIVED, daté, avec sa propre explication ouvrable. Somme des soldes
+  positifs des comptes, plus la valeur brute des actifs non financiers quand ils existent
+- `Liabilities(t)` : DERIVED, daté, avec sa propre explication ouvrable. Inclut les
+  soldes bancaires débiteurs, traités en passif court terme, et les dettes adossées aux
+  actifs financés
+- toute equity dérivée (immobilière, business) est affichée pour information et
+  explicitement marquée comme non sommable
 
 PROVENANCE : DERIVED, confiance bornée par le minimum des deux composants.
-ASSUMPTIONS : convention de traitement des comptes débiteurs ; périmètre limité aux
-actifs financiers ; devise unique EUR sans conversion.
+ASSUMPTIONS : un solde bancaire débiteur est un passif court terme ; un actif financé
+entre en valeur brute avec sa dette en passif, l'equity restant DERIVED et non sommable ;
+périmètre limité aux actifs financiers, d'où le libellé « Actifs financiers identifiés » ;
+devise unique EUR sans conversion.
 MISSING : immobilier, business equity, autres actifs, tous hors périmètre.
 COMPLETENESS : COMPLETE sur le périmètre déclaré, biais NONE, précision 2 décimales.
 REPORTING UNIT : EUR, aucun taux appliqué.
@@ -138,6 +145,25 @@ COMPLETENESS : COMPLETE.
 panneau de couverture de liquidité. Lister les comptes exclus et le motif de leur
 exclusion est le point le plus utile à ajouter : c'est là que se joue l'invariant
 « le cash PEA n'est pas du cash bancaire », et l'utilisateur ne le voit nulle part.
+
+### 4.3 bis Grandeurs de liquidité
+
+Trois panneaux distincts, un par grandeur, conformément à `FINANCIAL_DEFINITIONS.md` §3.2.
+
+`LiquidAssets` : formule `Σ actifs mobilisables sous 30 jours sans pénalité`. Inputs :
+un par actif retenu, plus la liste des actifs exclus avec le motif d'exclusion, qui est
+l'information la plus utile du panneau.
+
+`NetLiquidityPosition30d` : formule `LiquidAssets - Σ engagements exigibles sous 30 jours`.
+Inputs : `LiquidAssets` avec son explication ouvrable, plus le détail des engagements,
+échéance par échéance.
+
+`LiquidNetWorth` : formule `LiquidAssets - Σ Liabilities`. Le panneau doit dire
+explicitement que cette grandeur est structurellement inférieure au patrimoine net dès
+qu'un actif illiquide existe, et qu'un résultat négatif n'est pas une anomalie.
+
+ÉCART ACTUEL : aucun de ces trois panneaux n'existe, et la métrique unique qui en tient
+lieu est un alias de `NetWorth`.
 
 ### 4.4 Couverture de liquidité
 
@@ -305,12 +331,18 @@ modèle est trompeur.
 FORMULA cible pour l'equity investie
     InvestedEquity = max(0, CoûtTotalProjet - MontantEmprunté)
 
+FORMULA cible pour le MOIC
+    MOIC = (Σ distributions + valeur résiduelle) / Σ contributions en equity
+
+Les apports complémentaires, y compris le comblement d'un cash-flow négatif, entrent au
+dénominateur et non en déduction du numérateur.
+
 INPUTS : les seize hypothèses, chacune avec sa provenance, toutes USER_ASSUMPTION par
 défaut ; les flux annuels ; le flux de sortie décomposé en prix de cession, frais de
 vente, dette restante et fiscalité.
 PROVENANCE : DERIVED pour les résultats, USER_ASSUMPTION pour toutes les entrées.
 ASSUMPTIONS à exposer :
-- l'assiette de la valeur de sortie, avec ou sans travaux capitalisés ;
+- l'assiette de la valeur de sortie : `postRenovationValue` quand elle est renseignée, prix d'achat sinon. Le coût des travaux et la valeur qu'ils créent sont deux entrées distinctes, jamais dérivées l'une de l'autre ;
 - les charges annuelles sont constantes sur l'horizon ;
 - la vacance s'applique au loyer initial seulement ;
 - le taux d'imposition est un taux effectif unique, sans lien avec le moteur fiscal ;
@@ -358,18 +390,21 @@ Classées par gain de crédibilité rapporté au coût.
 1. Corriger les quatre panneaux dont les inputs sont figés. Les données existent toutes
    dans `state`. Aucune modification de moteur. Zone verte.
 2. Corriger le panneau du cash-flow, qui affirme un input contraire au calcul exécuté.
-3. Ajouter le panneau manquant du service de dette, par prêt et par motif.
-4. Ajouter la section complétude aux panneaux existants, avec le sens du biais.
-5. Ajouter les hypothèses non déclarées au panneau Monte-Carlo, en commençant par
-   l'absence de la dette dans la projection.
+3. Déclarer `modelSimplifications` sur les cinq moteurs existants. C'est du texte écrit
+   par le propriétaire du moteur, sans code, et cela révèle immédiatement les cas où un
+   résultat complet est structurellement inadapté.
+4. Ajouter le panneau manquant du service de dette, par prêt, par échéance exigible et
+   par motif de contribution nulle.
+5. Ajouter les trois axes de fiabilité aux panneaux existants : complétude, confiance,
+   incertitude de modèle, avec le sens du biais.
 6. Ajouter un panneau à l'arbitrage du Decision Lab, ou retirer sa recommandation.
-7. Exposer l'equity investie dans le panneau immobilier.
+7. Exposer l'equity investie et le détail du MOIC dans le panneau immobilier.
 
 Les points 1 à 3 se traitent dans la lane de Léo, sans toucher aux moteurs.
 
 ## 6. Points à soumettre à la review
 
-1. Faut-il exposer `version` de formule dès la V1, ou seulement quand un résultat sera archivé dans une clôture ?
+1. Faut-il exposer `version` de formule dès la V1, ou seulement quand un résultat sera archivé dans une clôture ? La décision de versionnage des clôtures (INV-J-01) rend la question plus pressante : une clôture en version 2 doit pouvoir dire avec quelle version de formule elle a été produite.
 2. Une explication doit-elle être exportable, par exemple dans le backup JSON, pour qu'un tiers puisse rejouer le calcul ?
 3. Les hypothèses de modèle doivent-elles apparaître dans le panneau principal ou dans un second niveau ? Le panneau Monte-Carlo en aurait cinq, ce qui alourdit.
 4. Un panneau doit-il exister pour un résultat NOT_COMPUTABLE, ou le message « non calculable » suffit-il ?

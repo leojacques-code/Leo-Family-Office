@@ -1,6 +1,6 @@
 # Questions ouvertes
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`.
 
 ## Usage
@@ -21,267 +21,31 @@ entre dans le code sans être écrite quelque part est une dette invisible.
 
 ### État
 
+Treize questions sur dix-huit ont été fermées le 20 août 2026 : Q-14 par la création de la
+topologie de branches, les douze autres par le Checkpoint GPT-5.6 Sol. Cinq restent
+ouvertes, dont quatre relèvent d'un arbitrage de Léo et une de Tom.
+
 | ID | Sujet | Décideur | Échéance | Statut |
 |---|---|---|---|---|
-| Q-01 | Service de dette pendant un différé | Léo | avant toute correction du cash-flow | ouverte |
-| Q-02 | Arrondi monétaire canonique | Paul, arbitrage Léo | avant de rendre la suite verte | ouverte |
-| Q-03 | Convention actif ou passif d'un compte débiteur | Léo | avant l'import de comptes | ouverte |
-| Q-04 | `liquidNetWorth` : implémenter ou retirer | Léo | avant la V1 | ouverte |
-| Q-05 | `savingsRate` et `investmentRate` : deux métriques ou une | Léo | avant l'import de transactions | ouverte |
-| Q-06 | Sémantique de `forecast_net_worth` | Léo | avant la deuxième clôture | ouverte |
-| Q-07 | Confiance forcée à HIGH après édition | Léo | avant la V1 | ouverte |
-| Q-08 | Projection déterministe : conserver, aligner ou supprimer | Léo | avant tout travail sur les projections | ouverte |
-| Q-09 | `shockYear` : année relative ou civile | Léo | avant la V1 | ouverte |
-| Q-10 | Assiette de la valeur de sortie immobilière | Paul, arbitrage Léo | avant de corriger le moteur immobilier | ouverte |
+| Q-01 | Service de dette pendant un différé | Léo | avant toute correction du cash-flow | **fermée le 20/08** |
+| Q-02 | Arrondi monétaire canonique | Paul, arbitrage Léo | avant de rendre la suite verte | **fermée le 20/08** |
+| Q-03 | Convention actif ou passif d'un compte débiteur | Léo | avant l'import de comptes | **fermée le 20/08** |
+| Q-04 | `liquidNetWorth` : implémenter ou retirer | Léo | avant la V1 | **fermée le 20/08** |
+| Q-05 | `savingsRate` et `investmentRate` : deux métriques ou une | Léo | avant l'import de transactions | **fermée le 20/08** |
+| Q-06 | Sémantique de `forecast_net_worth` | Léo | avant la deuxième clôture | **fermée le 20/08** |
+| Q-07 | Confiance forcée à HIGH après édition | Léo | avant la V1 | **fermée le 20/08** |
+| Q-08 | Projection déterministe : conserver, aligner ou supprimer | Léo | avant tout travail sur les projections | **fermée le 20/08** |
+| Q-09 | `shockYear` : année relative ou civile | Léo | avant la V1 | **fermée le 20/08** |
+| Q-10 | Assiette de la valeur de sortie immobilière | Paul, arbitrage Léo | avant de corriger le moteur immobilier | **fermée le 20/08** |
 | Q-11 | Decision Lab : recommandation ou comparaison | Léo | immédiat | ouverte |
 | Q-12 | Données personnelles réelles dans le dépôt | Léo, mise en oeuvre Tom | avant l'arrivée de Paul et Tom | ouverte |
 | Q-13 | npm ou pnpm | Tom | avant l'arrivée de Paul et Tom | ouverte |
 | Q-14 | Topologie de branches inexistante | Léo | avant l'arrivée de Paul et Tom | **fermée le 20/08** |
-| Q-15 | Périmètre nommé « Patrimoine brut » | Léo | avec les correctifs de copie | ouverte |
-| Q-16 | Clôture d'un mois déjà clos : refus ou réouverture | Léo | avant la deuxième clôture | ouverte |
+| Q-15 | Périmètre nommé « Patrimoine brut » | Léo | avec les correctifs de copie | **fermée le 20/08** |
+| Q-16 | Clôture d'un mois déjà clos : refus ou réouverture | Léo | avant la deuxième clôture | **fermée le 20/08** |
 | Q-17 | Barre d'acceptation V1 | Léo | avant le 24 août | ouverte |
 | Q-18 | Ordre entre parité Finary et profondeur Finary+ | Léo | avant le 24 août | ouverte |
-
----
-
-## Q-01 · Service de dette pendant un différé
-
-CONTEXTE
-Trois définitions coexistent dans le produit, sans qu'aucune ne soit désignée comme la
-bonne :
-- le moteur (`shared.ts:31`) compte 284,72 € dès la date zéro, via un filtre
-  `firstPaymentDate <= "2027-08-19"` ;
-- l'interface affiche ce résultat sous les libellés « Avant échéance du prêt » et
-  « Disponible avant prêt », et son panneau d'explication annonce « Service de dette
-  actuel : 0,00 € avant le 5 décembre 2026 » ;
-- `docs/ASSUMPTIONS.md` annonce un cash-flow de +142 € par mois, soit la définition
-  opposée, avec un signe opposé.
-
-Le test `shared.test.ts` verrouille le comportement du moteur en attendant `-142,72`.
-La documentation et la suite de tests sont donc en désaccord formel.
-
-OPTIONS
-- A. Le service de dette est nul avant la première échéance. Cohérent avec le business
-  plan §1.2, qui exige de représenter le cas « étudiant, prêt différé, première échéance
-  future ». Le cash-flow libre passe à +142 €. Il faut alors afficher séparément une
-  ligne « engagement futur » pour que l'utilisateur ne découvre pas la mensualité en
-  décembre.
-- B. Le service de dette compte l'engagement dès qu'il est connu. Plus prudent pour le
-  pilotage, cohérent avec le chiffre affiché aujourd'hui. Il faut alors corriger trois
-  libellés et une ligne de documentation.
-- C. Deux métriques distinctes : service exigible, et service engagé. Plus juste, plus
-  coûteux, et cohérent avec la doctrine « profondeur dans le moteur, simplicité dans
-  l'interface ».
-
-Nuance apportée par le golden dataset CASE 11 : la règle ne peut pas s'énoncer « 0 avant
-la première échéance ». Un différé partiel décaisse les intérêts pendant le différé. La
-formulation correcte est « le paiement contractuel exigible à cette date », qui vaut 0
-en différé total et les intérêts en différé partiel.
-
-BLOQUE : correction de `deriveMetrics`, correction des libellés du cockpit, correction
-de `docs/ASSUMPTIONS.md`, invariant INV-D-02, golden cases CASE 8 et CASE 11.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avant toute correction du cash-flow.
-IMPACT SI NON TRANCHÉ : le produit continue d'afficher un chiffre sous un libellé qui le
-contredit, sur son premier écran. Paul risque d'implémenter la définition A en croyant
-corriger un bug, et de casser un test qui verrouille la définition B.
-
----
-
-## Q-02 · Arrondi monétaire canonique
-
-CONTEXTE
-`15571.49 - 16745` rend `-1173.5100000000002`. Le test `financial.test.ts:40` échoue sur
-une comparaison stricte. C'est le seul test rouge du dépôt, et il rend `pnpm check`
-rouge.
-
-OPTIONS
-- A. Arrondir à la présentation seulement. Le moteur garde la précision maximale, les
-  tests utilisent des tolérances. Simple, sans effet de bord, mais les agrégats ne
-  bouclent pas exactement.
-- B. Arrondir dans le moteur, à chaque agrégation, en half-even sur 2 décimales. Les
-  agrégats bouclent, la précision se dégrade sur les calculs itératifs comme les
-  échéanciers à 240 lignes.
-- C. Représenter les montants en centimes entiers. Correct, et c'est une refonte du
-  modèle de données.
-
-BLOQUE : passage de la suite au vert, invariants INV-A-01 et INV-A-02, définition des
-tolérances du golden dataset.
-DÉCIDEUR : Paul propose, Léo arbitre.
-ÉCHÉANCE : avant de rendre la suite verte, donc avant tout autre travail sur les tests.
-IMPACT SI NON TRANCHÉ : la suite reste rouge, et un échec rouge permanent finit par ne
-plus être lu. C'est le pire état possible pour une base de tests.
-
----
-
-## Q-03 · Convention actif ou passif d'un compte débiteur
-
-CONTEXTE
-Le compte CIC est à -3,44 €. Il est compté comme un actif de valeur négative. Le
-business plan annexe A.1 note lui-même « convention actif/passif à formaliser ».
-
-OPTIONS
-- A. Actif de valeur négative. Simple, additif, conserve l'identité comptable.
-- B. Passif court terme. Plus juste économiquement, impose de redéfinir `GrossAssets`
-  comme la somme des soldes positifs seulement.
-
-BLOQUE : invariant INV-A-06, définition de `GrossAssets`, export CSV.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avant l'import de comptes, qui multipliera les cas.
-IMPACT SI NON TRANCHÉ : 3,44 € aujourd'hui. Un découvert autorisé de plusieurs milliers
-d'euros demain, avec deux écrans qui ne s'accordent pas.
-
----
-
-## Q-04 · `liquidNetWorth`
-
-CONTEXTE
-La métrique vaut exactement `grossAssets - debt`, c'est-à-dire `netWorth`. La notion de
-liquidité n'intervient nulle part dans son calcul. Elle porte un nom qui ne correspond
-pas à ce qu'elle mesure.
-
-OPTIONS
-- A. Implémenter la définition : actifs mobilisables sous 30 jours moins dettes
-  exigibles sous 30 jours. Suppose de qualifier la liquidité de chaque actif, ce qui
-  suppose Q-03 tranchée et le champ `liquidity` réellement exploité.
-- B. Retirer la métrique du type `DashboardMetrics`.
-- C. La renommer, mais un doublon renommé reste un doublon.
-
-BLOQUE : invariant §3.2 de `FINANCIAL_DEFINITIONS.md`, nettoyage de `DashboardMetrics`.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avant la V1.
-IMPACT SI NON TRANCHÉ : la métrique n'est affichée nulle part aujourd'hui, le risque est
-qu'elle le soit un jour sous son nom.
-
----
-
-## Q-05 · `savingsRate` et `investmentRate`
-
-CONTEXTE
-`savingsRate = freeCashFlow / monthlyIncome`, non borné.
-`investmentRate = max(0, freeCashFlow) / monthlyIncome`.
-Les deux mesurent le cash-flow libre, aucune ne mesure l'épargne ni l'investissement
-constatés. Elles sont identiques dès que le cash-flow est positif.
-
-OPTIONS
-- A. Une seule métrique, honnêtement nommée « taux de cash-flow libre », jusqu'à ce que
-  les transactions permettent de mesurer l'épargne réelle.
-- B. Conserver les deux et les redéfinir sur des flux constatés, ce qui suppose l'import
-  de transactions.
-
-BLOQUE : libellés du cockpit et de la page Cash Flow.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avant l'import de transactions.
-IMPACT SI NON TRANCHÉ : le produit affiche un « taux d'épargne provisoire » de -11,1 %
-qui ne mesure pas une épargne.
-
----
-
-## Q-06 · Sémantique de `forecast_net_worth`
-
-CONTEXTE
-Le champ reçoit le patrimoine net de la clôture précédente. `variance` mesure donc une
-variation entre deux mois, pas un écart au plan. L'interface promet « Écart réel vs
-prévu ».
-
-OPTIONS
-- A. Renommer en `previous_net_worth` et `variation`, et corriger le texte. Sans coût,
-  sans valeur ajoutée.
-- B. Brancher le champ sur la projection produite avant le mois. C'est la promesse du
-  business plan §14.3, et cela suppose de persister une prévision mensuelle, ce qui
-  n'existe pas.
-
-BLOQUE : invariant INV-J-03, golden case CASE 18, texte de la page Timeline.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avant la deuxième clôture réelle, sinon la première variance sera fausse et
-archivée.
-IMPACT SI NON TRANCHÉ : le rituel mensuel, qui est un différenciant fort du produit,
-mesure autre chose que ce qu'il annonce.
-
----
-
-## Q-07 · Confiance forcée à HIGH après édition
-
-CONTEXTE
-`update_scenario` et `update_expense` passent `confidence` à `HIGH` à chaque
-modification. Déplacer un curseur de rendement de 5,5 % à 8 % produit donc une hypothèse
-de confiance élevée.
-
-OPTIONS
-- A. Conserver la confiance précédente.
-- B. Demander la confiance à l'utilisateur, ce qui alourdit chaque saisie.
-- C. Déduire la confiance du type : un montant saisi depuis un document est HIGH, un
-  curseur de scénario est MEDIUM au mieux.
-
-BLOQUE : invariant INV-H-04, crédibilité du registre d'hypothèses de la page Settings.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avant la V1.
-IMPACT SI NON TRANCHÉ : le registre affiche « confiance élevée » sur des paramètres
-inventés, ce qui vide le mécanisme de confiance de son sens.
-
----
-
-## Q-08 · Projection déterministe
-
-CONTEXTE
-Deux moteurs coexistent. Le déterministe capitalise annuellement et ajoute l'épargne en
-fin d'année, exécuté côté client, jamais persisté. Le Monte-Carlo capitalise
-mensuellement et ajoute l'épargne chaque mois, exécuté par l'API, persisté. À paramètres
-identiques ils ne produisent pas la même trajectoire, et rien ne l'explique.
-
-OPTIONS
-- A. Aligner le déterministe sur le pas mensuel du Monte-Carlo. Le déterministe devient
-  alors la médiane à volatilité nulle, ce qui est cohérent et vérifiable par un test.
-- B. Supprimer le déterministe et afficher le P50 du Monte-Carlo sur le cockpit. Coût :
-  un appel API au chargement de la page d'accueil.
-- C. Conserver les deux et documenter l'écart.
-
-BLOQUE : invariant INV-G-07, graphique du cockpit.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avant tout travail sur les projections.
-IMPACT SI NON TRANCHÉ : deux chiffres différents pour la même question, dans le même
-produit, à deux clics d'écart.
-
----
-
-## Q-09 · `shockYear`
-
-CONTEXTE
-Le champ est un entier relatif à l'année 1 de la projection. Le scénario Stress porte
-`shockYear = 2`, ce qui signifie 2027 et non 2028. Le formulaire affiche « Année du
-choc » sans unité.
-
-OPTIONS
-- A. Conserver l'année relative et corriger le libellé en « Année de projection du
-  choc, 1 égale la première année ».
-- B. Passer en année civile, ce qui impose une migration des données existantes.
-
-BLOQUE : libellé du formulaire de scénario, description du scénario Stress.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avant la V1.
-IMPACT SI NON TRANCHÉ : un utilisateur place un choc à la mauvaise année sans s'en
-apercevoir.
-
----
-
-## Q-10 · Assiette de la valeur de sortie immobilière
-
-CONTEXTE
-`exitValue = purchasePrice × (1 + croissance)^horizon`. Les travaux ne sont pas dans
-l'assiette. Sur le jeu par défaut, 15 000 € de travaux ne créent aucune valeur de
-sortie. Ce n'est pas nécessairement faux, mais ce n'est pas dit.
-
-OPTIONS
-- A. Assiette égale au prix d'achat. Conservateur. À afficher comme hypothèse.
-- B. Assiette égale au prix d'achat plus travaux capitalisés. Plus favorable, et discutable
-  selon la nature des travaux.
-- C. Paramètre explicite, avec une valeur par défaut conservatrice.
-
-BLOQUE : invariant INV-E-04, golden case CASE 13, correction du moteur immobilier.
-DÉCIDEUR : Paul propose, Léo arbitre.
-ÉCHÉANCE : avant de corriger le moteur immobilier, pour ne pas corriger deux fois.
-IMPACT SI NON TRANCHÉ : les projets à travaux sont systématiquement sous-évalués, sans
-que l'utilisateur sache pourquoi.
+| Q-19 | Vérification du compte auteur pour Vercel | Léo, règle d'équipe Tom | avant l'arrivée de Paul et Tom | ouverte |
 
 ---
 
@@ -354,42 +118,6 @@ lockfiles concurrents peuvent apparaître.
 
 ---
 
-## Q-15 · Périmètre nommé « Patrimoine brut »
-
-CONTEXTE
-L'agrégat ne contient que les actifs financiers. Ni immobilier, ni business equity, ni
-autres actifs. Les tables existent et ne sont jamais lues.
-
-OPTIONS
-- A. Renommer en « Actifs financiers identifiés ».
-- B. Conserver le nom et ajouter une réserve de périmètre sur chaque carte.
-
-BLOQUE : invariant INV-A-05, libellés du cockpit et de la page Net Worth.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avec les correctifs de copie.
-IMPACT SI NON TRANCHÉ : l'utilisateur croit son bilan exhaustif.
-
----
-
-## Q-16 · Clôture d'un mois déjà clos
-
-CONTEXTE
-`create_monthly_close` fait un upsert. Reclôturer janvier écrase la ligne de janvier
-sans trace. Par ailleurs `net_worth_snapshots` reçoit une insertion à chaque appel, sans
-contrainte d'unicité côté SQLite : deux clics créent deux snapshots.
-
-OPTIONS
-- A. Refus strict. Une clôture existante ne peut pas être remplacée.
-- B. Réouverture explicite et tracée, conservant la version précédente.
-
-BLOQUE : invariants INV-J-01 et INV-J-04, golden case CASE 18.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avant la deuxième clôture réelle.
-IMPACT SI NON TRANCHÉ : perte définitive d'un point d'historique patrimonial, sans
-aucune trace.
-
----
-
 ## Q-17 · Barre d'acceptation V1
 
 CONTEXTE
@@ -426,10 +154,160 @@ techniquement le plus proche, pas vers ce qui a le plus de valeur.
 
 ---
 
+## Q-19 · Vérification du compte auteur des commits pour Vercel
+
+CONTEXTE
+Vercel refuse de déployer une prévisualisation quand il ne peut pas rattacher l'adresse
+de commit à un compte GitHub ayant accès à l'équipe. Les commits de la branche
+`claude/plan-de-leo-qakf68` portent `lchety@triactis.com`, qui n'est pas reliée. Le
+statut `Vercel / Deployment was blocked` est donc rouge sur PR #1, alors que la PR ne
+touche que `docs/` et que `next build` sort en 0 sur le même HEAD.
+
+Ce blocage n'est pas un défaut : c'est un contrôle d'accès qui fonctionne. Il ne doit pas
+être contourné, ni par réécriture de l'auteur des commits, ni par un commit vide, ni par
+une modification du réglage Vercel.
+
+OPTIONS
+- A. Relier l'adresse de commit au compte GitHub rattaché à l'équipe Vercel. Remède
+  documenté par Vercel lui-même.
+- B. Convenir d'une adresse de commit unique pour tous les collaborateurs du projet, et
+  la relier une seule fois.
+- C. Ne rien faire, et accepter que les prévisualisations restent bloquées sur toute PR
+  de documentation. Tenable pour `docs/`, intenable dès qu'une PR touche l'interface.
+
+BLOQUE : les déploiements de prévisualisation sur toute PR dont l'auteur n'est pas
+vérifié. Paul et Tom heurteront le même mur à leur première PR.
+DÉCIDEUR : Léo pour son propre compte, Tom pour la règle d'équipe.
+ÉCHÉANCE : avant l'arrivée de Paul et Tom.
+IMPACT SI NON TRANCHÉ : aucune prévisualisation exploitable, donc aucune revue visuelle
+possible sur les PR d'interface, qui sont précisément celles où elle sert le plus.
+
+---
+
 ## Questions fermées
 
 Une question tranchée descend ici avec sa réponse, sa date et les documents mis à jour.
 Elle n'est pas supprimée : la trace de l'arbitrage vaut autant que l'arbitrage.
+
+---
+
+## Q-01 · Service de dette pendant un différé · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : `DebtService(période)` est la somme des `LoanScheduleEntry.totalCashOut` contractuellement exigibles dans la période. Avant la première échéance : 0. En différé partiel : les intérêts intercalaires réellement exigibles. Après la maturité : 0. Assurance et frais inclus lorsqu'ils existent. Aucune de ces trois situations n'est un cas particulier : elles découlent du comptage des échéances exigibles.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §4.3, INV-D-02, INV-D-03, INV-D-08, CASE 8, CASE 11.
+
+NOTE : La valeur juste au 19 août 2026 est donc 0 € de service de dette et +142 € de cash-flow libre avant impôt. Le libellé de l'interface et `docs/ASSUMPTIONS.md` deviennent corrects, et c'est `deriveMetrics` plus le test `shared.test.ts` qui doivent changer. Reste à faire, hors documentation : le modèle ne porte pas encore d'échéancier lisible.
+
+---
+
+## Q-02 · Arrondi monétaire canonique · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Calculs internes en pleine précision, sans arrondi intermédiaire. Arrondi aux deux seules frontières où un montant devient un engagement ou une information : la restitution (affichage, export, rapport) et le contrat (échéance débitée, montant facturé).
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §2.3, INV-A-02.
+
+NOTE : Conséquence sur INV-A-01 : le calcul est RESPECTED côté implémentation, le test est FAILING. C'est le test qui doit être aligné sur la règle, pas la formule.
+
+---
+
+## Q-03 · Convention d'un compte bancaire débiteur · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Un solde bancaire débiteur est un passif court terme. Il entre dans `Liabilities`, jamais dans `GrossAssets`, qui devient la somme des soldes positifs.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §2.4, INV-A-06.
+
+NOTE : `NetWorth` est inchangé par le choix : seule la présentation du bilan diffère. L'enjeu est la visibilité du découvert dans les analyses de passif et de liquidité.
+
+---
+
+## Q-04 · `liquidNetWorth` · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Remplacée par trois grandeurs distinctes : `LiquidAssets`, `NetLiquidityPosition30d` et `LiquidNetWorth`, chacune avec sa définition et son usage. Aucune n'est un alias de `NetWorth`.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §3.2, INV-B-06.
+
+NOTE : Prérequis non tranché : la qualification de la liquidité par type d'actif, qui suppose d'exploiter enfin le champ `liquidity` de `FinancialAccount`.
+
+---
+
+## Q-05 · `savingsRate` et `investmentRate` · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Métriques de flux constatés, lues dans le ledger de flux. Tant que ce ledger n'existe pas, elles sont NOT_COMPUTABLE. Elles ne sont approximées ni par le free cash flow, ni par une capacité théorique, ni par une différence de soldes.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §4.5, INV-B-07.
+
+NOTE : `shared.test.ts` verrouille aujourd'hui le proxy par le FCF, donc le test devra changer avec la formule.
+
+---
+
+## Q-06 · Sémantique de `forecast_net_worth` · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Le champ contient une vraie prévision future, produite avant le mois, avec la trace du scénario et de sa version. Jamais la clôture précédente. En l'absence de projection préalable, il reste MISSING plutôt que d'être rempli par défaut.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §8.2, INV-J-03, CASE 18.
+
+NOTE : La variation entre deux clôtures reste une grandeur utile, mais distincte, et porte son propre nom.
+
+---
+
+## Q-07 · Confiance forcée à HIGH après édition · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Une donnée éditée devient USER_ASSUMPTION, et cela n'implique aucune confiance HIGH. La confiance qualifie la vérification, pas l'intention. Elle conserve sa valeur antérieure ou est demandée, jamais élevée par effet de bord.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §10, INV-H-04.
+
+NOTE : Les mutations concernées vivent dans les repositories, donc la mise en oeuvre relève de la lane de Tom, pas de celle de Paul.
+
+---
+
+## Q-08 · Projection déterministe · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Conservée, pour sa valeur d'explicabilité, et branchée sur le même moteur de bilan mensuel que le Monte-Carlo, exécuté à volatilité nulle et sans stress.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §9.1, INV-G-07.
+
+NOTE : Propriété vérifiable qui en découle et qui devient un test : à volatilité 0 et stress 0, la trajectoire déterministe et le P50 coïncident année par année.
+
+---
+
+## Q-09 · `shockYear` · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Remplacé conceptuellement par une date d'effet (`shockDate`) ou une période d'effet (`effectiveFrom`, `effectiveTo`). Un entier relatif à l'année 1 change de sens dès que la date d'observation bouge.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §8.1, INV-G-08.
+
+NOTE : Impose une migration de la colonne `shock_year`, donc une intervention de la lane de Tom.
+
+---
+
+## Q-10 · Assiette de la valeur de sortie immobilière · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Le coût des travaux et la valeur qu'ils créent sont deux grandeurs séparées. Le coût est certain, la valeur créée est une hypothèse explicite portée par `postRenovationValue` ou `valueCreationFromWorks`, avec sa propre provenance. Aucune capitalisation 1 pour 1 implicite.
+
+DOCUMENTS MIS À JOUR : INV-E-04, CASE 13.
+
+NOTE : Reste ouvert : la valeur par défaut de `postRenovationValue` quand l'utilisateur ne la renseigne pas. Le golden dataset retient le repli sur le prix d'achat avec drapeau, à confirmer.
+
+---
+
+## Q-15 · Périmètre nommé « Patrimoine brut » · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Tant que le bilan ne contient que des actifs financiers, le libellé est « Actifs financiers identifiés ». « Patrimoine brut » est réservé au périmètre complet, immobilier et business equity inclus.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §2.1, INV-A-05.
+
+NOTE : Correctif de copie, zone verte, sans effet sur aucun calcul.
+
+---
+
+## Q-16 · Clôture d'un mois déjà clos · FERMÉE le 20 août 2026, Checkpoint GPT-5.6 Sol
+
+RÉPONSE : Réouverture explicite avec versionnage. Une clôture ne peut pas être remplacée : elle doit d'abord être rouverte par une opération distincte et tracée, la reclôture crée alors une version supplémentaire, et toutes les versions antérieures sont conservées.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §8.2, INV-J-01, CASE 18, CASE 20.
+
+NOTE : Le refus strict a été écarté : une correction postérieure à une clôture est un cas normal, et l'interdire pousserait à ne pas corriger.
 
 ---
 

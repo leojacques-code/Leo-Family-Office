@@ -1,6 +1,6 @@
 # Critères d'acceptation V1
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`.
 
 ## Objet et portée
@@ -65,7 +65,8 @@ FAIRE
 - [x] voir la ventilation par compte et par type
 - [ ] voir la variation depuis la dernière clôture
 - [ ] voir l'attribution de cette variation : épargne, marché, principal remboursé, revalorisations, frais, taxes
-- [ ] inclure l'immobilier et le business equity dans le périmètre, ou déclarer leur absence dans le libellé
+- [ ] inclure l'immobilier et le business equity dans le périmètre, ou déclarer leur absence par le libellé « Actifs financiers identifiés »
+- [ ] entrer un actif financé en valeur brute, sa dette en passif, et n'afficher son equity qu'en DERIVED non sommable
 
 PERSISTER
 - [x] chaque solde est daté et historisé, une correction crée une nouvelle observation
@@ -80,8 +81,8 @@ TESTER
 - [x] absence de double comptage des positions
 - [x] calcul du patrimoine net
 - [ ] compte en devise étrangère
-- [ ] compte débiteur, convention actif ou passif
-- [ ] tolérance monétaire, le test actuel est rouge sur une égalité stricte
+- [ ] compte débiteur exclu de `GrossAssets` et compté en passif court terme
+- [ ] tolérance monétaire alignée sur la règle canonique : pleine précision en interne, arrondi à la restitution. Le test actuel est rouge sur une égalité stricte, et c'est le test qui doit changer, pas la formule
 
 SIGNALER
 - [x] callout « Périmètre identifié » sur la page dédiée
@@ -116,11 +117,36 @@ SIGNALER
 
 ---
 
+## Liquidité
+
+FAIRE
+- [ ] voir `LiquidAssets`, les actifs mobilisables sous 30 jours sans pénalité
+- [ ] voir `NetLiquidityPosition30d`, ce qui reste après les engagements du mois
+- [ ] voir `LiquidNetWorth`, ce qui resterait après solde de toutes les dettes
+- [ ] voir, pour chaque actif exclu, le motif de son exclusion
+
+PERSISTER
+- [ ] la qualification de liquidité par actif : le champ `liquidity` existe sur `FinancialAccount` et n'est exploité par aucun calcul
+
+EXPLIQUER
+- [ ] trois panneaux distincts, un par grandeur, dont celui de `LiquidNetWorth` doit dire qu'un résultat négatif n'est pas une anomalie
+
+TESTER
+- [ ] jeu comportant un actif illiquide et une dette à échéance proche ; les trois grandeurs doivent différer, et aucune ne doit égaler `NetWorth`
+
+SIGNALER
+- [ ] un actif dont la liquidité n'est pas qualifiée est exclu par défaut et signalé, jamais inclus par défaut
+
+Module entièrement absent au commit `ef5bacf` : une seule métrique existe,
+`liquidNetWorth`, et elle est un alias exact de `netWorth`.
+
+---
+
 ## Cash Flow
 
 FAIRE
 - [x] voir revenus actifs, dépenses connues et cash-flow libre
-- [x] voir le taux d'épargne
+- [ ] voir le taux d'épargne et le taux d'investissement, qui doivent afficher « non calculable » tant que le ledger de flux n'existe pas, et non un proxy du cash-flow libre
 - [ ] voir le cash-flow sur une période choisie, pas seulement au mois courant
 - [ ] voir un historique réel
 - [ ] voir une prévision à 30, 90 et 365 jours
@@ -136,7 +162,7 @@ EXPLIQUER
 
 TESTER
 - [x] service de dette et cash-flow libre couverts par `shared.test.ts`
-- [ ] aucun test des fenêtres de date, avant première échéance, après maturité
+- [ ] aucun test du service de dette par somme des `totalCashOut` exigibles : avant première échéance, en différé partiel, en amortissement, après maturité
 - [ ] aucun test du taux d'épargne en valeur négative profonde
 
 SIGNALER
@@ -292,6 +318,8 @@ EXPLIQUER
 TESTER
 - [x] un test couvre les totaux, le rendement brut, la longueur des flux et la non-nullité du TRI
 - [ ] aucun test avec `loanAmount` différent de `purchasePrice`, c'est-à-dire le cas où la formule d'equity est fausse
+- [ ] aucun test du MOIC avec apports complémentaires au dénominateur
+- [ ] aucun test séparant le coût des travaux de la valeur qu'ils créent
 - [ ] aucun test du flux de sortie, du principal restant, ni de la fiscalité
 - [ ] aucun test avec un horizon supérieur à la durée du prêt
 
@@ -501,7 +529,8 @@ comportement que la page Investments devrait adopter pour la performance du CTO.
 FAIRE
 - [x] clôturer un mois
 - [x] voir la liste des clôtures
-- [ ] rouvrir une clôture par une procédure explicite
+- [ ] rouvrir une clôture par une procédure explicite et tracée, produisant une version supplémentaire
+- [ ] consulter toutes les versions antérieures d'une clôture, dont aucune n'est jamais supprimée
 - [ ] voir l'attribution de la variation entre deux clôtures
 
 PERSISTER
@@ -577,8 +606,9 @@ proposition d'arbitrage, pas une décision.
 1. Toute valeur affichée est dérivée des données, jamais écrite dans le code.
 2. Tout calcul affiché a un panneau d'explication dont les inputs sont réels.
 3. Tout calcul affiché a au moins un golden case et un test de cas limite.
-4. Tout calcul construit sur des données partielles expose sa complétude et, si le sens
-   du biais est connu, le déclare.
+4. Tout calcul expose les trois axes de fiabilité séparément, complétude, confiance et
+   incertitude de modèle, et déclare le sens du biais quand il est connu. La précision
+   affichée est bornée par le plus dégradé des trois.
 5. Aucun libellé n'affirme une capacité que le module n'a pas.
 
 Au commit `ef5bacf`, aucun module ne satisfait les cinq conditions. Monte-Carlo satisfait

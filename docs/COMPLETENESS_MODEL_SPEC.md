@@ -1,6 +1,6 @@
 # Spécification du modèle de complétude
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`. Aucun code n'est écrit ici, aucun score n'est implémenté.
 
 ## 1. Le problème que ce modèle résout
@@ -22,13 +22,39 @@ Le modèle de complétude sert à répondre à trois questions, dans cet ordre :
 La troisième question est la plus utile et la plus souvent oubliée. Quand le sens du
 biais est connu, le dire vaut plus qu'un pourcentage.
 
-## 2. Ce que le modèle n'est pas
+## 2. Trois axes orthogonaux, jamais fusionnés
+
+Décision canonique du Checkpoint. La fiabilité d'un résultat se décompose en trois
+grandeurs indépendantes, qui ne se combinent en aucun score unique.
+
+| Axe | Question | Porte sur | Qui le renseigne | Action corrective |
+|---|---|---|---|---|
+| COMPLETENESS | ai-je toutes les données nécessaires ? | couverture des inputs | le système, par comptage | saisir la donnée manquante |
+| CONFIDENCE / DATA QUALITY | les données présentes sont-elles fiables ? | qualité des inputs présents | la provenance de chaque input | vérifier, sourcer, dater |
+| MODEL UNCERTAINTY | le modèle est-il adapté à la question ? | structure du calcul | le propriétaire du moteur, par déclaration | changer de modèle |
+
+Les trois sont indépendants. Un résultat peut être complet à 100 %, de confiance HIGH,
+et porter une incertitude de modèle élevée. Un modèle exact appliqué à des données
+partielles reste inexploitable. Une donnée présente peut être fausse.
+
+Le troisième axe est le seul qu'aucune donnée ne peut révéler : seul l'auteur du moteur
+sait qu'il applique la vacance au loyer initial seulement, ou qu'il n'amortit pas la
+dette dans la projection. Il se déclare, il ne se calcule pas.
+
+### Pourquoi ne pas fusionner
+
+Un indicateur unique ne dit ni ce qui manque, ni ce qui est douteux, ni ce qui est
+simplifié. Il n'oriente donc vers aucune correction. Un utilisateur qui lit
+« fiabilité 60 % » ne sait pas s'il doit saisir une donnée, obtenir un justificatif, ou
+se méfier de la formule. Trois axes, trois actions.
+
+## 2 bis. Ce que le modèle n'est pas
 
 - Ce n'est pas un score de gamification. Aucun objectif de « 100 % de complétude ».
 - Ce n'est pas un score unique d'application. Voir §4.
-- Ce n'est pas un indicateur de confiance dans la donnée. La confiance qualifie une
-  source, la complétude qualifie un calcul. Une donnée peut être présente et peu fiable,
-  ou absente sans conséquence.
+- Ce n'est pas un indicateur de confiance dans la donnée : la confiance est l'axe 2,
+  distinct.
+- Ce n'est pas une mesure de la qualité du modèle : c'est l'axe 3, distinct.
 - Ce n'est pas une mesure de progression du produit.
 
 ## 3. État actuel
@@ -113,14 +139,18 @@ et il est revu à chaque modification de cette formule.
 
 Tout résultat matériellement incomplet expose au minimum :
 
-| Champ | Type | Sens |
-|---|---|---|
-| `status` | COMPLETE, PARTIAL, NOT_COMPUTABLE | verdict binaire d'utilisabilité |
-| `completeness` | 0 à 1 | part pondérée des inputs matériels renseignés |
-| `missing` | liste | inputs absents, nommés en langage utilisateur |
-| `missingCritical` | liste | sous-ensemble des INDISPENSABLE absents |
-| `biasDirection` | UNDER, OVER, UNKNOWN, NONE | sens dans lequel le résultat va bouger |
-| `displayPrecision` | entier | décimales autorisées, voir §8 |
+| Champ | Axe | Type | Sens |
+|---|---|---|---|
+| `status` | 1 | COMPLETE, PARTIAL, NOT_COMPUTABLE | verdict d'utilisabilité |
+| `completeness` | 1 | 0 à 1 | part pondérée des inputs matériels renseignés |
+| `missing` | 1 | liste | inputs absents, nommés en langage utilisateur |
+| `missingCritical` | 1 | liste | sous-ensemble des INDISPENSABLE absents |
+| `confidence` | 2 | HIGH, MEDIUM, LOW, UNKNOWN | qualité des inputs présents, bornée par le plus faible |
+| `lowConfidenceInputs` | 2 | liste | inputs présents mais faiblement sourcés |
+| `modelUncertainty` | 3 | LOW, MEDIUM, HIGH | appréciation déclarée par le propriétaire du moteur |
+| `modelSimplifications` | 3 | liste | simplifications structurantes, déclarées, non calculées |
+| `biasDirection` | transverse | UNDER, OVER, UNKNOWN, NONE | sens dans lequel le résultat va bouger |
+| `displayPrecision` | transverse | entier | décimales autorisées, voir §8 |
 
 `biasDirection` se lit du point de vue du résultat affiché : UNDER signifie que le
 résultat réel est inférieur au résultat affiché.
@@ -158,21 +188,38 @@ d'ailleurs ce que fait déjà correctement l'interface actuelle.
 
 ## 8. Précision d'affichage
 
-Règle : le nombre de décimales affichées ne dépasse jamais la précision que le modèle
-peut soutenir.
+Règle canonique : la précision affichée est bornée par **le plus dégradé des trois
+axes**, jamais par la complétude seule.
 
-Barème proposé, à valider :
+    displayPrecision = min( niveau autorisé par COMPLETENESS,
+                            niveau autorisé par CONFIDENCE,
+                            niveau autorisé par MODEL UNCERTAINTY )
 
-| Complétude | Montants | Taux et ratios | Formulation |
-|---|---|---|---|
-| 100 % | 2 décimales | 2 décimales de point de pourcentage | valeur exacte |
-| 80 à 99 % | 0 décimale | 1 décimale | valeur approchée |
-| 50 à 79 % | arrondi au multiple de 10 ou 100 selon l'ordre de grandeur | 0 décimale | « environ » |
-| moins de 50 % | ordre de grandeur seulement | 0 décimale, ou fourchette | « indicatif » |
-| NOT_COMPUTABLE | pas de nombre | pas de nombre | « non calculable » |
+Ce point est le correctif le plus important apporté au Checkpoint. Lier mécaniquement la
+précision au seul score de complétude produit exactement la fausse précision que la règle
+cherche à éviter : un underwriting dont les seize entrées sont renseignées mais toutes
+hypothétiques afficherait deux décimales, alors que c'est le cas où la précision est la
+moins justifiée.
 
-Application au cas actuel du TRI immobilier de CASE 14 du golden dataset : complétude
-60 % sur les charges, donc « environ 6 % » et non « 6,32 % ».
+Barème par axe, à valider :
+
+| Niveau | COMPLETENESS | CONFIDENCE | MODEL UNCERTAINTY | Montants | Taux et ratios | Formulation |
+|---|---|---|---|---|---|---|
+| 3 | 100 % | HIGH | LOW | 2 décimales | 2 décimales de point | valeur exacte |
+| 2 | 80 à 99 % | MEDIUM | LOW à MEDIUM | 0 décimale | 1 décimale | valeur approchée |
+| 1 | 50 à 79 % | LOW | MEDIUM | arrondi au multiple de 10 ou 100 selon l'ordre de grandeur | 0 décimale | « environ » |
+| 0 | moins de 50 % | UNKNOWN | HIGH | ordre de grandeur seulement | 0 décimale, ou fourchette | « indicatif » |
+| bloqué | NOT_COMPUTABLE | sans objet | sans objet | pas de nombre | pas de nombre | « non calculable » |
+
+Deux applications qui montrent que la borne ne vient pas toujours du même axe :
+
+- TRI de CASE 14 : COMPLETENESS 60 % (niveau 1), CONFIDENCE LOW (niveau 1),
+  MODEL UNCERTAINTY MEDIUM (niveau 1). Borne = niveau 1, donc « environ 6 % » et non
+  « 6,32 % ». Ici les trois axes concordent.
+- Underwriting de CASE 12, toutes entrées renseignées : COMPLETENESS 100 % (niveau 3),
+  CONFIDENCE LOW car tout est USER_ASSUMPTION (niveau 1), MODEL UNCERTAINTY MEDIUM
+  (niveau 1). Borne = niveau 1. La complétude parfaite n'autorise pas deux décimales.
+  C'est le cas que l'ancien barème traitait mal.
 
 Cette règle est la plus visible pour l'utilisateur et la moins coûteuse à implémenter.
 Elle est aussi celle qui protège le mieux contre la fausse précision, qui est l'un des
@@ -182,15 +229,17 @@ modes de défaillance nommés dans le business plan §3.2.
 
 Un agrégat hérite de la complétude de ses composants.
 
-    completeness(agrégat) = min(completeness(composants))
-    biasDirection(agrégat) = UNKNOWN si les composants ont des biais opposés
+    completeness(agrégat)      = min(completeness(composants))
+    confidence(agrégat)        = min(confidence(composants))
+    modelUncertainty(agrégat)  = max(modelUncertainty(composants))
+    biasDirection(agrégat)     = UNKNOWN si les composants ont des biais opposés
 
-Le minimum, et non la moyenne : un agrégat n'est pas plus fiable que son maillon le
-plus faible. Une moyenne diluerait précisément l'information qui compte.
+Le minimum pour les deux premiers axes, le maximum pour le troisième : dans les trois cas
+la règle dit la même chose, un agrégat n'est pas plus fiable que son maillon le plus
+faible. Une moyenne diluerait précisément l'information qui compte.
 
-Corollaire, aligné sur `DATA_INVARIANTS.md` INV-H-03 : la confiance d'un dérivé est
-elle aussi bornée par celle de ses inputs. Complétude et confiance se propagent selon
-la même règle, et restent deux grandeurs distinctes.
+Les trois se propagent séparément et restent trois grandeurs distinctes à l'arrivée,
+conformément à `DATA_INVARIANTS.md` INV-M-01 et INV-H-03.
 
 ## 10. Affichage
 
@@ -227,15 +276,29 @@ provenance et date. Il lui manque la complétude.
 
 Application aux sept résultats principaux du produit, à titre d'illustration.
 
-| Résultat | Statut | Complétude | Manquants matériels | Biais | Précision |
-|---|---|---:|---|---|---|
-| Patrimoine net | COMPLETE sur périmètre financier | 100 % | immobilier, business equity, autres actifs, tous hors périmètre déclaré | NONE | 2 décimales |
-| Cash bancaire | COMPLETE | 100 % | aucun | NONE | 2 décimales |
-| Actifs investis | COMPLETE | 100 % | aucun | NONE | 2 décimales |
-| Dépenses mensuelles | PARTIAL | 5 % | 19 catégories | UNDER | ordre de grandeur |
-| Cash-flow libre | PARTIAL | 5 % | 19 catégories, taxes | UNDER | ordre de grandeur |
-| Couverture de liquidité | PARTIAL | 13 % | 7 dépenses essentielles sur 8 (électricité, internet, téléphone, assurance, transport, courses, santé), service de dette absent du dénominateur | OVER | ordre de grandeur |
-| Performance du CTO | NOT_COMPUTABLE | sans objet | cost basis, historique de flux | sans objet | pas de nombre |
+| Résultat | Statut | COMPLETENESS | CONFIDENCE | MODEL UNCERTAINTY | Biais | Précision |
+|---|---|---:|---|---|---|---|
+| Patrimoine net | COMPLETE sur périmètre financier | 100 % | HIGH | LOW | NONE | 2 décimales |
+| Cash bancaire | COMPLETE | 100 % | HIGH | LOW | NONE | 2 décimales |
+| Actifs investis | COMPLETE | 100 % | HIGH | LOW | NONE | 2 décimales |
+| Dépenses mensuelles | PARTIAL | 5 % | HIGH sur la seule ligne connue | LOW | UNDER | ordre de grandeur |
+| Cash-flow libre | PARTIAL | 5 % | MEDIUM, taxes absentes du modèle | MEDIUM | UNDER | ordre de grandeur |
+| Couverture de liquidité | PARTIAL | 13 % | HIGH | MEDIUM, service de dette hors dénominateur | OVER | ordre de grandeur |
+| Underwriting immobilier | PARTIAL | 60 % | LOW, tout en USER_ASSUMPTION | HIGH, charges constantes, vacance non indexée, fiscalité forfaitaire | UNDER | ordre de grandeur |
+| Projection Monte-Carlo | COMPLETE | 100 % | MEDIUM | HIGH, dette non amortie, épargne constante, stress fixe | UNKNOWN | ordre de grandeur |
+| Performance du CTO | NOT_COMPUTABLE | sans objet | sans objet | sans objet | sans objet | pas de nombre |
+| Taux d'épargne et d'investissement | NOT_COMPUTABLE | sans objet | sans objet | sans objet | sans objet | pas de nombre |
+
+Deux lignes méritent une lecture attentive.
+
+La projection Monte-Carlo est **complète** au sens de l'axe 1, et c'est précisément le
+cas que l'ancien barème traitait mal : elle aurait affiché deux décimales. Son incertitude
+de modèle est élevée, pour cinq raisons déclarées et non calculables, dont la principale
+est que la dette n'y est pas amortie.
+
+Les taux d'épargne et d'investissement passent en NOT_COMPUTABLE, conformément à la
+décision du Checkpoint reprise en INV-B-07 : ce sont des métriques de flux constatés, et
+le ledger de flux n'existe pas. Elles ne sont plus proxifiées par le cash-flow libre.
 
 La dernière ligne est celle qui compte le plus : le modèle de complétude, s'il avait
 existé, aurait empêché mécaniquement l'affichage de « +77,71 % ». C'est le meilleur
@@ -254,18 +317,29 @@ dangereux.
    portefeuille. Ces six couvrent le cockpit.
 2. Implémenter `status` et `missingCritical`, sans pondération ni pourcentage. Cela
    suffit à empêcher l'affichage d'un NOT_COMPUTABLE, ce qui est le gain principal.
-3. Ajouter `biasDirection`, saisi à la main par le propriétaire du calcul. Trois valeurs
+3. Déclarer `modelSimplifications` sur les cinq moteurs existants. C'est du texte écrit
+   par le propriétaire du moteur, sans code, et cela révèle immédiatement les cas où un
+   résultat complet est structurellement inadapté.
+4. Ajouter `biasDirection`, saisi à la main par le propriétaire du calcul. Trois valeurs
    suffisent.
-4. Ajouter `completeness` avec des poids égaux à 1.
-5. Ajouter la règle de précision d'affichage.
-6. Ajouter les poids différenciés, seulement là où l'ordre de grandeur le justifie.
+5. Ajouter `completeness` avec des poids égaux à 1, et propager `confidence` depuis la
+   provenance des inputs, qui existe déjà.
+6. Ajouter la règle de précision d'affichage, bornée par les trois axes.
+7. Ajouter les poids différenciés, seulement là où l'ordre de grandeur le justifie.
 
-Les étapes 1 à 3 apportent l'essentiel de la valeur. Les étapes 4 à 6 affinent.
+Les étapes 1 à 3 apportent l'essentiel de la valeur, et l'étape 3 ne coûte que du temps
+de rédaction. Les étapes 4 à 7 affinent.
 
 ## 13. Points à soumettre à la review
+
+Tranché au Checkpoint : les trois axes sont séparés, et la précision d'affichage est
+bornée par le plus dégradé des trois, jamais par la complétude seule.
+
+Encore ouvert :
 
 1. Le seuil de matérialité de 10 % est-il le bon, ou faut-il un seuil absolu par domaine ?
 2. La propagation par minimum est-elle trop conservatrice pour un agrégat à nombreux composants ?
 3. Le barème de précision d'affichage doit-il s'appliquer aussi aux exports CSV et JSON, ou seulement à l'interface ?
-4. `completeness` doit-il être persisté avec une clôture mensuelle, pour pouvoir dire plus tard « cette clôture était complète à 40 % » ?
-5. Faut-il un statut intermédiaire entre PARTIAL et NOT_COMPUTABLE, par exemple STALE, pour une donnée présente mais périmée ?
+4. Les trois axes doivent-ils être persistés avec une clôture mensuelle, pour pouvoir dire plus tard « cette clôture était complète à 40 %, de confiance MEDIUM » ?
+5. Faut-il un statut intermédiaire entre PARTIAL et NOT_COMPUTABLE, par exemple STALE, pour une donnée présente mais périmée ? Cela relèverait de l'axe CONFIDENCE plutôt que de l'axe COMPLETENESS.
+6. `modelUncertainty` est une appréciation déclarée, donc subjective. Faut-il une grille de qualification pour la rendre comparable entre moteurs ?

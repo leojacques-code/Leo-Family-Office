@@ -1,6 +1,6 @@
 # Golden dataset canonique
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`. Référence d'invariants : `docs/DATA_INVARIANTS.md` V0.1.
 
 ## Statut et portée
@@ -42,8 +42,9 @@ Chaque cas porte : INPUTS, DATES, CURRENCY, PROVENANCE, EXPECTED OUTPUTS,
 EXPECTED FLAGS, INVARIANTS TESTED, TOLERANCE, WHAT MUST NOT HAPPEN.
 
 Les cas marqués ÉCHEC ATTENDU AUJOURD'HUI sont ceux que le code du commit `ef5bacf`
-ne passe pas. Ils ne doivent pas être adaptés au code : c'est le code qui doit changer,
-après arbitrage. Sept cas sur dix-huit sont dans ce statut.
+ne passe pas. Ils ne doivent pas être adaptés au code : c'est le code qui doit changer.
+Les arbitrages correspondants ont été rendus au Checkpoint et figurent dans
+`docs/FINANCIAL_DEFINITIONS.md` §14.
 
 | Cas | Sujet | Statut attendu sur `ef5bacf` |
 |---|---|---|
@@ -65,6 +66,8 @@ après arbitrage. Sept cas sur dix-huit sont dans ce statut.
 | 16 | FX externe daté | non exécutable (modèle absent) |
 | 17 | Écart de réconciliation | passe |
 | 18 | Clôture mensuelle | ÉCHEC ATTENDU (INV-J-01) |
+| 19 | Compte clôturé | non exécutable (mutation absente) |
+| 20 | Correction rétroactive | non exécutable (versionnage absent) |
 
 ---
 
@@ -163,13 +166,35 @@ DATES : acquisition 2026-06-30, valorisation et observation 2027-01-31.
 CURRENCY : USD native, EUR reporting.
 PROVENANCE : position ACTUAL / HIGH ; taux EXTERNAL_DATA / HIGH, source nommée et datée.
 
+CONVENTION D'ATTRIBUTION FX, canonique
+
+    PriceEffect = (V1_native - V0_native) × FX0
+    FXEffect    = V1_native × (FX1 - FX0)
+
+où `V0_native` et `V1_native` sont les valeurs en devise native aux deux dates, `FX0` le
+taux à la date d'acquisition et `FX1` le taux à la date d'observation.
+
+Cette convention est **exacte par construction**, et non approchée :
+
+    PriceEffect + FXEffect = V1×FX0 - V0×FX0 + V1×FX1 - V1×FX0
+                           = V1×FX1 - V0×FX0
+                           = P&L total en EUR
+
+Le terme croisé `(V1 - V0) × (FX1 - FX0)` est attribué en totalité à l'effet change, par
+le choix d'appliquer la variation de taux à la valeur **finale** en devise native. Ce
+choix est arbitraire au sens mathématique, il doit donc être déclaré, et il ne doit
+jamais varier d'un écran à l'autre. La convention symétrique, qui applique la variation
+de taux à la valeur initiale et le prix au taux courant, est également exacte et donne
+1 800,00 et -400,00 : elle est écartée, mais elle est mentionnée ici pour que personne ne
+la réintroduise en croyant corriger un écart.
+
 EXPECTED OUTPUTS
 - valeur en EUR = 10 000,00 × 0,90 = 9 000,00
 - cost basis en EUR = 8 000,00 × 0,95 = 7 600,00
 - P&L total en EUR = 1 400,00
 - effet prix = (10 000 - 8 000) × 0,95 = 1 900,00
 - effet change = 10 000 × (0,90 - 0,95) = -500,00
-- contrôle : 1 900,00 + (-500,00) = 1 400,00
+- contrôle exact, pas approché : 1 900,00 + (-500,00) = 1 400,00
 
 EXPECTED FLAGS : aucun si les deux taux existent. Si l'un manque, MISSING sur la conversion et agrégat marqué incomplet.
 INVARIANTS TESTED : INV-I-01, INV-I-02, INV-I-03, INV-I-04.
@@ -179,6 +204,8 @@ WHAT MUST NOT HAPPEN
 - `grossAssets` ne doit jamais recevoir 10 000,00 comme s'il s'agissait d'euros. C'est le comportement actuel : `deriveMetrics` somme `account.balance` sans lire `account.currency`, ce qui surévalue ce compte de 1 000,00 €, soit 11,1 %.
 - Un taux manquant ne doit jamais devenir 1,00.
 - L'effet change ne doit pas être fondu dans la performance de marché.
+- La somme des deux effets ne doit jamais laisser de résidu. Un écart non nul signale que
+  la convention d'attribution a été mélangée entre deux implémentations.
 
 ---
 
@@ -280,8 +307,11 @@ WHAT MUST NOT HAPPEN
 ÉCHEC ATTENDU AUJOURD'HUI.
 
 INPUTS
-- Prêt `GD-LOAN-0`, Prêteur Gamma, capital 12 000,00, taux nominal 0,00 %, 48 mensualités de 250,00.
+- Prêt `GD-LOAN-0`, Prêteur Gamma, capital 12 000,00, taux nominal 0,00 %, 48 mensualités.
 - Première échéance 2027-06-01, maturité 2031-05-01.
+- Échéancier de 48 `LoanScheduleEntry`, chacune portant
+  `interest = 0,00`, `principal = 250,00`, `insurance = 0,00`, `fees = 0,00`,
+  donc `totalCashOut = 250,00`.
 - Contrôle : 250,00 × 48 = 12 000,00, écart contractuel nul.
 
 DATES : trois observations, 2027-01-31, 2027-06-01 et 2031-06-01.
@@ -290,12 +320,18 @@ PROVENANCE : ACTUAL / HIGH.
 
 EXPECTED OUTPUTS
 
-| Observation | `monthlyDebtService` | `currentBalance` | Intérêts cumulés |
-|---|---:|---:|---:|
-| 2027-01-31 (avant première échéance) | 0,00 | 12 000,00 | 0,00 |
-| 2027-06-01 (première échéance) | 250,00 | 11 750,00 | 0,00 |
-| 2028-05-01 (12 échéances payées) | 250,00 | 9 000,00 | 0,00 |
-| 2031-06-01 (après maturité) | 0,00 | 0,00 | 0,00 |
+`DebtService(période)` est la somme des `totalCashOut` des échéances exigibles dans la
+période. Sur un pas mensuel :
+
+| Observation | Échéances exigibles | `DebtService` | `currentBalance` | Intérêts cumulés |
+|---|---:|---:|---:|---:|
+| 2027-01-31 (avant première échéance) | 0 | 0,00 | 12 000,00 | 0,00 |
+| 2027-06-01 (première échéance) | 1 | 250,00 | 11 750,00 | 0,00 |
+| 2028-05-01 (12 échéances payées) | 1 | 250,00 | 9 000,00 | 0,00 |
+| 2031-06-01 (après maturité) | 0 | 0,00 | 0,00 | 0,00 |
+
+Aucune de ces quatre lignes ne demande de règle particulière : elles découlent toutes du
+comptage des échéances exigibles.
 
 - FCF au 2027-01-31 avec CASE 6 et CASE 7 : 3 000,00 - 1 600,00 - 0,00 = 1 400,00
 - FCF au 2027-06-01 : 3 000,00 - 1 600,00 - 250,00 = 1 150,00
@@ -339,8 +375,12 @@ TOLERANCE : 0,01 € par ligne, 0,05 € en cumul.
 
 WHAT MUST NOT HAPPEN
 - Le solde ne doit jamais passer sous zéro.
-- Sur une échéance, le principal remboursé ne doit pas être compté comme une dépense économique : le patrimoine net ne baisse que de l'intérêt.
-- Le total versé ne doit pas être présenté comme un coût du crédit : le coût est 33 103,42, pas 133 103,42.
+- Le remboursement de principal doit être **neutre sur le patrimoine net** : à chaque
+  échéance, la trésorerie et le capital restant dû diminuent simultanément du même
+  montant. Sur la ligne 1, trésorerie -554,60 €, dette -304,60 €, `ΔNetWorth` = -250,00 €,
+  soit exactement l'intérêt. Le principal n'est ni une charge, ni un enrichissement.
+- Le total versé ne doit pas être présenté comme un coût du crédit : le coût est
+  33 103,42, pas 133 103,42.
 
 ---
 
@@ -394,13 +434,16 @@ CURRENCY : EUR.
 PROVENANCE : ACTUAL / HIGH.
 
 EXPECTED OUTPUTS
-- intérêt mensuel pendant le différé = 20 000,00 × 0,02 / 12 = 33,3333, arrondi à 33,33
+- l'échéancier compte 72 `LoanScheduleEntry` : 12 lignes de différé puis 60 lignes
+  d'amortissement
+- lignes de différé : `interest = 33,3333`, `principal = 0,00`, `totalCashOut = 33,33`
 - solde au 2028-02-01, fin de différé = 20 000,00, inchangé
 - intérêts payés pendant le différé = 12 × 33,3333 = 400,00
-- PMT de la phase d'amortissement sur 60 mois = 350,555201 …, arrondie à 350,56
+- lignes d'amortissement : `totalCashOut` = 350,555201 …, arrondi contractuel à 350,56
 - intérêts de la phase d'amortissement = 1 033,31
 - coût total du crédit = 400,00 + 1 033,31 = 1 433,31
-- `monthlyDebtService` au 2027-06-01 = 33,33, pas 0,00 et pas 350,56
+- `DebtService` au 2027-06-01 = 33,33, parce que la ligne exigible ce mois-là porte
+  `totalCashOut = 33,33`. Ni 0,00, ni 350,56
 
 EXPECTED FLAGS
 - « prêt en différé partiel jusqu'au 2028-02-01 »
@@ -410,7 +453,12 @@ TOLERANCE : 0,01 € par ligne, 0,05 € en cumul.
 
 WHAT MUST NOT HAPPEN
 - Le capital ne doit pas s'amortir pendant le différé.
-- Le service de dette pendant le différé ne doit pas être nul : des intérêts sont bien décaissés. Ce cas montre pourquoi INV-D-02 ne peut pas se réduire à « rien avant la première échéance » : la bonne règle est « le paiement contractuel exigible à cette date », qui vaut 0 en différé total et les intérêts en différé partiel.
+- Le service de dette pendant le différé ne doit pas être nul : des intérêts sont bien
+  décaissés. C'est ce cas qui a imposé la formulation retenue pour INV-D-02. « Rien avant
+  la première échéance » serait faux ici : la règle canonique est la somme des
+  `totalCashOut` contractuellement exigibles, qui vaut 0 en différé total et les intérêts
+  intercalaires en différé partiel, sans qu'aucune des deux situations soit un cas
+  particulier.
 
 ---
 
@@ -455,9 +503,16 @@ WHAT MUST NOT HAPPEN
 ÉCHEC ATTENDU AUJOURD'HUI. C'est le cas discriminant de INV-E-01.
 
 INPUTS
-- Prix d'achat 200 000,00, frais d'acquisition 16 000,00, travaux 30 000,00, mobilier 4 000,00.
+- Prix d'achat 200 000,00, frais d'acquisition 16 000,00, mobilier 4 000,00.
+- Travaux : **coût certain** de 30 000,00, provenance ACTUAL une fois les devis signés.
+- `postRenovationValue` : **hypothèse séparée** de 245 000,00, provenance
+  USER_ASSUMPTION, confiance MEDIUM. Valeur créée par les travaux = 245 000 - 200 000 =
+  45 000,00 pour 30 000,00 dépensés. Aucune équivalence 1 pour 1 n'est supposée.
 - Coût total du projet = 250 000,00.
-- Emprunt 220 000,00, apport 30 000,00. L'emprunt finance donc le prix, les frais, les travaux et le mobilier, moins l'apport.
+- Emprunt 220 000,00, apport 30 000,00. L'emprunt finance donc le prix, les frais, les
+  travaux et le mobilier, moins l'apport.
+- Flux d'exploitation annuels négatifs de -3 000,00 aux années 1 et 2, comblés par des
+  **apports complémentaires** de l'investisseur.
 - Reste des hypothèses identiques à CASE 12, loyer porté à 1 050,00 après travaux.
 
 DATES : acquisition 2027-01-01, travaux livrés 2027-06-30, mise en location 2027-07-01, sortie 2036-12-31.
@@ -465,24 +520,46 @@ CURRENCY : EUR.
 PROVENANCE : USER_ASSUMPTION / MEDIUM.
 
 EXPECTED OUTPUTS
-- equity investie = 250 000,00 - 220 000,00 = 30 000,00
+- equity investie initiale = 250 000,00 - 220 000,00 = 30 000,00
 - `cashFlows[0]` = -30 000,00
-- LTV sur prix d'achat = 220 000,00 / 200 000,00 = 110,00 %, qui doit être signalé comme un financement supérieur au prix, pas masqué
-- assiette de la valeur de sortie : paramètre explicite, 200 000,00 ou 230 000,00 (prix plus travaux capitalisés). Le cas exige que le choix soit visible, pas qu'il soit tranché ici.
+- LTV sur prix d'achat = 220 000,00 / 200 000,00 = 110,00 %, à signaler comme un
+  financement supérieur au prix, pas à masquer
+- assiette de la valeur de sortie = `postRenovationValue` = 245 000,00. Si
+  `postRenovationValue` est MISSING, l'assiette retombe sur le prix d'achat 200 000,00 et
+  le résultat porte le drapeau correspondant. L'assiette n'est jamais
+  « prix + travaux » par construction.
 - première année d'exploitation partielle : 6 mois de loyer, pas 12
+- MOIC, avec les apports complémentaires :
+
+      contributions  = 30 000 + 3 000 + 3 000 = 36 000,00
+      distributions  = produit de cession net  = 80 000,00
+      valeur résiduelle après cession          = 0,00
+      MOIC = 80 000,00 / 36 000,00 = 2,2222
 
 EXPECTED FLAGS
 - « LTV supérieure à 100 % du prix d'achat : le financement couvre les frais et les travaux »
-- « assiette de sortie : travaux capitalisés ou non, hypothèse à confirmer »
+- « valeur créée par les travaux : 45 000 € supposés pour 30 000 € dépensés, hypothèse
+  USER_ASSUMPTION à confirmer »
 - « exploitation partielle la première année »
+- « deux apports complémentaires de 3 000 € comptés au dénominateur du MOIC »
 
-INVARIANTS TESTED : INV-E-01, INV-E-04, INV-A-07.
+INVARIANTS TESTED : INV-E-01, INV-E-02, INV-E-04, INV-A-07.
 TOLERANCE : 0,01 €.
 
 WHAT MUST NOT HAPPEN
-- L'equity investie ne doit pas valoir 80 000,00. C'est le résultat de la formule actuelle : 30 000 + 16 000 + 30 000 + 4 000. Facteur d'erreur 2,667. Cash-on-cash, TRI et MOIC sont divisés par 2,667, ce qui peut faire rejeter un projet rentable.
-- Le loyer de la première année ne doit pas être compté sur 12 mois alors que le bien est en travaux 6 mois.
-- La croissance de valeur ne doit pas s'appliquer implicitement à une assiette sans que l'assiette soit nommée.
+- L'equity investie ne doit pas valoir 80 000,00. C'est le résultat de la formule
+  actuelle : 30 000 + 16 000 + 30 000 + 4 000. Facteur d'erreur 2,667. Cash-on-cash, TRI
+  et MOIC sont divisés par 2,667, ce qui peut faire rejeter un projet rentable.
+- Le MOIC ne doit valoir ni 2,4667, qui netterait les apports complémentaires au
+  numérateur, ni 2,6667, qui les ignorerait. Les deux variantes sont plus favorables que
+  la valeur juste de 2,2222, et d'autant plus favorables que le projet consomme de la
+  trésorerie, c'est-à-dire précisément sur les projets les plus risqués.
+- Les 30 000,00 de travaux ne doivent pas créer 30 000,00 de valeur par construction. La
+  valeur créée est une hypothèse séparée, et elle peut être inférieure, supérieure ou
+  nulle.
+- Le loyer de la première année ne doit pas être compté sur 12 mois alors que le bien est
+  en travaux 6 mois.
+- La croissance de valeur ne doit pas s'appliquer à une assiette qui n'est pas nommée.
 
 ---
 
@@ -633,21 +710,142 @@ CURRENCY : EUR.
 PROVENANCE : la clôture est un snapshot ACTUAL figé.
 
 EXPECTED OUTPUTS
-- après la première clôture : 1 ligne de clôture, 1 snapshot de patrimoine, détail figé des 2 comptes, des 2 positions et du passif
-- après la deuxième clôture : 2 lignes de clôture, 2 snapshots
-- après la troisième opération, qui vise un mois déjà clos : refus explicite, ou réouverture tracée conservant la version précédente. Dans les deux cas, la valeur d'origine du 2027-01-31 reste retrouvable.
-- `variance` de février : écart entre le patrimoine net constaté de février et le patrimoine net projeté pour février, produit avant février. Pas l'écart avec janvier.
+- après la première clôture : 1 clôture de janvier en version 1, 1 snapshot de
+  patrimoine, détail figé des 2 comptes, des 2 positions et du passif
+- après la deuxième clôture : 1 clôture de janvier version 1, 1 clôture de février
+  version 1, 2 snapshots
+- troisième opération, reclôture de janvier **sans réouverture préalable** : refusée
+- quatrième opération, réouverture explicite de janvier : tracée avec auteur, date et
+  motif ; la version 1 reste intacte et consultable
+- cinquième opération, reclôture de janvier après réouverture : crée la **version 2**.
+  Les deux versions coexistent, la version 2 est courante, la version 1 reste lisible
+  avec sa date et le motif de réouverture. Aucune version n'est jamais supprimée.
+- `variance` de février : écart entre le patrimoine net constaté de février et le
+  patrimoine net **projeté pour février, produit avant février**, avec la trace du
+  scénario et de sa version. Jamais l'écart avec janvier.
+- si aucune projection n'a été produite avant février, `forecast_net_worth` reste MISSING
+  et `variance` n'est pas calculée. Elle ne retombe pas sur la clôture précédente.
 
 EXPECTED FLAGS
-- à la troisième opération : « mois déjà clos, réouverture requise »
+- à la troisième opération : « mois déjà clos, réouverture explicite requise »
+- à la cinquième : « clôture de janvier 2027 en version 2, version 1 conservée »
 
 INVARIANTS TESTED : INV-J-01, INV-J-02, INV-J-03, INV-J-04, INV-K-01.
 TOLERANCE : égalité stricte sur les cardinalités, 0,01 € sur les montants.
 
 WHAT MUST NOT HAPPEN
-- La troisième opération ne doit pas écraser silencieusement la clôture de janvier. C'est le comportement actuel : `INSERT OR REPLACE` côté SQLite et upsert côté Supabase détruisent la ligne précédente sans trace.
-- La deuxième clôture ne doit pas créer deux snapshots pour un seul mois : aujourd'hui `net_worth_snapshots` reçoit une insertion à chaque appel, sans contrainte d'unicité côté SQLite.
-- Le champ `forecast_net_worth` ne doit pas recevoir le patrimoine net de la clôture précédente tant qu'il porte ce nom.
+- La troisième opération ne doit pas écraser silencieusement la clôture de janvier. C'est
+  le comportement actuel : `INSERT OR REPLACE` côté SQLite et upsert côté Supabase
+  détruisent la ligne précédente sans trace.
+- Aucune version antérieure ne doit être supprimée ni modifiée par une réouverture. La
+  réouverture ouvre le droit d'écrire une version supplémentaire, elle n'efface rien.
+- La deuxième clôture ne doit pas créer deux snapshots pour un seul mois : aujourd'hui
+  `net_worth_snapshots` reçoit une insertion à chaque appel, sans contrainte d'unicité
+  côté SQLite.
+- Le champ `forecast_net_worth` ne doit jamais recevoir le patrimoine net de la clôture
+  précédente. En l'absence de prévision, il reste MISSING.
+
+---
+
+## CASE 19 · COMPTE CLÔTURÉ
+
+NON EXÉCUTABLE AUJOURD'HUI : aucune mutation de clôture de compte n'existe, et le champ
+`status` de `financial_accounts` n'est jamais passé à autre chose que `ACTIVE`.
+
+INPUTS
+- Compte `GD-BANK-2`, Banque Alpha, type BANK, solde 1 200,00 au 2027-03-31.
+- Le 2027-04-15, le compte est soldé : virement sortant de 1 200,00 vers `GD-BANK-1`,
+  puis clôture du compte.
+- État final : `status = CLOSED`, `closedAt = 2027-04-15`, dernier solde 0,00.
+- Une clôture mensuelle de mars 2027 existe déjà, produite avant la fermeture.
+
+DATES : trois observations, 2027-03-31, 2027-04-30, et recalcul rétrospectif au
+2027-03-31 depuis une date postérieure à la fermeture.
+CURRENCY : EUR.
+PROVENANCE : soldes ACTUAL / HIGH ; virement ACTUAL / HIGH ; clôture ACTUAL / HIGH.
+
+EXPECTED OUTPUTS
+
+| Observation | Le compte apparaît | `GrossAssets` contribué | Effet sur `NetWorth` |
+|---|---|---:|---|
+| 2027-03-31, en direct | oui, actif | 1 200,00 | inclus |
+| 2027-04-30, en direct | non, hors liste des comptes actifs | 0,00 | aucun |
+| 2027-03-31, recalculé depuis mai | oui, avec la mention « clôturé depuis le 2027-04-15 » | 1 200,00 | inclus |
+
+- le virement de 1 200,00 est un transfert interne : il ne crée ni revenu ni dépense, et
+  ne modifie pas `NetWorth` (INV-F-01)
+- la clôture mensuelle de mars 2027 reste inchangée : elle continue d'afficher le compte
+  et son solde de 1 200,00
+- `GrossAssets` au 2027-04-30 est inchangé par la fermeture elle-même : les fonds ont
+  changé de compte, pas de propriétaire
+
+EXPECTED FLAGS
+- aucun sur la fermeture, qui est une opération normale
+- si le compte est fermé avec un solde non nul et sans transfert identifié :
+  « compte clôturé avec un solde résiduel de X, destination inconnue », drapeau de
+  réconciliation ouvert
+
+INVARIANTS TESTED : INV-K-01, INV-K-02, INV-F-01, INV-J-01, INV-A-01.
+TOLERANCE : 0,01 € ; égalité stricte sur la clôture de mars.
+
+WHAT MUST NOT HAPPEN
+- La fermeture ne doit pas faire disparaître le compte de l'historique. Un compte clôturé
+  sort des vues courantes, il ne sort jamais du passé.
+- La fermeture ne doit pas modifier rétroactivement la clôture mensuelle de mars.
+- `GrossAssets` ne doit pas chuter de 1 200,00 le jour de la fermeture : ce serait
+  confondre un transfert avec une disparition d'actif.
+- La ligne de compte ne doit pas être supprimée de la base.
+
+---
+
+## CASE 20 · CORRECTION RÉTROACTIVE
+
+NON EXÉCUTABLE AUJOURD'HUI : la réouverture de clôture n'existe pas, et `effective_date`
+est écrite à une constante figée plutôt qu'à la date réelle de l'événement.
+
+INPUTS
+- Solde de `GD-BANK-1` saisi à 2 500,00 avec `balanceDate = 2027-01-31`, provenance
+  ACTUAL / HIGH, source « relevé synthétique ».
+- Clôture de janvier 2027 produite le 2027-02-01, version 1, patrimoine net incluant ces
+  2 500,00.
+- Le 2027-03-10, le relevé bancaire réel arrive : le solde au 2027-01-31 était en réalité
+  2 461,20. Écart de -38,80.
+- Correction saisie le 2027-03-10, portant `balanceDate = 2027-01-31` et
+  `recordedAt = 2027-03-10`.
+
+DATES : deux axes distincts, la **date d'effet** (2027-01-31) et la **date
+d'enregistrement** (2027-03-10). Le cas teste précisément leur séparation.
+CURRENCY : EUR.
+PROVENANCE : ACTUAL / HIGH avant et après ; la correction ne dégrade pas la provenance,
+elle remplace une observation par une observation mieux sourcée.
+
+EXPECTED OUTPUTS
+- l'observation initiale de 2 500,00 est **conservée**, avec sa date d'enregistrement.
+  La correction est une nouvelle observation, pas une mise à jour de l'ancienne.
+- une lecture du solde au 2027-01-31, effectuée après le 2027-03-10, rend 2 461,20
+- une reconstitution de ce que le système affirmait au 2027-02-01 rend 2 500,00
+- la clôture de janvier version 1 reste intacte à sa valeur d'origine
+- la clôture de janvier ne se corrige **pas automatiquement** : elle exige une
+  réouverture explicite, qui produit alors une version 2 à -38,80 du patrimoine net de
+  la version 1
+- après réouverture et reclôture, les deux versions coexistent et sont consultables
+
+EXPECTED FLAGS
+- « correction rétroactive au 2027-01-31, enregistrée le 2027-03-10, écart -38,80 »
+- « 1 clôture postérieure à la date d'effet est concernée : janvier 2027 »
+
+INVARIANTS TESTED : INV-K-01, INV-K-02, INV-J-01, INV-G-02, INV-H-05.
+TOLERANCE : 0,01 € ; égalité stricte sur la version 1 de la clôture.
+
+WHAT MUST NOT HAPPEN
+- La correction ne doit pas écraser l'observation d'origine. Sans elle, il devient
+  impossible d'expliquer pourquoi la clôture de janvier annonçait un autre chiffre.
+- La correction ne doit pas modifier silencieusement une clôture déjà produite. Une
+  clôture figée qui bouge toute seule ne prouve plus rien.
+- La date d'enregistrement ne doit pas se substituer à la date d'effet : le solde a été
+  faux au 31 janvier, pas au 10 mars.
+- Le système ne doit pas exiger une correction manuelle de chaque clôture postérieure. Il
+  doit les **signaler**, et laisser l'utilisateur décider lesquelles rouvrir.
 
 ---
 
@@ -655,6 +853,7 @@ WHAT MUST NOT HAPPEN
 
 | Domaine | Raison |
 |---|---|
+| Bilan incluant l'immobilier et le business equity | aucune persistance ; la convention canonique (valeur brute en actif, dette en passif, equity DERIVED) est écrite en INV-A-07 et attend un cas dès la première persistance |
 | Fiscalité des enveloppes (PEA, CTO, assurance-vie) | aucune règle vérifiée n'est chargée, un golden case fiscal serait un golden case d'hypothèses |
 | Business equity, cap table, dilution | aucune persistance |
 | Career, brut vers net | `employmentCompensation` existe mais n'est appelé par aucun code de production |
@@ -667,11 +866,20 @@ WHAT MUST NOT HAPPEN
 Ces manques sont volontaires : un golden case sur une fonctionnalité inexistante ne
 teste rien et donne l'illusion d'une couverture.
 
-## Points à soumettre à la review Checkpoint 2
+## Décisions rendues au Checkpoint 2
 
-1. CASE 11 montre que INV-D-02 est mal formulé si on le lit « 0 avant la première échéance ». La bonne formulation est « le paiement contractuel exigible à cette date ». Confirmer.
-2. CASE 13 : l'assiette de la valeur de sortie doit-elle inclure les travaux capitalisés ? Le dataset laisse le paramètre ouvert.
-3. CASE 10 : le résidu contractuel de 1 768,75 doit-il produire une alerte HIGH ou MEDIUM ?
-4. CASE 18 : refus strict ou réouverture tracée ? Le dataset accepte les deux, le produit doit en choisir un.
-5. CASE 12 révèle que la formule d'equity actuelle est fausse même sans travaux, pas seulement dans le cas des travaux financés. Facteur 1,444 contre 2,667.
-6. Faut-il ajouter deux cas, « compte clôturé » et « donnée corrigée rétroactivement » ? Les deux touchent l'intégrité historique et ne sont couverts par aucun des dix-huit cas actuels.
+| Point soumis | Décision |
+|---|---|
+| CASE 11 : formulation de INV-D-02 | confirmée et renforcée. La règle est la somme des `LoanScheduleEntry.totalCashOut` contractuellement exigibles, ce qui rend le différé total et le différé partiel non particuliers |
+| CASE 13 : assiette de la valeur de sortie | tranchée. `postRenovationValue` est une hypothèse explicite et séparée du coût des travaux. Aucune capitalisation 1 pour 1 |
+| CASE 18 : refus strict ou réouverture | tranchée. Réouverture explicite avec versionnage, toutes versions conservées |
+| CASE 19 et CASE 20 | ajoutés au dataset |
+| CASE 4 : attribution FX | convention canonique fixée, effet prix au taux d'acquisition, effet change sur la valeur finale en devise native, identité exacte |
+| CASE 13 : MOIC | formule corrigée, apports complémentaires au dénominateur, valeur résiduelle au numérateur |
+
+### Points encore ouverts
+
+1. CASE 10 : le résidu contractuel de 1 768,75 doit-il produire une alerte HIGH ou MEDIUM ?
+2. CASE 13 : valeur par défaut de `postRenovationValue` quand l'utilisateur ne la renseigne pas. Le dataset retient le repli sur le prix d'achat avec drapeau, à confirmer.
+3. CASE 20 : le système doit-il proposer une réouverture en masse quand une correction rétroactive touche plusieurs clôtures, ou une par une ?
+4. CASE 19 : que faire d'un compte clôturé avec un solde résiduel non expliqué, au-delà du drapeau ?

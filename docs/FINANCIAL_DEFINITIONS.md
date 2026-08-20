@@ -1,6 +1,6 @@
 # Définitions financières canoniques
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Date zéro de référence : 2026-08-19. Devise de reporting : EUR.
 
 ## Statut de ce document
@@ -59,18 +59,33 @@ Règle de non-double-comptage : un compte d'investissement entre par son solde d
 OU par la somme de ses positions, jamais par les deux. La convention LFO retenue est
 le solde de compte, les positions servant d'explication.
 
+Convention canonique de bilan, arrêtée au Checkpoint : un actif financé entre en
+**valeur brute**, la dette adossée entre en **passif**, et l'equity correspondante est
+une grandeur **DERIVED** qui n'est jamais additionnée en plus. Un bien valorisé
+220 000 € financé par 180 000 € d'emprunt contribue 220 000 € à `GrossAssets` et
+180 000 € à `Liabilities` ; `RealEstateEquity` vaut 40 000 € en dérivé, affichable,
+jamais sommable. La même règle s'applique au business equity. Voir INV-A-07.
+
+Décision de libellé : tant que `GrossAssets` ne contient que des actifs financiers, la
+grandeur s'affiche **« Actifs financiers identifiés »**. Le terme « Patrimoine brut »
+est réservé au périmètre complet.
+
 ÉTAT DU CODE
 `calculateNetWorth` (`src/lib/engine/financial.ts:93`) somme `account.balance` sur tous
 les comptes actifs. Les positions ne sont pas ajoutées. Immobilier, business equity et
 autres actifs ne sont pas dans le périmètre : les tables existent, aucun code ne les lit.
 
 ÉCART
-1. Périmètre : seuls les actifs financiers sont couverts. Le nom affiché « Patrimoine
-   brut » surdéclare le périmètre. Il faut lire « actifs financiers identifiés ».
-2. Un compte débiteur (CIC à -3,44 € au seed) est compté comme un actif de valeur
-   négative, pas comme un passif. Convention à formaliser (voir §2.4).
+1. Périmètre : seuls les actifs financiers sont couverts, et le libellé affiché est
+   « Patrimoine brut », qui surdéclare. Le libellé canonique est « Actifs financiers
+   identifiés ».
+2. Un compte débiteur (-3,44 € au seed) est compté comme un actif de valeur négative.
+   La convention canonique en fait un passif court terme (voir §2.4).
 3. Aucune conversion FX : voir §7.
-Propriétaire de l'écart : Léo pour le nom, Paul pour le périmètre, Tom pour rien ici.
+4. Aucune règle d'entrée au bilan pour un actif financé : les tables `properties` et
+   `mortgages` existent et ne sont jamais lues.
+Propriétaires : Léo pour le libellé et la sémantique, Paul pour les dérivations, Tom
+pour la persistance des actifs non financiers.
 
 ### 2.2 Liabilities (dettes)
 
@@ -98,30 +113,47 @@ DÉFINITION CIBLE
 ÉTAT DU CODE
 Conforme. Valeur au seed : 15 571,49 - 16 745 = -1 173,51 €.
 
+RÈGLE D'ARRONDI CANONIQUE, arrêtée au Checkpoint
+Les calculs internes s'effectuent en **pleine précision**, sans arrondi intermédiaire.
+L'arrondi n'intervient qu'à deux frontières :
+- la **restitution** : affichage, export, rapport ;
+- le **contrat** : montant d'une échéance effectivement débitée, montant facturé.
+
+Motif : arrondir à chaque agrégation dégrade la précision sur les calculs itératifs, un
+échéancier de 240 lignes en premier. Ne jamais arrondir laisse fuir des artefacts de
+représentation binaire jusqu'à l'écran. Arrondir aux deux seules frontières où un
+montant devient un engagement ou une information résout les deux problèmes.
+
+Corollaire de test : toute comparaison de montants utilise une tolérance déclarée.
+
 ÉCART
-Artefact de précision flottante : le calcul rend -1 173,5100000000002. Le test
-`financial.test.ts:40` échoue sur `toEqual` strict. Constat vérifié par exécution
-directe le 20 août 2026. C'est le seul test rouge du dépôt.
-Décision de définition requise : LFO retient-il un arrondi monétaire canonique
-(2 décimales, half-even) au niveau de la couche de présentation, du moteur, ou des
-deux ? Tant que la réponse n'est pas donnée, aucun invariant d'égalité comptable ne
-peut être testé autrement qu'avec une tolérance. Propriétaire : Paul, arbitrage Léo.
+Le calcul rend -1 173,5100000000002 en interne, ce qui est **correct** au regard de la
+règle. Le test `financial.test.ts:40` compare par `toEqual` strict et échoue : le défaut
+est dans le test, pas dans la formule. Constat vérifié par exécution directe le
+20 août 2026. C'est le seul test rouge du dépôt. Propriétaire : Paul.
 
-### 2.4 Convention actif / passif d'un compte débiteur
+### 2.4 Convention d'un compte bancaire débiteur
 
-DÉFINITION CIBLE À TRANCHER (non résolue)
-Deux conventions sont défendables :
-- A. Un solde bancaire négatif reste un actif de valeur négative. Simple, additif,
-  conserve l'identité Gross - Liabilities = Net.
-- B. Un solde bancaire négatif devient un passif court terme. Plus juste au sens
-  économique, mais casse l'additivité naïve et impose de définir GrossAssets comme
-  somme des soldes positifs seulement.
+DÉFINITION CANONIQUE, arrêtée au Checkpoint
+Un solde bancaire débiteur est un **passif court terme** (découvert). Il entre dans
+`Liabilities`, jamais dans `GrossAssets`. `GrossAssets` est donc la somme des soldes
+**positifs** des comptes.
 
-ÉTAT DU CODE : convention A, implicite, jamais documentée.
+    GrossAssets(t)  = Σ solde(compte) pour solde > 0
+    Liabilities(t)  = Σ capital restant dû + Σ |solde(compte)| pour solde < 0
 
-ÉCART : le business plan (annexe A.1) note « CIC -3,44 € : convention actif/passif à
-formaliser ». Elle ne l'est toujours pas. Impact chiffré actuel : 3,44 €, donc
-négligeable en valeur, structurant en définition. Propriétaire : Léo.
+Motif du choix : un découvert est économiquement une dette, souvent la plus chère du
+bilan. Le traiter en actif négatif préserve une additivité de façade au prix d'une
+fausse représentation, et le rend invisible dans toute analyse de passif ou de
+liquidité. `NetWorth` est inchangé par le choix : seule la présentation du bilan
+diffère.
+
+ÉTAT DU CODE : convention opposée, implicite, jamais documentée. Le solde de -3,44 €
+est agrégé dans `GrossAssets`.
+
+ÉCART : impact chiffré actuel 3,44 €, donc négligeable en valeur, structurant en
+définition et bloquant dès qu'un découvert autorisé de plusieurs milliers d'euros
+apparaît. Propriétaires : Léo pour la sémantique, Paul pour la dérivation.
 
 ## 3. Liquidité
 
@@ -141,21 +173,46 @@ liquidité alors que le champ `liquidity` existe déjà sur `FinancialAccount` e
 pas utilisé pour ce calcul. Un livret bloqué typé SAVINGS entrerait à tort dans le
 cash disponible. Propriétaire : Paul.
 
-### 3.2 Liquid Net Worth
+### 3.2 Trois grandeurs de liquidité, à ne jamais confondre
 
-DÉFINITION CIBLE
+DÉFINITIONS CANONIQUES, arrêtées au Checkpoint
+Trois grandeurs distinctes, trois noms, trois usages. Aucune n'est un alias d'une autre,
+aucune n'est un alias de `NetWorth`.
 
-    LiquidNetWorth(t) = Σ actifs mobilisables sous 30 jours sans pénalité majeure
-                        - Σ dettes exigibles sous 30 jours
+    LiquidAssets(t)            = Σ actifs mobilisables sous 30 jours
+                                 sans pénalité ni perte de valeur significative
+
+    NetLiquidityPosition30d(t) = LiquidAssets(t)
+                                 - Σ engagements exigibles dans les 30 jours
+
+    LiquidNetWorth(t)          = LiquidAssets(t) - Σ Liabilities(t)
+
+| Grandeur | Question à laquelle elle répond | Usage |
+|---|---|---|
+| `LiquidAssets` | de quoi puis-je disposer rapidement ? | stock, base des deux autres |
+| `NetLiquidityPosition30d` | puis-je payer ce qui tombe ce mois-ci ? | pilotage de trésorerie |
+| `LiquidNetWorth` | que resterait-il si je soldais tout avec mes seuls actifs liquides ? | résilience, stress |
+
+`LiquidNetWorth` est structurellement inférieur à `NetWorth` dès qu'il existe un actif
+illiquide, et il peut être négatif alors que le patrimoine net est largement positif.
+C'est attendu, et c'est précisément l'information qu'il porte.
+
+EXEMPLE
+Cash 2 000, PEA mobilisable 20 000, bien immobilier 220 000, prêt 180 000 dont 900
+exigibles dans les 30 jours. `LiquidAssets` = 22 000. `NetLiquidityPosition30d` = 21 100.
+`LiquidNetWorth` = -158 000. `NetWorth` = 62 000. Quatre nombres, quatre sens.
 
 ÉTAT DU CODE
-`liquidNetWorth = grossAssets - debt`, soit exactement `netWorth`. La notion de
-liquidité n'intervient nulle part.
+Une seule métrique existe, `liquidNetWorth = grossAssets - debt`, soit exactement
+`netWorth`. La notion de liquidité n'intervient nulle part. Les deux autres grandeurs
+n'existent pas.
 
 ÉCART
-BLOQUANT au sens de la définition : la métrique porte un nom qui ment. Deux issues
-possibles : implémenter la définition cible, ou retirer la métrique. Ne pas la laisser
-affichée sous ce nom. Propriétaire : Paul pour le calcul, Léo pour la décision.
+BLOQUANT au sens de la définition : la métrique existante porte un nom qui affirme une
+information de liquidité qu'elle ne contient pas. Elle doit être remplacée par les trois
+grandeurs ci-dessus, dont le calcul suppose de qualifier la liquidité de chaque actif,
+c'est-à-dire d'exploiter enfin le champ `liquidity` de `FinancialAccount`.
+Propriétaires : Léo pour la sémantique et les libellés, Paul pour les trois dérivations.
 
 ### 3.3 Emergency Coverage (couverture de la réserve)
 
@@ -205,13 +262,35 @@ n'est pas une dépense mensuelle, c'est une borne inférieure des dépenses mens
 
 ### 4.3 Monthly Debt Service
 
-DÉFINITION CIBLE
+DÉFINITION CANONIQUE, arrêtée au Checkpoint
 
-    DebtService(t) = Σ paiementContractuel_i(t) pour les prêts tels que
-                     firstPaymentDate_i <= t <= maturityDate_i
+    DebtService(période) = Σ LoanScheduleEntry.totalCashOut
+                           pour toute échéance dont la date d'exigibilité
+                           tombe dans la période
 
-Un prêt en différé, dont la première échéance est postérieure à `t`, contribue 0.
-Un prêt échu contribue 0.
+    totalCashOut = interest + principal + insurance + fees
+
+La définition passe par l'**échéancier**, pas par une fenêtre de dates appliquée à un
+champ `monthlyPayment`. Trois conséquences en découlent, sans qu'aucune soit un cas
+particulier à coder :
+
+| Situation | Ce que porte l'échéancier | DebtService |
+|---|---|---|
+| avant la première échéance | aucune ligne exigible | 0 |
+| différé total | lignes à `totalCashOut` nul, ou absence de ligne | 0 |
+| différé partiel | lignes portant les intérêts intercalaires | intérêts réellement exigibles |
+| amortissement | lignes complètes | intérêt + principal + assurance + frais |
+| après la dernière échéance | aucune ligne exigible | 0 |
+
+Assurance et frais sont inclus dès lors qu'ils existent. Le cash-out est le montant
+réellement débité, pas la somme intérêt plus principal.
+
+Motif du choix : définir le service de dette par une fenêtre appliquée à une mensualité
+unique oblige à traiter le différé, la maturité, les paliers et l'assurance comme autant
+d'exceptions. Le définir par l'échéancier supprime les exceptions, parce que
+l'échéancier porte déjà l'information. C'est aussi la seule définition compatible avec
+la priorité des sources du business plan §6.1, où un échéancier bancaire importé fait
+autorité.
 
 ÉTAT DU CODE
 `Σ monthlyPayment` filtré sur `firstPaymentDate <= "2027-08-19"`. La borne est une
@@ -220,15 +299,20 @@ testée. Au seed, le prêt étudiant (première échéance 2026-12-05) est donc 
 dès la date zéro : 284,72 €.
 
 ÉCART
-BLOQUANT. Trois définitions coexistent aujourd'hui dans le produit :
+BLOQUANT, et double. D'une part le modèle ne porte pas d'échéancier lisible : la table
+`loan_schedules` est écrite au seed et jamais relue, et `AmortizationRow` n'a ni
+`insurance`, ni `fees`, ni `totalCashOut`. La définition canonique n'est donc pas
+calculable en l'état. D'autre part trois définitions coexistent dans le produit :
 - moteur : 284,72 € comptés dès le 19 août 2026 ;
 - explication affichée à l'utilisateur : « Service de dette actuel : 0,00 € avant le
   5 décembre 2026 » (`pages.tsx:307`) ;
 - `docs/ASSUMPTIONS.md` : « La mensualité étudiante n'entre dans le cash flow exigible
   qu'à partir du 5 décembre 2026 », et annonce un cash-flow de +142 €/mois.
 Le produit affiche -142,72 €/mois en le libellant « avant échéance du prêt ».
-Arbitrage produit requis avant toute correction de code : voir `OPEN_QUESTIONS.md` Q-01.
-Propriétaire : Léo pour l'arbitrage, Paul pour l'implémentation.
+L'arbitrage est rendu : la définition canonique ci-dessus fait foi, et la valeur juste au
+19 août 2026 est 0 € de service de dette, donc +142 € de cash-flow libre avant impôt.
+Propriétaires : Paul pour la dérivation et les tests, Tom pour le modèle
+`LoanScheduleEntry` et sa persistance. Voir `OPEN_QUESTIONS.md` Q-01, fermée.
 
 ### 4.4 Free Cash Flow personnel
 
@@ -252,20 +336,40 @@ Taxes. Au seed : 1 282 - 1 140 - 284,72 = -142,72 €.
 
 ### 4.5 Savings Rate et Investment Rate
 
-DÉFINITION CIBLE
-- SavingsRate = épargne effectivement constituée sur la période / revenu net de la période.
-- InvestmentRate = montant effectivement investi sur la période / revenu net de la période.
-Ces deux grandeurs se mesurent sur des flux constatés, pas sur un FCF théorique.
+DÉFINITIONS CANONIQUES, arrêtées au Checkpoint
+Ce sont des **métriques de flux constatés**, lues dans le ledger de flux :
+
+    SavingsRate(période)    = épargne effectivement constituée sur la période
+                              / revenu net encaissé sur la période
+
+    InvestmentRate(période) = montant effectivement investi sur la période
+                              / revenu net encaissé sur la période
+
+Décision explicite : **tant que le ledger de flux n'existe pas, ces deux métriques sont
+NOT_COMPUTABLE**. Elles ne sont approximées ni par le free cash flow, ni par une
+capacité d'épargne théorique, ni par une différence entre deux soldes.
+
+Motif : le FCF est une capacité, l'épargne est un fait. Un mois à FCF positif où tout a
+été dépensé a un taux d'épargne nul. Proxifier revient à afficher une intention sous le
+nom d'un constat, ce que le produit s'interdit partout ailleurs. Second motif :
+`max(0, FCF) / revenu` est mathématiquement identique à `FCF / revenu` dès que le FCF est
+positif, donc deux métriques affichées pour une seule information.
+
+EXEMPLE
+Revenu net 3 000, dépenses 1 600, FCF 1 400, aucun virement d'épargne ni achat de titres
+sur la période. `SavingsRate` = 0 %, `InvestmentRate` = 0 %, pas 46,7 %. Autre cas :
+500 versés sur le PEA dont 300 investis en titres et 200 laissés en cash PEA.
+`SavingsRate` = 16,7 %, `InvestmentRate` = 10,0 %.
 
 ÉTAT DU CODE
 - `savingsRate = freeCashFlow / monthlyIncome`, non borné : -11,1 % au seed.
 - `investmentRate = max(0, freeCashFlow) / monthlyIncome`, soit 0 au seed.
 
 ÉCART
-Les deux métriques mesurent la même chose (le FCF), pas l'épargne ni l'investissement
-constatés. `investmentRate` est identique à `savingsRate` dès que le FCF est positif :
-c'est un doublon. Aucune des deux ne doit être présentée comme un taux d'épargne tant
-que les transactions ne sont pas importées. Propriétaire : Paul, arbitrage Léo.
+Les deux métriques sont des proxys du FCF, ce que la définition canonique interdit
+explicitement. `shared.test.ts` verrouille par ailleurs ce comportement, donc verrouille
+le proxy. Propriétaires : Léo pour l'état non calculable, Paul pour les formules, Tom
+pour le ledger de flux dont elles dépendent.
 
 ## 5. Investissements
 
@@ -322,6 +426,44 @@ Le calcul vit dans l'interface (`InvestmentsPage`), pas dans un moteur testable,
 identifie les comptes par identifiant littéral `"acc_pea"` / `"acc_cto"`.
 Propriétaire : Paul (extraction moteur), Léo (spécification).
 
+### 5.4 Multiples de retour sur equity
+
+DÉFINITION CANONIQUE DU MOIC, arrêtée au Checkpoint
+
+    MOIC = (Σ distributions encaissées + valeur résiduelle à la date d'évaluation)
+           / Σ contributions en equity
+
+Le dénominateur comprend **toutes** les contributions, y compris les apports
+complémentaires postérieurs à l'investissement initial : appels de fonds, comblement de
+cash-flow négatif, CAPEX non financé, refinancement à la charge de l'investisseur.
+
+Règle de signe, qui est le point où l'erreur se produit : un flux périodique négatif
+n'est pas une distribution négative. C'est une **contribution supplémentaire**. Il va au
+dénominateur, il ne se retranche pas du numérateur.
+
+La valeur résiduelle rend le multiple interprétable avant la sortie, sur un projet non
+liquidé. Elle vaut 0 après cession complète.
+
+EXEMPLE
+Equity initiale 30 000, flux annuels -3 000 puis -3 000, sortie nette +80 000.
+Contributions = 30 000 + 3 000 + 3 000 = 36 000. Distributions = 80 000. Valeur
+résiduelle = 0. MOIC = 80 000 / 36 000 = **2,22**. Ni 2,47, qui netterait les
+contributions au numérateur, ni 2,67, qui les ignorerait.
+
+ÉTAT DU CODE
+`moic(totalDistributions, investedCapital)` est appelé depuis `real-estate.ts` avec
+`totalPositiveFlows`, c'est-à-dire `Σ max(0, flux)`. Les flux négatifs sont donc écartés
+du numérateur sans rejoindre le dénominateur : c'est la variante la plus optimiste des
+trois. Le dénominateur `investedEquity` est par ailleurs faux, voir INV-E-01.
+
+ÉCART
+Deux erreurs cumulatives, qui jouent dans le même sens sur le numérateur et dans le sens
+inverse sur le dénominateur. Le MOIC affiché n'est donc comparable à rien.
+Propriétaire : Paul, `financial.ts:moic` et `real-estate.ts:87`.
+
+Note : TRI et VAN ne sont pas redéfinis ici, leurs définitions standard sont correctes
+dans le code. Seul leur dénominateur d'equity est en cause, traité par INV-E-01.
+
 ## 6. Dette
 
 ### 6.1 Priorité des sources d'échéancier
@@ -369,11 +511,16 @@ demandé par le business plan §6.2 n'existe pas comme état de donnée : c'est 
 DÉFINITION CIBLE
 Trois grandeurs distinctes qui ne doivent jamais être confondues :
 - Intérêt : charge économique de la période, réduit le patrimoine net.
-- Principal : transfert d'un passif vers un actif, patrimoine net inchangé.
-- Cash-out : intérêt + principal + assurance + frais, ce qui sort du compte.
+- Principal : au moment du paiement, la trésorerie et le passif diminuent simultanément
+  du même montant. Le remboursement de principal est donc **neutre sur le patrimoine
+  net**.
+- Cash-out : intérêt + principal + assurance + frais, ce qui sort effectivement du compte.
 
-Un remboursement de principal n'est pas une dépense au sens du compte de résultat
-personnel, mais c'est bien une sortie de trésorerie.
+Formulation comptable, et non métaphorique : il n'y a pas de « transfert vers le
+patrimoine net », les deux jambes de l'écriture s'annulent. Un remboursement de principal
+n'est pas une charge, mais c'est bien une sortie de trésorerie. La distinction compte
+pour l'attribution de variation, où le principal apparaît comme un poste à somme nulle
+entre trésorerie et dette, pas comme un enrichissement.
 
 ÉTAT DU CODE
 `amortizeLoan` produit `payment`, `interest`, `principal`, `closingBalance`. Assurance
@@ -418,17 +565,40 @@ ACTUAL. `applyScenarioOverrides` est pur et testé pour la non-mutation.
 ÉCART
 Le champ `shockYear` est un entier relatif à l'année 1 de la projection, pas une année
 civile. Un utilisateur qui saisit « 2 » en pensant « 2028 » obtient un choc en 2027.
-Aucune unité n'est affichée. Propriétaire : Léo (libellé), Paul (convention).
+Aucune unité n'est affichée.
+
+DÉCISION CANONIQUE : remplacer conceptuellement `shockYear` par une **date d'effet**
+(`shockDate`) ou une **période d'effet** (`effectiveFrom`, `effectiveTo`). Motif : un
+entier relatif change de sens dès que la date d'observation bouge, ce qui rend deux
+projections lancées à des dates différentes non comparables. Une date est stable et
+alignable sur un événement réel. Propriétaires : Léo pour la sémantique et le libellé,
+Paul pour le moteur, Tom pour la migration de colonne.
 
 ### 8.2 Monthly Close
 
-DÉFINITION CIBLE
-Une clôture mensuelle est une photographie figée. Elle n'est réécrite que par une
-procédure explicite de réouverture, tracée.
+DÉFINITION CANONIQUE, arrêtée au Checkpoint
+Une clôture mensuelle est une photographie figée. Le mécanisme retenu est la
+**réouverture explicite avec versionnage** :
+
+1. une clôture existante ne peut pas être remplacée par une nouvelle clôture ;
+2. elle doit d'abord être **rouverte** par une opération distincte et tracée, portant
+   auteur, date et motif ;
+3. la reclôture crée alors une **version supplémentaire** ;
+4. **toutes les versions sont conservées**, aucune n'est supprimée ni modifiée ; la
+   version courante est désignée, les autres restent consultables.
+
+Le refus strict a été écarté : une correction de solde postérieure à une clôture est un
+cas normal, pas une anomalie, et interdire la reclôture pousserait à ne pas corriger. Le
+versionnage autorise la correction tout en conservant ce que le système affirmait à
+chaque instant, ce qui est la propriété réellement recherchée.
 
     Variance(mois) = NetWorthConstaté(mois) - NetWorthPrévu(mois)
 
-où « prévu » désigne la projection produite avant le mois, pas la clôture précédente.
+où « prévu » désigne la projection produite **avant** le mois, jamais la clôture
+précédente. `forecast_net_worth` contient donc une vraie prévision future, avec la trace
+du scénario et de la version utilisés ; en l'absence de projection préalable, le champ
+reste MISSING plutôt que d'être rempli par défaut. La variation entre deux clôtures est
+une grandeur distincte, qui porte son propre nom.
 
 ÉTAT DU CODE
 `create_monthly_close` fait un UPSERT sur `(user_id, close_date)` : relancer la clôture
@@ -437,10 +607,15 @@ d'un mois déjà clos écrase silencieusement la ligne précédente. Le champ
 `variance` mesure donc une variation, pas un écart au plan.
 
 ÉCART
-1. Écrasement silencieux : viole la définition de « figé ».
-2. Le champ `forecast_net_worth` porte un nom faux. L'interface promet « Écart réel vs
-   prévu » alors que le système calcule « écart au mois précédent ».
-Propriétaire : Paul, arbitrage Léo sur la sémantique cible.
+1. Écrasement silencieux : viole la définition de « figé ». Aucune notion de version,
+   aucune opération de réouverture.
+2. Le champ `forecast_net_worth` contient la clôture précédente, pas une prévision.
+   L'interface promet « Écart réel vs prévu » alors que le système calcule « écart au
+   mois précédent ».
+3. La clôture ne fige que trois agrégats, ce qui rend toute attribution de variation
+   ultérieure impossible.
+Propriétaires : Tom pour le modèle de versionnage et les repositories, Léo pour la
+sémantique de la réouverture, Paul pour la source de la prévision.
 
 ## 9. Projection et distribution
 
@@ -455,9 +630,19 @@ Propriétaire : Paul, arbitrage Léo sur la sémantique cible.
 À paramètres identiques, les deux moteurs ne produisent pas la même trajectoire, et
 aucun texte ne l'explique à l'utilisateur.
 
-DÉFINITION CIBLE
-Un seul moteur de trajectoire. La projection déterministe doit être la médiane du
-modèle à volatilité nulle, ou être supprimée. Propriétaire : Paul, arbitrage Léo.
+DÉCISION CANONIQUE, arrêtée au Checkpoint
+La projection déterministe est **conservée** : elle a une valeur d'explicabilité que la
+distribution n'a pas, et le cockpit a besoin d'une trajectoire lisible sans lancer 3 000
+simulations. Elle doit consommer le **même moteur de bilan mensuel** que le
+Monte-Carlo, exécuté à volatilité nulle et sans stress.
+
+Propriété vérifiable qui en découle : à volatilité 0 et probabilité de stress 0, la
+trajectoire déterministe et le P50 coïncident exactement, année par année, à la
+tolérance monétaire près. C'est un test, pas une intention.
+
+Motif : deux implémentations parallèles de la même trajectoire divergent toujours. Un
+moteur unique supprime la question de la réconciliation au lieu de la documenter.
+Propriétaire : Paul.
 
 ### 9.2 Percentiles
 
@@ -514,26 +699,53 @@ un point fort réel du produit.
 1. La règle de propagation de confiance n'existe pas : `deriveMetrics` produit des
    agrégats sans provenance ni confiance. `netWorth` n'a pas de provenance.
 2. Toute édition utilisateur force `confidence = 'HIGH'`, y compris sur un scénario
-   modélisé. Une saisie n'est pas une vérification.
+   modélisé.
+
+   DÉCISION CANONIQUE : une donnée éditée par l'utilisateur devient USER_ASSUMPTION, et
+   cela **n'implique aucune confiance HIGH**. La confiance est un attribut distinct de la
+   provenance : elle qualifie la vérification, pas l'intention. Déplacer un curseur de
+   rendement de 5,5 % à 8 % ne vérifie rien. La confiance conserve donc sa valeur
+   antérieure, ou est demandée explicitement, mais n'est jamais élevée par effet de bord
+   d'une saisie.
 3. Aucun mécanisme de conflit import / correction manuelle n'existe, faute d'import.
-Propriétaire : Paul pour 1, Léo pour 2, différé pour 3.
+Propriétaires : Paul pour 1, Léo pour la règle du point 2 et Tom pour les mutations qui
+la portent (elles vivent dans les repositories), différé pour 3.
 
-## 11. Complétude
+## 11. Complétude, confiance et incertitude de modèle
 
-DÉFINITION CIBLE
-Un calcul techniquement exécutable n'est pas économiquement fiable. La complétude
-mesure la part des inputs matériellement nécessaires qui sont réellement renseignés,
-pondérée par leur poids dans le résultat.
+DÉFINITIONS CANONIQUES, arrêtées au Checkpoint
+Un calcul techniquement exécutable n'est pas économiquement fiable, pour trois raisons
+**indépendantes** qui appellent trois grandeurs distinctes, jamais fusionnées.
+
+| Axe | Question | Porte sur | Action corrective |
+|---|---|---|---|
+| COMPLETENESS | ai-je toutes les données nécessaires ? | couverture des inputs | saisir la donnée manquante |
+| CONFIDENCE / DATA QUALITY | les données présentes sont-elles fiables ? | qualité des inputs présents | vérifier ou sourcer |
+| MODEL UNCERTAINTY | le modèle est-il adapté à la question ? | structure du calcul | changer de modèle |
+
+Ces trois axes sont orthogonaux. Un résultat peut être complet à 100 %, de confiance
+HIGH, et porter une incertitude de modèle élevée. Un modèle exact appliqué à des données
+partielles reste inexploitable. Les fusionner produit un indicateur qui ne dit ni ce qui
+manque, ni ce qui est douteux, ni ce qui est simplifié, et n'oriente donc vers aucune
+correction.
+
+Conséquence sur la restitution : la précision d'affichage est bornée par **le plus
+dégradé des trois axes**, jamais par la complétude seule. Un underwriting dont les seize
+entrées sont renseignées mais toutes hypothétiques a une complétude de 100 % et ne mérite
+pas deux décimales.
 
 ÉTAT DU CODE
-`dataCompleteness = catégories de budget renseignées / catégories de budget totales`.
-Au seed : 1 / 20 = 5 %. Le dénominateur inclut les catégories « Revenu » et
-« Investissement », qui ne sont pas des dépenses.
+Un seul indicateur existe : `dataCompleteness = catégories de budget renseignées /
+catégories de budget totales`. Au seed : 1 / 20 = 5 %. Le dénominateur inclut les
+catégories « Revenu » et « Investissement », qui ne sont pas des dépenses. Ni la
+confiance des agrégats, ni l'incertitude de modèle n'existent.
 
 ÉCART
-La métrique s'appelle `dataCompleteness` dans le type `DashboardMetrics` mais ne
-mesure que la complétude du budget. Le nom promet un score global. Spécification
-complète dans `COMPLETENESS_MODEL_SPEC.md`. Propriétaire : Léo.
+La métrique porte un nom qui promet un score global de complétude des données et ne
+mesure que le budget. Les deux autres axes sont entièrement absents, dont
+MODEL UNCERTAINTY, que seule une déclaration du propriétaire du calcul peut produire.
+Spécification complète dans `COMPLETENESS_MODEL_SPEC.md`. Propriétaires : Léo pour la
+sémantique des trois axes, Paul pour leur calcul et leur propagation.
 
 ## 12. Fiscalité
 
@@ -574,15 +786,36 @@ implémentation. Elles ne doivent pas être affichées avant d'être définies.
 | Savings Engine (minimum / recommended / accelerated) | exige un historique de dépenses |
 | Liquidity Engine (minimum / target / opportunity buffer) | exige stabilité de revenu mesurée |
 
-## 14. Points soumis à la review Checkpoint 1
+## 14. Décisions rendues au Checkpoint 1
 
-1. Arrondi monétaire canonique : quelle règle, à quelle couche ?
-2. Convention actif / passif d'un compte bancaire débiteur.
-3. `monthlyDebtService` pendant un différé : 0 ou mensualité contractuelle ?
-4. `liquidNetWorth` : implémenter la définition ou retirer la métrique ?
-5. `savingsRate` et `investmentRate` : conserver deux métriques ou une seule ?
-6. `forecast_net_worth` de la clôture mensuelle : renommer ou brancher sur la projection ?
-7. Confiance automatique HIGH après édition utilisateur : acceptable ?
-8. Projection déterministe : conserver, aligner sur le Monte-Carlo, ou supprimer ?
-9. `shockYear` : année relative ou année civile ?
-10. Périmètre nommé « Patrimoine brut » alors que seuls les actifs financiers sont couverts.
+Les dix points soumis à la review ont été tranchés. Ils ne sont plus ouverts, et les
+sections correspondantes portent désormais la mention « DÉFINITION CANONIQUE ».
+
+| # | Point | Décision | Section |
+|---|---|---|---|
+| 1 | arrondi monétaire | pleine précision en interne, arrondi à la restitution et au contrat | §2.3 |
+| 2 | compte bancaire débiteur | passif court terme, hors `GrossAssets` | §2.4 |
+| 3 | service de dette en différé | somme des `LoanScheduleEntry.totalCashOut` exigibles ; 0 avant la première échéance ; intérêts en différé partiel | §4.3 |
+| 4 | `liquidNetWorth` | remplacé par trois grandeurs distinctes : `LiquidAssets`, `NetLiquidityPosition30d`, `LiquidNetWorth` | §3.2 |
+| 5 | taux d'épargne et d'investissement | métriques de flux constatés ; NOT_COMPUTABLE tant que le ledger n'existe pas | §4.5 |
+| 6 | `forecast_net_worth` | vraie prévision future, jamais la clôture précédente | §8.2 |
+| 7 | confiance après édition | une édition ne fait pas passer la confiance à HIGH | §10 |
+| 8 | projection déterministe | conservée, sur le même moteur mensuel que le Monte-Carlo | §9.1 |
+| 9 | `shockYear` | remplacé par `shockDate` ou une période d'effet | §8.1 |
+| 10 | libellé du périmètre | « Actifs financiers identifiés » tant que le bilan est financier | §2.1 |
+
+S'ajoutent quatre décisions non listées initialement et rendues au même Checkpoint :
+
+| Point | Décision | Section |
+|---|---|---|
+| entrée au bilan d'un actif financé | valeur brute en actif, dette en passif, equity DERIVED jamais sommée | §2.1 |
+| MOIC | (distributions + valeur résiduelle) / total des contributions, apports complémentaires inclus | §5.4 |
+| complétude, confiance, incertitude de modèle | trois axes orthogonaux, précision bornée par le plus dégradé | §11 |
+| clôture mensuelle | réouverture explicite et versionnage, toutes versions conservées | §8.2 |
+
+### Points encore ouverts après ce Checkpoint
+
+1. Poids et seuil de matérialité du calcul de complétude, voir `COMPLETENESS_MODEL_SPEC.md`.
+2. Assiette de la valeur de sortie immobilière : `postRenovationValue` est désormais un champ obligatoire, sa valeur par défaut reste à décider.
+3. Qualification de la liquidité par type d'actif, prérequis des trois grandeurs de §3.2.
+4. Granularité du ledger de flux, prérequis des taux d'épargne et d'investissement de §4.5.

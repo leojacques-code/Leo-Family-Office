@@ -1,6 +1,6 @@
 # Dossier de revue pré-Codex
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`. Destinataire : Codex / Work, mission du 24 août 2026.
 
 ## 0. Avertissement de sincérité
@@ -140,13 +140,19 @@ Ce qui existe mais n'a pas été vérifié, ou dont la vérification a échoué.
 Classés par gravité. « Gravité » signifie ici : un chiffre faux est présenté à
 l'utilisateur comme une vérité.
 
-### B-01 · Contradiction sur le service de dette
-Le moteur retranche 284,72 € du cash-flow dès la date zéro. L'interface libelle le
-résultat « avant échéance du prêt ». Le panneau d'explication annonce 0,00 €.
-`docs/ASSUMPTIONS.md` annonce +142 € par mois, de signe opposé. Le test
-`shared.test.ts` verrouille le comportement du moteur.
-Trois sources, deux vérités, sur le premier écran du produit.
-Référence : `DATA_INVARIANTS.md` INV-D-02, `OPEN_QUESTIONS.md` Q-01.
+### B-01 · Service de dette faux, définition désormais arrêtée
+Le moteur retranche 284,72 € du cash-flow dès la date zéro, alors que la première
+échéance tombe le 5 décembre 2026. L'interface libelle le résultat « avant échéance du
+prêt », le panneau d'explication annonce 0,00 €, `docs/ASSUMPTIONS.md` annonce +142 € par
+mois. Trois sources, deux vérités, sur le premier écran du produit.
+
+La définition canonique est arrêtée depuis le Checkpoint : `DebtService(période)` est la
+somme des `LoanScheduleEntry.totalCashOut` contractuellement exigibles dans la période.
+La valeur juste au 19 août 2026 est donc 0 €, et le cash-flow libre avant impôt +142 €.
+Ce sont `deriveMetrics` et le test `shared.test.ts` qui doivent changer, pas la
+documentation. Prérequis : le modèle ne porte pas encore d'échéancier lisible ni de champ
+`totalCashOut`.
+Référence : `FINANCIAL_DEFINITIONS.md` §4.3, INV-D-02, INV-D-08, `OPEN_QUESTIONS.md` Q-01, fermée.
 
 ### B-02 · Performance affichée sans base de calcul
 La page Investments affiche « Performance affichée : +77,71 % » pour le CTO. Ce compte
@@ -154,6 +160,15 @@ a un cost basis nul et aucun historique de flux. Le pourcentage n'est dérivable
 donnée. Sur le même écran, le produit refuse d'afficher volatilité et Sharpe faute
 d'historique fiable.
 Référence : `DATA_INVARIANTS.md` INV-C-02, `UI_STATE_AUDIT.md` UI-003.
+
+### B-03 bis · MOIC faux dans les deux sens
+`moic(totalDistributions, investedCapital)` est appelé avec `Σ max(0, flux)` : les flux
+négatifs sont écartés du numérateur sans rejoindre le dénominateur, ce qui est la
+variante la plus optimiste possible. La formule canonique est
+`(Σ distributions + valeur résiduelle) / Σ contributions`, apports complémentaires
+inclus au dénominateur. Sur CASE 13, la valeur juste est 2,2222 contre 2,6667 affiché.
+L'erreur se cumule avec B-03, dont elle partage le dénominateur.
+Référence : `FINANCIAL_DEFINITIONS.md` §5.4, INV-E-02, CASE 13.
 
 ### B-03 · Equity investie immobilière fausse
 `investedEquity = downPayment + acquisitionCosts + renovation + furniture` compte les
@@ -272,7 +287,7 @@ Lane de Paul. Constats de lecture et de recalcul.
 - Absence de règle fiscale non vérifiée.
 - Écarts de réconciliation exposés et non absorbés.
 
-### Défaillant
+### Défaillant, au regard des définitions arrêtées au Checkpoint
 - Service de dette : différé non respecté, maturité non testée, fenêtre littérale.
 - Equity investie immobilière : fausse dans tous les cas où l'emprunt ne finance pas
   exactement le prix d'achat.
@@ -344,9 +359,12 @@ reprises sans discussion.
 
 Classés par valeur rapportée au risque.
 
-1. Trancher Q-01, Q-02 et Q-11. Trois décisions de Léo, sans code, qui débloquent
-   respectivement le cash-flow, la suite de tests et le risque produit le plus élevé.
-   Q-14, la topologie de branches, a été fermée le 20 août : les six branches existent.
+1. Trancher Q-11, seule décision produit encore bloquante : le Decision Lab émet une
+   recommandation sans test ni coefficient sourcé. Treize des dix-huit questions ouvertes
+   ont été fermées le 20 août, Q-14 par la création de la topologie de branches et les
+   douze autres par le Checkpoint GPT-5.6 Sol. Les définitions de Net Worth, service de
+   dette, liquidité, taux d'épargne, MOIC, complétude et clôture mensuelle sont
+   désormais arrêtées : Paul peut coder contre une cible stable.
 2. Appliquer les correctifs de copie de la zone verte : UI-003, UI-004, UI-005, UI-002,
    UI-006, UI-025. Six correctifs, aucun moteur touché, gain de crédibilité immédiat.
 3. Mettre en place une CI minimale : lint, tests, build sur chaque PR. Sans elle, aucune

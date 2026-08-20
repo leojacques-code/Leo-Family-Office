@@ -1,6 +1,6 @@
 # Démarrer ici, collaborateurs
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Destinataires : Paul (Financial Truth), Tom (Technical Trust), et tout futur relecteur.
 
 Ce document ne contient aucun secret, aucune clé, aucune URL de projet, aucun code
@@ -75,9 +75,15 @@ existe. Remontez du composant au moteur puis à la base.
 
 | Personne | Rôle | Possède |
 |---|---|---|
-| Léo | Product Truth, intégrateur | vision, priorisation, définitions canoniques, critères d'acceptation, conventions d'affichage, revue de PR, décisions de merge, déploiement |
-| Paul | Financial Truth | primitives financières, Debt Engine, Real Estate, golden cases, tests financiers |
-| Tom | Technical Trust | sécurité, CI, repository, auth et RLS, Supabase, intégrations techniques, staging |
+| Léo | Product Truth, intégrateur | sémantique produit : vision, priorisation, définitions canoniques, critères d'acceptation, libellés et périmètres, conventions d'affichage, revue de PR, décisions de merge, déploiement |
+| Paul | Financial Truth | sémantique financière : primitives, Debt Engine, Real Estate, formules, golden cases, tests financiers |
+| Tom | Technical Trust | schéma, repositories, persistance, migrations, sécurité, CI, auth et RLS, Supabase, intégrations techniques, staging |
+
+Ligne de partage à retenir quand deux lanes semblent se toucher : Paul possède la
+**formule** qui consomme une donnée, Tom possède la **structure** qui la porte. Un
+correctif dont la maison cible est une table, une colonne ou un repository n'a jamais
+Paul pour propriétaire unique. Inversement, une migration qui change une valeur affichée
+n'est pas fusionnée sans que Paul ait validé la formule et Léo le libellé.
 
 ### Fichiers temporairement réservés
 
@@ -207,9 +213,9 @@ spécifiée ne prouve que la stabilité de cette formule, pas sa justesse.
 | Document | Contenu | Statut |
 |---|---|---|
 | `docs/ENGINE_AUDIT.md` | audit statique complet des moteurs, 16 sections, findings P0 à P3 | de référence |
-| `docs/FINANCIAL_DEFINITIONS.md` | définitions canoniques, écart entre cible et code | V0.1, à relire |
-| `docs/DATA_INVARIANTS.md` | 70 invariants, statut vérifié au commit `ef5bacf` | V0.1, à relire |
-| `docs/GOLDEN_DATASET.md` | 18 cas synthétiques, sorties attendues | V0.1, à relire |
+| `docs/FINANCIAL_DEFINITIONS.md` | définitions canoniques, écart entre cible et code | V0.2, décisions du Checkpoint 1 intégrées |
+| `docs/DATA_INVARIANTS.md` | 74 invariants, implémentation et tests évalués séparément | V0.2, décisions du Checkpoint 2 intégrées |
+| `docs/GOLDEN_DATASET.md` | 20 cas synthétiques, sorties attendues | V0.2, décisions du Checkpoint 2 intégrées |
 | `docs/FINANCIAL_HARDCODES_AUDIT.md` | 34 hardcodes classés et priorisés | V0.1 |
 | `docs/FINARY_GAP_MATRIX.md` | 32 capabilities, statut réel | V0.1 |
 | `docs/UI_STATE_AUDIT.md` | 27 findings d'interface | V0.1 |
@@ -218,8 +224,18 @@ spécifiée ne prouve que la stabilité de cette formule, pas sa justesse.
 | `docs/DATA_VERIFICATION.md` | documents réels à obtenir | existant |
 | `docs/ROADMAP.md` | fonctions différées volontairement | existant |
 
-Les documents marqués « à relire » attendent le Checkpoint 1 ou 2. Ne les traitez pas
-comme des vérités stabilisées : signalez-y ce qui vous paraît faux, c'est leur usage.
+Les documents en V0.2 ont intégré les décisions rendues au Checkpoint GPT-5.6 Sol du
+20 août 2026. Quatorze conventions y sont désormais arrêtées : convention de bilan brute,
+MOIC, service de dette par `totalCashOut`, séparation des trois grandeurs de liquidité,
+taux d'épargne non calculables sans ledger, séparation complétude, confiance et
+incertitude de modèle, arrondi à la restitution, solde débiteur en passif, prévision
+mensuelle réelle, projection déterministe sur moteur mensuel commun, choc daté, libellé
+« Actifs financiers identifiés », coût des travaux distinct de la valeur créée,
+réouverture et versionnage des clôtures.
+
+Vous pouvez coder contre ces définitions : elles ne bougeront pas sans un nouveau
+Checkpoint. Ce qui reste ouvert est listé dans `docs/OPEN_QUESTIONS.md`, six questions.
+Signalez toujours ce qui vous paraît faux, c'est l'usage de ces documents.
 
 ## 9. Stop list
 
