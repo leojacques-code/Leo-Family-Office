@@ -36,7 +36,7 @@ entre dans le code sans être écrite quelque part est une dette invisible.
 | Q-11 | Decision Lab : recommandation ou comparaison | Léo | immédiat | ouverte |
 | Q-12 | Données personnelles réelles dans le dépôt | Léo, mise en oeuvre Tom | avant l'arrivée de Paul et Tom | ouverte |
 | Q-13 | npm ou pnpm | Tom | avant l'arrivée de Paul et Tom | ouverte |
-| Q-14 | Topologie de branches inexistante | Léo | avant l'arrivée de Paul et Tom | ouverte |
+| Q-14 | Topologie de branches inexistante | Léo | avant l'arrivée de Paul et Tom | **fermée le 20/08** |
 | Q-15 | Périmètre nommé « Patrimoine brut » | Léo | avec les correctifs de copie | ouverte |
 | Q-16 | Clôture d'un mois déjà clos : refus ou réouverture | Léo | avant la deuxième clôture | ouverte |
 | Q-17 | Barre d'acceptation V1 | Léo | avant le 24 août | ouverte |
@@ -354,32 +354,6 @@ lockfiles concurrents peuvent apparaître.
 
 ---
 
-## Q-14 · Topologie de branches inexistante
-
-CONTEXTE
-Le plan de développement §3 et le business plan §19.1 décrivent une topologie à six
-branches : `main`, `audit/financial-engine`, `integration/v1.2-hardening`,
-`leo/phase0`, `finance/paul-sprint`, `platform/tom-security`. Le dépôt ne contient
-aujourd'hui que `leo/phase0` et `claude/plan-de-leo-qakf68`, qui pointent sur le même
-commit. Il n'existe ni `main`, ni branche d'intégration.
-
-Conséquence directe : la règle « toutes les PR ciblent `integration/v1.2-hardening` »
-n'est pas applicable, et deux collaborateurs qui commenceraient maintenant n'auraient
-pas de point de convergence.
-
-OPTIONS
-- A. Créer la topologie complète avant l'arrivée de Paul et Tom.
-- B. Simplifier : une branche d'intégration et deux branches de travail, sans branche
-  d'audit gelée.
-
-BLOQUE : la règle de PR, la revue croisée, l'ordre de merge.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : avant l'arrivée de Paul et Tom.
-IMPACT SI NON TRANCHÉ : les collaborateurs travaillent sans point de rendez-vous, et le
-plan du 22 août (revue des PR de Paul et Tom) est inexécutable.
-
----
-
 ## Q-15 · Périmètre nommé « Patrimoine brut »
 
 CONTEXTE
@@ -454,8 +428,41 @@ techniquement le plus proche, pas vers ce qui a le plus de valeur.
 
 ## Questions fermées
 
-Aucune à ce jour. Ce document est créé le 20 août 2026.
+Une question tranchée descend ici avec sa réponse, sa date et les documents mis à jour.
+Elle n'est pas supprimée : la trace de l'arbitrage vaut autant que l'arbitrage.
 
-Quand une question est tranchée, elle descend ici avec sa réponse, sa date et le
-document de référence mis à jour. Elle n'est pas supprimée : la trace de l'arbitrage
-vaut autant que l'arbitrage.
+---
+
+## Q-14 · Topologie de branches · FERMÉE le 20 août 2026
+
+CONTEXTE INITIAL
+Le plan de développement §3 et le business plan §19.1 décrivent une topologie à six
+branches. Au moment de l'audit du 20 août, le dépôt ne contenait que `leo/phase0` et
+`claude/plan-de-leo-qakf68`, pointant sur le même commit. Ni `main`, ni branche
+d'intégration, ni branches de collaborateurs. La règle « toutes les PR ciblent
+`integration/v1.2-hardening` » n'était donc pas applicable, et le plan du 22 août,
+revue des PR de Paul et Tom, était inexécutable.
+
+RÉPONSE : option A, topologie complète créée.
+
+État vérifié le 20 août 2026 à 15h07 UTC :
+
+| Branche | Commit | Rôle |
+|---|---|---|
+| `main` | `ee0d16d` | production, V1.1 Supabase |
+| `audit/financial-engine` | `ef5bacf` | baseline auditée, à geler |
+| `integration/v1.2-hardening` | `ef5bacf` | zone de convergence |
+| `leo/phase0` | `ef5bacf` | lane Léo |
+| `finance/paul-sprint` | `ef5bacf` | lane Paul |
+| `platform/tom-security` | `ef5bacf` | lane Tom |
+
+La topologie est conforme au plan §3 : `audit/financial-engine` ajoute `ENGINE_AUDIT.md`
+à `main`, et les quatre branches suivantes en dérivent sans divergence.
+
+DOCUMENTS MIS À JOUR : `COLLAB_START_HERE.md` §4, `PRE_CODEX_REVIEW.md` §1, §10 et §11.
+
+CE QUI RESTE OUVERT, et qui n'était pas dans Q-14 :
+- geler formellement `audit/financial-engine`, prévu par le plan §3, non fait ;
+- `integration/v1.2-hardening` ne contient aucun travail de convergence à ce jour ;
+- PR #1 cible `leo/phase0`, ce qui est correct : c'est la branche de Léo. La PR
+  suivante, `leo/phase0` vers `integration/v1.2-hardening`, reste à ouvrir.

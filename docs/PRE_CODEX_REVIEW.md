@@ -26,12 +26,18 @@ rupture involontaire.
 
 Décision attendue, en un mot : MERGE READY, FIX REQUIRED, ou REDESIGN REQUIRED.
 
-### Obstacle immédiat
+### État de la branche cible
 
-Il n'existe aujourd'hui ni branche `main`, ni branche `integration/v1.2-hardening`.
-Le dépôt contient `leo/phase0` et `claude/plan-de-leo-qakf68`, qui pointent sur le même
-commit. La mission telle qu'énoncée n'a pas d'objet tant que la topologie n'est pas
-créée. Voir `docs/OPEN_QUESTIONS.md` Q-14.
+La topologie complète a été créée le 20 août 2026, dans l'intervalle entre la rédaction
+de la première version de ce dossier et sa vérification à 15h07 UTC.
+`integration/v1.2-hardening` existe et pointe sur `ef5bacf`, comme `audit/financial-engine`,
+`leo/phase0`, `finance/paul-sprint` et `platform/tom-security`. `main` pointe sur
+`ee0d16d`. Voir `docs/OPEN_QUESTIONS.md` Q-14, fermée.
+
+Réserve pour Codex : au 20 août, `integration/v1.2-hardening` ne contient aucun travail
+de convergence. Elle est identique à la baseline auditée. La branche existe, elle n'a
+rien à auditer. La mission du 24 août suppose que Paul et Tom y aient fusionné leurs
+sprints d'ici là.
 
 ## 2. Documents de référence
 
@@ -289,7 +295,9 @@ financière indépendante n'a été menée : `PAUL_FINANCIAL_REVIEW.md` n'existe
 
 ## 10. Ordre de fusion proposé
 
-Sans objet à ce jour : aucune PR n'existe, aucune branche de collaborateur n'existe.
+Une seule PR existe au 20 août : PR #1, `claude/plan-de-leo-qakf68` vers `leo/phase0`,
+documentation seule, 13 fichiers, aucun fichier fonctionnel. Les branches de Paul et de
+Tom existent et sont vides de tout commit.
 
 Ordre proposé quand elles existeront, du moins risqué au plus risqué :
 1. Documentation seule, lane Léo.
@@ -302,7 +310,8 @@ exécute les golden cases revient à se priver du seul filet disponible.
 
 ## 11. Conflits identifiés
 
-Aucun conflit Git : aucune branche concurrente n'existe.
+Aucun conflit Git à ce jour : les cinq branches de travail partent du même commit
+`ef5bacf` et seule `claude/plan-de-leo-qakf68` porte des commits, tous dans `docs/`.
 
 Conflits de périmètre anticipés, à surveiller quand les branches existeront :
 
@@ -327,7 +336,7 @@ reprises sans discussion.
 | Corriger le test rouge en changeant l'assertion | rend la suite verte sans trancher Q-02, et masque le vrai sujet de l'arrondi canonique |
 | Corriger la formule d'equity immobilière tout de suite | fichier de la lane de Paul, et Q-10 sur l'assiette de sortie n'est pas tranchée |
 | Retirer immédiatement « +77,71 % » de l'interface | correction évidente, mais le plan de cette session interdit toute modification de code fonctionnel. Consigné en UI-003 et HC-24 |
-| Créer les branches manquantes | dépasse le mandat de cette session, et engage la topologie de collaboration. Consigné en Q-14 |
+| Créer les branches manquantes | dépassait le mandat de cette session, et engageait la topologie de collaboration. Consigné en Q-14, puis créées par Léo le 20 août |
 | Écrire les fixtures du golden dataset | le plan les réserve explicitement à une étape ultérieure, après validation des définitions |
 | Produire un score de complétude global | contraire au principe retenu en `COMPLETENESS_MODEL_SPEC.md` §4 |
 
@@ -335,9 +344,9 @@ reprises sans discussion.
 
 Classés par valeur rapportée au risque.
 
-1. Trancher Q-01, Q-02, Q-11 et Q-14. Quatre décisions de Léo, sans code, qui
-   débloquent respectivement le cash-flow, la suite de tests, le risque produit le plus
-   élevé et la collaboration elle-même.
+1. Trancher Q-01, Q-02 et Q-11. Trois décisions de Léo, sans code, qui débloquent
+   respectivement le cash-flow, la suite de tests et le risque produit le plus élevé.
+   Q-14, la topologie de branches, a été fermée le 20 août : les six branches existent.
 2. Appliquer les correctifs de copie de la zone verte : UI-003, UI-004, UI-005, UI-002,
    UI-006, UI-025. Six correctifs, aucun moteur touché, gain de crédibilité immédiat.
 3. Mettre en place une CI minimale : lint, tests, build sur chaque PR. Sans elle, aucune

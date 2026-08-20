@@ -112,21 +112,29 @@ fichier fait le changement, l'autre lane fournit la spécification et le test.
                   ├── finance/paul-sprint
                   └── platform/tom-security
 
-État réel au 20 août 2026 : seules `leo/phase0` et `claude/plan-de-leo-qakf68`
-existent, et elles pointent sur le même commit. Les branches `main`,
-`audit/financial-engine`, `integration/v1.2-hardening`, `finance/paul-sprint` et
-`platform/tom-security` n'ont pas encore été créées.
+État réel, vérifié le 20 août 2026 à 15h07 UTC : la topologie complète existe.
 
-Écart à traiter par Léo avant l'arrivée de Paul et Tom. Tant qu'il subsiste, il n'y a
-pas de zone de convergence : deux collaborateurs qui commencent maintenant travaillent
-sans point de rendez-vous.
+| Branche | Commit | Rôle |
+|---|---|---|
+| `main` | `ee0d16d` | production, V1.1 Supabase |
+| `audit/financial-engine` | `ef5bacf` | baseline auditée, à geler |
+| `integration/v1.2-hardening` | `ef5bacf` | zone de convergence |
+| `leo/phase0` | `ef5bacf` | lane Léo |
+| `finance/paul-sprint` | `ef5bacf` | lane Paul |
+| `platform/tom-security` | `ef5bacf` | lane Tom |
+| `claude/plan-de-leo-qakf68` | `462f656` | documentation de la phase 0, PR #1 vers `leo/phase0` |
 
-Règles, une fois la topologie en place :
+Les cinq branches de travail partent toutes de `ef5bacf`, qui ajoute `ENGINE_AUDIT.md`
+à `main`. Aucune divergence entre elles à ce jour : Paul et Tom démarrent d'une base
+identique.
+
+Règles applicables dès maintenant :
 - aucun développement direct sur `main` ;
 - aucun push direct d'un collaborateur sur `integration/v1.2-hardening` ;
 - toutes les PR ciblent `integration/v1.2-hardening` ;
 - personne ne fusionne sa propre PR ;
-- `audit/financial-engine` est gelée après validation.
+- `audit/financial-engine` est gelée après validation. Ce gel n'a pas encore été
+  formalisé au 20 août : la branche existe et reste techniquement ouverte à l'écriture.
 
 ## 5. Règles de sécurité
 
