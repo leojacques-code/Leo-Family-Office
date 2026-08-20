@@ -565,7 +565,7 @@ confidentialité, et qui relève de la lane de Tom.
 | Prêt 16 745, mensualité 284,72, 60 échéances, 2026-12-05, 2031-11-05 | idem | dette réelle |
 | Revenu net 1 282, loyer 1 140, revenu tennis 130 | idem | revenus et charges réels |
 | Noms d'établissements réels : Boursobank, Revolut, CIC, Trade Republic, Bpifrance | idem | relations bancaires |
-| Prénom de l'utilisateur, `usr_leo`, code de développement `leo-local-2026` | `local-repository.ts`, `auth.ts`, `login-form.tsx` | identité |
+| Prénom de l'utilisateur, identifiant `usr_leo`, valeur de repli du code d'accès de développement | `local-repository.ts`, `auth.ts`, `login-form.tsx` | identité |
 
 Constat : le dépôt contient l'inventaire patrimonial complet d'une personne physique
 identifiée, avec le nom de ses établissements bancaires et de son prêteur, dans trois

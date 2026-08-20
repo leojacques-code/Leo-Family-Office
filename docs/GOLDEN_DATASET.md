@@ -674,4 +674,4 @@ teste rien et donne l'illusion d'une couverture.
 3. CASE 10 : le résidu contractuel de 1 768,75 doit-il produire une alerte HIGH ou MEDIUM ?
 4. CASE 18 : refus strict ou réouverture tracée ? Le dataset accepte les deux, le produit doit en choisir un.
 5. CASE 12 révèle que la formule d'equity actuelle est fausse même sans travaux, pas seulement dans le cas des travaux financés. Facteur 1,444 contre 2,667.
-6. Faut-il un CASE 19 « compte clôturé » et un CASE 20 « donnée corrigée rétroactivement » ? Les deux touchent l'intégrité historique et ne sont pas couverts.
+6. Faut-il ajouter deux cas, « compte clôturé » et « donnée corrigée rétroactivement » ? Les deux touchent l'intégrité historique et ne sont couverts par aucun des dix-huit cas actuels.

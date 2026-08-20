@@ -186,7 +186,7 @@ est écrite pour contraindre le futur, pas pour juger le présent.
 ### INV-B-05 · Une couverture calculée sur un budget incomplet porte un drapeau
 - RULE : si des catégories de dépense essentielles sont MISSING, la couverture affichée porte un drapeau d'incomplétude et un sens de biais.
 - RATIONALE : ici le biais est connu : ajouter des dépenses fera baisser le ratio. L'utilisateur doit le savoir.
-- EXAMPLE : « 0,31 mois, borne haute : 6 catégories essentielles sur 7 non renseignées ».
+- EXAMPLE : « 0,31 mois, borne haute : 7 catégories essentielles sur 8 non renseignées ».
 - FAILURE MODE : l'utilisateur se croit à 0,31 mois alors qu'il est peut-être à 0,15.
 - HOW TO TEST : le drapeau apparaît dès qu'une catégorie essentielle est MISSING.
 - OWNER / MODULE : Léo (spécification), Paul (drapeau).
@@ -326,7 +326,7 @@ est écrite pour contraindre le futur, pas pour juger le présent.
 - RATIONALE : confondre les deux fait apparaître le désendettement comme un appauvrissement.
 - EXAMPLE : mensualité 284,72 € à 0 % : trésorerie -284,72 €, dette -284,72 €, patrimoine net inchangé.
 - FAILURE MODE : l'attribution de variation du patrimoine attribue au « coût de la dette » ce qui est de l'equity build-up.
-- HOW TO TEST : golden case CASE 09 ; vérifier `ΔNetWorth = -intérêt` sur une échéance.
+- HOW TO TEST : golden case CASE 9 ; vérifier `ΔNetWorth = -intérêt` sur une échéance.
 - OWNER / MODULE : Paul, futur moteur d'attribution.
 - SEVERITY : HIGH.
 - STATUT : NON TESTABLE. Aucun moteur d'attribution de variation n'existe.
@@ -414,7 +414,7 @@ est écrite pour contraindre le futur, pas pour juger le présent.
 - RATIONALE : c'est le mode de défaillance numéro un des agrégateurs de budget. Chaque virement d'épargne apparaît comme une dépense.
 - EXAMPLE : 500 € du compte courant vers le PEA. Cash bancaire -500, cash PEA +500, patrimoine net inchangé, dépenses inchangées, revenus inchangés, performance inchangée.
 - FAILURE MODE : le taux d'épargne s'effondre à chaque virement d'épargne ; l'utilisateur croit dépenser ce qu'il épargne.
-- HOW TO TEST : golden case CASE 05 ; comparer les métriques avant et après le transfert.
+- HOW TO TEST : golden case CASE 5 ; comparer les métriques avant et après le transfert.
 - OWNER / MODULE : Paul, futur moteur de transactions.
 - SEVERITY : BLOCKER.
 - STATUT : NON TESTABLE. Le modèle `Transaction` n'a qu'un `accountId` : un transfert n'est pas représentable comme une entité unique à deux jambes.
@@ -636,7 +636,7 @@ est écrite pour contraindre le futur, pas pour juger le présent.
 - RATIONALE : sans cette séparation, l'utilisateur attribue à son choix de titre ce qui vient de l'euro.
 - EXAMPLE : position 100 USD passant de 10 à 11 USD avec un taux passant de 0,92 à 0,88 : +10 % en USD, +5,2 % en EUR, dont -4,3 % d'effet change.
 - FAILURE MODE : attribution de performance fausse.
-- HOW TO TEST : golden case CASE 04 avec variation simultanée du prix et du taux.
+- HOW TO TEST : golden case CASE 4 avec variation simultanée du prix et du taux.
 - OWNER / MODULE : Paul, futur Portfolio Engine.
 - SEVERITY : MEDIUM.
 - STATUT : NON TESTABLE. aujourd'hui, aucune performance n'étant calculée.
