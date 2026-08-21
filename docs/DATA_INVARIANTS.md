@@ -116,7 +116,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : propriété sur jeu aléatoire de comptes et dettes ; tolérance explicite, pas d'égalité flottante stricte.
 - OWNER / MODULE : Paul, `src/lib/engine/financial.ts:calculateNetWorth`.
 - SEVERITY : BLOCKER.
-- IMPLEMENTATION STATUS : RESPECTED. en valeur, VIOLÉ en test. `15571.49 - 16745` rend `-1173.5100000000002` et le test `financial.test.ts:40` échoue sur `toEqual`. Vérifié par exécution de `npx vitest run` le 20 août 2026 : 25 tests, 24 verts, 1 rouge. Voir INV-A-02.
+- IMPLEMENTATION STATUS : RESPECTED. L'identité comptable est exacte : `15571.49 - 16745` vaut bien `-1173.51` au centime. Le résidu `-1173.5100000000002` est un artefact de représentation binaire, sans effet sur la restitution arrondie. Voir INV-A-02.
 - TEST STATUS : FAILING. Le calcul est financièrement exact. `financial.test.ts:40` échoue sur une égalité stricte de flottant, ce qui est un défaut du test, pas de la formule. Voir INV-A-02.
 
 ### INV-A-02 · Tolérance monétaire explicite `DÉPEND-DEF`
@@ -148,7 +148,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : jeu avec positions dont la somme égale le solde, vérifier que `GrossAssets` n'augmente pas quand on ajoute des positions.
 - OWNER / MODULE : Paul, `src/lib/data/shared.ts:deriveMetrics`.
 - SEVERITY : BLOCKER.
-- IMPLEMENTATION STATUS : RESPECTED. et testé (`shared.test.ts`, « additionne les soldes de comptes sans double compter les positions »).
+- IMPLEMENTATION STATUS : RESPECTED. `deriveMetrics` agrège les soldes de comptes et n'ajoute jamais les positions.
 - TEST STATUS : COVERED. `shared.test.ts`, « additionne les soldes de comptes sans double compter les positions ».
 
 ### INV-A-04 · Les positions expliquent le solde, elles ne s'y ajoutent pas
@@ -403,7 +403,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : test de somme sur le jeu de données de l'allocation.
 - OWNER / MODULE : Paul (extraction d'un moteur d'allocation), Léo (affichage de l'écart).
 - SEVERITY : MEDIUM.
-- IMPLEMENTATION STATUS : VIOLATED. silencieusement. L'écart existe, il correspond exactement au gap de réconciliation déjà exposé ailleurs, mais rien ne le relie sur ce graphique.
+- IMPLEMENTATION STATUS : VIOLATED, et silencieusement. L'écart existe et correspond exactement au gap de réconciliation exposé sur la page Investments, mais rien ne le relie sur ce graphique.
 - TEST STATUS : UNCOVERED. Le calcul vit dans le JSX, donc hors de portée de la suite.
 
 ### INV-C-06 · Frais et dividendes sont des flux distincts de la performance
@@ -429,7 +429,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : échéancier complet ; `every(row => row.closingBalance >= 0)`.
 - OWNER / MODULE : Paul, `financial.ts:amortizeLoan`.
 - SEVERITY : BLOCKER.
-- IMPLEMENTATION STATUS : RESPECTED. et testé (« caps the final contractual payment at the remaining balance »).
+- IMPLEMENTATION STATUS : RESPECTED. Le principal de la dernière échéance est plafonné au solde restant.
 - TEST STATUS : COVERED. `financial.test.ts`, « caps the final contractual payment at the remaining balance ».
 
 ### INV-D-02 · Le service de dette est la somme des cash-out contractuellement exigibles
@@ -466,7 +466,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - OWNER / MODULE : Paul pour la définition et la dérivation ; Tom pour le modèle
   `LoanScheduleEntry` et sa persistance.
 - SEVERITY : BLOCKER.
-- IMPLEMENTATION STATUS : VIOLATED. et l'arbitrage produit n'est pas rendu. Le code compte 284,72 € dès la date zéro via un filtre `firstPaymentDate <= "2027-08-19"`. L'interface et `docs/ASSUMPTIONS.md` affirment l'inverse. Voir `OPEN_QUESTIONS.md` Q-01.
+- IMPLEMENTATION STATUS : VIOLATED. Le code compte 284,72 € dès la date zéro via un filtre `firstPaymentDate <= "2027-08-19"`, sans lire d'échéancier. L'interface et `docs/ASSUMPTIONS.md` affirment l'inverse. La définition canonique est désormais arrêtée : voir `OPEN_QUESTIONS.md` Q-01, fermée.
 - TEST STATUS : UNCOVERED. Aucun test des fenêtres d'exigibilité.
 
 ### INV-D-03 · Un échéancier couvre exactement la vie du prêt, ni avant ni après
@@ -508,7 +508,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : golden case CASE 10 ; vérifier que le paiement retenu est le contractuel.
 - OWNER / MODULE : Paul pour la priorité des sources ; Tom pour l'import et la persistance de l'échéancier.
 - SEVERITY : BLOCKER.
-- IMPLEMENTATION STATUS : PARTIAL. au niveau de la mensualité (`contractualPayment` est prioritaire). NON TESTABLE au niveau de l'échéancier ligne à ligne : aucun import n'existe.
+- IMPLEMENTATION STATUS : PARTIAL. La priorité est respectée au niveau de la mensualité (`contractualPayment` prime sur la PMT théorique). Elle est inapplicable au niveau de l'échéancier ligne à ligne : aucun mécanisme d'import n'existe.
 - TEST STATUS : PARTIAL. La priorité de la mensualité contractuelle est couverte par `financial.test.ts` ; la priorité ligne à ligne ne l'est pas.
 
 ### INV-D-06 · Un seul échéancier fait autorité
@@ -519,7 +519,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : comparer l'échéancier stocké et l'échéancier recalculé, ligne à ligne.
 - OWNER / MODULE : Paul pour la règle de source unique ; Tom pour la lecture de `loan_schedules`.
 - SEVERITY : MEDIUM.
-- IMPLEMENTATION STATUS : VIOLATED. par construction. `loan_schedules` est écrite au seed et n'est jamais relue ; `DebtPage` recalcule côté client.
+- IMPLEMENTATION STATUS : VIOLATED, par construction. `loan_schedules` est écrite au seed et jamais relue ; `DebtPage` recalcule l'échéancier côté client à chaque affichage.
 - TEST STATUS : UNCOVERED.
 
 ### INV-D-07 · Le remboursement de principal est neutre sur le patrimoine net
@@ -767,7 +767,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : égalité stricte de deux exécutions.
 - OWNER / MODULE : Paul, `monte-carlo.ts`.
 - SEVERITY : BLOCKER.
-- IMPLEMENTATION STATUS : RESPECTED. et testé.
+- IMPLEMENTATION STATUS : RESPECTED. `mulberry32` est semé explicitement et le moteur est une fonction pure : deux exécutions à seed identique produisent le même résultat.
 - TEST STATUS : COVERED. `monte-carlo.test.ts`, « is exactly reproducible with a seed ».
 
 ### INV-G-04 · Ordre des percentiles
@@ -778,7 +778,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : parcours de tous les points.
 - OWNER / MODULE : Paul.
 - SEVERITY : HIGH.
-- IMPLEMENTATION STATUS : RESPECTED. et testé.
+- IMPLEMENTATION STATUS : RESPECTED. Les valeurs sont triées avant interpolation, l'ordre des percentiles est donc structurellement garanti.
 - TEST STATUS : COVERED. `monte-carlo.test.ts`, « returns ordered percentiles for every year ».
 
 ### INV-G-08 · Un choc est daté, il n'est pas indexé sur une année de projection
@@ -858,7 +858,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : checklist par écran.
 - OWNER / MODULE : Léo pour la règle produit ; Paul pour la propagation vers les agrégats ; Tom pour les colonnes de provenance.
 - SEVERITY : HIGH.
-- IMPLEMENTATION STATUS : PARTIAL. au niveau des entités. VIOLÉ au niveau des agrégats : `DashboardMetrics` ne porte aucune provenance ; `netWorth` est affiché sans badge.
+- IMPLEMENTATION STATUS : PARTIAL. Respecté au niveau des entités, violé au niveau des agrégats : `DashboardMetrics` ne porte aucune provenance et `netWorth` est affiché sans badge.
 - TEST STATUS : UNCOVERED.
 
 ### INV-H-02 · Une donnée manquante reste MISSING
@@ -939,7 +939,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : le modèle refuse un taux sans date.
 - OWNER / MODULE : Tom pour la table `currency_rates` et son alimentation ; Paul pour la signature datée de la conversion.
 - SEVERITY : HIGH.
-- IMPLEMENTATION STATUS : VIOLATED. en pratique. La table existe dans le schéma, elle n'est jamais alimentée ni lue ; `fxConvert(amount, eurPerUnit)` ne prend pas de date.
+- IMPLEMENTATION STATUS : VIOLATED, en pratique. La table `currency_rates` existe au schéma, elle n'est jamais alimentée ni lue ; `fxConvert(amount, eurPerUnit)` ne prend aucune date.
 - TEST STATUS : PARTIAL. `fxConvert` est testé isolément, sans date ni source.
 
 ### INV-I-03 · Un taux manquant produit un MISSING, pas un taux de 1
@@ -950,7 +950,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : jeu avec une devise sans taux.
 - OWNER / MODULE : Paul.
 - SEVERITY : BLOCKER.
-- IMPLEMENTATION STATUS : VIOLATED. par le même mécanisme que INV-I-01.
+- IMPLEMENTATION STATUS : VIOLATED, par le même mécanisme que INV-I-01.
 - TEST STATUS : UNCOVERED.
 
 ### INV-I-04 · La performance de change est séparée de la performance de marché
@@ -1061,7 +1061,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : saisir une donnée avec une date antérieure et vérifier son classement.
 - OWNER / MODULE : Tom, repositories : date d'effet réelle plutôt que constante.
 - SEVERITY : MEDIUM.
-- IMPLEMENTATION STATUS : PARTIAL. partiellement. `add_account` et `update_expense` écrivent `effective_date = AS_OF_DATE`, une constante figée au 19 août 2026, quelle que soit la date réelle.
+- IMPLEMENTATION STATUS : PARTIAL. `add_account` et `update_expense` écrivent `effective_date = AS_OF_DATE`, constante figée au 19 août 2026, quelle que soit la date réelle de l'événement.
 - TEST STATUS : UNCOVERED.
 
 ### INV-K-03 · Une version de scénario est immuable
@@ -1083,7 +1083,7 @@ violations, et il ne se réduira pas en corrigeant des formules.
 - HOW TO TEST : rejouer un run depuis ses paramètres stockés ; égalité des percentiles.
 - OWNER / MODULE : Tom, repositories et tables `simulation_runs` et `simulation_results`.
 - SEVERITY : LOW.
-- IMPLEMENTATION STATUS : RESPECTED. dans le modèle. NON TESTABLE en pratique : aucun écran ne relit un run passé.
+- IMPLEMENTATION STATUS : RESPECTED. dans le modèle : `simulation_runs` stocke seed, horizon, nombre de simulations et méthodologie. Aucun écran ne relit un run passé, la propriété n'est donc pas exercée.
 - TEST STATUS : UNCOVERED. Le modèle porte les paramètres ; aucun écran ni test ne rejoue un run.
 
 ---

@@ -215,7 +215,10 @@ INPUTS
   raison : exigible, en différé, échu
 
 PROVENANCE : DERIVED.
-ASSUMPTIONS : définition du service de dette pendant un différé, question ouverte Q-01.
+ASSUMPTIONS : la définition du service de dette est arrêtée (somme des `totalCashOut`
+exigibles, voir §4.6 et `DATA_INVARIANTS.md` INV-D-02). Le code ne l'applique pas
+encore : le panneau doit exposer ce que le moteur calcule, pas la définition cible,
+tant que l'écart subsiste.
 MISSING : 19 catégories de dépense sur 20 ; l'impôt sur le revenu.
 COMPLETENESS : PARTIAL, 5 %, biais UNDER.
 PRÉCISION : ordre de grandeur.
@@ -231,20 +234,47 @@ moteur fait.
 ### 4.6 Service de dette
 
 FORMULA CIBLE
-    DebtService(t) = Σ paiementContractuel_i(t)
-                     pour les prêts tels que firstPaymentDate_i <= t <= maturityDate_i
 
-INPUTS : par prêt, le nom, la mensualité contractuelle, la première échéance, la
-maturité, et le statut de contribution : exigible, en différé, échu.
-PROVENANCE : ACTUAL pour les termes du contrat, DERIVED pour l'agrégat.
-ASSUMPTIONS : traitement du différé, partiel ou total ; assurance et frais non modélisés.
-MISSING : assurance ; frais ; échéancier bancaire réel.
-COMPLETENESS : PARTIAL tant que l'échéancier réel n'est pas importé, biais UNDER,
-puisque l'assurance manquante ne peut qu'augmenter le décaissement.
+    DebtService(période) = Σ LoanScheduleEntry.totalCashOut
+                           pour toute échéance exigible dans la période
 
-ÉCART ACTUEL : aucun panneau dédié. La contribution de chaque prêt et son motif ne sont
-visibles nulle part. C'est le panneau manquant le plus utile du produit : il rendrait
-visible en un coup d'oeil la contradiction de Q-01.
+    LoanScheduleEntry.totalCashOut = interest + principal + insurance + fees
+
+Définition canonique arrêtée au Checkpoint, voir `DATA_INVARIANTS.md` INV-D-02. Le
+service de dette se lit sur l'échéancier, il n'est pas reconstruit par une fenêtre de
+dates appliquée à un champ `monthlyPayment` unique.
+
+INPUTS, par prêt :
+- nom du prêt et prêteur ;
+- les échéances retenues, avec pour chacune sa date d'exigibilité et ses quatre
+  composantes `interest`, `principal`, `insurance`, `fees` ;
+- `totalCashOut` de chaque échéance retenue, et leur somme ;
+- pour les prêts qui ne contribuent pas, le motif : aucune échéance exigible avant la
+  première (`AVANT_PREMIERE_ECHEANCE`), différé partiel avec cash-out réduit aux
+  intérêts (`DIFFERE_PARTIEL`), prêt échu (`ECHU`) ;
+- la source de l'échéancier : contractuel importé (niveau 1) ou dérivé des conditions
+  (niveau 2), qui est l'information la plus importante du panneau.
+
+PROVENANCE : ACTUAL pour les termes du contrat et pour un échéancier importé, DERIVED
+pour un échéancier généré et pour l'agrégat.
+
+ASSUMPTIONS à exposer : niveau de source de l'échéancier ; absence de remboursement
+anticipé ; absence de modulation ; taux fixe sur toute la durée.
+
+MISSING : assurance et frais tant que le modèle ne les porte pas ; échéancier bancaire
+réel tant qu'il n'est pas importé.
+
+COMPLETENESS : PARTIAL tant que l'échéancier réel n'est pas importé. Biais UNDER :
+l'assurance et les frais manquants ne peuvent qu'augmenter le décaissement réel.
+CONFIDENCE : bornée par celle du contrat déclaré, MEDIUM tant que le document bancaire
+n'est pas produit. MODEL UNCERTAINTY : LOW, l'échéancier est une mécanique contractuelle,
+pas un modèle prédictif.
+
+ÉCART ACTUEL : aucun panneau dédié n'existe. La contribution de chaque prêt et son motif
+ne sont visibles nulle part. C'est le panneau manquant le plus utile du produit : il
+rendrait visible en un coup d'oeil l'écart entre la définition canonique et le
+comportement du code, décrit en INV-D-02, et il resterait utile bien après la correction
+puisqu'il porte le motif de non-contribution de chaque prêt.
 
 ### 4.7 Amortissement d'un prêt
 
