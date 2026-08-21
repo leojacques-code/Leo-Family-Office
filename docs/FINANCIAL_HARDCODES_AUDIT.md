@@ -178,7 +178,7 @@ consomme, pas la structure qui la porte.
 - FUNCTION : `compareDebtVsInvest`
 - PURPOSE : pénaliser l'option d'investissement pour son risque
 - CATEGORY : HEURISTIC
-- PROVENANCE EXPECTED : méthode documentée et sourcée, ou paramètre exposé avec sa signification
+- PROVENANCE EXPECTED : `MODEL_HEURISTIC / EXPERIMENTAL` étiqueté, formule et impact auditables, tant que la méthode n'est pas documentée, testée et approuvée (décision canonique Q-11)
 - CURRENT RISK : ce coefficient détermine directement la conclusion affichée « L'investissement présente l'espérance ajustée du risque la plus élevée ». Il n'a aucune source, aucun test, et il n'est mentionné nulle part dans l'interface. Le produit émet une recommandation d'arbitrage patrimonial dont le paramètre décisif est invisible.
 - TEMPORARILY ACCEPTABLE ? Non pour la conclusion affichée. Oui pour le calcul si la conclusion est retirée ou requalifiée en illustration.
 - TARGET HOME : paramètre de préférence de risque, exposé et expliqué
@@ -192,7 +192,7 @@ consomme, pas la structure qui la porte.
 - FUNCTION : `compareDebtVsInvest`
 - PURPOSE : qualifier verbalement le risque
 - CATEGORY : HEURISTIC
-- PROVENANCE EXPECTED : échelle documentée
+- PROVENANCE EXPECTED : échelle documentée, et `MODEL_HEURISTIC / EXPERIMENTAL` tant qu'elle ne l'est pas (décision canonique Q-11)
 - CURRENT RISK : une volatilité de 14,9 % est « modérée » et 15,1 % est « élevée ». La discontinuité n'a pas de justification. Le mot est plus mémorable que le chiffre.
 - TEMPORARILY ACCEPTABLE ? Oui si l'échelle est affichée.
 - TARGET HOME : échelle nommée avec ses bornes
@@ -206,7 +206,7 @@ consomme, pas la structure qui la porte.
 - FUNCTION : `DebtPage` et `DecisionLabPage`
 - PURPOSE : valoriser le fait de conserver du capital disponible
 - CATEGORY : HEURISTIC
-- PROVENANCE EXPECTED : préférence utilisateur explicite
+- PROVENANCE EXPECTED : préférence utilisateur explicite ; à défaut `MODEL_HEURISTIC / EXPERIMENTAL` étiqueté et auditable (décision canonique Q-11)
 - CURRENT RISK : 3 % du capital est ajouté à l'avantage de l'option « investir » sans que l'utilisateur sache qu'une valeur est attribuée à sa liquidité, ni laquelle. Le chiffre entre directement dans `opportunityAdvantage`, qui est affiché.
 - TEMPORARILY ACCEPTABLE ? Non tant que `opportunityAdvantage` est affiché comme un montant en euros.
 - TARGET HOME : paramètre de préférence, avec explication

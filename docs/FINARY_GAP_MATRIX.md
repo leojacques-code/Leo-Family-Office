@@ -157,7 +157,7 @@ sur la performance du CTO.
 |---|---|---|---|---|---|---:|---|---|---|---|---|---|---|
 | 18 | Scenarios | TESTED | `types.ts`, deux repositories, `pages.tsx:ScenariosPage` | oui, versionné | MEDIUM | 1 | hypothèses | non | versions, duplication, jamais d'écriture sur ACTUAL | `salaryGrowth` stocké et jamais consommé, confiance forcée à HIGH | P2 | Paul | 6 |
 | 19 | Monte-Carlo | TESTED | `monte-carlo.ts`, `/api/projection` | oui, runs et résultats | DEEP | 3 | scénario, actifs | non | queues épaisses, seed reproductible, méthodologie stockée | dette absente de la projection, année de base en dur | P2 | Paul | 6 |
-| 20 | Decision Lab | PARTIAL | `decision.ts`, `pages.tsx:DecisionLabPage` | non | MEDIUM | 0 | hypothèses | non | comparaison multicritère, liquidité et risque | 1 cas sur 10, aucun test, coefficients non sourcés, inflation figée | P1 | Paul | 10 |
+| 20 | Decision Lab | PARTIAL | `decision.ts`, `pages.tsx:DecisionLabPage` | non | MEDIUM | 0 | hypothèses | non | comparaison et classement multicritère sans prescription (Q-11) | 1 cas sur 10, aucun test, coefficients à étiqueter `MODEL_HEURISTIC / EXPERIMENTAL`, inflation figée | P1 | Léo affichage, Paul méthode | 10 |
 | 21 | Goals | FUNCTIONAL | `pages.tsx:GoalsPage`, mutation `add_goal` | oui | SHALLOW | 0 | patrimoine net | oui | « non calculable » assumé pour FI ratio et Freedom Coverage | aucun moteur d'atteinte, paliers non configurables | P3 | Paul | 11 |
 
 Notes.

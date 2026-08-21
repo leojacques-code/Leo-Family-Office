@@ -188,8 +188,8 @@ pas à des bugs de calcul.
 - FILE : `src/components/pages.tsx:174`, `257`, `decision.ts:19`, `32`
 - CURRENT BEHAVIOUR : l'option « Investir » porte un bandeau « Espérance ajustée supérieure » et un « Avantage ajusté » en euros. Le calcul repose sur un coefficient de décote de risque de 0,25, un poids de liquidité de 0,03 et un seuil de qualification à 0,15, tous invisibles.
 - WHY IT IS MISLEADING : le produit émet une recommandation d'arbitrage patrimonial dont les trois paramètres décisifs ne sont ni affichés, ni sourcés, ni testés. `decision.ts` n'a aucun test. Le business plan §13.1 pose la règle inverse : le Decision Lab ne doit jamais conclure sur un seul critère et doit exposer liquidité, risque, downside et coût d'opportunité.
-- EXPECTED BEHAVIOUR : afficher les paramètres du jugement, ou retirer le bandeau de recommandation et ne présenter que les éléments de comparaison.
-- OWNER : Léo pour l'affichage, Paul pour les tests.
+- EXPECTED BEHAVIOUR : décision canonique Q-11, fermée le 21 août 2026. Le Decision Lab peut comparer et classer des résultats objectifs, il ne peut pas émettre de recommandation prescriptive fondée sur des heuristiques non validées. Concrètement : retirer le bandeau « Espérance ajustée supérieure » et la carte `preferred` ; conserver la comparaison critère par critère ; étiqueter `riskHaircut`, `liquidityWeight` et le seuil de risque en `MODEL_HEURISTIC / EXPERIMENTAL`, avec formule et impact auditables, le classement devant rester consultable sans eux. Aucune formulation « vous devriez choisir X » avant que la méthodologie ne soit documentée, testée et approuvée.
+- OWNER : Léo pour l'affichage et l'étiquetage ; Paul pour les tests et la méthodologie de pondération.
 - PHASE : 10
 - SAFE TEXT-ONLY FIX : oui pour retirer le bandeau. Non pour exposer les paramètres.
 

@@ -37,7 +37,7 @@ ouvertes, dont quatre relèvent d'un arbitrage de Léo et une de Tom.
 | Q-08 | Projection déterministe : conserver, aligner ou supprimer | Léo | avant tout travail sur les projections | **fermée le 20/08** |
 | Q-09 | `shockYear` : année relative ou civile | Léo | avant la V1 | **fermée le 20/08** |
 | Q-10 | Assiette de la valeur de sortie immobilière | Paul, arbitrage Léo | avant de corriger le moteur immobilier | **fermée le 20/08** |
-| Q-11 | Decision Lab : recommandation ou comparaison | Léo | immédiat | ouverte |
+| Q-11 | Decision Lab : recommandation ou comparaison | Léo | immédiat | **fermée le 21/08** |
 | Q-12 | Données personnelles réelles dans le dépôt | Léo, mise en oeuvre Tom | avant l'arrivée de Paul et Tom | ouverte |
 | Q-13 | npm ou pnpm | Tom | avant l'arrivée de Paul et Tom | ouverte |
 | Q-14 | Topologie de branches inexistante | Léo | avant l'arrivée de Paul et Tom | **fermée le 20/08** |
@@ -46,30 +46,6 @@ ouvertes, dont quatre relèvent d'un arbitrage de Léo et une de Tom.
 | Q-17 | Barre d'acceptation V1 | Léo | avant le 24 août | ouverte |
 | Q-18 | Ordre entre parité Finary et profondeur Finary+ | Léo | avant le 24 août | ouverte |
 | Q-19 | Vérification du compte auteur pour Vercel | Léo, règle d'équipe Tom | avant l'arrivée de Paul et Tom | ouverte |
-
----
-
-## Q-11 · Decision Lab, recommandation ou comparaison
-
-CONTEXTE
-`compareDebtVsInvest` affiche un bandeau « Espérance ajustée supérieure » et un
-« Avantage ajusté » en euros. Trois coefficients non sourcés déterminent la conclusion :
-décote de risque 0,25, poids de liquidité 0,03, seuil de risque 0,15. Le moteur n'a
-aucun test. Le business plan §13.1 pose la règle inverse : ne jamais conclure sur un
-seul critère, exposer liquidité, risque, downside, coût d'opportunité et flexibilité.
-
-OPTIONS
-- A. Retirer le bandeau et l'avantage chiffré, ne présenter que les éléments de
-  comparaison. Immédiat, sans coût, dans la zone verte.
-- B. Financer les tests et exposer les paramètres. Coûteux, et c'est la bonne cible.
-- C. Statu quo.
-
-BLOQUE : rien techniquement. C'est un risque produit, pas une dépendance.
-DÉCIDEUR : Léo.
-ÉCHÉANCE : immédiat.
-IMPACT SI NON TRANCHÉ : le produit recommande un arbitrage patrimonial sur la base de
-trois coefficients arbitraires, non testés et invisibles. C'est le risque le plus élevé
-du dépôt rapporté à son coût de correction.
 
 ---
 
@@ -188,6 +164,66 @@ possible sur les PR d'interface, qui sont précisément celles où elle sert le 
 
 Une question tranchée descend ici avec sa réponse, sa date et les documents mis à jour.
 Elle n'est pas supprimée : la trace de l'arbitrage vaut autant que l'arbitrage.
+
+---
+
+## Q-11 · Decision Lab, recommandation ou comparaison · FERMÉE le 21 août 2026, Checkpoint GPT-5.6 Sol
+
+CONTEXTE INITIAL
+`compareDebtVsInvest` affichait un bandeau « Espérance ajustée supérieure » et un
+« Avantage ajusté » en euros. Trois coefficients non sourcés déterminaient la
+conclusion : décote de risque 0,25, poids de liquidité 0,03, seuil de qualification du
+risque 0,15. Le moteur n'avait aucun test. Le business plan §13.1 pose la règle
+inverse : ne jamais conclure sur un seul critère, exposer liquidité, risque, downside,
+coût d'opportunité et flexibilité.
+
+RÉPONSE, décision canonique
+
+> Decision Lab V1.2 may compare and rank objective outcomes, but must not issue
+> prescriptive recommendations based on unvalidated heuristics. `riskHaircut`,
+> `liquidityWeight`, and any unsourced weighting must be labelled
+> `MODEL_HEURISTIC / EXPERIMENTAL`, with formula and impact auditable. No
+> « you should choose X » recommendation until methodology is documented, tested
+> and approved.
+
+Ce que la décision autorise :
+- comparer des univers et les **classer** sur des critères objectifs et vérifiables
+  (patrimoine final, intérêts évités, valeur espérée, liquidité restante, downside) ;
+- afficher chaque critère séparément, avec sa formule et ses inputs ;
+- afficher un résultat pondéré, à condition que la pondération soit visible, étiquetée
+  `MODEL_HEURISTIC / EXPERIMENTAL`, et que son impact sur le classement soit auditable,
+  c'est-à-dire que l'utilisateur puisse voir le classement sans elle.
+
+Ce que la décision interdit :
+- toute formulation prescriptive du type « vous devriez choisir X », « option
+  recommandée », « espérance ajustée supérieure » présentée comme une conclusion ;
+- tout coefficient non sourcé qui influence un classement sans être étiqueté et
+  auditable ;
+- toute mise en avant visuelle d'une option (bandeau, carte « preferred », accentuation)
+  qui équivaut à une recommandation sans en porter le nom.
+
+Levée de l'interdiction : lorsque la méthodologie est documentée, testée et approuvée.
+Les trois conditions sont cumulatives. Un test qui vérifie qu'un coefficient est
+appliqué ne documente ni n'approuve la valeur de ce coefficient.
+
+NOUVELLE ÉTIQUETTE : `MODEL_HEURISTIC / EXPERIMENTAL`
+Distincte de `MODEL_ASSUMPTION`. Un `MODEL_ASSUMPTION` est un paramètre de modèle
+assumé, dont l'utilisateur peut discuter la valeur (un rendement espéré, une inflation).
+Un `MODEL_HEURISTIC / EXPERIMENTAL` est un coefficient de jugement dont la méthode
+elle-même n'est pas validée : ce n'est pas seulement sa valeur qui est ouverte, c'est sa
+légitimité. Il ne peut jamais porter seul une conclusion.
+
+DOCUMENTS MIS À JOUR : `FINANCIAL_DEFINITIONS.md` §10 (table de provenance et règles),
+`DATA_INVARIANTS.md` INV-M-05, `UI_STATE_AUDIT.md` UI-013,
+`FINANCIAL_HARDCODES_AUDIT.md` HC-07, HC-08, HC-09,
+`ACCEPTANCE_CRITERIA_V1.md` Decision Lab, `EXPLAIN_CALCULATION_SPEC.md` §4.12,
+`FINARY_GAP_MATRIX.md` capability 20, `PRE_CODEX_REVIEW.md` B-09 et §13.
+
+CE QUI RESTE OUVERT, et qui n'était pas dans Q-11 :
+- la méthodologie de pondération elle-même reste à écrire, à tester et à approuver. La
+  décision ne la fournit pas, elle en conditionne l'usage ;
+- l'absence de test sur `decision.ts` demeure un manque de couverture, indépendamment de
+  la question de la recommandation.
 
 ---
 

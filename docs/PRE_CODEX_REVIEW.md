@@ -215,7 +215,14 @@ Référence : `UI_STATE_AUDIT.md` UI-004, `README_STATUS_AUDIT.md` 2.4.
 `decision.ts` est le seul moteur sans fichier de test. Trois coefficients non sourcés
 déterminent sa conclusion. L'inflation utilisée ignore le scénario actif. Le capital
 arbitré est écrit en dur et diffère entre deux écrans.
-Référence : `FINANCIAL_HARDCODES_AUDIT.md` HC-07 à HC-12, `OPEN_QUESTIONS.md` Q-11.
+
+La règle produit est désormais arrêtée, ce qui ne referme pas le blocker mais en borne la
+correction : le module peut comparer et classer des résultats objectifs, il ne peut pas
+recommander sur la base d'heuristiques non validées. Les coefficients passent en
+`MODEL_HEURISTIC / EXPERIMENTAL`, formule et impact auditables. Le blocker subsiste tant
+que le code affiche un bandeau de recommandation et que `decision.ts` n'a aucun test.
+Référence : `FINANCIAL_HARDCODES_AUDIT.md` HC-07 à HC-12, `OPEN_QUESTIONS.md` Q-11,
+fermée le 21 août 2026.
 
 ## 7. DEFERRED
 
@@ -359,12 +366,12 @@ reprises sans discussion.
 
 Classés par valeur rapportée au risque.
 
-1. Trancher Q-11, seule décision produit encore bloquante : le Decision Lab émet une
-   recommandation sans test ni coefficient sourcé. Treize des dix-huit questions ouvertes
-   ont été fermées le 20 août, Q-14 par la création de la topologie de branches et les
-   douze autres par le Checkpoint GPT-5.6 Sol. Les définitions de Net Worth, service de
-   dette, liquidité, taux d'épargne, MOIC, complétude et clôture mensuelle sont
-   désormais arrêtées : Paul peut coder contre une cible stable.
+1. Aucune décision de définition ne bloque plus. Quatorze questions ont été fermées :
+   Q-14 par la création de la topologie de branches, douze par le Checkpoint GPT-5.6 Sol
+   du 20 août, Q-11 par la décision Decision Lab du 21 août. Net Worth, service de dette,
+   liquidité, taux d'épargne, MOIC, complétude, clôture mensuelle et périmètre du Decision
+   Lab sont arrêtés : Paul peut coder contre une cible stable. Les cinq questions
+   restantes sont opérationnelles ou de priorisation, aucune ne conditionne une formule.
 2. Appliquer les correctifs de copie de la zone verte : UI-003, UI-004, UI-005, UI-002,
    UI-006, UI-025. Six correctifs, aucun moteur touché, gain de crédibilité immédiat.
 3. Mettre en place une CI minimale : lint, tests, build sur chaque PR. Sans elle, aucune

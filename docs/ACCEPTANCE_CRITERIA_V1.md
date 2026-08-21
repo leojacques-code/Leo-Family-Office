@@ -490,9 +490,13 @@ SIGNALER
 - [ ] l'inflation utilisée n'est pas celle du scénario actif
 - [ ] le capital arbitré est écrit en dur et diffère entre deux écrans
 
-Barre V1 proposée pour ce module : soit il expose ses paramètres et il est testé, soit
-il cesse d'afficher une recommandation. Un moteur non testé qui conseille un arbitrage
-patrimonial est le risque produit le plus élevé du dépôt.
+Barre V1 pour ce module, arrêtée par la décision canonique Q-11 du 21 août 2026 : le
+module peut comparer et classer des résultats objectifs, il ne peut pas émettre de
+recommandation prescriptive fondée sur des heuristiques non validées. Il cesse donc
+d'afficher une recommandation, et il étiquette `riskHaircut`, `liquidityWeight` et le
+seuil de risque en `MODEL_HEURISTIC / EXPERIMENTAL`, avec formule et impact auditables.
+La levée de cette contrainte exige trois conditions cumulatives : méthodologie
+documentée, testée, approuvée.
 
 ---
 

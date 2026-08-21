@@ -406,6 +406,13 @@ MISSING : la fiscalité des deux options ; le coût d'opportunité réel ; le do
 COMPLETENESS : PARTIAL. Le business plan §13.1 exige que le Decision Lab n'arbitre pas
 sur un seul critère.
 
+CONTRAINTE CANONIQUE, décision Q-11 fermée le 21 août 2026 : ce panneau peut exposer une
+comparaison et un classement sur critères objectifs. Il ne peut pas conclure. Les trois
+coefficients ci-dessus portent l'étiquette `MODEL_HEURISTIC / EXPERIMENTAL`, leur formule
+est affichée, et leur impact est auditable : le classement sans pondération doit rester
+consultable dans le panneau. Aucune formulation prescriptive avant que la méthodologie ne
+soit documentée, testée et approuvée.
+
 ÉCART ACTUEL : aucun panneau d'explication. C'est le seul moteur du produit qui émet une
 recommandation et le seul à n'offrir aucune explication. C'est aussi le seul moteur sans
 test. La priorité proposée est simple : tant qu'il n'y a pas de panneau, il ne devrait

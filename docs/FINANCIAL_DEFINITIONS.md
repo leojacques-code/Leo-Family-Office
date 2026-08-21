@@ -679,12 +679,17 @@ DÉFINITION CIBLE (business plan §3.1, reprise du modèle `Provenance` existant
 |---|---|
 | ACTUAL | donnée observée, datée, sourcée |
 | USER_ASSUMPTION | hypothèse saisie explicitement par l'utilisateur |
-| MODEL_ASSUMPTION | hypothèse produite par le moteur |
+| MODEL_ASSUMPTION | hypothèse produite par le moteur, dont la valeur est discutable |
+| MODEL_HEURISTIC / EXPERIMENTAL | coefficient de jugement dont la méthode elle-même n'est pas validée |
 | EXTERNAL_DATA | donnée issue d'une source externe datée |
 | DERIVED | résultat de calcul sur d'autres données |
 | MISSING | information matériellement absente |
 
 Règles :
+- Un `MODEL_HEURISTIC / EXPERIMENTAL` ne peut jamais porter seul une conclusion, un
+  classement ou une recommandation. Sa formule et son impact sur le résultat sont
+  auditables, c'est-à-dire que le résultat sans lui doit rester consultable. Décision
+  canonique Q-11, fermée le 21 août 2026.
 - Une donnée MISSING ne devient jamais 0 par défaut.
 - Un DERIVED ne peut pas avoir une confiance supérieure à celle de son input le plus
   faible.
