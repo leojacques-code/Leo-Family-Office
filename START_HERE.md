@@ -1,24 +1,32 @@
 # Démarrer ici
 
-Le dépôt est prêt à installer avec Node.js 22+ et pnpm :
+Le dépôt s'installe avec **Node.js 22 ou 24**. npm est fourni avec Node : il n'y a aucun autre
+gestionnaire de paquets à installer.
 
 ```bash
-pnpm install
-pnpm test
-pnpm dev
+npm ci
+npm test
+npm run dev
 ```
 
 Puis ouvrir `http://localhost:3000` et utiliser le code local `leo-local-2026`.
 
-Le fichier `README.md` mentionne `--frozen-lockfile`, mais le lockfile n’a pas pu être généré dans cette session car la politique Windows bloque toute exécution de `node.exe`. Utiliser donc `pnpm install` au premier démarrage ; pnpm créera le lockfile. Il faudra ensuite le conserver dans le versioning.
+`npm ci` installe exactement les versions de `package-lock.json`. Au premier démarrage, si le
+lockfile est absent ou désynchronisé, utiliser `npm install` une fois, puis versionner le
+lockfile mis à jour.
 
-Avant une exposition Internet, configurer `SESSION_SECRET`, `LOCAL_ACCESS_CODE` et basculer vers Supabase Auth + RLS conformément à `docs/SUPABASE_SETUP.md`.
+Avant une exposition Internet, configurer `SESSION_SECRET`, `LOCAL_ACCESS_CODE` et basculer vers
+Supabase Auth + RLS conformément à `docs/SUPABASE_SETUP.md`.
 
 ## Statut de vérification
 
-- structure et fichiers JSON : vérifiés statiquement ;
-- équations de réconciliation : recalculées indépendamment ;
-- tests unitaires : écrits mais non exécutés dans cette session ;
-- lint, build et vérification navigateur : non exécutés, `node.exe` étant bloqué par une stratégie de groupe Windows, y compris après installation officielle via WinGet.
+Vérifié le 20 août 2026, sous Node 24 et npm 11 :
 
-Ne pas considérer le build comme certifié avant d’avoir exécuté `pnpm check` dans un terminal autorisant Node.
+- `npx tsc --noEmit` : aucune erreur de typage ;
+- `npm run build` : build de production réussi, 10 routes générées ;
+- `npm test` : **27 tests passent** ;
+- `npm run lint` : **9 erreurs**, 12 avertissements — toutes dans `src/components/pages.tsx`
+  (`<a>` au lieu de `<Link>` pour la navigation interne, imports inutilisés).
+
+Les erreurs de lint restantes sont connues et traitées dans la phase de nettoyage. Le reste de
+la chaîne (install, typage, tests, build) est confirmé fonctionnel.

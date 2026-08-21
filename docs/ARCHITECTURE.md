@@ -42,7 +42,7 @@ Le schéma de production reprend toutes les familles de données demandées, ajo
 
 1. créer et relier le projet Supabase ;
 2. appliquer la migration et exécuter les advisors ;
-3. amorcer les données avec `pnpm seed:supabase` ;
+3. amorcer les données avec `npm run seed:supabase` ;
 4. renseigner les variables Vercel listées dans le README.
 
 Le repository Supabase est implémenté (`src/lib/data/supabase-repository.ts`). Il reste à

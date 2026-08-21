@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { amortizeLoan, applyScenarioOverrides, calculateNetWorth, compoundReturn, fxConvert, irr, moic, npv, realValue } from "@/lib/engine/financial";
+import { amortizeLoan, applyScenarioOverrides, calculateNetWorth, compoundReturn, fxConvert, irr, moic, npv, realValue, roundMoney } from "@/lib/engine/financial";
 
 describe("financial primitives", () => {
   it("compounds returns with configurable periods", () => {
@@ -34,6 +34,21 @@ describe("financial primitives", () => {
   it("converts FX and rejects invalid rates", () => {
     expect(fxConvert(100, 0.92)).toBe(92);
     expect(() => fxConvert(100, 0)).toThrow();
+  });
+
+  it("rounds money to the cent and absorbs float drift", () => {
+    expect(roundMoney(0.1 + 0.2)).toBe(0.3);
+    expect(roundMoney(15571.49 - 16745)).toBe(-1173.51);
+    expect(roundMoney(1.005)).toBe(1.01);
+    expect(roundMoney(-1.005)).toBe(-1);
+    expect(roundMoney(1234.5678)).toBe(1234.57);
+    expect(roundMoney(0)).toBe(0);
+    expect(roundMoney(-0.004)).toBe(-0);
+  });
+
+  it("keeps a rounded total identical to the sum of rounded parts", () => {
+    const parts = [0.1, 0.2, 0.3, 355.48, -3.44];
+    expect(roundMoney(parts.reduce((sum, value) => sum + value, 0))).toBe(352.64);
   });
 
   it("calculates net worth from accounts rather than positions", () => {

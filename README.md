@@ -4,11 +4,11 @@ Application patrimoniale privée, desktop-first, datée au **19 août 2026** et 
 
 ## Démarrage local
 
-Prérequis : Node.js 22 ou 24 et pnpm.
+Prérequis : Node.js 22 ou 24. npm est fourni avec Node, il n'y a rien d'autre à installer.
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm dev
+npm ci
+npm run dev
 ```
 
 Ouvrir `http://localhost:3000`. Sans fichier `.env.local`, le code de développement est `leo-local-2026`.
@@ -31,10 +31,10 @@ En production, l’application refuse de créer une session si ces secrets sont 
 ## Commandes de qualité
 
 ```bash
-pnpm lint
-pnpm test
-pnpm build
-pnpm check
+npm run lint
+npm run test
+npm run build
+npm run check
 ```
 
 ## Ce qui fonctionne
@@ -91,6 +91,7 @@ Le mode local n’est pas destiné à être exposé directement sur Internet. Po
 
 ## Documentation
 
+- [Journal des modifications](CHANGELOG.md) — ce qui change à chaque version, en français simple
 - [Architecture](docs/ARCHITECTURE.md)
 - [Hypothèses et réconciliations](docs/ASSUMPTIONS.md)
 - [Roadmap et fonctions différées](docs/ROADMAP.md)
@@ -124,7 +125,7 @@ n'appelle Supabase : les laisser vides serait trompeur, les omettre est correct.
 
 1. Appliquer les migrations Supabase, voir `docs/SUPABASE_SETUP.md`.
 2. Créer les variables ci-dessus dans Vercel.
-3. `pnpm seed:supabase` en local, pointé sur le projet de production.
+3. `npm run seed:supabase` en local, pointé sur le projet de production.
 4. Déployer, puis vérifier `/login`, `/`, `/net-worth`, `/scenarios`, `/api/state`,
    `/api/export?format=csv` et une projection.
 

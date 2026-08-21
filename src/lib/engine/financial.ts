@@ -9,6 +9,15 @@ export interface AmortizationRow {
   closingBalance: number;
 }
 
+/**
+ * Arrondit un montant au centime. Les sommes de flottants dérivent
+ * (0.1 + 0.2 = 0.30000000000000004) : appliqué aux montants agrégés, jamais aux
+ * ratios ni aux taux, qui perdraient toute précision à deux décimales.
+ */
+export function roundMoney(amount: number): number {
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
+}
+
 export function compoundReturn(principal: number, annualRate: number, years: number, periodsPerYear = 1): number {
   if (periodsPerYear <= 0) throw new Error("periodsPerYear must be positive");
   return principal * Math.pow(1 + annualRate / periodsPerYear, periodsPerYear * years);
@@ -91,9 +100,9 @@ export function moic(totalDistributions: number, investedCapital: number): numbe
 }
 
 export function calculateNetWorth(accounts: Pick<FinancialAccount, "balance">[], liabilities: Pick<Liability, "currentBalance">[]) {
-  const grossAssets = accounts.reduce((sum, account) => sum + account.balance, 0);
-  const debt = liabilities.reduce((sum, liability) => sum + liability.currentBalance, 0);
-  return { grossAssets, debt, netWorth: grossAssets - debt };
+  const grossAssets = roundMoney(accounts.reduce((sum, account) => sum + account.balance, 0));
+  const debt = roundMoney(liabilities.reduce((sum, liability) => sum + liability.currentBalance, 0));
+  return { grossAssets, debt, netWorth: roundMoney(grossAssets - debt) };
 }
 
 export function applyScenarioOverrides<T extends Record<string, unknown>>(base: T, overrides: Partial<T>): T {
