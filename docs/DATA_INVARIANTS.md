@@ -1,14 +1,14 @@
 # Registre des invariants de données
 
-Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 21 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`. Date zéro : 2026-08-19. Devise de reporting : EUR.
 
 ## Statut
 
-STATUT : PROVISOIRE. `docs/FINANCIAL_DEFINITIONS.md` est lui-même en V0.1 non relue
-(Checkpoint 1). Conformément au plan §4, aucun invariant financier de ce registre ne
-doit être traité comme définitif avant cette review. Les invariants marqués
-`DÉPEND-DEF` reposent sur une définition encore ouverte et peuvent changer d'énoncé.
+STATUT : RÉVISÉ AU CHECKPOINT. `docs/FINANCIAL_DEFINITIONS.md` est en V0.2, décisions
+du Checkpoint GPT-5.6 Sol intégrées. Les conventions canoniques dont dépendaient les
+invariants marqués `DÉPEND-DEF` sont désormais arrêtées, et ces invariants ont été
+réécrits en conséquence. Ce qui reste ouvert est listé dans `docs/OPEN_QUESTIONS.md`.
 
 Ce registre ne modifie aucun code. Il ne prescrit aucune correction. Il énonce ce que
 le produit ne doit jamais violer, et constate si le code d'aujourd'hui le respecte.

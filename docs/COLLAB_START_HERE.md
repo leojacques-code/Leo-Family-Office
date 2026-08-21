@@ -1,6 +1,6 @@
 # Démarrer ici, collaborateurs
 
-Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 21 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Destinataires : Paul (Financial Truth), Tom (Technical Trust), et tout futur relecteur.
 
 Ce document ne contient aucun secret, aucune clé, aucune URL de projet, aucun code
@@ -216,9 +216,9 @@ spécifiée ne prouve que la stabilité de cette formule, pas sa justesse.
 | `docs/FINANCIAL_DEFINITIONS.md` | définitions canoniques, écart entre cible et code | V0.2, décisions du Checkpoint 1 intégrées |
 | `docs/DATA_INVARIANTS.md` | 74 invariants, implémentation et tests évalués séparément | V0.2, décisions du Checkpoint 2 intégrées |
 | `docs/GOLDEN_DATASET.md` | 20 cas synthétiques, sorties attendues | V0.2, décisions du Checkpoint 2 intégrées |
-| `docs/FINANCIAL_HARDCODES_AUDIT.md` | 34 hardcodes classés et priorisés | V0.1 |
-| `docs/FINARY_GAP_MATRIX.md` | 32 capabilities, statut réel | V0.1 |
-| `docs/UI_STATE_AUDIT.md` | 27 findings d'interface | V0.1 |
+| `docs/FINANCIAL_HARDCODES_AUDIT.md` | 34 hardcodes classés et priorisés | V0.2 |
+| `docs/FINARY_GAP_MATRIX.md` | 32 capabilities, statut réel | V0.2 |
+| `docs/UI_STATE_AUDIT.md` | 27 findings d'interface | V0.2 |
 | `docs/ARCHITECTURE.md` | architecture en couches, modèle Monte-Carlo | existant |
 | `docs/ASSUMPTIONS.md` | hypothèses et réconciliations ouvertes | contient une incohérence, voir `README_STATUS_AUDIT.md` |
 | `docs/DATA_VERIFICATION.md` | documents réels à obtenir | existant |

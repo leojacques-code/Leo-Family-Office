@@ -1,6 +1,6 @@
 # Définitions financières canoniques
 
-Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 21 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Date zéro de référence : 2026-08-19. Devise de reporting : EUR.
 
 ## Statut de ce document

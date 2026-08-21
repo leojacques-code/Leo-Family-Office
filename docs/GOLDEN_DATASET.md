@@ -1,7 +1,7 @@
 # Golden dataset canonique
 
-Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
-Base : commit `ef5bacf`. Référence d'invariants : `docs/DATA_INVARIANTS.md` V0.1.
+Léo Family Office. Version 0.2 du 21 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
+Base : commit `ef5bacf`. Référence d'invariants : `docs/DATA_INVARIANTS.md` V0.2.
 
 ## Statut et portée
 

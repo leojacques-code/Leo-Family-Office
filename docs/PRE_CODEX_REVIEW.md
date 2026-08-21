@@ -1,6 +1,6 @@
 # Dossier de revue pré-Codex
 
-Léo Family Office. Version 0.2 du 20 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 21 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`. Destinataire : Codex / Work, mission du 24 août 2026.
 
 ## 0. Avertissement de sincérité
@@ -44,18 +44,18 @@ sprints d'ici là.
 | Document | Existe | Statut | Contenu |
 |---|---|---|---|
 | `docs/ENGINE_AUDIT.md` | oui | de référence | audit statique des moteurs, 16 sections |
-| `docs/FINANCIAL_DEFINITIONS.md` | oui, créé le 20/08 | V0.1, non relu | définitions canoniques et écarts |
-| `docs/DATA_INVARIANTS.md` | oui, créé le 20/08 | V0.1, non relu | 70 invariants, statut vérifié |
-| `docs/GOLDEN_DATASET.md` | oui, créé le 20/08 | V0.1, non relu | 18 cas synthétiques |
-| `docs/FINANCIAL_HARDCODES_AUDIT.md` | oui, créé le 20/08 | V0.1 | 34 hardcodes classés |
-| `docs/FINARY_GAP_MATRIX.md` | oui, créé le 20/08 | V0.1 | 32 capabilities |
-| `docs/UI_STATE_AUDIT.md` | oui, créé le 20/08 | V0.1 | 27 findings d'interface |
+| `docs/FINANCIAL_DEFINITIONS.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | définitions canoniques et écarts |
+| `docs/DATA_INVARIANTS.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | 70 invariants, statut vérifié |
+| `docs/GOLDEN_DATASET.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | 18 cas synthétiques |
+| `docs/FINANCIAL_HARDCODES_AUDIT.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | 34 hardcodes classés |
+| `docs/FINARY_GAP_MATRIX.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | 32 capabilities |
+| `docs/UI_STATE_AUDIT.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | 27 findings d'interface |
 | `docs/README_STATUS_AUDIT.md` | oui, créé le 20/08 | V0.1 | 73 affirmations vérifiées |
-| `docs/ACCEPTANCE_CRITERIA_V1.md` | oui, créé le 20/08 | V0.1 | barre V1 par module |
-| `docs/COMPLETENESS_MODEL_SPEC.md` | oui, créé le 20/08 | V0.1 | modèle de complétude |
-| `docs/EXPLAIN_CALCULATION_SPEC.md` | oui, créé le 20/08 | V0.1 | contrat d'explication |
-| `docs/COLLAB_START_HERE.md` | oui, créé le 20/08 | V0.1 | onboarding collaborateurs |
-| `docs/OPEN_QUESTIONS.md` | oui, créé le 20/08 | V0.1 | 18 questions ouvertes |
+| `docs/ACCEPTANCE_CRITERIA_V1.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | barre V1 par module |
+| `docs/COMPLETENESS_MODEL_SPEC.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | modèle de complétude |
+| `docs/EXPLAIN_CALCULATION_SPEC.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | contrat d'explication |
+| `docs/COLLAB_START_HERE.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | onboarding collaborateurs |
+| `docs/OPEN_QUESTIONS.md` | oui, créé le 20/08 | V0.2, Checkpoint intégré | 18 questions ouvertes |
 | `PAUL_FINANCIAL_REVIEW.md` | non | absent | livrable de Paul, sprint non commencé |
 | `SECURITY_ARCHITECTURE_AUDIT.md` | non | absent | livrable de Tom, sprint non commencé |
 | `THREAT_MODEL.md` | non | absent | livrable de Tom, sprint non commencé |

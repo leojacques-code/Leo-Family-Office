@@ -1,6 +1,6 @@
 # Matrice d'écart Finary et Finary+
 
-Léo Family Office. Version 0.1 du 20 août 2026. Lane : Léo (Product Truth).
+Léo Family Office. Version 0.2 du 21 août 2026, décisions du Checkpoint GPT-5.6 Sol intégrées. Lane : Léo (Product Truth).
 Base : commit `ef5bacf`. Méthode : lecture du code, pas des libellés d'écran.
 
 ## Statut et méthode
