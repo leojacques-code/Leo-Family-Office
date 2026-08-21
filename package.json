@@ -2,7 +2,6 @@
   "name": "leo-family-office",
   "version": "1.0.0",
   "private": true,
-  "packageManager": "npm@11.16.0",
   "engines": {
     "node": ">=22"
   },
@@ -13,7 +12,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm lint && pnpm test && pnpm build",
+    "check": "npm run lint && npm run test && npm run build",
     "seed:supabase": "node --env-file=.env.local --experimental-strip-types scripts/seed-supabase.ts"
   },
   "dependencies": {

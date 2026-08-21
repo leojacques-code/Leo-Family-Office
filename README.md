@@ -4,7 +4,7 @@ Application patrimoniale privée, desktop-first, datée au **19 août 2026** et 
 
 ## Démarrage local
 
-Prérequis : Node.js 22 ou 24. npm est fourni avec Node, il n'y a rien d'autre à installer.
+Prérequis : Node.js 24.
 
 ```bash
 npm ci
