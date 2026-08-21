@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Ouvrir `http://localhost:3000`. Sans fichier `.env.local`, le code de développement est `leo-local-2026`.
+Ouvrir `http://localhost:3000`. Sans fichier `.env.local`, le code de développement vous sera donné par un administrateur.
 
 Pour une configuration privée durable :
 
