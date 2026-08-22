@@ -91,9 +91,10 @@ export function moic(totalDistributions: number, investedCapital: number): numbe
 }
 
 export function calculateNetWorth(accounts: Pick<FinancialAccount, "balance">[], liabilities: Pick<Liability, "currentBalance">[]) {
-  const grossAssets = accounts.reduce((sum, account) => sum + account.balance, 0);
-  const debt = liabilities.reduce((sum, liability) => sum + liability.currentBalance, 0);
-  return { grossAssets, debt, netWorth: grossAssets - debt };
+  const grossAssets = Number(accounts.reduce((sum, account) => sum + account.balance, 0).toFixed(2));
+  const debt = Number(liabilities.reduce((sum, liability) => sum + liability.currentBalance, 0).toFixed(2));
+  const netWorth = Number((grossAssets - debt).toFixed(2));
+  return { grossAssets, debt, netWorth };
 }
 
 export function applyScenarioOverrides<T extends Record<string, unknown>>(base: T, overrides: Partial<T>): T {
