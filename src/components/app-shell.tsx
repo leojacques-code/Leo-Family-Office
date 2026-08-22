@@ -126,6 +126,7 @@ export function AppShell({ initialState, section }: { initialState: DashboardSta
             <span className="as-of"><span className="status-dot" />Au 19 août 2026</span>
             <button className="icon-button" onClick={refresh} aria-label="Actualiser" title="Actualiser"><RefreshCw className={busy ? "spin" : ""} size={17} /></button>
             <button className="icon-button" onClick={toggleTheme} aria-label="Changer de thème" title="Changer de thème">{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- download API route, not a page */}
             <a className="button secondary export-button" href="/api/export?format=csv"><Download size={15} />Exporter</a>
           </div>
         </header>

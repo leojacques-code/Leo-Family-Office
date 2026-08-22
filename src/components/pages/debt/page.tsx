@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ArrowRight, FilePlus2 } from "lucide-react";
+import Link from "next/link";
 import {
   Area,
   AreaChart,
@@ -157,9 +158,9 @@ function DebtPage({ state, setExplanation }: SectionProps) {
             <span className="eyebrow">Arbitrage</span>
             <h2>Rembourser à 0 % ou investir</h2>
           </div>
-          <a href="/decision-lab">
+          <Link href="/decision-lab">
             Ouvrir le Decision Lab <ArrowRight size={14} />
-          </a>
+          </Link>
         </div>
         <div className="decision-controls">
           <label>

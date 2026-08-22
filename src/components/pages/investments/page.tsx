@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, UploadCloud } from "lucide-react";
+import { UploadCloud } from "lucide-react";
 import { Callout, Currency, DataBadge, MetricCard, Percent, SectionHeader } from "@/components/ui";
 import type { SectionProps } from "@/components/pages/shared";
 

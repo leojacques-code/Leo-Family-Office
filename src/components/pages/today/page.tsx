@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { AlertTriangle, ArrowRight, CalendarCheck, ChevronRight, Flag } from "lucide-react";
 import {
   Area,
@@ -213,9 +214,9 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
               </strong>
               /mois
             </span>
-            <a href="/scenarios">
+            <Link href="/scenarios">
               Tester les scénarios <ArrowRight size={14} />
-            </a>
+            </Link>
           </div>
         </article>
         <article className="panel allocation-panel">
@@ -272,9 +273,9 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
               <span className="eyebrow">Cash flow connu</span>
               <h2>Ce mois-ci</h2>
             </div>
-            <a href="/cash-flow">
+            <Link href="/cash-flow">
               Détails <ChevronRight size={14} />
-            </a>
+            </Link>
           </div>
           <div className="flow-rows">
             <div>
@@ -321,9 +322,9 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
               <span className="eyebrow">Objectif prioritaire</span>
               <h2>{primaryGoal?.name ?? "Aucun objectif"}</h2>
             </div>
-            <a href="/goals">
+            <Link href="/goals">
               Gérer <ChevronRight size={14} />
-            </a>
+            </Link>
           </div>
           {primaryGoal ? (
             <>
@@ -392,7 +393,7 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           </p>
           <div className="event-foot">
             <span>Dans 108 jours à la date zéro</span>
-            <a href="/debt">Voir l’échéancier</a>
+            <Link href="/debt">Voir l’échéancier</Link>
           </div>
         </article>
       </section>

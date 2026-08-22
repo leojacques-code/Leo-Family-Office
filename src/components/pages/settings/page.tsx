@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   AlertTriangle,
   BadgeEuro,
@@ -20,10 +21,10 @@ function SettingsPage({ state }: SectionProps) {
         title="Settings & Assumptions"
         description="Registre des hypothèses, provenance, confiance, sécurité et portabilité."
         actions={
-          <a className="button secondary" href="/api/export?format=json">
+          <Link className="button secondary" href="/api/export?format=json">
             <Download size={15} />
             Backup JSON
-          </a>
+          </Link>
         }
       />
       <section className="metrics-grid four">
@@ -117,22 +118,22 @@ function SettingsPage({ state }: SectionProps) {
             </div>
           </div>
           <div className="export-list">
-            <a href="/api/export?format=csv">
+            <Link href="/api/export?format=csv">
               <FileArchive size={18} />
               <span>
                 <strong>Balance sheet CSV</strong>
                 <small>Comptes et dettes consolidés</small>
               </span>
               <Download size={15} />
-            </a>
-            <a href="/api/export?format=json">
+            </Link>
+            <Link href="/api/export?format=json">
               <FileText size={18} />
               <span>
                 <strong>Backup complet JSON</strong>
                 <small>Données, hypothèses et scénarios</small>
               </span>
               <Download size={15} />
-            </a>
+            </Link>
             <button>
               <BadgeEuro size={18} />
               <span>
