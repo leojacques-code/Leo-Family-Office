@@ -9,6 +9,8 @@ import {
   REPORTING_CURRENCY,
   SCENARIO_NAME_ORDER,
   deriveMetrics,
+  ledgerWindowStart,
+  shouldDeriveBalance,
 } from "@/lib/data/shared";
 import type { FamilyOfficeRepository } from "@/lib/data/repository";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
@@ -27,6 +29,9 @@ import type {
   Scenario,
   Transaction,
 } from "@/lib/types";
+
+/** Garde-fou de pagination du ledger : 20 000 lignes sur la fenêtre lue. */
+const LEDGER_MAX_PAGES = 20;
 
 type Row = Record<string, unknown>;
 
@@ -95,6 +100,36 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
   const user = ownerId();
   const mine = (table: string) => db.from(table).select("*").eq("user_id", user);
 
+  /**
+   * Charge toute la fenêtre de ledger consommée par le produit, page par page.
+   *
+   * L'ancienne limite fixe de 100 lignes tronquait silencieusement le graphique six mois
+   * et les taux de flux constatés dès que le ledger la dépassait. Le bornage est donc
+   * temporel, et la pagination garantit que la fenêtre est lue en entier.
+   */
+  async function fetchLedgerWindow(): Promise<{ data: Row[] | null; error: PostgrestError | null }> {
+    const since = ledgerWindowStart(AS_OF_DATE);
+    const pageSize = 1000;
+    const rows: Row[] = [];
+    for (let page = 0; page < LEDGER_MAX_PAGES; page += 1) {
+      const result = await db
+        .from("transactions")
+        .select("*")
+        .eq("user_id", user)
+        .gte("transaction_date", since)
+        .order("transaction_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .range(page * pageSize, page * pageSize + pageSize - 1);
+      if (result.error) return { data: null, error: result.error };
+      const batch = (result.data ?? []) as Row[];
+      rows.push(...batch);
+      if (batch.length < pageSize) return { data: rows, error: null };
+    }
+    // Garde-fou : au-delà, la fenêtre est signalée plutôt que tronquée en silence.
+    console.warn(`Ledger tronqué : plus de ${LEDGER_MAX_PAGES * pageSize} transactions depuis ${since}.`);
+    return { data: rows, error: null };
+  }
+
   async function getDashboardState(): Promise<DashboardState> {
     const [
       institutionRows, accountRows, balanceRows, assetClassRows, securityRows, positionRows, snapshotRows,
@@ -104,7 +139,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("institutions"), mine("financial_accounts"), mine("account_balances"), mine("asset_classes"),
       mine("securities"), mine("positions"), mine("position_snapshots"), mine("liabilities"),
       mine("income_sources"), mine("expense_categories"), mine("budgets"),
-      db.from("transactions").select("*").eq("user_id", user).order("transaction_date", { ascending: false }).order("created_at", { ascending: false }).limit(100),
+      fetchLedgerWindow(),
       mine("scenarios"), mine("goals"),
       db.from("alerts").select("*").eq("user_id", user).eq("status", "OPEN"),
       mine("monthly_closes"), mine("documents"), mine("economic_assumptions"),
@@ -264,14 +299,17 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             .order("balance_date", { ascending: false }).order("created_at", { ascending: false })
             .limit(1), "lecture du dernier solde") as Row[];
           if (latest.length === 0) throw new Error("Aucun solde connu pour ce compte");
-          // Le solde dérivé doit primer sur le dernier solde connu, sinon une transaction
-          // antérieure à ce dernier relevé n'aurait aucun effet visible sur le compte.
+          // Un snapshot de solde daté est la vérité du compte à cette date : il contient
+          // déjà les mouvements antérieurs. Une transaction plus ancienne enrichit donc le
+          // ledger sans toucher au solde observé, sinon elle serait comptée deux fois.
           const latestDate = str(latest[0].balance_date);
-          unwrap(await db.from("account_balances").insert({
-            user_id: user, account_id: mutation.accountId, balance: num(latest[0].balance) + mutation.amount,
-            balance_date: mutation.date > latestDate ? mutation.date : latestDate,
-            data_kind: "DERIVED", confidence: "HIGH", source: "Transaction saisie",
-          }).select("id"), "solde dérivé");
+          if (shouldDeriveBalance(mutation.date, latestDate)) {
+            unwrap(await db.from("account_balances").insert({
+              user_id: user, account_id: mutation.accountId, balance: num(latest[0].balance) + mutation.amount,
+              balance_date: mutation.date,
+              data_kind: "DERIVED", confidence: "HIGH", source: "Transaction saisie",
+            }).select("id"), "solde dérivé");
+          }
         }
         break;
       }

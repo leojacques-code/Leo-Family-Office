@@ -13,7 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { compareDebtVsInvest } from "@/lib/engine/decision";
-import { buildLoanSchedule, monthlyDebtServiceAt, nextDebtEvent } from "@/lib/engine/debt";
+import { buildLoanTimeline, monthlyDebtServiceAt, nextDebtEvent } from "@/lib/engine/debt";
 import {
   Callout,
   Currency,
@@ -23,13 +23,22 @@ import {
   Percent,
   SectionHeader,
 } from "@/components/ui";
-import { type SectionProps, chartCurrency, formatDate, formatEur } from "@/components/pages/shared";
+import {
+  type SectionProps,
+  OptionalCurrency,
+  chartCurrency,
+  formatDate,
+  formatEur,
+} from "@/components/pages/shared";
 
 function DebtPage({ state, setExplanation }: SectionProps) {
   const [selectedId, setSelectedId] = useState(state.liabilities[0]?.id ?? "");
   const [investmentReturn, setInvestmentReturn] = useState(5.5);
   const loan = state.liabilities.find((item) => item.id === selectedId) ?? state.liabilities[0];
-  const schedule = useMemo(() => (loan ? buildLoanSchedule(loan) : null), [loan]);
+  const timeline = useMemo(
+    () => (loan ? buildLoanTimeline(loan, state.asOfDate) : null),
+    [loan, state.asOfDate],
+  );
   const scenario =
     state.scenarios.find((item) => item.name === "Central") ?? state.scenarios[0] ?? null;
   const comparison = loan
@@ -58,7 +67,7 @@ function DebtPage({ state, setExplanation }: SectionProps) {
     />
   );
 
-  if (!loan || !schedule) {
+  if (!loan || !timeline) {
     return (
       <div className="page-stack">
         {header}
@@ -70,9 +79,9 @@ function DebtPage({ state, setExplanation }: SectionProps) {
     );
   }
 
+  const { contractual, forward } = timeline;
   const currentDebtService = monthlyDebtServiceAt([loan], state.asOfDate);
   const upcoming = nextDebtEvent([loan], state.asOfDate);
-  const paidEntries = schedule.entries.filter((entry) => entry.dueDate <= state.asOfDate);
   const contractualTotal = loan.monthlyPayment * loan.paymentCount;
 
   return (
@@ -119,13 +128,17 @@ function DebtPage({ state, setExplanation }: SectionProps) {
                 { label: "Date d’observation", value: formatDate(state.asOfDate), kind: "ACTUAL" },
                 {
                   label: "Première échéance",
-                  value: schedule.firstDueDate ? formatDate(schedule.firstDueDate) : "Non datée",
+                  value: contractual.firstDueDate
+                    ? formatDate(contractual.firstDueDate)
+                    : "Non datée",
                   kind: "ACTUAL",
                   source: loan.provenance.source,
                 },
                 {
                   label: "Dernière échéance dérivée",
-                  value: schedule.lastDueDate ? formatDate(schedule.lastDueDate) : "Non datée",
+                  value: contractual.lastDueDate
+                    ? formatDate(contractual.lastDueDate)
+                    : "Non datée",
                   kind: "DERIVED",
                 },
                 {
@@ -141,8 +154,8 @@ function DebtPage({ state, setExplanation }: SectionProps) {
         />
         <MetricCard
           label="Écart contractuel"
-          value={<Currency value={schedule.contractualGap} />}
-          tone={Math.abs(schedule.contractualGap) > 0.01 ? "warning" : "neutral"}
+          value={<Currency value={timeline.contractualGap} />}
+          tone={Math.abs(timeline.contractualGap) > 0.01 ? "warning" : "neutral"}
           onExplain={() =>
             setExplanation({
               title: `Écart contractuel · ${loan.name}`,
@@ -168,14 +181,14 @@ function DebtPage({ state, setExplanation }: SectionProps) {
                   source: loan.provenance.source,
                 },
               ],
-              note: `${formatEur(contractualTotal)} − ${formatEur(loan.principal)} = ${formatEur(schedule.contractualGap)}. Aucune explication n’est supposée.`,
+              note: `${formatEur(contractualTotal)} − ${formatEur(loan.principal)} = ${formatEur(timeline.contractualGap)}. Aucune explication n’est supposée.`,
             })
           }
         />
       </section>
-      {schedule.flags.length ? (
+      {timeline.flags.length ? (
         <Callout tone="warning" title="Échéancier non réconcilié">
-          {schedule.flags.map((flag) => flag.detail).join(" ")} Le tableau arrête le principal à
+          {timeline.flags.map((flag) => flag.detail).join(" ")} Le tableau arrête le principal à
           zéro ; seul le document bancaire pourra expliquer le reliquat contractuel.
         </Callout>
       ) : null}
@@ -183,7 +196,7 @@ function DebtPage({ state, setExplanation }: SectionProps) {
         <article className="panel">
           <div className="panel-header">
             <div>
-              <span className="eyebrow">Amortissement dérivé</span>
+              <span className="eyebrow">Projection depuis l’encours observé</span>
               <h2>Solde restant</h2>
             </div>
             <button
@@ -197,7 +210,7 @@ function DebtPage({ state, setExplanation }: SectionProps) {
                       : "Intérêt = solde × taux/12 ; principal = mensualité − intérêt",
                   inputs: [
                     {
-                      label: "Capital de départ",
+                      label: `Encours observé au ${formatDate(state.asOfDate)}`,
                       value: formatEur(loan.currentBalance),
                       kind: loan.provenance.kind,
                       source: loan.provenance.source,
@@ -213,17 +226,23 @@ function DebtPage({ state, setExplanation }: SectionProps) {
                       kind: loan.provenance.kind,
                     },
                     {
-                      label: "Échéances dérivées",
-                      value: `${schedule.entries.length} lignes datées`,
+                      label: "Échéances déjà exigibles",
+                      value: `${timeline.elapsedPayments} sur ${loan.paymentCount}`,
+                      kind: "DERIVED",
+                      date: state.asOfDate,
+                    },
+                    {
+                      label: "Échéances restantes projetées",
+                      value: `${forward.entries.length} lignes datées`,
                       kind: "DERIVED",
                     },
                     {
-                      label: "Intérêts totaux dérivés",
-                      value: formatEur(schedule.totalInterest),
+                      label: "Intérêts restant à payer",
+                      value: formatEur(forward.totalInterest),
                       kind: "DERIVED",
                     },
                   ],
-                  note: "Échéancier généré à partir du contrat, provenance DERIVED. Il ne remplace pas l’échéancier bancaire et n’est jamais présenté comme contractuel.",
+                  note: "La projection amortit l’encours observé à la date d’observation, à partir de la prochaine échéance exigible. Les mensualités déjà passées ne sont jamais rejouées contre cet encours. Provenance DERIVED : cet échéancier ne remplace pas le document bancaire.",
                 })
               }
             >
@@ -233,8 +252,8 @@ function DebtPage({ state, setExplanation }: SectionProps) {
           <div className="medium-chart">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={schedule.entries
-                  .filter((_, index) => index % 6 === 0 || index === schedule.entries.length - 1)
+                data={forward.entries
+                  .filter((_, index) => index % 6 === 0 || index === forward.entries.length - 1)
                   .map((entry) => ({
                     date: entry.dueDate.slice(0, 7),
                     balance: entry.closingBalance,
@@ -274,7 +293,7 @@ function DebtPage({ state, setExplanation }: SectionProps) {
             </div>
             <div>
               <dt>Dernière échéance dérivée</dt>
-              <dd>{schedule.lastDueDate ? formatDate(schedule.lastDueDate) : "—"}</dd>
+              <dd>{contractual.lastDueDate ? formatDate(contractual.lastDueDate) : "—"}</dd>
             </div>
             <div>
               <dt>Nombre annoncé</dt>
@@ -282,12 +301,18 @@ function DebtPage({ state, setExplanation }: SectionProps) {
             </div>
             <div>
               <dt>Échéances payées à ce jour</dt>
-              <dd>{paidEntries.length}</dd>
+              <dd>{timeline.elapsedPayments}</dd>
             </div>
             <div>
-              <dt>Coût d’intérêt dérivé</dt>
+              <dt>Intérêts du contrat, durée complète</dt>
               <dd>
-                <Currency value={schedule.totalInterest} />
+                <Currency value={contractual.totalInterest} />
+              </dd>
+            </div>
+            <div>
+              <dt>Intérêts restant à payer</dt>
+              <dd>
+                <Currency value={forward.totalInterest} />
               </dd>
             </div>
           </dl>
@@ -296,10 +321,12 @@ function DebtPage({ state, setExplanation }: SectionProps) {
       <section className="panel">
         <div className="panel-header">
           <div>
-            <span className="eyebrow">Échéancier daté · DERIVED</span>
+            <span className="eyebrow">Échéancier forward daté · DERIVED</span>
             <h2>Prochaines échéances</h2>
           </div>
-          <span className="panel-note">{schedule.entries.length} lignes générées</span>
+          <span className="panel-note">
+            {forward.entries.length} restantes sur {loan.paymentCount} annoncées
+          </span>
         </div>
         <div className="simple-table">
           <div className="table-head">
@@ -309,26 +336,23 @@ function DebtPage({ state, setExplanation }: SectionProps) {
             <span>Principal</span>
             <span>Solde</span>
           </div>
-          {schedule.entries
-            .filter((entry) => entry.dueDate > state.asOfDate)
-            .slice(0, 6)
-            .map((entry) => (
-              <div className="table-row" key={entry.paymentNumber}>
-                <span>{formatDate(entry.dueDate)}</span>
-                <strong>
-                  n° {entry.paymentNumber} · <Currency value={entry.totalCashOut} />
-                </strong>
-                <span>
-                  <Currency value={entry.interest} />
-                </span>
-                <span>
-                  <Currency value={entry.principal} />
-                </span>
-                <strong>
-                  <Currency value={entry.closingBalance} />
-                </strong>
-              </div>
-            ))}
+          {forward.entries.slice(0, 6).map((entry) => (
+            <div className="table-row" key={entry.paymentNumber}>
+              <span>{formatDate(entry.dueDate)}</span>
+              <strong>
+                n° {entry.paymentNumber} · <Currency value={entry.totalCashOut} />
+              </strong>
+              <span>
+                <Currency value={entry.interest} />
+              </span>
+              <span>
+                <Currency value={entry.principal} />
+              </span>
+              <strong>
+                <Currency value={entry.closingBalance} />
+              </strong>
+            </div>
+          ))}
         </div>
       </section>
       {comparison ? (
@@ -363,9 +387,13 @@ function DebtPage({ state, setExplanation }: SectionProps) {
                 Rembourser <Currency value={comparison.capital} />
               </span>
               <strong>
-                <Currency value={comparison.repay.interestAvoided} />
+                <OptionalCurrency value={comparison.repay.interestAvoided} />
               </strong>
-              <small>Intérêts évités sur {comparison.horizonYears} ans, montant certain</small>
+              <small>
+                {comparison.repay.interestAvoided === null
+                  ? "Intérêts évités non calculables sans convention de remboursement anticipé"
+                  : `Intérêts évités sur ${comparison.horizonYears} ans, montant certain`}
+              </small>
             </div>
             <div>
               <span>
@@ -377,6 +405,12 @@ function DebtPage({ state, setExplanation }: SectionProps) {
               <small>Gain espéré non garanti, dette conservée</small>
             </div>
           </div>
+          {comparison.interestAvoidedBlocker ? (
+            <Callout tone="warning" title="Intérêts évités non calculables">
+              {comparison.interestAvoidedBlocker} Le montant réellement économisé n’est donc pas
+              chiffré ici : les autres grandeurs restent comparables.
+            </Callout>
+          ) : null}
           <Callout title="Lecture">
             Le capital arbitrable est borné par le cash bancaire réellement disponible (
             <Currency value={state.metrics.bankCash} />

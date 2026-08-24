@@ -268,9 +268,15 @@ function RealEstatePage({ setExplanation }: SectionProps) {
                 </dd>
               </div>
               <div>
-                <dt>Intérêts totaux</dt>
+                <dt>Intérêts payés jusqu’à la sortie</dt>
                 <dd>
-                  <Currency value={result.totalInterest} />
+                  <Currency value={result.interestPaidThroughExit} />
+                </dd>
+              </div>
+              <div>
+                <dt>Intérêts sur durée complète si prêt conservé</dt>
+                <dd>
+                  <Currency value={result.fullTermInterestIfHeld} />
                 </dd>
               </div>
               <div>

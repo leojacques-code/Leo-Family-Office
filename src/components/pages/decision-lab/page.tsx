@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Check, Landmark, TrendingUp } from "lucide-react";
 import { compareDebtVsInvest } from "@/lib/engine/decision";
 import { Callout, Currency, DataBadge, EmptyState, Percent, SectionHeader } from "@/components/ui";
-import { type SectionProps, formatEur } from "@/components/pages/shared";
+import { type SectionProps, OptionalCurrency, formatEur } from "@/components/pages/shared";
 
 const CASES = [
   "Louer vs acheter",
@@ -192,9 +192,13 @@ function DecisionLabPage({ state }: SectionProps) {
             <span className="eyebrow">Option A</span>
             <h2>Rembourser</h2>
             <strong className="option-value">
-              <Currency value={result.repay.interestAvoided} />
+              <OptionalCurrency value={result.repay.interestAvoided} />
             </strong>
-            <small>Intérêts évités sur {result.horizonYears} ans, montant certain</small>
+            <small>
+              {result.repay.interestAvoided === null
+                ? "Intérêts évités non calculables sans convention de remboursement anticipé"
+                : `Intérêts évités sur ${result.horizonYears} ans, montant certain`}
+            </small>
             <dl>
               <div>
                 <dt>Capital engagé</dt>
@@ -217,13 +221,13 @@ function DecisionLabPage({ state }: SectionProps) {
               <div>
                 <dt>Position nette nominale</dt>
                 <dd>
-                  <Currency value={result.repay.nominalPosition} sign />
+                  <OptionalCurrency value={result.repay.nominalPosition} sign />
                 </dd>
               </div>
               <div>
                 <dt>Position nette réelle</dt>
                 <dd>
-                  <Currency value={result.repay.realPosition} sign />
+                  <OptionalCurrency value={result.repay.realPosition} sign />
                 </dd>
               </div>
             </dl>
@@ -260,19 +264,26 @@ function DecisionLabPage({ state }: SectionProps) {
               <div>
                 <dt>Position nette nominale</dt>
                 <dd>
-                  <Currency value={result.invest.nominalPosition} sign />
+                  <OptionalCurrency value={result.invest.nominalPosition} sign />
                 </dd>
               </div>
               <div>
                 <dt>Position nette réelle</dt>
                 <dd>
-                  <Currency value={result.invest.realPosition} sign />
+                  <OptionalCurrency value={result.invest.realPosition} sign />
                 </dd>
               </div>
             </dl>
           </div>
         </div>
       </section>
+      {result.interestAvoidedBlocker ? (
+        <Callout tone="warning" title="Intérêts évités non calculables">
+          {result.interestAvoidedBlocker} Aucun montant n’est substitué : capitaliser le capital au
+          taux du prêt supposerait une dette qui ne s’amortit jamais. Les grandeurs indépendantes de
+          cette convention restent comparées ci-dessous.
+        </Callout>
+      ) : null}
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -287,7 +298,7 @@ function DecisionLabPage({ state }: SectionProps) {
           <div>
             <dt>Gain espéré de l’investissement − intérêts évités</dt>
             <dd>
-              <Currency value={result.nominalSpread} sign />
+              <OptionalCurrency value={result.nominalSpread} sign />
             </dd>
           </div>
           <div>
@@ -307,7 +318,10 @@ function DecisionLabPage({ state }: SectionProps) {
           <>
             <div className="uncertainty-strip">
               <DataBadge kind="MODEL_ASSUMPTION" />
-              <span>MODEL_HEURISTIC / EXPERIMENTAL · coefficients non sourcés, non testés</span>
+              <span>
+                MODEL_HEURISTIC / EXPERIMENTAL · heuristiques non sourcées et méthodologie non
+                validée
+              </span>
             </div>
             <dl className="loan-facts">
               <div>
@@ -325,7 +339,7 @@ function DecisionLabPage({ state }: SectionProps) {
               <div>
                 <dt>Avantage ajusté expérimental</dt>
                 <dd>
-                  <Currency value={result.experimental.opportunityAdvantage} sign />
+                  <OptionalCurrency value={result.experimental.opportunityAdvantage} sign />
                 </dd>
               </div>
             </dl>

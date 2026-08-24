@@ -19,19 +19,38 @@ describe("compareDebtVsInvest", () => {
     expect(result.repay.remainingDebt).toBeCloseTo(16745 - 354.08, 2);
   });
 
-  it("utilise le taux de la dette et n’en suppose jamais l’absence", () => {
+  it("rend exactement zéro d’intérêts évités sur une dette à 0 %", () => {
     const free = compareDebtVsInvest({ ...base, debtRate: 0 });
-    const costly = compareDebtVsInvest({ ...base, debtRate: 0.03 });
-    expect(free.repay.interestAvoided).toBeCloseTo(0, 6);
-    expect(costly.repay.interestAvoided).toBeCloseTo(5000 * (Math.pow(1.03, 5) - 1), 4);
-    expect(costly.nominalSpread).toBeLessThan(free.nominalSpread);
+    expect(free.repay.interestAvoided).toBe(0);
+    expect(free.interestAvoidedBlocker).toBeNull();
+    expect(free.nominalSpread).toBeCloseTo(free.invest.expectedGain, 6);
   });
 
-  it("applique l’inflation fournie aux positions réelles", () => {
+  it("n’invente aucun montant d’intérêts évités sur une dette amortissable", () => {
+    const costly = compareDebtVsInvest({ ...base, debtRate: 0.03 });
+    // Capitaliser le capital au taux du prêt supposerait une dette qui ne s'amortit
+    // jamais. Sans convention de remboursement anticipé, la grandeur est NOT_COMPUTABLE.
+    expect(costly.repay.interestAvoided).toBeNull();
+    expect(costly.invest.interestStillDue).toBeNull();
+    expect(costly.nominalSpread).toBeNull();
+    expect(costly.experimental.opportunityAdvantage).toBeNull();
+    expect(costly.interestAvoidedBlocker).toContain("remboursement anticipé");
+  });
+
+  it("garde comparables les grandeurs indépendantes de cette convention", () => {
+    const costly = compareDebtVsInvest({ ...base, debtRate: 0.03 });
+    expect(costly.capital).toBeCloseTo(5000, 2);
+    expect(costly.invest.expectedEndingValue).toBeGreaterThan(5000);
+    expect(costly.invest.endingLiquidity).toBeGreaterThan(costly.repay.endingLiquidity);
+    expect(costly.repay.remainingDebt).toBeCloseTo(base.debtBalance - 5000, 2);
+  });
+
+  it("applique l’inflation fournie aux positions réelles calculables", () => {
     const low = compareDebtVsInvest({ ...base, inflation: 0.02 });
     const high = compareDebtVsInvest({ ...base, inflation: 0.035 });
-    expect(Math.abs(high.invest.realPosition)).not.toBeCloseTo(
-      Math.abs(low.invest.realPosition),
+    expect(low.invest.realPosition).not.toBeNull();
+    expect(Math.abs(high.invest.realPosition as number)).not.toBeCloseTo(
+      Math.abs(low.invest.realPosition as number),
       2,
     );
   });

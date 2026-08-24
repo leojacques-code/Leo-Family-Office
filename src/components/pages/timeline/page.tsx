@@ -3,16 +3,17 @@
 import { CalendarCheck } from "lucide-react";
 import { Callout, Currency, EmptyState, SectionHeader } from "@/components/ui";
 import { type SectionProps, formatDate, formatEur } from "@/components/pages/shared";
-import { buildLoanSchedules } from "@/lib/engine/debt";
+import { buildLoanTimeline } from "@/lib/engine/debt";
 
 function TimelinePage({ state, mutate, busy }: SectionProps) {
   // Les jalons de dette viennent de l'échéancier dérivé : un passif modifié déplace
   // immédiatement ces événements.
-  const debtMilestones = buildLoanSchedules(state.liabilities).flatMap((schedule) => {
-    const liability = state.liabilities.find((item) => item.id === schedule.liabilityId);
-    const first = schedule.entries[0];
-    const last = schedule.entries.at(-1);
-    if (!liability || !first || !last) return [];
+  const debtMilestones = state.liabilities.flatMap((liability) => {
+    // Jalons du contrat : ils décrivent la vie complète du prêt, pas la projection.
+    const { contractual } = buildLoanTimeline(liability, state.asOfDate);
+    const first = contractual.entries[0];
+    const last = contractual.entries.at(-1);
+    if (!first || !last) return [];
     return [
       {
         date: formatDate(first.dueDate),

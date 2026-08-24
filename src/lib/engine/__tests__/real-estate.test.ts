@@ -3,27 +3,53 @@ import { underwriteRealEstate, type RealEstateInputs } from "@/lib/engine/real-e
 
 /** GOLDEN_DATASET CASE 12 : locatif simple, le crédit ne finance ni frais ni travaux. */
 const case12: RealEstateInputs = {
-  purchasePrice: 200000, acquisitionCosts: 16000, renovation: 0, furniture: 0,
-  downPayment: 36000, loanAmount: 180000, annualRate: 0.03, loanYears: 20,
-  monthlyRent: 900, vacancyRate: 0.05, annualOperatingCosts: 2400,
-  annualPropertyGrowth: 0.01, rentGrowth: 0.01, holdingYears: 10,
-  sellingCostsRate: 0.06, taxRate: 0.25,
+  purchasePrice: 200000,
+  acquisitionCosts: 16000,
+  renovation: 0,
+  furniture: 0,
+  downPayment: 36000,
+  loanAmount: 180000,
+  annualRate: 0.03,
+  loanYears: 20,
+  monthlyRent: 900,
+  vacancyRate: 0.05,
+  annualOperatingCosts: 2400,
+  annualPropertyGrowth: 0.01,
+  rentGrowth: 0.01,
+  holdingYears: 10,
+  sellingCostsRate: 0.06,
+  taxRate: 0.25,
 };
 
 /** GOLDEN_DATASET CASE 13 : le crédit finance aussi les frais, les travaux et le mobilier. */
 const case13: RealEstateInputs = {
-  ...case12, renovation: 30000, furniture: 4000, downPayment: 30000, loanAmount: 220000,
+  ...case12,
+  renovation: 30000,
+  furniture: 4000,
+  downPayment: 30000,
+  loanAmount: 220000,
   monthlyRent: 1050,
 };
 
 describe("real estate underwriting", () => {
   it("calculates financing, operations and equity returns", () => {
     const result = underwriteRealEstate({
-      purchasePrice: 200000, acquisitionCosts: 16000, renovation: 10000, furniture: 4000,
-      downPayment: 30000, loanAmount: 200000, annualRate: 0.03, loanYears: 20,
-      monthlyRent: 1200, vacancyRate: 0.05, annualOperatingCosts: 3000,
-      annualPropertyGrowth: 0.015, rentGrowth: 0.01, holdingYears: 10,
-      sellingCostsRate: 0.06, taxRate: 0.25,
+      purchasePrice: 200000,
+      acquisitionCosts: 16000,
+      renovation: 10000,
+      furniture: 4000,
+      downPayment: 30000,
+      loanAmount: 200000,
+      annualRate: 0.03,
+      loanYears: 20,
+      monthlyRent: 1200,
+      vacancyRate: 0.05,
+      annualOperatingCosts: 3000,
+      annualPropertyGrowth: 0.015,
+      rentGrowth: 0.01,
+      holdingYears: 10,
+      sellingCostsRate: 0.06,
+      taxRate: 0.25,
     });
     expect(result.totalProjectCost).toBe(230000);
     expect(result.monthlyPayment).toBeGreaterThan(1000);
@@ -72,7 +98,12 @@ describe("real estate underwriting", () => {
 
   it("ne retranche plus de service de dette après l’extinction du crédit", () => {
     const shortLoan = underwriteRealEstate({ ...case12, loanYears: 5, holdingYears: 7 });
-    const noLoan = underwriteRealEstate({ ...case12, loanAmount: 0, downPayment: 216000, holdingYears: 7 });
+    const noLoan = underwriteRealEstate({
+      ...case12,
+      loanAmount: 0,
+      downPayment: 216000,
+      holdingYears: 7,
+    });
     const effectiveRent = 900 * 12 * 0.95;
     // Année 6, hors service de dette : (loyer indexé − charges) × (1 − taux fiscal).
     const expectedYear6 = (effectiveRent * Math.pow(1.01, 5) - 2400) * 0.75;
@@ -80,6 +111,20 @@ describe("real estate underwriting", () => {
     expect(shortLoan.outstandingAtExit).toBe(0);
     expect(noLoan.cashFlows[1]).toBeCloseTo((effectiveRent - 2400) * 0.75, 2);
     expect(shortLoan.flags.some((flag) => flag.includes("s’éteint"))).toBe(true);
+  });
+
+  it("ne facture pas les intérêts postérieurs à la cession", () => {
+    // Crédit 25 ans, sortie à 10 ans : l'encours est soldé à la vente.
+    const result = underwriteRealEstate({ ...case12, loanYears: 25, holdingYears: 10 });
+    expect(result.interestPaidThroughExit).toBeLessThan(result.fullTermInterestIfHeld);
+    expect(result.interestPaidThroughExit).toBeGreaterThan(0);
+    expect(result.outstandingAtExit).toBeGreaterThan(0);
+  });
+
+  it("fait coïncider les deux grandeurs quand le prêt va jusqu’à maturité", () => {
+    const result = underwriteRealEstate({ ...case12, loanYears: 10, holdingYears: 10 });
+    expect(result.interestPaidThroughExit).toBeCloseTo(result.fullTermInterestIfHeld, 6);
+    expect(result.outstandingAtExit).toBeCloseTo(0, 6);
   });
 
   it("rend le taux d’actualisation explicite", () => {

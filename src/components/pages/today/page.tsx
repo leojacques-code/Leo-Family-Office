@@ -130,9 +130,9 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           onExplain={() => setExplanation(netWorthExplanation(state))}
         />
         <MetricCard
-          label="Actifs bruts"
+          label="Actifs financiers identifiés"
           value={<Currency value={state.metrics.grossAssets} />}
-          detail={`${state.accounts.length} comptes consolidés`}
+          detail={`${state.accounts.length} comptes consolidés · hors immobilier et business equity`}
           onExplain={() => setExplanation(assetsExplanation(state))}
         />
         <MetricCard
