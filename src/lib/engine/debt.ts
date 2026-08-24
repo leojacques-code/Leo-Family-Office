@@ -1,7 +1,10 @@
+import { MONTHS_PER_PERIOD } from "@/lib/types";
 import type {
   DataKind,
   EarlyRepayment,
+  InterestConvention,
   Liability,
+  LoanCharge,
   LoanScheduleEntry,
   ProvidedScheduleEntry,
 } from "@/lib/types";
@@ -111,7 +114,10 @@ export type LoanFlagCode =
   | "EARLY_REPAYMENT_CONVENTION_UNKNOWN"
   | "EARLY_REPAYMENT_PENALTY_UNKNOWN"
   | "NEGATIVE_AMORTISATION"
-  | "PROVIDED_SCHEDULE_USED";
+  | "PROVIDED_SCHEDULE_USED"
+  | "VARIABLE_RATE_UNPROJECTABLE"
+  | "RATE_ASSUMPTION_APPLIED"
+  | "BALLOON_AMOUNT_MISSING";
 
 export interface LoanScheduleFlag {
   code: LoanFlagCode;
@@ -167,12 +173,31 @@ function summarise(
   };
 }
 
+/**
+ * Construit une ligne en garantissant les deux invariants par construction plutôt qu'en
+ * les recalculant à chaque site d'appel, où une omission passerait inaperçue.
+ *
+ *   totalCashOut   = principal + interest + insurance + fees
+ *   closingBalance = openingBalance − principal + capitalisedInterest + capitalisedCharges
+ */
 function entry(
   liability: Liability,
-  fields: Omit<LoanScheduleEntry, "liabilityId" | "totalCashOut">,
+  fields: Omit<
+    LoanScheduleEntry,
+    "liabilityId" | "totalCashOut" | "capitalisedCharges" | "closingBalance"
+  > & { capitalisedCharges?: number; closingBalance?: number },
 ): LoanScheduleEntry {
+  const capitalisedCharges = fields.capitalisedCharges ?? 0;
+  const closingBalance =
+    fields.closingBalance ??
+    Math.max(
+      0,
+      fields.openingBalance - fields.principal + fields.capitalisedInterest + capitalisedCharges,
+    );
   return {
     ...fields,
+    capitalisedCharges,
+    closingBalance,
     liabilityId: liability.id,
     totalCashOut: fields.principal + fields.interest + fields.insurance + fields.fees,
   };
@@ -189,21 +214,84 @@ export const UNDECLARED_LOAN_TERMS = {
   recurringFees: null,
   paymentIncludesInsurance: null,
   deferral: null,
+  // Valeurs qui reproduisent exactement le comportement historique du moteur : un prêt
+  // amortissable mensuel à taux fixe proportionnel. Aucun contrat existant ne change.
+  amortisationProfile: "AMORTIZING",
+  balloonAmount: null,
+  paymentFrequency: "MONTHLY",
+  interestConvention: "PROPORTIONAL",
+  rateType: "FIXED",
+  rateSchedule: [],
+  paymentSchedule: [],
   earlyRepayments: [],
   oneOffCharges: [],
   providedSchedule: [],
+  facilityId: null,
 } satisfies Pick<
   Liability,
   | "monthlyInsurance"
   | "recurringFees"
   | "paymentIncludesInsurance"
   | "deferral"
+  | "amortisationProfile"
+  | "balloonAmount"
+  | "paymentFrequency"
+  | "interestConvention"
+  | "rateType"
+  | "rateSchedule"
+  | "paymentSchedule"
   | "earlyRepayments"
   | "oneOffCharges"
   | "providedSchedule"
+  | "facilityId"
 >;
 
 // ─── Termes du contrat ────────────────────────────────────────────────────────────────
+
+/** Nombre de mois entre deux échéances. Une dette n'est pas nécessairement mensuelle. */
+export function monthsPerPeriod(liability: Liability): number {
+  return MONTHS_PER_PERIOD[liability.paymentFrequency ?? "MONTHLY"];
+}
+
+/** Date d'exigibilité de la n-ième échéance contractuelle, toutes périodicités confondues. */
+export function dueDateOf(liability: Liability, paymentNumber: number): string {
+  return addMonths(liability.firstPaymentDate, (paymentNumber - 1) * monthsPerPeriod(liability));
+}
+
+/**
+ * Taux annuel en vigueur à une date, selon les changements datés déclarés.
+ *
+ * Aucun effet rétroactif : une révision ne réécrit pas le passé, elle prend effet à sa
+ * date. Le taux de la dette reste celui du départ tant qu'aucun changement n'a pris effet.
+ */
+export function annualRateAt(liability: Liability, date: string): number {
+  const applicable = (liability.rateSchedule ?? [])
+    .filter((change) => change.effectiveFrom <= date)
+    .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
+  return applicable.at(-1)?.annualRate ?? liability.annualRate;
+}
+
+/**
+ * Intérêt d'une période, selon la convention déclarée.
+ *
+ * PROPORTIONAL couvre les prêts amortissables français et reproduit le comportement
+ * historique. ACTUAL_365 compte les jours réels, ce qui produit de vrais écarts sur des
+ * périodes de longueur inégale.
+ */
+function periodInterest(
+  balance: number,
+  annualRate: number,
+  convention: InterestConvention,
+  months: number,
+  periodStart: string,
+  periodEnd: string,
+): number {
+  if (convention === "ACTUAL_365") {
+    const days = daysBetween(periodStart, periodEnd) ?? months * 30;
+    return (balance * annualRate * days) / 365;
+  }
+  return (balance * annualRate * months) / 12;
+}
 
 /** Assurance par échéance, 0 quand la donnée n'existe pas (l'absence n'est pas une valeur). */
 function insurancePerPayment(liability: Liability): number {
@@ -237,21 +325,37 @@ export function totalContractualPayment(liability: Liability): number {
  * mensualité d'un prêt à taux fixe est un terme du contrat : elle ne dérive pas parce que
  * l'encours a bougé.
  */
-export function amortisingPayment(liability: Liability): number {
-  if (liability.monthlyPayment > 0) {
+export function amortisingPayment(liability: Liability, atDate?: string): number {
+  const declared = declaredPaymentAt(liability, atDate);
+  if (declared > 0) {
     // `null` = convention inconnue. On retient l'hypothèse la moins déformante : ne rien
     // retrancher, ce qui laisse l'amortissement identique à la donnée déclarée. Le drapeau
     // INSURANCE_TREATMENT_UNKNOWN rend l'ambiguïté visible plutôt que de la trancher.
     const deduction =
       liability.paymentIncludesInsurance === true ? insurancePerPayment(liability) : 0;
-    return Math.max(0, liability.monthlyPayment - deduction);
+    return Math.max(0, declared - deduction);
   }
-  const payments = Math.trunc(liability.paymentCount);
-  if (payments <= 0 || liability.principal <= 0) return 0;
-  const monthlyRate = liability.annualRate / 12;
-  return monthlyRate === 0
-    ? liability.principal / payments
-    : (liability.principal * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -payments));
+  return theoreticalPayment(liability);
+}
+
+/** Paiement contractuel en vigueur à une date, paliers datés compris. */
+export function declaredPaymentAt(liability: Liability, atDate?: string): number {
+  return steppedPaymentAt(liability, atDate) ?? liability.monthlyPayment;
+}
+
+/**
+ * Palier daté en vigueur, ou `null` si aucun ne s'applique.
+ *
+ * Distinguer « aucun palier » de « palier égal au paiement de départ » est indispensable :
+ * sans cela, un paiement recalculé en cours de route, après un remboursement anticipé en
+ * réduction de mensualité, serait réécrasé à chaque échéance par la valeur du contrat.
+ */
+function steppedPaymentAt(liability: Liability, atDate?: string): number | null {
+  if (!atDate) return null;
+  const applicable = (liability.paymentSchedule ?? [])
+    .filter((change) => change.effectiveFrom <= atDate)
+    .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
+  return applicable.at(-1)?.amount ?? null;
 }
 
 /**
@@ -260,14 +364,34 @@ export function amortisingPayment(liability: Liability): number {
  */
 export const contractualPayment = amortisingPayment;
 
-/** PMT strictement théorique, dérivée du contrat, sans tenir compte de la mensualité déclarée. */
+/**
+ * PMT théorique dérivée du contrat, périodicité et profil compris.
+ *
+ * Un in fine ou un interest-only n'amortit rien : son paiement courant est l'intérêt de la
+ * période. Un balloon amortit vers un solde résiduel cible, pas vers zéro.
+ */
 function theoreticalPayment(liability: Liability): number {
   const payments = Math.trunc(liability.paymentCount);
   if (payments <= 0 || liability.principal <= 0) return 0;
-  const monthlyRate = liability.annualRate / 12;
-  return monthlyRate === 0
-    ? liability.principal / payments
-    : (liability.principal * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -payments));
+  const rate = periodicRate(liability, liability.annualRate);
+  const profile = liability.amortisationProfile ?? "AMORTIZING";
+  if (profile === "INTEREST_ONLY" || profile === "BULLET") return liability.principal * rate;
+  const target = profile === "BALLOON" ? Math.max(0, liability.balloonAmount ?? 0) : 0;
+  return pmtToTarget(liability.principal, rate, payments, target);
+}
+
+/** Taux d'une période, hors convention en jours réels qui dépend des dates. */
+function periodicRate(liability: Liability, annualRate: number): number {
+  return (annualRate * monthsPerPeriod(liability)) / 12;
+}
+
+/** Paiement amortissant `balance` vers `target` en `payments` échéances au taux `rate`. */
+function pmtToTarget(balance: number, rate: number, payments: number, target = 0): number {
+  if (payments <= 0) return 0;
+  const amortised = balance - target;
+  if (rate === 0) return Math.max(0, amortised / payments);
+  const growth = Math.pow(1 + rate, payments);
+  return (balance * rate * growth - target * rate) / (growth - 1);
 }
 
 function isUsable(liability: Liability): boolean {
@@ -296,7 +420,7 @@ function deferralOf(liability: Liability): {
 
 type LoanEvent =
   | { type: "EARLY_REPAYMENT"; date: string; repayment: EarlyRepayment }
-  | { type: "CHARGE"; date: string; amount: number; label: string };
+  | { type: "CHARGE"; date: string; amount: number; label: string; financed: boolean };
 
 interface AmortiseInput {
   liability: Liability;
@@ -316,12 +440,9 @@ interface AmortiseResult {
   assumed: boolean;
 }
 
-function pmt(balance: number, annualRate: number, payments: number): number {
+function pmt(liability: Liability, balance: number, annualRate: number, payments: number): number {
   if (payments <= 0 || balance <= 0) return 0;
-  const monthlyRate = annualRate / 12;
-  return monthlyRate === 0
-    ? balance / payments
-    : (balance * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -payments));
+  return pmtToTarget(balance, periodicRate(liability, annualRate), payments);
 }
 
 /**
@@ -339,7 +460,9 @@ function amortise(input: AmortiseInput): AmortiseResult {
   let assumed = false;
   if (paymentsToProduce <= 0) return { entries, flags, assumed };
 
-  const monthlyRate = liability.annualRate / 12;
+  const months = monthsPerPeriod(liability);
+  const convention = liability.interestConvention ?? "PROPORTIONAL";
+  const profile = liability.amortisationProfile ?? "AMORTIZING";
   const insurance = insurancePerPayment(liability);
   const fees = feesPerPayment(liability);
   const deferral = deferralOf(liability);
@@ -365,6 +488,36 @@ function amortise(input: AmortiseInput): AmortiseResult {
     }
   }
 
+  // Un taux révisable dont aucune révision future n'est déclarée : le taux du jour ne peut
+  // pas être présenté comme le taux de toute la vie du prêt. Produire un échéancier reste
+  // plus utile que ne rien produire, à condition qu'il s'annonce comme une hypothèse.
+  if (liability.rateType === "VARIABLE") {
+    const lastDeclared = (liability.rateSchedule ?? [])
+      .filter((change) => change.kind === "CONTRACTUAL")
+      .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))
+      .at(-1);
+    const horizon = dueDateOf(liability, Math.trunc(liability.paymentCount));
+    if (!lastDeclared || lastDeclared.effectiveFrom < horizon) {
+      flags.push({
+        code: "VARIABLE_RATE_UNPROJECTABLE",
+        detail: lastDeclared
+          ? `Taux révisable : aucune révision déclarée au-delà du ${frDate(lastDeclared.effectiveFrom)}. Le dernier taux connu est prolongé par hypothèse jusqu'à ${frDate(horizon)}, ce n'est pas une clause du contrat.`
+          : `Taux révisable sans aucune révision déclarée. Le taux actuel de ${(liability.annualRate * 100).toFixed(2)} % est prolongé par hypothèse jusqu'à ${frDate(horizon)} ; le contrat ne le garantit pas.`,
+      });
+      assumed = true;
+    }
+  }
+
+  // Une révision déclarée comme hypothèse n'est pas une clause : la trajectoire en dépend.
+  if ((liability.rateSchedule ?? []).some((change) => change.kind === "ASSUMPTION")) {
+    flags.push({
+      code: "RATE_ASSUMPTION_APPLIED",
+      detail:
+        "Au moins une révision de taux est une hypothèse déclarée, pas un terme du contrat. La trajectoire en dépend.",
+    });
+    assumed = true;
+  }
+
   // Assurance déclarée sans sa convention : l'amortissement dépend d'une hypothèse, il
   // faut donc que l'échéancier le dise, pas seulement un drapeau de la timeline.
   if (
@@ -388,6 +541,9 @@ function amortise(input: AmortiseInput): AmortiseResult {
 
   const applyEvent = (event: LoanEvent, paymentNumber: number) => {
     if (event.type === "CHARGE") {
+      // Frais financé : aucun euro ne sort, l'encours augmente d'autant. Le porter en
+      // `fees` le ferait sortir d'un compte qu'il n'a jamais quitté ; l'omettre ferait
+      // disparaître une dette réellement contractée.
       entries.push(
         entry(liability, {
           paymentNumber,
@@ -396,13 +552,14 @@ function amortise(input: AmortiseInput): AmortiseResult {
           openingBalance: balance,
           interest: 0,
           capitalisedInterest: 0,
+          capitalisedCharges: event.financed ? event.amount : 0,
           principal: 0,
           insurance: 0,
-          fees: event.amount,
-          closingBalance: balance,
+          fees: event.financed ? 0 : event.amount,
           kind: "ACTUAL",
         }),
       );
+      if (event.financed) balance += event.amount;
       return;
     }
     const repayment = event.repayment;
@@ -435,7 +592,7 @@ function amortise(input: AmortiseInput): AmortiseResult {
 
     const remaining = firstPaymentNumber + paymentsToProduce - 1 - paymentNumber;
     if (repayment.outcome === "REDUCE_PAYMENT") {
-      payment = pmt(balance, liability.annualRate, remaining);
+      payment = pmt(liability, balance, annualRateAt(liability, event.date), remaining);
     } else if (repayment.outcome === "UNKNOWN") {
       // Garder la mensualité inchangée est l'hypothèse qui déforme le moins : la mensualité
       // est un terme du contrat, la durée est ce que le remboursement raccourcit.
@@ -447,9 +604,13 @@ function amortise(input: AmortiseInput): AmortiseResult {
     }
   };
 
+  const lastPaymentNumber = firstPaymentNumber + paymentsToProduce - 1;
+  const totalPayments = Math.trunc(liability.paymentCount);
+  let previousDueDate = dueDateOf(liability, firstPaymentNumber - 1);
+
   for (let offset = 0; offset < paymentsToProduce; offset += 1) {
     const paymentNumber = firstPaymentNumber + offset;
-    const dueDate = addMonths(liability.firstPaymentDate, paymentNumber - 1);
+    const dueDate = dueDateOf(liability, paymentNumber);
     lastNumber = paymentNumber;
 
     while (eventIndex < events.length && events[eventIndex].date < dueDate) {
@@ -458,8 +619,28 @@ function amortise(input: AmortiseInput): AmortiseResult {
     }
     if (balance <= CENT) break;
 
-    const accrued = balance * monthlyRate;
+    // Le taux en vigueur est celui de la date d'exigibilité : une révision ne réécrit
+    // jamais les échéances déjà passées.
+    const annualRate = annualRateAt(liability, dueDate);
+    const accrued = periodInterest(
+      balance,
+      annualRate,
+      convention,
+      months,
+      previousDueDate,
+      dueDate,
+    );
+    // Un palier daté remplace le paiement à sa date d'effet, sans toucher au passé. En
+    // l'absence de palier, le paiement courant est conservé : il a pu être recalculé.
+    const stepped = steppedPaymentAt(liability, dueDate);
+    if (stepped !== null) {
+      const deduction =
+        liability.paymentIncludesInsurance === true ? insurancePerPayment(liability) : 0;
+      payment = Math.max(0, stepped - deduction);
+    }
+
     const inDeferral = paymentNumber <= deferral.months;
+    const isFinalPayment = paymentNumber >= Math.min(lastPaymentNumber, totalPayments);
     let interestPaid = 0;
     let capitalised = 0;
     let principal = 0;
@@ -469,20 +650,30 @@ function amortise(input: AmortiseInput): AmortiseResult {
     } else if (inDeferral) {
       // Différé de principal : les intérêts, l'assurance et les frais restent dus.
       interestPaid = accrued;
+    } else if (profile === "INTEREST_ONLY" || (profile === "BULLET" && !isFinalPayment)) {
+      // Seuls les intérêts sont servis : l'encours ne bouge pas.
+      interestPaid = accrued;
+    } else if (profile === "BULLET" && isFinalPayment) {
+      // In fine : tout le capital tombe à la dernière échéance.
+      interestPaid = accrued;
+      principal = balance;
     } else {
       interestPaid = Math.min(accrued, payment);
       capitalised = accrued - interestPaid;
       if (capitalised > CENT && !negativeAmortisationFlagged) {
         flags.push({
           code: "NEGATIVE_AMORTISATION",
-          detail: `À la ${paymentNumber}e échéance, la mensualité amortissante ${EUR.format(payment)} ne couvre pas l'intérêt ${EUR.format(accrued)} : l'encours augmente au lieu de diminuer.`,
+          detail: `À la ${paymentNumber}e échéance, le paiement amortissant ${EUR.format(payment)} ne couvre pas l'intérêt ${EUR.format(accrued)} : l'encours augmente au lieu de diminuer.`,
         });
         negativeAmortisationFlagged = true;
       }
       principal = Math.min(balance, Math.max(0, payment - accrued));
+      if (profile === "BALLOON" && isFinalPayment) {
+        // Le solde résiduel est remboursé en une fois avec la dernière échéance.
+        principal = balance;
+      }
     }
 
-    const closing = balance - principal + capitalised;
     entries.push(
       entry(liability, {
         paymentNumber,
@@ -494,11 +685,11 @@ function amortise(input: AmortiseInput): AmortiseResult {
         principal,
         insurance,
         fees,
-        closingBalance: Math.max(0, closing),
         kind: "DERIVED",
       }),
     );
-    balance = Math.max(0, closing);
+    balance = Math.max(0, balance - principal + capitalised);
+    previousDueDate = dueDate;
 
     while (eventIndex < events.length && events[eventIndex].date === dueDate) {
       applyEvent(events[eventIndex], paymentNumber);
@@ -539,11 +730,12 @@ function fromProvided(liability: Liability, rows: ProvidedScheduleEntry[]): Loan
 }
 
 function chargeEvents(liability: Liability): LoanEvent[] {
-  return (liability.oneOffCharges ?? []).map((charge) => ({
+  return (liability.oneOffCharges ?? []).map((charge: LoanCharge) => ({
     type: "CHARGE" as const,
     date: charge.date,
     amount: charge.amount,
     label: charge.label,
+    financed: charge.financed === true,
   }));
 }
 
@@ -595,7 +787,7 @@ export function elapsedPaymentsAt(liability: Liability, asOfDate: string): numbe
   const total = Math.trunc(liability.paymentCount);
   let elapsed = 0;
   for (let index = 1; index <= total; index += 1) {
-    if (addMonths(liability.firstPaymentDate, index - 1) <= asOfDate) elapsed += 1;
+    if (dueDateOf(liability, index) <= asOfDate) elapsed += 1;
     else break;
   }
   return elapsed;
@@ -791,6 +983,17 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
     });
   }
 
+  if (
+    liability.amortisationProfile === "BALLOON" &&
+    (liability.balloonAmount === null || liability.balloonAmount === undefined)
+  ) {
+    flags.push({
+      code: "BALLOON_AMOUNT_MISSING",
+      detail:
+        "Profil balloon déclaré sans montant de solde final. Sans lui, le paiement courant est indéterminé : le prêt est traité comme amortissable jusqu'à extinction.",
+    });
+  }
+
   const contractual = buildContractualSchedule(liability);
   const forward = buildForwardSchedule(liability, asOfDate);
   flags.push(...contractual.flags, ...forward.flags);
@@ -805,10 +1008,17 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
       ? (paymentRows[0]?.openingBalance ?? liability.principal)
       : (paymentRows.filter((row) => row.dueDate <= asOfDate).at(-1)?.closingBalance ?? 0);
 
+  // L'écart « paiements × nombre − capital » ne veut rien dire hors d'un amortissable à
+  // taux fixe : un in fine ne rembourse rien avant maturité, un balloon laisse un solde.
+  const comparablePayments =
+    !hasProvidedSchedule(liability) &&
+    (liability.amortisationProfile ?? "AMORTIZING") === "AMORTIZING" &&
+    (liability.rateSchedule ?? []).length === 0 &&
+    (liability.paymentSchedule ?? []).length === 0;
   const declaredCount = hasProvidedSchedule(liability)
     ? paymentRows.length
     : Math.trunc(liability.paymentCount);
-  if (!hasProvidedSchedule(liability) && paymentRows.length && paymentRows.length < declaredCount) {
+  if (comparablePayments && paymentRows.length && paymentRows.length < declaredCount) {
     flags.push({
       code: "EARLY_PAYOFF",
       detail: `Le capital est éteint à la ${paymentRows.length}e échéance alors que ${declaredCount} sont annoncées.`,
@@ -843,13 +1053,13 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
   }
 
   const amortising = amortisingPayment(liability);
-  const contractualGap = hasProvidedSchedule(liability)
-    ? 0
-    : amortising * Math.trunc(liability.paymentCount) - liability.principal;
+  const contractualGap = comparablePayments
+    ? amortising * Math.trunc(liability.paymentCount) - liability.principal
+    : 0;
   let impliedChargePerPayment: number | null = null;
   const theoretical = theoreticalPayment(liability);
   if (
-    !hasProvidedSchedule(liability) &&
+    comparablePayments &&
     Math.trunc(liability.paymentCount) > 0 &&
     liability.monthlyPayment > 0 &&
     amortising - theoretical > 0.005
@@ -959,7 +1169,10 @@ export interface DebtServiceBreakdown {
   interest: number;
   capitalisedInterest: number;
   insurance: number;
+  /** Frais décaissés. */
   fees: number;
+  /** Frais incorporés au financement : coût économique sans sortie de trésorerie. */
+  capitalisedCharges: number;
   totalCashOut: number;
   economicCost: number;
 }
@@ -970,6 +1183,7 @@ const EMPTY_BREAKDOWN: DebtServiceBreakdown = {
   capitalisedInterest: 0,
   insurance: 0,
   fees: 0,
+  capitalisedCharges: 0,
   totalCashOut: 0,
   economicCost: 0,
 };
@@ -993,9 +1207,15 @@ export function debtServiceBreakdownForPeriod(
         capitalisedInterest: total.capitalisedInterest + row.capitalisedInterest,
         insurance: total.insurance + row.insurance,
         fees: total.fees + row.fees,
+        capitalisedCharges: total.capitalisedCharges + row.capitalisedCharges,
         totalCashOut: total.totalCashOut + row.totalCashOut,
         economicCost:
-          total.economicCost + row.interest + row.capitalisedInterest + row.insurance + row.fees,
+          total.economicCost +
+          row.interest +
+          row.capitalisedInterest +
+          row.insurance +
+          row.fees +
+          row.capitalisedCharges,
       }),
       { ...EMPTY_BREAKDOWN },
     );

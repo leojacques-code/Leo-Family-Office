@@ -38,6 +38,62 @@ export interface Position {
   provenance: Provenance;
 }
 
+/**
+ * Forme économique du remboursement du capital. Quatre comportements suffisent à couvrir
+ * les produits courants ; le différé, lui, reste une notion distincte car il décrit le
+ * DÉBUT du prêt là où le profil décrit sa forme d'ensemble. Les deux se composent : un
+ * in fine peut très bien démarrer par une franchise totale.
+ */
+export type AmortisationProfile = "AMORTIZING" | "INTEREST_ONLY" | "BULLET" | "BALLOON";
+
+/** Périodicité contractuelle des échéances. Une dette n'est pas nécessairement mensuelle. */
+export type PaymentFrequency = "MONTHLY" | "QUARTERLY" | "SEMIANNUAL" | "ANNUAL";
+
+export const MONTHS_PER_PERIOD: Record<PaymentFrequency, number> = {
+  MONTHLY: 1,
+  QUARTERLY: 3,
+  SEMIANNUAL: 6,
+  ANNUAL: 12,
+};
+
+/**
+ * Convention de calcul des intérêts.
+ *
+ * `PROPORTIONAL` : taux annuel × mois de la période / 12. C'est la convention des prêts
+ * amortissables français et le comportement historique du moteur. Sur un échéancier
+ * régulier, le 30/360 lui est numériquement identique, d'où l'absence d'une troisième
+ * valeur qui ne changerait aucun chiffre.
+ *
+ * `ACTUAL_365` : taux annuel × jours réels de la période / 365. Répandu sur la dette
+ * professionnelle et à taux révisable, où il produit de vrais écarts.
+ */
+export type InterestConvention = "PROPORTIONAL" | "ACTUAL_365";
+
+/** Un taux fixe est connu jusqu'à maturité. Un taux révisable ne l'est pas. */
+export type RateType = "FIXED" | "VARIABLE";
+
+/**
+ * Terme daté : un taux ou un paiement qui change à partir d'une date.
+ *
+ * `CONTRACTUAL` : le contrat l'écrit noir sur blanc. `ASSUMPTION` : c'est nous qui le
+ * supposons. Les deux ne doivent jamais se confondre, sans quoi une hypothèse de taux
+ * finirait par se lire comme une clause.
+ */
+export type DatedTermKind = "CONTRACTUAL" | "ASSUMPTION";
+
+export interface RateChange {
+  effectiveFrom: string;
+  annualRate: number;
+  kind: DatedTermKind;
+}
+
+export interface PaymentChange {
+  effectiveFrom: string;
+  /** Paiement contractuel par échéance à partir de cette date. */
+  amount: number;
+  kind: DatedTermKind;
+}
+
 /** Nature d'un différé de remboursement. */
 export type DeferralKind = "NONE" | "PRINCIPAL_ONLY" | "TOTAL";
 
@@ -80,6 +136,13 @@ export interface LoanCharge {
   date: string;
   amount: number;
   label: string;
+  /**
+   * `true` : le frais est incorporé au financement. Aucune trésorerie ne sort, mais
+   * l'encours augmente d'autant. `false` : il est réglé comptant. Dans les deux cas c'est
+   * un coût économique ; les confondre ferait sortir de la trésorerie qui n'est jamais
+   * sortie, ou ferait disparaître une dette réellement contractée.
+   */
+  financed: boolean;
 }
 
 /**
@@ -106,11 +169,15 @@ export interface Liability {
   currentBalance: number;
   annualRate: number;
   /**
-   * Mensualité déclarée au contrat. Voir `paymentIncludesInsurance` : selon la convention
-   * du prêteur, elle inclut ou non l'assurance emprunteur, ce qui change entièrement la
-   * vitesse d'amortissement.
+   * Paiement contractuel PAR ÉCHÉANCE, pas nécessairement par mois : voir
+   * `paymentFrequency`. Le nom reste `monthlyPayment` pour ne pas casser la persistance
+   * d'une donnée déjà en place, l'immense majorité des prêts du dossier étant mensuels.
+   *
+   * Voir aussi `paymentIncludesInsurance` : selon la convention du prêteur, ce montant
+   * inclut ou non l'assurance emprunteur, ce qui change la vitesse d'amortissement.
    */
   monthlyPayment: number;
+  /** Nombre d'ÉCHÉANCES, pas de mois. Un prêt annuel sur 10 ans en compte 10. */
   paymentCount: number;
   firstPaymentDate: string;
   maturityDate: string;
@@ -125,10 +192,33 @@ export interface Liability {
    */
   paymentIncludesInsurance: boolean | null;
   deferral: LoanDeferral | null;
+  /** Forme du remboursement du capital. `AMORTIZING` reproduit le comportement historique. */
+  amortisationProfile: AmortisationProfile;
+  /**
+   * Capital restant dû à la dernière échéance, remboursé en une fois. Requis par le profil
+   * `BALLOON`. `null` sur les autres profils, où il n'a pas de sens.
+   */
+  balloonAmount: number | null;
+  paymentFrequency: PaymentFrequency;
+  interestConvention: InterestConvention;
+  rateType: RateType;
+  /**
+   * Changements de taux datés. Un `annualRate` de la dette reste le taux en vigueur au
+   * départ ; ces entrées le remplacent à partir de leur date, sans effet rétroactif.
+   */
+  rateSchedule: RateChange[];
+  /** Changements de paiement datés : step-up, step-down, avenant. */
+  paymentSchedule: PaymentChange[];
   earlyRepayments: EarlyRepayment[];
   oneOffCharges: LoanCharge[];
   /** Échéancier bancaire réel. Vide tant qu'aucun n'a été importé. */
   providedSchedule: ProvidedScheduleEntry[];
+  /**
+   * Rattachement à un concours multi-tranches. Une tranche reste une `Liability` à part
+   * entière, avec son taux, sa maturité et son amortissement : les fondre dans un objet
+   * polymorphe rendrait le moteur beaucoup plus difficile à raisonner pour un gain nul.
+   */
+  facilityId: string | null;
   provenance: Provenance;
 }
 
@@ -154,12 +244,17 @@ export interface LoanScheduleEntry {
    * de la trésorerie mais appauvrit bien le patrimoine, d'où sa comptabilisation séparée.
    */
   capitalisedInterest: number;
+  /**
+   * Frais incorporés au financement : aucune sortie de trésorerie, mais l'encours augmente.
+   * Séparés de `fees`, qui sont décaissés, pour que les deux invariants tiennent ensemble.
+   */
+  capitalisedCharges: number;
   principal: number;
   insurance: number;
   fees: number;
   /** Ce qui sort réellement du compte : principal + interest + insurance + fees. */
   totalCashOut: number;
-  /** closingBalance = openingBalance − principal + capitalisedInterest. */
+  /** closingBalance = openingBalance − principal + capitalisedInterest + capitalisedCharges. */
   closingBalance: number;
   kind: DataKind;
 }

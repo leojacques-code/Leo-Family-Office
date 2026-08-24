@@ -137,7 +137,19 @@ CREATE TABLE IF NOT EXISTS liabilities (
   payment_count INTEGER NOT NULL,
   first_payment_date TEXT NOT NULL,
   maturity_date TEXT NOT NULL,
-  rate_type TEXT NOT NULL DEFAULT 'FIXED',
+  rate_type TEXT NOT NULL DEFAULT 'FIXED'
+    CHECK (rate_type IN ('FIXED', 'VARIABLE')),
+  -- Forme du remboursement et périodicité. Les défauts reproduisent le comportement
+  -- historique : amortissable mensuel à taux proportionnel.
+  amortisation_profile TEXT NOT NULL DEFAULT 'AMORTIZING'
+    CHECK (amortisation_profile IN ('AMORTIZING', 'INTEREST_ONLY', 'BULLET', 'BALLOON')),
+  balloon_amount REAL,
+  payment_frequency TEXT NOT NULL DEFAULT 'MONTHLY'
+    CHECK (payment_frequency IN ('MONTHLY', 'QUARTERLY', 'SEMIANNUAL', 'ANNUAL')),
+  interest_convention TEXT NOT NULL DEFAULT 'PROPORTIONAL'
+    CHECK (interest_convention IN ('PROPORTIONAL', 'ACTUAL_365')),
+  -- Une tranche reste une dette à part entière ; ceci ne fait que les regrouper.
+  facility_id TEXT,
   -- Termes optionnels du contrat. NULL signifie « non renseigné », jamais « zéro » :
   -- c'est cette distinction qui permet au moteur de signaler une ambiguïté.
   monthly_insurance REAL,
@@ -171,7 +183,31 @@ CREATE TABLE IF NOT EXISTS loan_charges (
   liability_id TEXT NOT NULL REFERENCES liabilities(id),
   charge_date TEXT NOT NULL,
   amount REAL NOT NULL,
-  label TEXT NOT NULL
+  label TEXT NOT NULL,
+  -- 1 : frais incorporé au financement, aucun décaissement mais l'encours augmente.
+  financed INTEGER NOT NULL DEFAULT 0
+);
+
+-- Termes datés : un taux ou un paiement qui change à partir d'une date.
+-- term_kind distingue une clause du contrat d'une hypothèse que nous posons.
+CREATE TABLE IF NOT EXISTS loan_rate_changes (
+  id TEXT PRIMARY KEY,
+  liability_id TEXT NOT NULL REFERENCES liabilities(id),
+  effective_from TEXT NOT NULL,
+  annual_rate REAL NOT NULL,
+  term_kind TEXT NOT NULL DEFAULT 'CONTRACTUAL'
+    CHECK (term_kind IN ('CONTRACTUAL', 'ASSUMPTION')),
+  UNIQUE(liability_id, effective_from)
+);
+
+CREATE TABLE IF NOT EXISTS loan_payment_changes (
+  id TEXT PRIMARY KEY,
+  liability_id TEXT NOT NULL REFERENCES liabilities(id),
+  effective_from TEXT NOT NULL,
+  amount REAL NOT NULL,
+  term_kind TEXT NOT NULL DEFAULT 'CONTRACTUAL'
+    CHECK (term_kind IN ('CONTRACTUAL', 'ASSUMPTION')),
+  UNIQUE(liability_id, effective_from)
 );
 
 -- Échéancier stocké. Seules les lignes kind='ACTUAL' constituent un échéancier bancaire

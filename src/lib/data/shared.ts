@@ -7,12 +7,19 @@ import type {
   DeferralKind,
   DeferredInterestTreatment,
   EarlyRepayment,
+  AmortisationProfile,
+  DatedTermKind,
   EarlyRepaymentOutcome,
+  InterestConvention,
   LedgerCoverageSource,
   Liability,
   LoanCharge,
   LoanDeferral,
+  PaymentChange,
+  PaymentFrequency,
   ProvidedScheduleEntry,
+  RateChange,
+  RateType,
   ExpenseCategory,
   FinancialAccount,
   IncomeSource,
@@ -77,16 +84,30 @@ const boolOrNull = (value: unknown): boolean | null =>
  */
 export function readLoanTerms(
   row: Row,
-  related: { schedules?: Row[]; earlyRepayments?: Row[]; charges?: Row[] } = {},
+  related: {
+    schedules?: Row[];
+    earlyRepayments?: Row[];
+    charges?: Row[];
+    rateChanges?: Row[];
+    paymentChanges?: Row[];
+  } = {},
 ): Pick<
   Liability,
   | "monthlyInsurance"
   | "recurringFees"
   | "paymentIncludesInsurance"
   | "deferral"
+  | "amortisationProfile"
+  | "balloonAmount"
+  | "paymentFrequency"
+  | "interestConvention"
+  | "rateType"
+  | "rateSchedule"
+  | "paymentSchedule"
   | "earlyRepayments"
   | "oneOffCharges"
   | "providedSchedule"
+  | "facilityId"
 > {
   const liabilityId = String(row.id);
   const deferralKind = (row.deferral_kind ?? "NONE") as DeferralKind;
@@ -136,17 +157,47 @@ export function readLoanTerms(
       date: String(line.charge_date),
       amount: Number(line.amount),
       label: String(line.label),
+      financed: Boolean(line.financed),
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
+
+  const rateSchedule: RateChange[] = (related.rateChanges ?? [])
+    .filter((line) => String(line.liability_id) === liabilityId)
+    .map((line) => ({
+      effectiveFrom: String(line.effective_from),
+      annualRate: Number(line.annual_rate),
+      kind: (line.term_kind ?? "CONTRACTUAL") as DatedTermKind,
+    }))
+    .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
+
+  const paymentSchedule: PaymentChange[] = (related.paymentChanges ?? [])
+    .filter((line) => String(line.liability_id) === liabilityId)
+    .map((line) => ({
+      effectiveFrom: String(line.effective_from),
+      amount: Number(line.amount),
+      kind: (line.term_kind ?? "CONTRACTUAL") as DatedTermKind,
+    }))
+    .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
 
   return {
     monthlyInsurance: numberOrNull(row.monthly_insurance),
     recurringFees: numberOrNull(row.recurring_fees),
     paymentIncludesInsurance: boolOrNull(row.payment_includes_insurance),
     deferral,
+    // Défauts qui reproduisent le comportement historique : amortissable mensuel à taux
+    // fixe proportionnel. Une base antérieure à Debt V2.1 continue donc de calculer juste.
+    amortisationProfile: (row.amortisation_profile ?? "AMORTIZING") as AmortisationProfile,
+    balloonAmount: numberOrNull(row.balloon_amount),
+    paymentFrequency: (row.payment_frequency ?? "MONTHLY") as PaymentFrequency,
+    interestConvention: (row.interest_convention ?? "PROPORTIONAL") as InterestConvention,
+    rateType: (row.rate_type ?? "FIXED") as RateType,
+    rateSchedule,
+    paymentSchedule,
     earlyRepayments,
     oneOffCharges,
     providedSchedule,
+    facilityId:
+      row.facility_id === null || row.facility_id === undefined ? null : String(row.facility_id),
   };
 }
 

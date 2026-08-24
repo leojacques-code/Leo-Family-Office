@@ -6,6 +6,7 @@ import {
   buildLoanTimeline,
   debtServiceForPeriod,
   elapsedPaymentsAt,
+  monthBounds,
   monthlyDebtServiceAt,
   nextDebtEvent,
   outstandingBalanceAt,
@@ -13,6 +14,8 @@ import {
   amortisingPayment,
   debtServiceBreakdownForPeriod,
   projectedBalanceAt,
+  annualRateAt,
+  dueDateOf,
   UNDECLARED_LOAN_TERMS,
 } from "@/lib/engine/debt";
 import type { Liability, LoanScheduleEntry, Provenance } from "@/lib/types";
@@ -312,7 +315,10 @@ function expectEntryInvariants(schedule: { entries: LoanScheduleEntry[] }) {
       6,
     );
     expect(row.closingBalance).toBeCloseTo(
-      Math.max(0, row.openingBalance - row.principal + row.capitalisedInterest),
+      Math.max(
+        0,
+        row.openingBalance - row.principal + row.capitalisedInterest + row.capitalisedCharges,
+      ),
       6,
     );
     expect(row.closingBalance).toBeGreaterThanOrEqual(-1e-9);
@@ -437,7 +443,14 @@ describe("CASE D7 — frais", () => {
       monthlyPayment: 703.25,
       recurringFees: 3,
       oneOffCharges: [
-        { id: "chg1", liabilityId: "lia_v2", date: "2026-09-20", amount: 900, label: "Dossier" },
+        {
+          id: "chg1",
+          liabilityId: "lia_v2",
+          date: "2026-09-20",
+          amount: 900,
+          label: "Dossier",
+          financed: false,
+        },
       ],
     });
     const schedule = buildContractualSchedule(liability);
@@ -1071,5 +1084,381 @@ describe("CASE D18 — propagation des hypothèses", () => {
     // Le document bancaire ne prévoit pas ce remboursement : ses prélèvements postérieurs
     // ne sont plus ceux qu'il annonce.
     expect(buildForwardSchedule(avecEvenement, "2026-08-19").kind).toBe("MODEL_ASSUMPTION");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// DEBT V2.1 — couverture contractuelle élargie
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+describe("CASE E-A — amortissable standard inchangé", () => {
+  it("produit exactement le même échéancier qu’avant l’extension", () => {
+    const liability = loan({ monthlyPayment: 702.13 });
+    const schedule = buildContractualSchedule(liability);
+    expect(schedule.kind).toBe("DERIVED");
+    expect(schedule.entries).toHaveLength(240);
+    expect(schedule.entries[0].interest).toBeCloseTo((120000 * 0.036) / 12, 6);
+    expect(schedule.entries[0].principal).toBeCloseTo(702.13 - 360, 6);
+    // 702,13 € déclarés au lieu de 702,1337 : le résidu d'arrondi est le comportement
+    // historique, inchangé par l'extension.
+    expect(schedule.entries.at(-1)?.closingBalance).toBeLessThan(2);
+    expectEntryInvariants(schedule);
+  });
+});
+
+describe("CASE E-B — interest-only", () => {
+  it("ne rembourse aucun capital et laisse l’encours stable", () => {
+    const liability = loan({ amortisationProfile: "INTEREST_ONLY", paymentCount: 24 });
+    const schedule = buildContractualSchedule(liability);
+    expect(schedule.entries).toHaveLength(24);
+    for (const row of schedule.entries) {
+      expect(row.principal).toBeCloseTo(0, 9);
+      expect(row.interest).toBeCloseTo((120000 * 0.036) / 12, 6);
+      expect(row.closingBalance).toBeCloseTo(120000, 6);
+    }
+    // Aucun capital remboursé : l'encours final est le capital emprunté.
+    expect(schedule.totalInterest).toBeCloseTo(24 * 360, 4);
+    expectEntryInvariants(schedule);
+  });
+});
+
+describe("CASE E-C — in fine / bullet", () => {
+  it("garde le capital intact puis le rembourse à maturité", () => {
+    const liability = loan({ amortisationProfile: "BULLET", paymentCount: 24 });
+    const schedule = buildContractualSchedule(liability);
+    expect(schedule.entries).toHaveLength(24);
+    for (const row of schedule.entries.slice(0, 23)) {
+      expect(row.principal).toBeCloseTo(0, 9);
+      expect(row.closingBalance).toBeCloseTo(120000, 6);
+    }
+    const derniere = schedule.entries[23];
+    expect(derniere.principal).toBeCloseTo(120000, 6);
+    expect(derniere.interest).toBeCloseTo(360, 6);
+    expect(derniere.totalCashOut).toBeCloseTo(120360, 6);
+    expect(derniere.closingBalance).toBeCloseTo(0, 6);
+    expectEntryInvariants(schedule);
+  });
+
+  it("le remboursement final est neutre au patrimoine hors coût", () => {
+    const liability = loan({ amortisationProfile: "BULLET", paymentCount: 24 });
+    const asOf = "2026-08-19";
+    const derniere = dueDateOf(liability, 24);
+    const mois = monthBounds(derniere);
+    const b = debtServiceBreakdownForPeriod([liability], asOf, mois.start, mois.end);
+    expect(b.totalCashOut).toBeCloseTo(120360, 6);
+    expect(b.principal).toBeCloseTo(120000, 6);
+    // Seuls 360 € appauvrissent : les 120 000 € éteignent un passif.
+    expect(b.economicCost).toBeCloseTo(360, 6);
+  });
+});
+
+describe("CASE E-D — balloon", () => {
+  it("amortit partiellement puis solde le résiduel à la dernière échéance", () => {
+    const liability = loan({
+      amortisationProfile: "BALLOON",
+      balloonAmount: 60000,
+      paymentCount: 60,
+      monthlyPayment: 0,
+    });
+    const schedule = buildContractualSchedule(liability);
+    expect(schedule.entries).toHaveLength(60);
+    // Amortissement réel pendant la vie du prêt, mais partiel.
+    expect(schedule.entries[0].principal).toBeGreaterThan(0);
+    // À mi-vie, une partie seulement du capital est remboursée : c'est ce qui distingue le
+    // balloon de l'in fine.
+    expect(schedule.entries[29].closingBalance).toBeLessThan(120000);
+    expect(schedule.entries[29].closingBalance).toBeGreaterThan(60000);
+    // Le paiement courant amortit vers le solde cible, atteint à la dernière échéance.
+    const avantDerniere = schedule.entries[58];
+    const derniere = schedule.entries[59];
+    expect(avantDerniere.closingBalance - derniere.interest).toBeGreaterThan(60000);
+    expect(derniere.principal).toBeCloseTo(avantDerniere.closingBalance, 4);
+    expect(derniere.principal).toBeGreaterThan(60000);
+    expect(derniere.closingBalance).toBeCloseTo(0, 6);
+    expectEntryInvariants(schedule);
+  });
+
+  it("signale un profil balloon sans montant de solde final", () => {
+    const timeline = buildLoanTimeline(
+      loan({ amortisationProfile: "BALLOON", balloonAmount: null, monthlyPayment: 0 }),
+      "2026-08-19",
+    );
+    expect(timeline.flags.some((flag) => flag.code === "BALLOON_AMOUNT_MISSING")).toBe(true);
+  });
+});
+
+describe("CASE E-E — échéance trimestrielle", () => {
+  const liability = loan({
+    paymentFrequency: "QUARTERLY",
+    paymentCount: 20,
+    monthlyPayment: 0,
+    firstPaymentDate: "2026-09-05",
+  });
+
+  it("date les échéances tous les trois mois", () => {
+    const schedule = buildContractualSchedule(liability);
+    expect(schedule.entries.slice(0, 4).map((row) => row.dueDate)).toEqual([
+      "2026-09-05",
+      "2026-12-05",
+      "2027-03-05",
+      "2027-06-05",
+    ]);
+    // L'intérêt d'une période trimestrielle couvre trois mois.
+    expect(schedule.entries[0].interest).toBeCloseTo((120000 * 0.036 * 3) / 12, 6);
+    expect(schedule.entries.at(-1)?.closingBalance).toBeCloseTo(0, 2);
+    expectEntryInvariants(schedule);
+  });
+
+  it("ne facture rien dans les mois sans échéance", () => {
+    const asOf = "2026-08-19";
+    expect(debtServiceForPeriod([liability], asOf, "2026-10-01", "2026-10-31")).toBeCloseTo(0, 9);
+    expect(debtServiceForPeriod([liability], asOf, "2026-11-01", "2026-11-30")).toBeCloseTo(0, 9);
+    const decembre = debtServiceForPeriod([liability], asOf, "2026-12-01", "2026-12-31");
+    expect(decembre).toBeGreaterThan(0);
+    // Aucun lissage : le trimestre entier tombe sur un seul mois.
+    const trimestre = debtServiceForPeriod([liability], asOf, "2026-10-01", "2026-12-31");
+    expect(trimestre).toBeCloseTo(decembre, 9);
+  });
+});
+
+describe("CASE E-F — changement de taux connu", () => {
+  it("applique le nouveau taux à sa date, sans effet rétroactif", () => {
+    const liability = loan({
+      monthlyPayment: 702.13,
+      rateType: "VARIABLE",
+      rateSchedule: [
+        { effectiveFrom: "2028-01-01", annualRate: 0.05, kind: "CONTRACTUAL" },
+        { effectiveFrom: "2046-09-01", annualRate: 0.05, kind: "CONTRACTUAL" },
+      ],
+    });
+    expect(annualRateAt(liability, "2027-12-31")).toBeCloseTo(0.036, 9);
+    expect(annualRateAt(liability, "2028-01-01")).toBeCloseTo(0.05, 9);
+    const schedule = buildContractualSchedule(liability);
+    const avant = schedule.entries.find((row) => row.dueDate === "2027-12-05");
+    const apres = schedule.entries.find((row) => row.dueDate === "2028-01-05");
+    expect(avant?.interest).toBeCloseTo((avant!.openingBalance * 0.036) / 12, 6);
+    expect(apres?.interest).toBeCloseTo((apres!.openingBalance * 0.05) / 12, 6);
+    // La hausse de taux ralentit l'amortissement à paiement constant.
+    expect(apres!.principal).toBeLessThan(avant!.principal);
+    expectEntryInvariants(schedule);
+  });
+});
+
+describe("CASE E-G — taux révisable non projetable", () => {
+  it("n’érige jamais le taux du jour en certitude contractuelle", () => {
+    const liability = loan({ monthlyPayment: 702.13, rateType: "VARIABLE", rateSchedule: [] });
+    const timeline = buildLoanTimeline(liability, "2026-08-19");
+    expect(timeline.flags.some((flag) => flag.code === "VARIABLE_RATE_UNPROJECTABLE")).toBe(true);
+    expect(timeline.contractual.kind).toBe("MODEL_ASSUMPTION");
+    expect(timeline.forward.kind).toBe("MODEL_ASSUMPTION");
+    expect(
+      timeline.contractual.entries
+        .filter((row) => row.entryKind === "PAYMENT")
+        .every((row) => row.kind === "MODEL_ASSUMPTION"),
+    ).toBe(true);
+  });
+
+  it("une hypothèse de taux déclarée reste une hypothèse, pas une clause", () => {
+    const liability = loan({
+      monthlyPayment: 702.13,
+      rateType: "VARIABLE",
+      rateSchedule: [{ effectiveFrom: "2030-01-01", annualRate: 0.055, kind: "ASSUMPTION" }],
+    });
+    const timeline = buildLoanTimeline(liability, "2026-08-19");
+    expect(timeline.flags.some((flag) => flag.code === "RATE_ASSUMPTION_APPLIED")).toBe(true);
+    expect(timeline.contractual.kind).toBe("MODEL_ASSUMPTION");
+  });
+
+  it("un taux fixe sans révision ne déclenche aucune hypothèse", () => {
+    const timeline = buildLoanTimeline(loan({ monthlyPayment: 702.13 }), "2026-08-19");
+    expect(timeline.flags.some((flag) => flag.code === "VARIABLE_RATE_UNPROJECTABLE")).toBe(false);
+    expect(timeline.contractual.kind).toBe("DERIVED");
+  });
+});
+
+describe("CASE E-H — paiement évolutif", () => {
+  it("change de montant exactement à la date prévue", () => {
+    const liability = loan({
+      monthlyPayment: 702.13,
+      paymentSchedule: [{ effectiveFrom: "2029-01-01", amount: 900, kind: "CONTRACTUAL" }],
+    });
+    const schedule = buildContractualSchedule(liability);
+    const avant = schedule.entries.find((row) => row.dueDate === "2028-12-05");
+    const apres = schedule.entries.find((row) => row.dueDate === "2029-01-05");
+    expect(avant!.principal + avant!.interest).toBeCloseTo(702.13, 6);
+    expect(apres!.principal + apres!.interest).toBeCloseTo(900, 6);
+    // Le step-up éteint le prêt avant la 240e échéance.
+    expect(schedule.entries.length).toBeLessThan(240);
+    expect(schedule.entries.at(-1)?.closingBalance).toBeCloseTo(0, 2);
+    expectEntryInvariants(schedule);
+  });
+});
+
+describe("CASE E-I / E-J — frais payés cash contre frais financés", () => {
+  const charge = (financed: boolean) => ({
+    id: "c1",
+    liabilityId: "lia_v2",
+    date: "2026-09-20",
+    amount: 900,
+    label: "Frais de dossier",
+    financed,
+  });
+
+  it("un frais payé cash sort du compte et n’augmente pas la dette", () => {
+    const liability = loan({ monthlyPayment: 702.13, oneOffCharges: [charge(false)] });
+    const b = debtServiceBreakdownForPeriod([liability], "2026-08-19", "2026-09-01", "2026-09-30");
+    expect(b.fees).toBeCloseTo(900, 6);
+    expect(b.capitalisedCharges).toBeCloseTo(0, 9);
+    expect(b.totalCashOut).toBeCloseTo(702.13 + 900, 6);
+    expect(b.economicCost).toBeCloseTo(360 + 900, 6);
+  });
+
+  it("un frais financé n’est pas décaissé mais alourdit l’encours", () => {
+    const liability = loan({ monthlyPayment: 702.13, oneOffCharges: [charge(true)] });
+    const b = debtServiceBreakdownForPeriod([liability], "2026-08-19", "2026-09-01", "2026-09-30");
+    // Aucun euro supplémentaire ne sort : seule l'échéance est décaissée.
+    expect(b.totalCashOut).toBeCloseTo(702.13, 6);
+    expect(b.fees).toBeCloseTo(0, 9);
+    expect(b.capitalisedCharges).toBeCloseTo(900, 6);
+    // Mais c'est bien un coût : il appauvrit par la dette, pas par la trésorerie.
+    expect(b.economicCost).toBeCloseTo(360 + 900, 6);
+    // Aucun double comptage : l'encours monte d'exactement 900 €.
+    const forward = buildForwardSchedule(liability, "2026-08-19");
+    const ligne = forward.entries.find((row) => row.entryKind === "CHARGE");
+    expect(ligne?.closingBalance).toBeCloseTo(ligne!.openingBalance + 900, 6);
+    const apres = forward.entries.find(
+      (row) => row.entryKind === "PAYMENT" && row.dueDate === "2026-10-05",
+    );
+    const avant = forward.entries.find(
+      (row) => row.entryKind === "PAYMENT" && row.dueDate === "2026-09-05",
+    );
+    expect(apres!.openingBalance - avant!.closingBalance).toBeCloseTo(900, 6);
+    expectEntryInvariants(forward);
+  });
+});
+
+describe("CASE E-L — neutralité patrimoniale sur bullet et balloon", () => {
+  it("le principal final ne détruit aucun patrimoine", () => {
+    for (const liability of [
+      loan({ amortisationProfile: "BULLET", paymentCount: 12 }),
+      loan({
+        amortisationProfile: "BALLOON",
+        balloonAmount: 80000,
+        paymentCount: 12,
+        monthlyPayment: 0,
+      }),
+    ]) {
+      const schedule = buildContractualSchedule(liability);
+      const principalTotal = schedule.entries.reduce((sum, row) => sum + row.principal, 0);
+      // Tout le capital est bien remboursé, ni plus ni moins.
+      expect(principalTotal).toBeCloseTo(120000, 2);
+      expect(schedule.entries.at(-1)?.closingBalance).toBeCloseTo(0, 4);
+      expectEntryInvariants(schedule);
+    }
+  });
+});
+
+describe("CASE E-P — extinction totale par remboursement anticipé", () => {
+  it("solde le prêt et n’émet plus aucune échéance ensuite", () => {
+    const liability = loan({
+      monthlyPayment: 702.13,
+      currentBalance: 100000,
+      earlyRepayments: [
+        {
+          id: "payoff",
+          liabilityId: "lia_v2",
+          date: "2030-06-15",
+          amount: 200000,
+          penalty: 1500,
+          outcome: "SHORTEN_TERM",
+        },
+      ],
+    });
+    const forward = buildForwardSchedule(liability, "2030-01-10");
+    const payoff = forward.entries.find((row) => row.entryKind === "EARLY_REPAYMENT");
+    // On ne rembourse jamais plus que l'encours, même si le montant déclaré le dépasse.
+    expect(payoff!.principal).toBeLessThanOrEqual(100000);
+    expect(payoff!.closingBalance).toBeCloseTo(0, 6);
+    expect(payoff!.fees).toBeCloseTo(1500, 6);
+    expect(forward.entries.filter((row) => row.dueDate > "2030-06-15")).toHaveLength(0);
+    expectEntryInvariants(forward);
+  });
+});
+
+describe("CASE E-Q — convention de calcul des intérêts", () => {
+  it("ACTUAL_365 compte les jours réels, PROPORTIONAL les mois", () => {
+    const base = { monthlyPayment: 0, paymentCount: 4, paymentFrequency: "QUARTERLY" as const };
+    const proportionnel = buildContractualSchedule(loan(base));
+    const jours = buildContractualSchedule(loan({ ...base, interestConvention: "ACTUAL_365" }));
+    // Un trimestre de 92 jours porte plus d'intérêt qu'un quart d'année théorique.
+    expect(proportionnel.entries[0].interest).toBeCloseTo((120000 * 0.036 * 3) / 12, 6);
+    const premierTrimestre = 92;
+    expect(jours.entries[0].interest).toBeCloseTo((120000 * 0.036 * premierTrimestre) / 365, 4);
+    expect(jours.entries[0].interest).not.toBeCloseTo(proportionnel.entries[0].interest, 2);
+    expectEntryInvariants(jours);
+  });
+});
+
+describe("CASE E-R — regroupement multi-tranches", () => {
+  it("chaque tranche reste une dette autonome, le service de dette s’additionne", () => {
+    const trancheA = loan({
+      id: "tA",
+      facilityId: "fac_1",
+      monthlyPayment: 702.13,
+      firstPaymentDate: "2026-09-05",
+    });
+    const trancheB = loan({
+      id: "tB",
+      facilityId: "fac_1",
+      principal: 50000,
+      currentBalance: 50000,
+      annualRate: 0.05,
+      amortisationProfile: "BULLET",
+      paymentCount: 60,
+      monthlyPayment: 0,
+      firstPaymentDate: "2026-09-05",
+    });
+    const b = debtServiceBreakdownForPeriod(
+      [trancheA, trancheB],
+      "2026-08-19",
+      "2026-09-01",
+      "2026-09-30",
+    );
+    // Taux, maturité et profil diffèrent : rien n'est fondu dans une moyenne.
+    expect(b.interest).toBeCloseTo((120000 * 0.036) / 12 + (50000 * 0.05) / 12, 6);
+    expect(b.principal).toBeCloseTo(702.13 - 360, 6);
+    expect(trancheA.facilityId).toBe(trancheB.facilityId);
+  });
+});
+
+describe("CASE E-O — non-régression du prêt étudiant", () => {
+  it("garde exactement le comportement validé en Debt V2", () => {
+    // Le prêt du dossier n'a aucun terme V2.1 déclaré : profil, périodicité et convention
+    // reprennent leurs valeurs par défaut, qui reproduisent le moteur d'origine.
+    expect(studentLoan.amortisationProfile).toBe("AMORTIZING");
+    expect(studentLoan.paymentFrequency).toBe("MONTHLY");
+    expect(studentLoan.interestConvention).toBe("PROPORTIONAL");
+    expect(studentLoan.rateType).toBe("FIXED");
+
+    const timeline = buildLoanTimeline(studentLoan, "2026-08-19");
+    expect(timeline.contractual.kind).toBe("DERIVED");
+    expect(timeline.contractualGap).toBeCloseTo(338.2, 2);
+    expect(timeline.impliedChargePerPayment).toBeCloseTo(338.2 / 60, 4);
+    expect(timeline.contractual.entries).toHaveLength(59);
+    expect(timeline.contractual.entries[0].dueDate).toBe("2026-12-05");
+    expect(timeline.contractual.entries[0].principal).toBeCloseTo(284.72, 6);
+    expect(timeline.contractual.entries[0].interest).toBeCloseTo(0, 9);
+    expect(monthlyDebtServiceAt([studentLoan], "2026-08-19")).toBeCloseTo(0, 9);
+    expect(monthlyDebtServiceAt([studentLoan], "2026-12-15")).toBeCloseTo(284.72, 6);
+    expectEntryInvariants(timeline.contractual);
+  });
+
+  it("se réconcilie toujours en déclarant l’assurance implicite", () => {
+    const apres = buildLoanTimeline(
+      { ...studentLoan, monthlyInsurance: 5.64, paymentIncludesInsurance: true },
+      "2026-08-19",
+    );
+    expect(apres.contractualGap).toBeCloseTo(-0.2, 2);
+    expect(apres.contractual.entries[0].totalCashOut).toBeCloseTo(284.72, 6);
   });
 });

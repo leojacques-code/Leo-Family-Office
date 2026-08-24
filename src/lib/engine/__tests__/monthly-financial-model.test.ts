@@ -57,6 +57,7 @@ function assumptions(
 const noDebt = {
   interest: 0,
   capitalisedInterest: 0,
+  capitalisedCharges: 0,
   principal: 0,
   insurance: 0,
   fees: 0,
@@ -1024,5 +1025,122 @@ describe("CASE DM3 — le calendrier de dette transporte l’intérêt capitalis
     for (const state of model.states.slice(1)) {
       expect(state.attributionResidual).toBeCloseTo(0, 6);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// DEBT V2.1 — les nouveaux profils traversent toute la chaîne
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+function debtLoan(overrides: Partial<Liability>): Liability {
+  return {
+    id: "lia_v21",
+    name: "Prêt",
+    lender: "Banque",
+    principal: 120000,
+    currentBalance: 120000,
+    annualRate: 0.036,
+    monthlyPayment: 0,
+    paymentCount: 24,
+    firstPaymentDate: "2026-09-05",
+    maturityDate: "2028-08-05",
+    ...UNDECLARED_LOAN_TERMS,
+    provenance,
+    ...overrides,
+  };
+}
+
+describe("CASE DM4 — in fine à travers le bilan mensuel", () => {
+  it("laisse la dette intacte puis la solde d’un coup, sans détruire de patrimoine", () => {
+    const liability = debtLoan({ amortisationProfile: "BULLET", paymentCount: 24 });
+    const model = runMonthlyModel({
+      opening: opening({ bankCash: 200000, loanBalance: 120000 }),
+      liabilities: [liability],
+      assumptions: assumptions({ operatingSurplus: 0 }),
+      months: 24,
+      marketReturn: () => 0,
+    });
+    // Pendant toute la vie du prêt, seul l'intérêt sort et la dette ne bouge pas.
+    const courant = model.states[5];
+    expect(courant.principalPaid).toBeCloseTo(0, 9);
+    expect(courant.debtCashOut).toBeCloseTo(360, 6);
+    expect(courant.loanBalance).toBeCloseTo(120000, 6);
+    expect(courant.netWorthChange).toBeCloseTo(-360, 6);
+
+    // À maturité, 120 360 € sortent et la dette s'éteint : seul l'intérêt appauvrit.
+    const maturite = model.states[24];
+    expect(maturite.debtCashOut).toBeCloseTo(120360, 6);
+    expect(maturite.principalPaid).toBeCloseTo(120000, 6);
+    expect(maturite.loanBalance).toBeCloseTo(0, 6);
+    expect(maturite.economicDebtCosts).toBeCloseTo(360, 6);
+    expect(maturite.netWorthChange).toBeCloseTo(-360, 6);
+    for (const state of model.states.slice(1)) {
+      expect(state.attributionResidual).toBeCloseTo(0, 6);
+    }
+  });
+});
+
+describe("CASE DM5 — dette trimestrielle à travers le bilan mensuel", () => {
+  it("ne facture rien les mois sans échéance, sans lissage", () => {
+    const liability = debtLoan({
+      paymentFrequency: "QUARTERLY",
+      paymentCount: 8,
+      maturityDate: "2028-06-05",
+    });
+    const calendar = buildDebtCalendar([liability], "2026-08-19", 6);
+    // Septembre porte l'échéance, octobre et novembre sont vides, décembre reprend.
+    expect(calendar[1].cashOut).toBeGreaterThan(0);
+    expect(calendar[2].cashOut).toBeCloseTo(0, 9);
+    expect(calendar[3].cashOut).toBeCloseTo(0, 9);
+    expect(calendar[4].cashOut).toBeGreaterThan(0);
+
+    const model = runMonthlyModel({
+      opening: opening({ bankCash: 100000, loanBalance: 120000 }),
+      liabilities: [liability],
+      assumptions: assumptions({ operatingSurplus: 0 }),
+      months: 6,
+      marketReturn: () => 0,
+    });
+    expect(model.states[2].debtCashOut).toBeCloseTo(0, 9);
+    expect(model.states[2].loanBalance).toBeCloseTo(model.states[1].loanBalance, 9);
+    expect(model.states[4].debtCashOut).toBeGreaterThan(0);
+    for (const state of model.states.slice(1)) {
+      expect(state.attributionResidual).toBeCloseTo(0, 6);
+    }
+  });
+});
+
+describe("CASE DM6 — frais financé à travers le bilan mensuel", () => {
+  it("n’entame pas la trésorerie, alourdit la dette, appauvrit d’autant", () => {
+    const liability = debtLoan({
+      monthlyPayment: 0,
+      amortisationProfile: "INTEREST_ONLY",
+      oneOffCharges: [
+        {
+          id: "c",
+          liabilityId: "lia_v21",
+          date: "2026-09-20",
+          amount: 900,
+          label: "Frais financés",
+          financed: true,
+        },
+      ],
+    });
+    const model = runMonthlyModel({
+      opening: opening({ bankCash: 50000, loanBalance: 120000 }),
+      liabilities: [liability],
+      assumptions: assumptions({ operatingSurplus: 0 }),
+      months: 2,
+      marketReturn: () => 0,
+    });
+    const septembre = model.states[1];
+    // Seul l'intérêt sort : les 900 € financés ne quittent pas le compte.
+    expect(septembre.debtCashOut).toBeCloseTo(360, 6);
+    // Mais la dette monte de 900 € malgré un capital remboursé nul.
+    expect(septembre.principalPaid).toBeCloseTo(0, 9);
+    expect(septembre.loanBalance).toBeCloseTo(120900, 6);
+    expect(septembre.economicDebtCosts).toBeCloseTo(360 + 900, 6);
+    expect(septembre.netWorthChange).toBeCloseTo(-(360 + 900), 6);
+    expect(septembre.attributionResidual).toBeCloseTo(0, 6);
   });
 });

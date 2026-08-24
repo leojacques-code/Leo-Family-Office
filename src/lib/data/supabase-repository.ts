@@ -186,6 +186,8 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       loanScheduleRows,
       earlyRepaymentRows,
       loanChargeRows,
+      rateChangeRows,
+      paymentChangeRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -211,6 +213,8 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("loan_schedules"),
       mine("loan_early_repayments"),
       mine("loan_charges"),
+      mine("loan_rate_changes"),
+      mine("loan_payment_changes"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -268,6 +272,8 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         schedules: loanScheduleRows,
         earlyRepayments: earlyRepaymentRows,
         charges: loanChargeRows,
+        rateChanges: rateChangeRows,
+        paymentChanges: paymentChangeRows,
       }),
       id: str(row.id),
       name: str(row.name),

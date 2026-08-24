@@ -92,6 +92,14 @@ function ensureLedgerCoverageColumns(databaseInstance: DatabaseSync) {
     insurance: "REAL NOT NULL DEFAULT 0",
     fees: "REAL NOT NULL DEFAULT 0",
   });
+  ensureColumns(databaseInstance, "liabilities", {
+    amortisation_profile: "TEXT NOT NULL DEFAULT 'AMORTIZING'",
+    balloon_amount: "REAL",
+    payment_frequency: "TEXT NOT NULL DEFAULT 'MONTHLY'",
+    interest_convention: "TEXT NOT NULL DEFAULT 'PROPORTIONAL'",
+    facility_id: "TEXT",
+  });
+  ensureColumns(databaseInstance, "loan_charges", { financed: "INTEGER NOT NULL DEFAULT 0" });
 }
 
 /** Ajout idempotent de colonnes sur une base locale déjà créée. */
@@ -901,9 +909,17 @@ function getLiabilities(): Liability[] {
   const schedules = db().prepare("SELECT * FROM loan_schedules").all() as SqlRow[];
   const earlyRepayments = db().prepare("SELECT * FROM loan_early_repayments").all() as SqlRow[];
   const charges = db().prepare("SELECT * FROM loan_charges").all() as SqlRow[];
+  const rateChanges = db().prepare("SELECT * FROM loan_rate_changes").all() as SqlRow[];
+  const paymentChanges = db().prepare("SELECT * FROM loan_payment_changes").all() as SqlRow[];
   return (db().prepare("SELECT * FROM liabilities WHERE user_id=?").all(USER_ID) as SqlRow[]).map(
     (row) => ({
-      ...readLoanTerms(row, { schedules, earlyRepayments, charges }),
+      ...readLoanTerms(row, {
+        schedules,
+        earlyRepayments,
+        charges,
+        rateChanges,
+        paymentChanges,
+      }),
       id: String(row.id),
       name: String(row.name),
       lender: String(row.lender),

@@ -102,6 +102,8 @@ export interface MonthlyFinancialState {
   interestPaid: number;
   /** Intérêt couru non décaissé sur le mois : hors trésorerie, mais bien un coût. */
   capitalisedInterestAccrued: number;
+  /** Frais incorporés au financement sur le mois : hors trésorerie, mais bien un coût. */
+  capitalisedChargesAccrued: number;
   principalPaid: number;
   insurancePaid: number;
   feesPaid: number;
@@ -252,6 +254,11 @@ interface DebtMonth {
    * différé total et laisserait le patrimoine net inchangé alors qu'il baisse.
    */
   capitalisedInterest: number;
+  /**
+   * Frais incorporés au financement : aucun décaissement, mais l'encours augmente. Même
+   * mécanique que l'intérêt capitalisé, et même piège s'il n'atteint pas le bilan.
+   */
+  capitalisedCharges: number;
   principal: number;
   insurance: number;
   fees: number;
@@ -261,6 +268,7 @@ interface DebtMonth {
 const NO_DEBT: DebtMonth = {
   interest: 0,
   capitalisedInterest: 0,
+  capitalisedCharges: 0,
   principal: 0,
   insurance: 0,
   fees: 0,
@@ -287,6 +295,7 @@ export function buildDebtCalendar(
     for (const entry of due) {
       month.interest += entry.interest;
       month.capitalisedInterest += entry.capitalisedInterest;
+      month.capitalisedCharges += entry.capitalisedCharges;
       month.principal += entry.principal;
       month.insurance += entry.insurance;
       month.fees += entry.fees;
@@ -316,6 +325,7 @@ function openingState(opening: OpeningBalanceSheet): MonthlyFinancialState {
     operatingSurplus: 0,
     interestPaid: 0,
     capitalisedInterestAccrued: 0,
+    capitalisedChargesAccrued: 0,
     principalPaid: 0,
     insurancePaid: 0,
     feesPaid: 0,
@@ -434,14 +444,21 @@ export function advanceMonth(
     previous.financingCostMissing || fundingGap > 0 || fundingGapChange > 0;
   if (financingCostMissing) flags.push(FINANCING_COST_FLAG);
 
-  // ClosingDebt = OpeningDebt − PrincipalPaid + CapitalisedInterest. Le capital remboursé
-  // éteint le passif, l'intérêt capitalisé l'augmente sans qu'aucun euro ne sorte.
-  const loanBalance = Math.max(0, openingLoan - debt.principal + debt.capitalisedInterest);
+  // ClosingDebt = OpeningDebt − PrincipalPaid + CapitalisedInterest + CapitalisedCharges.
+  // Le capital remboursé éteint le passif ; l'intérêt capitalisé et les frais financés
+  // l'augmentent sans qu'aucun euro ne sorte du compte.
+  const loanBalance = Math.max(
+    0,
+    openingLoan - debt.principal + debt.capitalisedInterest + debt.capitalisedCharges,
+  );
   const grossFinancialAssets =
     bankCash + marketInvestedAssets + openingInvestmentCash + openingOther;
   const netWorth = grossFinancialAssets - loanBalance - fundingGap;
 
-  const economicDebtCosts = debt.interest + debt.capitalisedInterest + debt.insurance + debt.fees;
+  // Tout ce qui appauvrit : intérêt décaissé, intérêt capitalisé, frais financés, frais
+  // décaissés, assurance. Le principal n'y figure jamais, il éteint un passif.
+  const economicDebtCosts =
+    debt.interest + debt.capitalisedInterest + debt.capitalisedCharges + debt.insurance + debt.fees;
   const netWorthChange = netWorth - openingNetWorth;
   // Attribution économique : le principal n'y figure pas, sa double jambe s'annule.
   const attribution = operatingSurplus - economicDebtCosts + marketPnL;
@@ -460,6 +477,7 @@ export function advanceMonth(
     operatingSurplus,
     interestPaid: debt.interest,
     capitalisedInterestAccrued: debt.capitalisedInterest,
+    capitalisedChargesAccrued: debt.capitalisedCharges,
     principalPaid: debt.principal,
     insurancePaid: debt.insurance,
     feesPaid: debt.fees,
