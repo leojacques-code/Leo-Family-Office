@@ -42,7 +42,14 @@ function studentT5(random: () => number) {
   return z / Math.sqrt(chiSquare / 5) / Math.sqrt(5 / 3);
 }
 
-function percentile(sorted: number[], probability: number) {
+export function percentile(sorted: number[], probability: number) {
+  if (sorted.length === 0) throw new Error("Percentile impossible : série vide");
+  const invalidIndex = sorted.findIndex((value) => !Number.isFinite(value));
+  if (invalidIndex !== -1) {
+    throw new Error(
+      `Percentile impossible : valeur non finie à l'index ${invalidIndex} (${String(sorted[invalidIndex])})`,
+    );
+  }
   const index = (sorted.length - 1) * probability;
   const lower = Math.floor(index);
   const fraction = index - lower;
@@ -96,7 +103,17 @@ export function runMonteCarlo(input: MonteCarloInput): ProjectionResult {
     // Le percentile porte sur le PATRIMOINE NET, pas sur un capital brut.
     for (let year = 0; year <= years; year += 1) {
       const state: MonthlyFinancialState | undefined = result.states[year * 12];
-      byYear[year].push(state?.netWorth ?? 0);
+      if (!state) {
+        throw new Error(
+          `Monte Carlo invalide : état absent (simulation=${simulation}, année=${baseYear + year}, mois=${year * 12})`,
+        );
+      }
+      if (!Number.isFinite(state.netWorth)) {
+        throw new Error(
+          `Monte Carlo invalide : patrimoine net non fini (simulation=${simulation}, année=${baseYear + year}, mois=${year * 12}, netWorth=${String(state.netWorth)}, assets=${String(state.grossFinancialAssets)}, debt=${String(state.loanBalance)}, fundingGap=${String(state.fundingGap)})`,
+        );
+      }
+      byYear[year].push(state.netWorth);
     }
   }
 

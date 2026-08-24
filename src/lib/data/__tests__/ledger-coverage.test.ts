@@ -1,114 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { describe, expect, it } from "vitest";
 import { completeMonthsPeriod, compareSurplusToScenario } from "@/lib/engine/cash-flow";
 import { readLedgerCoverage } from "@/lib/data/shared";
 import { mutationSchema } from "@/lib/validation/mutations";
-import type { FamilyOfficeRepository } from "@/lib/data/repository";
 import type { ExpenseCategory, Provenance, Transaction } from "@/lib/types";
-
-/**
- * Le repository local est testé pour de vrai, pas simulé : il écrit dans un SQLite dont la
- * persistance est précisément ce que ces cas doivent prouver. Il est isolé dans un
- * répertoire temporaire, avec le schéma copié à l'emplacement qu'il attend.
- */
-const projectRoot = process.cwd();
-const sandbox = mkdtempSync(path.join(tmpdir(), "lfo-coverage-"));
-const originalCwd = process.cwd();
-
-beforeAll(() => {
-  mkdirSync(path.join(sandbox, "src", "lib", "data"), { recursive: true });
-  cpSync(
-    path.join(projectRoot, "src", "lib", "data", "schema.sql"),
-    path.join(sandbox, "src", "lib", "data", "schema.sql"),
-  );
-  process.chdir(sandbox);
-});
-
-afterAll(() => {
-  process.chdir(originalCwd);
-  rmSync(sandbox, { recursive: true, force: true });
-});
-
-/**
- * Le module met sa connexion en cache. Réinitialiser les modules puis réimporter rejoue
- * exactement ce que fait un redémarrage du serveur sur la même base : c'est la seule façon
- * de distinguer une valeur réellement persistée d'une valeur restée en mémoire.
- */
-async function restart(): Promise<FamilyOfficeRepository> {
-  vi.resetModules();
-  const freshModule = await import("@/lib/data/local-repository");
-  return freshModule.createLocalRepository();
-}
-
-describe("CASE AK — profondeur non déclarée", () => {
-  it("persiste null et laisse T3M non calculable", async () => {
-    const repository = await restart();
-    const state = await repository.getDashboardState();
-    expect(state.ledgerCoverageStart).toBeNull();
-    expect(state.ledgerCoverageSource).toBe("MANUAL");
-
-    const comparison = compareSurplusToScenario(
-      state.transactions,
-      state.expenseCategories,
-      state.asOfDate,
-      250,
-      state.ledgerCoverageStart,
-    );
-    expect(comparison.observedT3M).toBeNull();
-    expect(comparison.observedT12M).toBeNull();
-  });
-});
-
-describe("CASE AL — déclaration au 2026-05-01", () => {
-  it("survit à un redémarrage", async () => {
-    const repository = await restart();
-    const written = await repository.mutateState({
-      action: "set_ledger_coverage",
-      startDate: "2026-05-01",
-      source: "MANUAL",
-    });
-    expect(written.ledgerCoverageStart).toBe("2026-05-01");
-
-    // Relecture dans la même instance, puis après redémarrage complet.
-    expect((await repository.getDashboardState()).ledgerCoverageStart).toBe("2026-05-01");
-    const restarted = await restart();
-    const state = await restarted.getDashboardState();
-    expect(state.ledgerCoverageStart).toBe("2026-05-01");
-    expect(state.ledgerCoverageSource).toBe("MANUAL");
-  });
-});
-
-describe("CASE AM — remise à null", () => {
-  it("efface la déclaration et rend les moyennes non calculables", async () => {
-    const repository = await restart();
-    await repository.mutateState({
-      action: "set_ledger_coverage",
-      startDate: "2026-05-01",
-      source: "MANUAL",
-    });
-    const cleared = await repository.mutateState({
-      action: "set_ledger_coverage",
-      startDate: null,
-      source: "MANUAL",
-    });
-    expect(cleared.ledgerCoverageStart).toBeNull();
-
-    const restarted = await restart();
-    const state = await restarted.getDashboardState();
-    expect(state.ledgerCoverageStart).toBeNull();
-    const comparison = compareSurplusToScenario(
-      state.transactions,
-      state.expenseCategories,
-      state.asOfDate,
-      250,
-      state.ledgerCoverageStart,
-    );
-    expect(comparison.observedT3M).toBeNull();
-    expect(comparison.observedT12M).toBeNull();
-  });
-});
 
 describe("CASE AN — validation", () => {
   const parse = (startDate: string | null) =>
@@ -220,33 +114,26 @@ describe("CASE AP — couverture 2026-06-05", () => {
   });
 });
 
-describe("CASE AQ — même contrat des deux côtés", () => {
-  /**
-   * Les deux adaptateurs passent par `readLedgerCoverage`. Les lignes ci-dessous
-   * reproduisent ce que chaque pilote rend réellement : SQLite ne connaît pas `undefined`
-   * mais peut ne pas avoir la colonne, Postgres rend `null` pour une valeur non déclarée.
-   */
-  const sqliteRow = { ledger_coverage_start: "2026-05-01", ledger_coverage_source: "MANUAL" };
+describe("CASE AQ — contrat Supabase strict", () => {
   const postgresRow = { ledger_coverage_start: "2026-05-01", ledger_coverage_source: "MANUAL" };
 
-  it("expose la même valeur pour une déclaration identique", () => {
-    expect(readLedgerCoverage(sqliteRow)).toEqual(readLedgerCoverage(postgresRow));
-    expect(readLedgerCoverage(sqliteRow)).toEqual({ start: "2026-05-01", source: "MANUAL" });
+  it("expose une déclaration valide", () => {
+    expect(readLedgerCoverage(postgresRow)).toEqual({ start: "2026-05-01", source: "MANUAL" });
   });
 
-  it("traite null, undefined et ligne absente comme « non déclarée »", () => {
+  it("conserve null comme valeur métier non déclarée", () => {
     const expected = { start: null, source: "MANUAL" as const };
-    expect(readLedgerCoverage({ ledger_coverage_start: null })).toEqual(expected);
-    expect(readLedgerCoverage({})).toEqual(expected);
-    expect(readLedgerCoverage(undefined)).toEqual(expected);
-    expect(readLedgerCoverage(null)).toEqual(expected);
+    expect(
+      readLedgerCoverage({ ledger_coverage_start: null, ledger_coverage_source: "MANUAL" }),
+    ).toEqual(expected);
   });
 
-  it("retombe sur MANUAL plutôt que d’inventer une provenance", () => {
-    expect(
-      readLedgerCoverage({ ledger_coverage_start: "2026-05-01", ledger_coverage_source: "WAT" })
-        .source,
-    ).toBe("MANUAL");
+  it("refuse une migration absente ou une provenance invalide", () => {
+    expect(() => readLedgerCoverage({})).toThrow(/Schéma Supabase incomplet/);
+    expect(() => readLedgerCoverage(undefined)).toThrow(/profil propriétaire absent/);
+    expect(() =>
+      readLedgerCoverage({ ledger_coverage_start: "2026-05-01", ledger_coverage_source: "WAT" }),
+    ).toThrow(/profiles\.ledger_coverage_source/);
     expect(
       readLedgerCoverage({ ledger_coverage_start: "2026-05-01", ledger_coverage_source: "API" })
         .source,

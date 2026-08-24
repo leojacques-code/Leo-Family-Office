@@ -10,7 +10,7 @@ export default defineConfig({
     alias: {
       "@": new URL("./src", import.meta.url).pathname,
       // Marqueur de frontière Next, sans implémentation exécutable. Le neutraliser permet
-      // de tester le repository local pour de vrai plutôt que de le simuler.
+      // de tester les modules serveur sans démarrer Next.js.
       "server-only": new URL("./src/lib/data/__tests__/server-only-stub.ts", import.meta.url)
         .pathname,
     },

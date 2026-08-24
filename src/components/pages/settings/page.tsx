@@ -34,7 +34,7 @@ function SettingsPage({ state }: SectionProps) {
           value={state.reportingCurrency}
           detail="Multi-devises prêt"
         />
-        <MetricCard label="Adapter actif" value="SQLite local" detail="Supabase prêt à connecter" />
+        <MetricCard label="Persistance" value="Supabase" detail="PostgreSQL + Storage privé" />
         <MetricCard label="Données externes actives" value="0" detail="Fallback manuel" />
       </section>
       <section className="panel">
