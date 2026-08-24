@@ -16,6 +16,7 @@
 - **Data** : `FamilyOfficeRepository` expose l’état agrégé et les mutations. Son unique implémentation est `supabase-repository.ts`.
 - **Schéma** : `supabase/migrations/` est la source de vérité PostgreSQL.
 - **Documents** : bucket privé `family-office-documents`, avec métadonnées dans `public.documents`.
+- **Vérification** : `db:verify` contrôle directement PostgreSQL dans une transaction `READ ONLY`; il ne constitue jamais une seconde définition du schéma.
 
 Les pages, routes et composants continuent d’appeler `getRepository()`. Aucun composant UI n’accède directement à Supabase.
 
