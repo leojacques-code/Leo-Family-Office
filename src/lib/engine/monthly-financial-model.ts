@@ -1,4 +1,10 @@
-import { buildForwardSchedule, addMonths, monthBounds } from "@/lib/engine/debt";
+import {
+  buildForwardSchedule,
+  addMonths,
+  debtImpactFromEntries,
+  monthBounds,
+} from "@/lib/engine/debt";
+import type { DebtConsequences, DebtServiceBreakdown } from "@/lib/engine/debt";
 import type {
   AnnualBalanceSheetPoint,
   DashboardState,
@@ -246,34 +252,15 @@ function nextDay(iso: string): string {
   return parsed.toISOString().slice(0, 10);
 }
 
-interface DebtMonth {
-  interest: number;
-  /**
-   * Intérêt couru non décaissé, ajouté au capital restant dû. Il ne touche pas la
-   * trésorerie mais alourdit la dette : l'ignorer ferait stagner l'encours pendant un
-   * différé total et laisserait le patrimoine net inchangé alors qu'il baisse.
-   */
-  capitalisedInterest: number;
-  /**
-   * Frais incorporés au financement : aucun décaissement, mais l'encours augmente. Même
-   * mécanique que l'intérêt capitalisé, et même piège s'il n'atteint pas le bilan.
-   */
-  capitalisedCharges: number;
-  principal: number;
-  insurance: number;
-  fees: number;
-  cashOut: number;
-}
+export type MonthlyDebtImpact = DebtConsequences &
+  Partial<
+    Pick<
+      DebtServiceBreakdown,
+      "principal" | "interest" | "capitalisedInterest" | "capitalisedCharges" | "insurance" | "fees"
+    >
+  >;
 
-const NO_DEBT: DebtMonth = {
-  interest: 0,
-  capitalisedInterest: 0,
-  capitalisedCharges: 0,
-  principal: 0,
-  insurance: 0,
-  fees: 0,
-  cashOut: 0,
-};
+const NO_DEBT = debtImpactFromEntries([]);
 
 /**
  * Échéances exigibles par mois projeté, issues du SEUL échéancier forward : le capital
@@ -283,25 +270,22 @@ export function buildDebtCalendar(
   liabilities: Liability[],
   asOfDate: string,
   months: number,
-): DebtMonth[] {
-  const entries: LoanScheduleEntry[] = liabilities.flatMap(
-    (liability) => buildForwardSchedule(liability, asOfDate).entries,
-  );
-  const calendar: DebtMonth[] = [{ ...NO_DEBT }];
+): DebtServiceBreakdown[] {
+  const schedules = liabilities.map((liability) => ({
+    liability,
+    schedule: buildForwardSchedule(liability, asOfDate),
+  }));
+  const entries: LoanScheduleEntry[] = schedules.flatMap(({ schedule }) => schedule.entries);
+  const metadata = {
+    sourceLiabilityIds: liabilities.map((liability) => liability.id),
+    flags: schedules.flatMap(({ schedule }) => schedule.flags),
+    dataKinds: schedules.map(({ schedule }) => schedule.kind),
+  };
+  const calendar: DebtServiceBreakdown[] = [debtImpactFromEntries([], metadata)];
   for (let monthIndex = 1; monthIndex <= months; monthIndex += 1) {
     const { start, end } = projectedMonthWindow(asOfDate, monthIndex);
     const due = entries.filter((entry) => entry.dueDate >= start && entry.dueDate <= end);
-    const month: DebtMonth = { ...NO_DEBT };
-    for (const entry of due) {
-      month.interest += entry.interest;
-      month.capitalisedInterest += entry.capitalisedInterest;
-      month.capitalisedCharges += entry.capitalisedCharges;
-      month.principal += entry.principal;
-      month.insurance += entry.insurance;
-      month.fees += entry.fees;
-      month.cashOut += entry.totalCashOut;
-    }
-    calendar.push(month);
+    calendar.push(debtImpactFromEntries(due, metadata));
   }
   return calendar;
 }
@@ -364,7 +348,7 @@ export function advanceMonth(
   previous: MonthlyFinancialState,
   monthIndex: number,
   date: string,
-  debt: DebtMonth,
+  debt: MonthlyDebtImpact,
   assumptions: MonthlyScenarioAssumptions,
   marketReturnRate: number,
 ): MonthlyFinancialState {
@@ -380,8 +364,8 @@ export function advanceMonth(
   const operatingSurplus = assumptions.operatingSurplus;
   // Le service de dette est retranché explicitement : il n'est jamais absorbé par
   // l'hypothèse de surplus.
-  const debtCashOut = debt.cashOut;
-  const postDebtSurplus = operatingSurplus - debtCashOut;
+  const debtCashOut = Math.max(0, -debt.cashImpact);
+  const postDebtSurplus = operatingSurplus + debt.cashImpact;
 
   const rate = Math.min(1, Math.max(0, assumptions.investmentAllocationRate));
   let bankCash = openingBankCash;
@@ -444,21 +428,14 @@ export function advanceMonth(
     previous.financingCostMissing || fundingGap > 0 || fundingGapChange > 0;
   if (financingCostMissing) flags.push(FINANCING_COST_FLAG);
 
-  // ClosingDebt = OpeningDebt − PrincipalPaid + CapitalisedInterest + CapitalisedCharges.
-  // Le capital remboursé éteint le passif ; l'intérêt capitalisé et les frais financés
-  // l'augmentent sans qu'aucun euro ne sorte du compte.
-  const loanBalance = Math.max(
-    0,
-    openingLoan - debt.principal + debt.capitalisedInterest + debt.capitalisedCharges,
-  );
+  // Le Debt Engine fournit la variation canonique du passif. Cette transition ignore
+  // volontairement le produit ou l'événement qui l'a produite.
+  const loanBalance = Math.max(0, openingLoan + debt.liabilityDelta);
   const grossFinancialAssets =
     bankCash + marketInvestedAssets + openingInvestmentCash + openingOther;
   const netWorth = grossFinancialAssets - loanBalance - fundingGap;
 
-  // Tout ce qui appauvrit : intérêt décaissé, intérêt capitalisé, frais financés, frais
-  // décaissés, assurance. Le principal n'y figure jamais, il éteint un passif.
-  const economicDebtCosts =
-    debt.interest + debt.capitalisedInterest + debt.capitalisedCharges + debt.insurance + debt.fees;
+  const economicDebtCosts = debt.economicCost;
   const netWorthChange = netWorth - openingNetWorth;
   // Attribution économique : le principal n'y figure pas, sa double jambe s'annule.
   const attribution = operatingSurplus - economicDebtCosts + marketPnL;
@@ -475,12 +452,12 @@ export function advanceMonth(
     openingFundingGap,
     openingNetWorth,
     operatingSurplus,
-    interestPaid: debt.interest,
-    capitalisedInterestAccrued: debt.capitalisedInterest,
-    capitalisedChargesAccrued: debt.capitalisedCharges,
-    principalPaid: debt.principal,
-    insurancePaid: debt.insurance,
-    feesPaid: debt.fees,
+    interestPaid: debt.interest ?? 0,
+    capitalisedInterestAccrued: debt.capitalisedInterest ?? 0,
+    capitalisedChargesAccrued: debt.capitalisedCharges ?? 0,
+    principalPaid: Math.max(0, -debt.principalMovement),
+    insurancePaid: debt.insurance ?? 0,
+    feesPaid: debt.fees ?? 0,
     debtCashOut,
     postDebtSurplus,
     investmentContribution,
@@ -535,13 +512,22 @@ export function toAnnualPoints(result: MonthlyModelResult): AnnualBalanceSheetPo
   const points: AnnualBalanceSheetPoint[] = [];
   let cumulativeOperatingSurplus = 0;
   let cumulativeMarketPnL = 0;
-  let cumulativeInterestPaid = 0;
+  let cumulativeCashInterestPaid = 0;
+  let cumulativeCapitalisedInterest = 0;
+  let cumulativeInsurancePaid = 0;
+  let cumulativeCashFeesPaid = 0;
+  let cumulativeCapitalisedCharges = 0;
+  let cumulativeEconomicDebtCosts = 0;
   let cumulativePrincipalPaid = 0;
   for (const state of result.states) {
     cumulativeOperatingSurplus += state.operatingSurplus;
     cumulativeMarketPnL += state.marketPnL;
-    cumulativeInterestPaid +=
-      state.interestPaid + state.capitalisedInterestAccrued + state.insurancePaid + state.feesPaid;
+    cumulativeCashInterestPaid += state.interestPaid;
+    cumulativeCapitalisedInterest += state.capitalisedInterestAccrued;
+    cumulativeInsurancePaid += state.insurancePaid;
+    cumulativeCashFeesPaid += state.feesPaid;
+    cumulativeCapitalisedCharges += state.capitalisedChargesAccrued;
+    cumulativeEconomicDebtCosts += state.economicDebtCosts;
     cumulativePrincipalPaid += state.principalPaid;
     if (state.monthIndex % 12 !== 0) continue;
     points.push({
@@ -555,7 +541,12 @@ export function toAnnualPoints(result: MonthlyModelResult): AnnualBalanceSheetPo
       marketInvestedAssets: state.marketInvestedAssets,
       cumulativeOperatingSurplus,
       cumulativeMarketPnL,
-      cumulativeInterestPaid,
+      cumulativeCashInterestPaid,
+      cumulativeCapitalisedInterest,
+      cumulativeInsurancePaid,
+      cumulativeCashFeesPaid,
+      cumulativeCapitalisedCharges,
+      cumulativeEconomicDebtCosts,
       cumulativePrincipalPaid,
       financingCostMissing: state.financingCostMissing,
     });

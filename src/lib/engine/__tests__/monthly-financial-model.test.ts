@@ -62,6 +62,10 @@ const noDebt = {
   insurance: 0,
   fees: 0,
   cashOut: 0,
+  cashImpact: 0,
+  liabilityDelta: 0,
+  principalMovement: 0,
+  economicCost: 0,
 };
 
 /** Un seul mois isolé, pour tester une écriture précise. */
@@ -78,14 +82,23 @@ function oneMonth(
     months: 0,
     marketReturn: () => marketReturn,
   });
-  return advanceMonth(
-    model.states[0],
-    1,
-    "2026-09-30",
-    { ...noDebt, ...debt },
-    assumptions(assume),
-    marketReturn,
-  );
+  const detail = { ...noDebt, ...debt };
+  const impact = {
+    ...detail,
+    cashImpact: debt.cashImpact ?? -detail.cashOut,
+    liabilityDelta:
+      debt.liabilityDelta ??
+      -detail.principal + detail.capitalisedInterest + detail.capitalisedCharges,
+    principalMovement: debt.principalMovement ?? -detail.principal,
+    economicCost:
+      debt.economicCost ??
+      detail.interest +
+        detail.capitalisedInterest +
+        detail.capitalisedCharges +
+        detail.insurance +
+        detail.fees,
+  };
+  return advanceMonth(model.states[0], 1, "2026-09-30", impact, assumptions(assume), marketReturn);
 }
 
 describe("CASE A — aucun flux", () => {
@@ -366,9 +379,9 @@ describe("CASE M — dette arrivée à maturité", () => {
       provenance,
     };
     const calendar = buildDebtCalendar([liability], "2026-08-19", 24);
-    const paid = calendar.filter((month) => month.cashOut > 0);
+    const paid = calendar.filter((month) => month.totalCashOut > 0);
     expect(paid).toHaveLength(12);
-    expect(calendar.slice(13).every((month) => month.cashOut === 0)).toBe(true);
+    expect(calendar.slice(13).every((month) => month.totalCashOut === 0)).toBe(true);
     const result = runDeterministicModel(
       opening({ bankCash: 5000, loanBalance: 1200 }),
       [liability],
@@ -411,7 +424,7 @@ describe("CASE N — plusieurs dettes", () => {
       provenance,
     };
     const calendar = buildDebtCalendar([first, second], "2026-08-19", 12);
-    expect(calendar[1].cashOut).toBeCloseTo(300, 6);
+    expect(calendar[1].totalCashOut).toBeCloseTo(300, 6);
     expect(calendar[1].principal).toBeCloseTo(300, 6);
     const result = runDeterministicModel(
       opening({ bankCash: 10000, loanBalance: 3600 }),
@@ -986,6 +999,38 @@ describe("CASE DM2 — remboursement anticipé et frais ponctuel", () => {
   });
 });
 
+describe("CASE DM2-B — conséquences de dette génériques", () => {
+  it("absorbe une hausse de passif sans connaître sa mécanique produit", () => {
+    const start = opening({ bankCash: 50000, loanBalance: 100000 });
+    const state = oneMonth(start, {
+      cashImpact: 0,
+      liabilityDelta: 300,
+      economicCost: 300,
+      principalMovement: 0,
+    });
+
+    expect(state.bankCash).toBeCloseTo(50000, 9);
+    expect(state.loanBalance).toBeCloseTo(100300, 9);
+    expect(state.netWorthChange).toBeCloseTo(-300, 9);
+    expect(state.attributionResidual).toBeCloseTo(0, 9);
+  });
+
+  it("absorbe une baisse non standard du passif sans formule spécifique", () => {
+    const start = opening({ bankCash: 50000, loanBalance: 100000 });
+    const state = oneMonth(start, {
+      cashImpact: 0,
+      liabilityDelta: -250,
+      economicCost: -250,
+      principalMovement: 0,
+    });
+
+    expect(state.bankCash).toBeCloseTo(50000, 9);
+    expect(state.loanBalance).toBeCloseTo(99750, 9);
+    expect(state.netWorthChange).toBeCloseTo(250, 9);
+    expect(state.attributionResidual).toBeCloseTo(0, 9);
+  });
+});
+
 describe("CASE DM3 — le calendrier de dette transporte l’intérêt capitalisé", () => {
   it("de l’échéancier forward jusqu’au bilan mensuel, sans perte", () => {
     const liability: Liability = {
@@ -1005,7 +1050,7 @@ describe("CASE DM3 — le calendrier de dette transporte l’intérêt capitalis
     };
     const calendar = buildDebtCalendar([liability], "2026-08-19", 3);
     // Premier mois projeté : rien ne sort, 300 € courent.
-    expect(calendar[1].cashOut).toBeCloseTo(0, 9);
+    expect(calendar[1].totalCashOut).toBeCloseTo(0, 9);
     expect(calendar[1].capitalisedInterest).toBeCloseTo((100000 * 0.036) / 12, 6);
 
     const model = runMonthlyModel({
@@ -1089,10 +1134,10 @@ describe("CASE DM5 — dette trimestrielle à travers le bilan mensuel", () => {
     });
     const calendar = buildDebtCalendar([liability], "2026-08-19", 6);
     // Septembre porte l'échéance, octobre et novembre sont vides, décembre reprend.
-    expect(calendar[1].cashOut).toBeGreaterThan(0);
-    expect(calendar[2].cashOut).toBeCloseTo(0, 9);
-    expect(calendar[3].cashOut).toBeCloseTo(0, 9);
-    expect(calendar[4].cashOut).toBeGreaterThan(0);
+    expect(calendar[1].totalCashOut).toBeGreaterThan(0);
+    expect(calendar[2].totalCashOut).toBeCloseTo(0, 9);
+    expect(calendar[3].totalCashOut).toBeCloseTo(0, 9);
+    expect(calendar[4].totalCashOut).toBeGreaterThan(0);
 
     const model = runMonthlyModel({
       opening: opening({ bankCash: 100000, loanBalance: 120000 }),
@@ -1142,5 +1187,42 @@ describe("CASE DM6 — frais financé à travers le bilan mensuel", () => {
     expect(septembre.economicDebtCosts).toBeCloseTo(360 + 900, 6);
     expect(septembre.netWorthChange).toBeCloseTo(-(360 + 900), 6);
     expect(septembre.attributionResidual).toBeCloseTo(0, 6);
+  });
+
+  it("conserve des cumuls annuels financièrement exacts et séparés", () => {
+    const liability = debtLoan({
+      monthlyPayment: 0,
+      amortisationProfile: "INTEREST_ONLY",
+      oneOffCharges: [
+        {
+          id: "c",
+          liabilityId: "lia_v21",
+          date: "2026-09-20",
+          amount: 900,
+          label: "Frais financés",
+          financed: true,
+        },
+      ],
+    });
+    const model = runMonthlyModel({
+      opening: opening({ bankCash: 50000, loanBalance: 120000 }),
+      liabilities: [liability],
+      assumptions: assumptions({ operatingSurplus: 0 }),
+      months: 12,
+      marketReturn: () => 0,
+    });
+    const annual = toAnnualPoints(model).find((point) => point.monthIndex === 12)!;
+    const months = model.states.slice(1);
+
+    expect(annual.cumulativeCashInterestPaid).toBeCloseTo(
+      months.reduce((sum, state) => sum + state.interestPaid, 0),
+      9,
+    );
+    expect(annual.cumulativeCapitalisedCharges).toBeCloseTo(900, 9);
+    expect(annual.cumulativeCashFeesPaid).toBeCloseTo(0, 9);
+    expect(annual.cumulativeEconomicDebtCosts).toBeCloseTo(
+      months.reduce((sum, state) => sum + state.economicDebtCosts, 0),
+      9,
+    );
   });
 });

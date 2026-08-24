@@ -6,12 +6,79 @@ import type {
   Essentiality,
   ExpenseBehavior,
   FinancialAccount,
+  AmortisationProfile,
+  DatedTermKind,
+  DeferredInterestTreatment,
+  DeferralKind,
+  EarlyRepaymentOutcome,
+  InterestConvention,
   LedgerCoverageSource,
+  PaymentFrequency,
+  RateType,
   RecurrenceFrequency,
   Scenario,
 } from "@/lib/types";
 
+export interface DebtContractInput {
+  liabilityId: string | null;
+  name: string;
+  lender: string;
+  principal: number;
+  /** Requis uniquement à la création. Une édition de contrat l'ignore toujours. */
+  initialBalance: number | null;
+  balanceDate: string | null;
+  annualRate: number;
+  paymentAmount: number;
+  paymentCount: number;
+  firstPaymentDate: string;
+  maturityDate: string;
+  amortisationProfile: AmortisationProfile;
+  balloonAmount: number | null;
+  paymentFrequency: PaymentFrequency;
+  interestConvention: InterestConvention;
+  rateType: RateType;
+  insuranceAmount: number | null;
+  recurringFees: number | null;
+  paymentIncludesInsurance: boolean | null;
+  deferral: {
+    kind: Exclude<DeferralKind, "NONE">;
+    months: number;
+    interestTreatment: DeferredInterestTreatment;
+  } | null;
+  facilityId: string | null;
+  notes: string | null;
+  rateSchedule: Array<{ effectiveFrom: string; annualRate: number; kind: DatedTermKind }>;
+  paymentSchedule: Array<{ effectiveFrom: string; amount: number; kind: DatedTermKind }>;
+  earlyRepayments: Array<{
+    id: string;
+    date: string;
+    amount: number;
+    penalty: number | null;
+    outcome: EarlyRepaymentOutcome;
+  }>;
+  charges: Array<{ id: string; date: string; amount: number; label: string; financed: boolean }>;
+  providedSchedule: Array<{
+    paymentNumber: number;
+    dueDate: string;
+    openingBalance: number;
+    interest: number;
+    principal: number;
+    insurance: number;
+    fees: number;
+    closingBalance: number;
+  }>;
+}
+
 export type Mutation =
+  | { action: "save_debt_contract"; contract: DebtContractInput }
+  | {
+      action: "record_debt_balance";
+      liabilityId: string;
+      observedAt: string;
+      balance: number;
+      notes: string | null;
+    }
+  | { action: "archive_debt"; liabilityId: string }
   | { action: "update_account"; accountId: string; balance: number; balanceDate: string }
   | {
       action: "add_account";

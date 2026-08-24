@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ArrowRight, FilePlus2 } from "lucide-react";
+import { useMemo, useState, type FormEvent } from "react";
+import { Archive, ArrowRight, Edit3, Plus, Save, WalletCards } from "lucide-react";
 import Link from "next/link";
 import {
   Area,
@@ -26,6 +26,7 @@ import {
   DataBadge,
   EmptyState,
   MetricCard,
+  Modal,
   Percent,
   SectionHeader,
 } from "@/components/ui";
@@ -36,10 +37,38 @@ import {
   formatDate,
   formatEur,
 } from "@/components/pages/shared";
+import type { DebtContractInput } from "@/lib/data/contracts";
+import type { Liability } from "@/lib/types";
+import { DebtContractForm } from "@/components/pages/debt/debt-contract-form";
 
-function DebtPage({ state, setExplanation }: SectionProps) {
+const PROFILE_LABELS: Record<Liability["amortisationProfile"], string> = {
+  AMORTIZING: "Amortissable",
+  INTEREST_ONLY: "Intérêts seuls",
+  BULLET: "In fine",
+  BALLOON: "Balloon",
+};
+
+const FREQUENCY_LABELS: Record<Liability["paymentFrequency"], string> = {
+  MONTHLY: "mensuelle",
+  QUARTERLY: "trimestrielle",
+  SEMIANNUAL: "semestrielle",
+  ANNUAL: "annuelle",
+};
+
+function interestFormula(loan: Liability): string {
+  if (loan.interestConvention === "ACTUAL_365") {
+    return "Intérêt = solde × taux annuel × nombre de jours réels / 365";
+  }
+  const period = { MONTHLY: 1, QUARTERLY: 3, SEMIANNUAL: 6, ANNUAL: 12 }[loan.paymentFrequency];
+  return `Intérêt = solde × taux annuel × ${period}/12`;
+}
+
+function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const [selectedId, setSelectedId] = useState(state.liabilities[0]?.id ?? "");
   const [investmentReturn, setInvestmentReturn] = useState(5.5);
+  const [contractEditor, setContractEditor] = useState<"new" | "edit" | null>(null);
+  const [balanceEditor, setBalanceEditor] = useState(false);
+  const [balance, setBalance] = useState({ value: "", date: state.asOfDate, notes: "" });
   const loan = state.liabilities.find((item) => item.id === selectedId) ?? state.liabilities[0];
   const timeline = useMemo(
     () => (loan ? buildLoanTimeline(loan, state.asOfDate) : null),
@@ -65,13 +94,66 @@ function DebtPage({ state, setExplanation }: SectionProps) {
       title="Debt"
       description="Échéanciers datés, coût du crédit et arbitrage remboursement vs investissement."
       actions={
-        <button className="button secondary">
-          <FilePlus2 size={15} />
-          Importer l’échéancier <span className="soon">À connecter</span>
-        </button>
+        <>
+          {loan ? (
+            <>
+              <button className="button secondary" onClick={() => setContractEditor("edit")}>
+                <Edit3 size={15} /> Modifier le contrat
+              </button>
+              <button
+                className="button secondary"
+                onClick={() => {
+                  setBalance({
+                    value: String(loan.currentBalance),
+                    date: state.asOfDate,
+                    notes: "",
+                  });
+                  setBalanceEditor(true);
+                }}
+              >
+                <WalletCards size={15} /> Nouvel encours
+              </button>
+            </>
+          ) : null}
+          <button className="button primary" onClick={() => setContractEditor("new")}>
+            <Plus size={15} /> Nouvelle dette
+          </button>
+        </>
       }
     />
   );
+
+  const editorModal = (
+    <Modal
+      open={contractEditor !== null}
+      onClose={() => setContractEditor(null)}
+      title={contractEditor === "edit" && loan ? `Modifier ${loan.name}` : "Nouvelle dette"}
+      subtitle="Les termes contractuels et l’encours observé restent deux vérités distinctes."
+      wide
+    >
+      <DebtContractForm
+        key={`${contractEditor}-${loan?.id ?? "new"}`}
+        loan={contractEditor === "edit" ? (loan ?? null) : null}
+        asOfDate={state.asOfDate}
+        busy={busy}
+        onCancel={() => setContractEditor(null)}
+        onSave={(contract: DebtContractInput) => mutate({ action: "save_debt_contract", contract })}
+      />
+    </Modal>
+  );
+
+  async function recordBalance(event: FormEvent) {
+    event.preventDefault();
+    if (!loan) return;
+    const ok = await mutate({
+      action: "record_debt_balance",
+      liabilityId: loan.id,
+      observedAt: balance.date,
+      balance: Number(balance.value.replace(",", ".")),
+      notes: balance.notes || null,
+    });
+    if (ok) setBalanceEditor(false);
+  }
 
   if (!loan || !timeline) {
     return (
@@ -80,7 +162,13 @@ function DebtPage({ state, setExplanation }: SectionProps) {
         <EmptyState
           title="Aucune dette enregistrée"
           detail="Le service de dette mensuel vaut 0 € et aucun échéancier n’est projeté tant qu’aucun passif n’est saisi."
+          action={
+            <button className="button primary" onClick={() => setContractEditor("new")}>
+              <Plus size={15} /> Enregistrer une dette
+            </button>
+          }
         />
+        {editorModal}
       </div>
     );
   }
@@ -134,7 +222,7 @@ function DebtPage({ state, setExplanation }: SectionProps) {
               ? upcoming
                 ? `Aucune échéance exigible ce mois · prochaine le ${formatDate(upcoming.entry.dueDate)}`
                 : "Aucune échéance exigible ce mois"
-              : `Mensualité annoncée ${formatEur(loan.monthlyPayment)}`
+              : `Paiement ${FREQUENCY_LABELS[loan.paymentFrequency]} annoncé ${formatEur(loan.monthlyPayment)}`
           }
           onExplain={() =>
             setExplanation({
@@ -169,39 +257,47 @@ function DebtPage({ state, setExplanation }: SectionProps) {
             })
           }
         />
-        <MetricCard
-          label="Écart contractuel"
-          value={<Currency value={timeline.contractualGap} />}
-          tone={Math.abs(timeline.contractualGap) > 0.01 ? "warning" : "neutral"}
-          onExplain={() =>
-            setExplanation({
-              title: `Écart contractuel · ${loan.name}`,
-              formula: "Mensualité × nombre d’échéances − capital annoncé",
-              inputs: [
-                {
-                  label: "Mensualité",
-                  value: formatEur(loan.monthlyPayment),
-                  kind: loan.provenance.kind,
-                  date: loan.provenance.effectiveDate ?? state.asOfDate,
-                  source: loan.provenance.source,
-                },
-                {
-                  label: "Échéances annoncées",
-                  value: String(loan.paymentCount),
-                  kind: loan.provenance.kind,
-                  source: loan.provenance.source,
-                },
-                {
-                  label: "Capital",
-                  value: formatEur(loan.principal),
-                  kind: loan.provenance.kind,
-                  source: loan.provenance.source,
-                },
-              ],
-              note: `${formatEur(contractualTotal)} − ${formatEur(loan.principal)} = ${formatEur(timeline.contractualGap)}. Aucune explication n’est supposée.`,
-            })
-          }
-        />
+        {loan.amortisationProfile === "AMORTIZING" ? (
+          <MetricCard
+            label="Écart du paiement contractuel"
+            value={<Currency value={timeline.contractualGap} />}
+            tone={Math.abs(timeline.contractualGap) > 0.01 ? "warning" : "neutral"}
+            onExplain={() =>
+              setExplanation({
+                title: `Écart contractuel · ${loan.name}`,
+                formula: "Paiement par échéance × nombre d’échéances − capital annoncé",
+                inputs: [
+                  {
+                    label: "Paiement par échéance",
+                    value: formatEur(loan.monthlyPayment),
+                    kind: loan.provenance.kind,
+                    date: loan.provenance.effectiveDate ?? state.asOfDate,
+                    source: loan.provenance.source,
+                  },
+                  {
+                    label: "Échéances annoncées",
+                    value: String(loan.paymentCount),
+                    kind: loan.provenance.kind,
+                    source: loan.provenance.source,
+                  },
+                  {
+                    label: "Capital",
+                    value: formatEur(loan.principal),
+                    kind: loan.provenance.kind,
+                    source: loan.provenance.source,
+                  },
+                ],
+                note: `${formatEur(contractualTotal)} − ${formatEur(loan.principal)} = ${formatEur(timeline.contractualGap)}. Aucune explication n’est supposée.`,
+              })
+            }
+          />
+        ) : (
+          <MetricCard
+            label="Profil contractuel"
+            value={PROFILE_LABELS[loan.amortisationProfile]}
+            detail={`${loan.paymentCount} échéances · fréquence ${FREQUENCY_LABELS[loan.paymentFrequency]}`}
+          />
+        )}
       </section>
       {providedNotice ? (
         <Callout tone="info" title="Échéancier bancaire">
@@ -212,6 +308,13 @@ function DebtPage({ state, setExplanation }: SectionProps) {
         <Callout tone="warning" title="Points à réconcilier">
           {anomalies.map((flag) => flag.detail).join(" ")} L’encours observé fait foi : rien n’est
           corrigé en silence pour faire coller le modèle à la donnée.
+        </Callout>
+      ) : null}
+      {loan.amortisationProfile === "INTEREST_ONLY" ? (
+        <Callout tone="info" title="Capital à la maturité">
+          Le profil « intérêts seuls » ne fait pas disparaître le capital : l’encours reste dû après
+          la dernière échéance d’intérêts tant qu’un remboursement final n’est pas déclaré. Pour un
+          remboursement automatique du capital à maturité, utilisez le profil « in fine ».
         </Callout>
       ) : null}
       <section className="two-column wide-left">
@@ -228,8 +331,8 @@ function DebtPage({ state, setExplanation }: SectionProps) {
                   title: `Amortissement · ${loan.name}`,
                   formula:
                     loan.annualRate === 0
-                      ? "Intérêt = 0 ; principal payé = min(solde, mensualité)"
-                      : "Intérêt = solde × taux/12 ; principal = mensualité − intérêt",
+                      ? "Intérêt = 0 ; mouvement de principal selon le profil contractuel"
+                      : interestFormula(loan),
                   inputs: [
                     {
                       label: `Encours observé au ${formatDate(state.asOfDate)}`,
@@ -243,7 +346,7 @@ function DebtPage({ state, setExplanation }: SectionProps) {
                       kind: loan.provenance.kind,
                     },
                     {
-                      label: "Mensualité contractuelle",
+                      label: "Paiement contractuel par échéance",
                       value: formatEur(loan.monthlyPayment),
                       kind: loan.provenance.kind,
                     },
@@ -264,7 +367,7 @@ function DebtPage({ state, setExplanation }: SectionProps) {
                       kind: "DERIVED",
                     },
                   ],
-                  note: "La projection amortit l’encours observé à la date d’observation, à partir de la prochaine échéance exigible. Les mensualités déjà passées ne sont jamais rejouées contre cet encours. Provenance DERIVED : cet échéancier ne remplace pas le document bancaire.",
+                  note: `${loan.interestConvention === "ACTUAL_365" ? "La convention ACTUAL/365 compte les jours calendaires réels entre deux échéances. " : "La convention proportionnelle applique la fraction d’année correspondant à la périodicité. "}${loan.rateType === "VARIABLE" ? "Un taux révisable n’est prolongé au-delà des révisions déclarées que comme hypothèse de modèle. " : "Le taux fixe est appliqué jusqu’à la maturité déclarée. "}La projection part de l’encours observé ; les échéances déjà passées ne sont jamais rejouées. Qualité ${forward.kind} : un échéancier bancaire ACTUAL prime sur toute dérivation.`,
                 })
               }
             >
@@ -319,7 +422,9 @@ function DebtPage({ state, setExplanation }: SectionProps) {
             </div>
             <div>
               <dt>Nombre annoncé</dt>
-              <dd>{loan.paymentCount} mensualités</dd>
+              <dd>
+                {loan.paymentCount} échéances · fréquence {FREQUENCY_LABELS[loan.paymentFrequency]}
+              </dd>
             </div>
             <div>
               <dt>Échéances payées à ce jour</dt>
@@ -338,12 +443,21 @@ function DebtPage({ state, setExplanation }: SectionProps) {
               </dd>
             </div>
           </dl>
+          {loan.currentBalance <= 0.01 ? (
+            <button
+              className="button secondary debt-archive"
+              disabled={busy}
+              onClick={() => mutate({ action: "archive_debt", liabilityId: loan.id })}
+            >
+              <Archive size={14} /> Archiver cette dette éteinte
+            </button>
+          ) : null}
         </article>
       </section>
       <section className="panel">
         <div className="panel-header">
           <div>
-            <span className="eyebrow">Échéancier forward daté · DERIVED</span>
+            <span className="eyebrow">Échéancier forward daté · {forward.kind}</span>
             <h2>Prochaines échéances</h2>
           </div>
           <span className="panel-note">
@@ -358,8 +472,11 @@ function DebtPage({ state, setExplanation }: SectionProps) {
             <span>Principal</span>
             <span>Solde</span>
           </div>
-          {forward.entries.slice(0, 6).map((entry) => (
-            <div className="table-row" key={entry.paymentNumber}>
+          {forward.entries.slice(0, 6).map((entry, index) => (
+            <div
+              className="table-row"
+              key={`${entry.entryKind}-${entry.paymentNumber}-${entry.dueDate}-${index}`}
+            >
               <span>{formatDate(entry.dueDate)}</span>
               <strong>
                 n° {entry.paymentNumber} · <Currency value={entry.totalCashOut} />
@@ -441,6 +558,58 @@ function DebtPage({ state, setExplanation }: SectionProps) {
           </Callout>
         </section>
       ) : null}
+      {editorModal}
+      <Modal
+        open={balanceEditor}
+        onClose={() => setBalanceEditor(false)}
+        title={`Nouvel encours observé · ${loan.name}`}
+        subtitle="Cette observation n’altère aucun terme contractuel."
+      >
+        <form className="form-grid" onSubmit={recordBalance}>
+          <label>
+            Encours
+            <input
+              className="text-input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={balance.value}
+              onChange={(event) => setBalance({ ...balance, value: event.target.value })}
+              required
+            />
+          </label>
+          <label>
+            Date d’observation
+            <input
+              className="text-input"
+              type="date"
+              value={balance.date}
+              onChange={(event) => setBalance({ ...balance, date: event.target.value })}
+              required
+            />
+          </label>
+          <label className="full">
+            Note (optionnelle)
+            <input
+              className="text-input"
+              value={balance.notes}
+              onChange={(event) => setBalance({ ...balance, notes: event.target.value })}
+            />
+          </label>
+          <div className="form-actions">
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => setBalanceEditor(false)}
+            >
+              Annuler
+            </button>
+            <button className="button primary" disabled={busy}>
+              <Save size={15} /> Enregistrer l’observation
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

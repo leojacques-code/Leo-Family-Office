@@ -13,7 +13,7 @@ export default function LoginPage() {
           <h1>Votre patrimoine,<br />sans angle mort.</h1>
           <p>Un cockpit personnel pour suivre, projeter et décider avec des hypothèses explicites.</p>
         </div>
-        <div className="privacy-note"><span className="privacy-dot" />Données stockées localement dans cette V1</div>
+        <div className="privacy-note"><span className="privacy-dot" />Données privées, centralisées et protégées</div>
       </section>
       <section className="login-form-wrap">
         <LoginForm />

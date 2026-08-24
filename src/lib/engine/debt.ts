@@ -199,8 +199,18 @@ function entry(
     capitalisedCharges,
     closingBalance,
     liabilityId: liability.id,
-    totalCashOut: fields.principal + fields.interest + fields.insurance + fields.fees,
+    totalCashOut: debtCashOut(fields),
   };
+}
+
+/** Invariant canonique du décaissement d'une ligne de dette. */
+export function debtCashOut(fields: {
+  principal: number;
+  interest: number;
+  insurance: number;
+  fees: number;
+}): number {
+  return fields.principal + fields.interest + fields.insurance + fields.fees;
 }
 
 /**
@@ -824,10 +834,10 @@ export function buildForwardSchedule(liability: Liability, asOfDate: string): Lo
             openingBalance: 0,
             interest: 0,
             capitalisedInterest: 0,
+            capitalisedCharges: event.financed ? event.amount : 0,
             principal: 0,
             insurance: 0,
-            fees: event.amount,
-            closingBalance: 0,
+            fees: event.financed ? 0 : event.amount,
             kind: "ACTUAL",
           })
         : entry(liability, {
@@ -958,7 +968,10 @@ export function projectedBalanceAt(
   // L'encours observé ancre la projection ; l'échéancier n'en fournit que les variations.
   // Reprendre le `closingBalance` absolu d'un échéancier bancaire écraserait silencieusement
   // une observation plus récente, alors que c'est elle la vérité du bilan à `asOfDate`.
-  const change = due.reduce((sum, row) => sum + row.principal - row.capitalisedInterest, 0);
+  const change = due.reduce(
+    (sum, row) => sum + row.principal - row.capitalisedInterest - row.capitalisedCharges,
+    0,
+  );
   return Math.max(0, liability.currentBalance - change);
 }
 
@@ -1113,8 +1126,11 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
  * de vraies sorties de trésorerie : ils rejoignent la partie passée sans toucher à
  * l'encours observé, qui les contient déjà.
  */
-function timelineEntries(liability: Liability, asOfDate: string): LoanScheduleEntry[] {
-  const timeline = buildLoanTimeline(liability, asOfDate);
+function timelineEntries(
+  liability: Liability,
+  asOfDate: string,
+  timeline: LoanTimeline = buildLoanTimeline(liability, asOfDate),
+): LoanScheduleEntry[] {
   const pastEvents: LoanScheduleEntry[] = [
     ...repaymentEvents(liability),
     ...chargeEvents(liability),
@@ -1129,10 +1145,10 @@ function timelineEntries(liability: Liability, asOfDate: string): LoanScheduleEn
             openingBalance: 0,
             interest: 0,
             capitalisedInterest: 0,
+            capitalisedCharges: event.financed ? event.amount : 0,
             principal: 0,
             insurance: 0,
-            fees: event.amount,
-            closingBalance: 0,
+            fees: event.financed ? 0 : event.amount,
             kind: "ACTUAL",
           })
         : entry(liability, {
@@ -1164,7 +1180,18 @@ function timelineEntries(liability: Liability, asOfDate: string): LoanScheduleEn
  * pas de patrimoine. Les intérêts capitalisés n'appartiennent qu'au second : ils ne
  * sortent pas du compte mais alourdissent la dette.
  */
-export interface DebtServiceBreakdown {
+export interface DebtConsequences {
+  /** Variation signée de trésorerie : un décaissement est négatif. */
+  cashImpact: number;
+  /** Variation signée du passif : positive si la dette augmente. */
+  liabilityDelta: number;
+  /** Variation du passif causée par le principal ; un remboursement est négatif. */
+  principalMovement: number;
+  /** Coût économique, même lorsqu'il n'est pas décaissé. Peut être négatif pour un gain. */
+  economicCost: number;
+}
+
+export interface DebtServiceBreakdown extends DebtConsequences {
   principal: number;
   interest: number;
   capitalisedInterest: number;
@@ -1174,7 +1201,11 @@ export interface DebtServiceBreakdown {
   /** Frais incorporés au financement : coût économique sans sortie de trésorerie. */
   capitalisedCharges: number;
   totalCashOut: number;
-  economicCost: number;
+  /** Qualité la plus prudente des lignes qui composent la période. */
+  kind: DataKind;
+  dataKinds: DataKind[];
+  sourceLiabilityIds: string[];
+  flags: LoanScheduleFlag[];
 }
 
 const EMPTY_BREAKDOWN: DebtServiceBreakdown = {
@@ -1185,8 +1216,72 @@ const EMPTY_BREAKDOWN: DebtServiceBreakdown = {
   fees: 0,
   capitalisedCharges: 0,
   totalCashOut: 0,
+  cashImpact: 0,
+  liabilityDelta: 0,
+  principalMovement: 0,
   economicCost: 0,
+  kind: "DERIVED",
+  dataKinds: [],
+  sourceLiabilityIds: [],
+  flags: [],
 };
+
+function aggregateDataKind(kinds: DataKind[]): DataKind {
+  if (!kinds.length) return "DERIVED";
+  if (kinds.includes("MISSING")) return "MISSING";
+  if (kinds.includes("MODEL_ASSUMPTION")) return "MODEL_ASSUMPTION";
+  if (kinds.includes("USER_ASSUMPTION")) return "USER_ASSUMPTION";
+  if (kinds.every((kind) => kind === "ACTUAL")) return "ACTUAL";
+  if (kinds.every((kind) => kind === "EXTERNAL_DATA")) return "EXTERNAL_DATA";
+  return "DERIVED";
+}
+
+export function debtImpactFromEntries(
+  entries: LoanScheduleEntry[],
+  metadata: {
+    sourceLiabilityIds?: string[];
+    flags?: LoanScheduleFlag[];
+    dataKinds?: DataKind[];
+  } = {},
+): DebtServiceBreakdown {
+  const dataKinds = [
+    ...new Set([...(metadata.dataKinds ?? []), ...entries.map((row) => row.kind)]),
+  ];
+  const sourceLiabilityIds = [
+    ...new Set([...(metadata.sourceLiabilityIds ?? []), ...entries.map((row) => row.liabilityId)]),
+  ];
+  const breakdown = entries.reduce<DebtServiceBreakdown>(
+    (total, row) => ({
+      ...total,
+      principal: total.principal + row.principal,
+      interest: total.interest + row.interest,
+      capitalisedInterest: total.capitalisedInterest + row.capitalisedInterest,
+      insurance: total.insurance + row.insurance,
+      fees: total.fees + row.fees,
+      capitalisedCharges: total.capitalisedCharges + row.capitalisedCharges,
+      totalCashOut: total.totalCashOut + row.totalCashOut,
+      cashImpact: total.cashImpact - row.totalCashOut,
+      liabilityDelta:
+        total.liabilityDelta - row.principal + row.capitalisedInterest + row.capitalisedCharges,
+      principalMovement: total.principalMovement - row.principal,
+      economicCost:
+        total.economicCost +
+        row.interest +
+        row.capitalisedInterest +
+        row.insurance +
+        row.fees +
+        row.capitalisedCharges,
+    }),
+    {
+      ...EMPTY_BREAKDOWN,
+      dataKinds,
+      sourceLiabilityIds,
+      flags: metadata.flags ?? [],
+      kind: aggregateDataKind(dataKinds),
+    },
+  );
+  return breakdown;
+}
 
 export function debtServiceBreakdownForPeriod(
   liabilities: Liability[],
@@ -1194,31 +1289,23 @@ export function debtServiceBreakdownForPeriod(
   startDate: string,
   endDate: string,
 ): DebtServiceBreakdown {
-  return liabilities
-    .flatMap((liability) =>
-      timelineEntries(liability, asOfDate).filter(
-        (row) => row.dueDate >= startDate && row.dueDate <= endDate,
-      ),
-    )
-    .reduce<DebtServiceBreakdown>(
-      (total, row) => ({
-        principal: total.principal + row.principal,
-        interest: total.interest + row.interest,
-        capitalisedInterest: total.capitalisedInterest + row.capitalisedInterest,
-        insurance: total.insurance + row.insurance,
-        fees: total.fees + row.fees,
-        capitalisedCharges: total.capitalisedCharges + row.capitalisedCharges,
-        totalCashOut: total.totalCashOut + row.totalCashOut,
-        economicCost:
-          total.economicCost +
-          row.interest +
-          row.capitalisedInterest +
-          row.insurance +
-          row.fees +
-          row.capitalisedCharges,
-      }),
-      { ...EMPTY_BREAKDOWN },
-    );
+  const timelines = liabilities.map((liability) => ({
+    liability,
+    timeline: buildLoanTimeline(liability, asOfDate),
+  }));
+  const entries = timelines.flatMap(({ liability, timeline }) =>
+    timelineEntries(liability, asOfDate, timeline).filter(
+      (row) => row.dueDate >= startDate && row.dueDate <= endDate,
+    ),
+  );
+  return debtImpactFromEntries(entries, {
+    sourceLiabilityIds: liabilities.map((liability) => liability.id),
+    flags: timelines.flatMap(({ timeline }) => timeline.flags),
+    dataKinds: timelines.flatMap(({ timeline }) => [
+      timeline.contractual.kind,
+      timeline.forward.kind,
+    ]),
+  });
 }
 
 /** Σ des cash-outs exigibles dans [startDate, endDate], bornes incluses. */

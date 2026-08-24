@@ -251,7 +251,8 @@ export function projectionExplanation(
   const openingNetWorth = previous?.netWorth ?? opening.netWorth;
   const surplus = point.cumulativeOperatingSurplus - (previous?.cumulativeOperatingSurplus ?? 0);
   const marketPnL = point.cumulativeMarketPnL - (previous?.cumulativeMarketPnL ?? 0);
-  const debtCosts = point.cumulativeInterestPaid - (previous?.cumulativeInterestPaid ?? 0);
+  const debtCosts =
+    point.cumulativeEconomicDebtCosts - (previous?.cumulativeEconomicDebtCosts ?? 0);
   const principal = point.cumulativePrincipalPaid - (previous?.cumulativePrincipalPaid ?? 0);
   return {
     title: `Patrimoine net projeté en ${point.year}`,
