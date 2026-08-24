@@ -1,88 +1,93 @@
 # Configuration Supabase
 
-Supabase est l'adapter de **production**. SQLite reste l'adapter de développement local.
-La version antérieure de ce document est conservée dans `SUPABASE_SETUP.v1.md`.
+Supabase est la persistance unique en développement, preview et production. Utiliser des projets ou branches distincts ; le développement ne doit jamais écrire par défaut dans la production.
 
-## 1. Créer le projet
+## 1. Environnements et secrets
 
-Région UE, `eu-west-3` (Paris) pour limiter la latence depuis les fonctions Vercel européennes.
+Créer `.env.local` à partir de `.env.example` :
 
-## 2. Créer l'utilisateur propriétaire
+```text
+SESSION_SECRET=
+LOCAL_ACCESS_CODE=
+SUPABASE_URL=
+SUPABASE_SECRET_KEY=
+SUPABASE_DB_URL=
+OWNER_USER_ID=
+SUPABASE_DOCUMENTS_BUCKET=family-office-documents
+```
 
-Toutes les tables portent `user_id uuid not null references auth.users(id)`. Un utilisateur
-Auth réel doit exister avant tout insert, y compris avec la secret key.
+`SUPABASE_SECRET_KEY` et `SUPABASE_DB_URL` sont strictement serveur. Ne jamais les préfixer `NEXT_PUBLIC_` ni les importer dans un composant client. `SUPABASE_DB_URL` sert uniquement à `db:verify` et doit viser le même environnement que les autres variables.
 
-1. Authentication, Users, Add user, méthode email + mot de passe.
-2. Relever l'UUID affiché : c'est la valeur de `OWNER_USER_ID`.
+Environnements recommandés :
 
-`enable_signup = false` dans `supabase/config.toml` : aucune inscription publique n'est possible.
+- Development : Supabase CLI local ou projet de développement dédié ;
+- Preview : projet ou branche Supabase dédiée si disponible ;
+- Production : projet de production isolé.
 
-## 3. Appliquer les migrations
+## 2. Utilisateur propriétaire
+
+Les tables référencent `auth.users(id)`. Créer l’utilisateur propriétaire dans Supabase Auth et renseigner son UUID dans `OWNER_USER_ID`. L’application continue néanmoins d’utiliser `LOCAL_ACCESS_CODE` pour l’accès : cette exigence de FK ne constitue pas une migration Supabase Auth.
+
+## 3. Migrations
+
+Vérifier la CLI avec ses aides intégrées, puis inspecter l’état avant tout push :
 
 ```bash
-supabase link --project-ref <ref>
+supabase --version
+supabase --help
+supabase migration list
+supabase db reset # cible locale uniquement
+supabase db push --dry-run
 supabase db push
 ```
 
-Deux migrations sont appliquées dans l'ordre :
+Ordre attendu :
 
-- `202608190001_initial_family_office.sql` : schéma complet, grants explicites, RLS sur toutes
-  les tables à `user_id`, bucket privé `family-office-documents`.
-- `202608190002_scenario_parameters.sql` : colonnes de paramètres sur `public.scenarios`,
-  contrainte de cohérence du choc daté, index de lecture du cockpit.
+1. `202608190001_initial_family_office.sql`
+2. `202608190002_scenario_parameters.sql`
+3. `202608240001_scenario_investment_allocation.sql`
+4. `202608240002_cash_flow_engine_v2.sql`
+5. `202608240003_debt_engine_v2.sql`
+6. `202608240004_debt_engine_v2_1.sql`
+7. `202608240005_supabase_only_runtime.sql`
 
-La migration initiale n'est **pas** idempotente (`create table` sans `if not exists`) : elle ne
-doit être appliquée qu'une fois, sur une base vierge. La seconde est rejouable.
+Ne jamais modifier une migration déjà appliquée. Toute évolution future reçoit un nouveau fichier. Ne jamais exécuter `supabase db reset` sur une base distante.
 
-Lancer ensuite les advisors Database et Security de la console Supabase et traiter les
-avertissements avant mise en service.
+La migration 005 ajoute des RPC transactionnelles réservées au rôle serveur. Elles regroupent les écritures, sans déplacer les formules financières en SQL.
 
-## 4. Vérifier les garde-fous
+## 4. Vérifications
 
-- Storage : le bucket `family-office-documents` existe et est **privé** (`public = false`),
-  limite 8 Mio, types MIME restreints.
-- Table Editor : RLS activé sur toutes les tables à `user_id`, policy `owner_all` présente.
-- API : le rôle `anon` n'a aucun grant sur `public`.
-
-## 5. Amorcer les données
+Après application :
 
 ```bash
-node --env-file=.env.local --experimental-strip-types scripts/seed-supabase.ts
+npm run db:verify
+supabase db advisors
 ```
 
-Le script refuse de tourner si des comptes existent déjà pour `OWNER_USER_ID`, sauf avec
-`--force`. Il reprend à l'identique le jeu de données de l'adapter local et réutilise
-`amortizeLoan` du moteur pour l'échéancier du prêt : aucune formule n'est recalculée à la main.
+`db:verify` ouvre une transaction PostgreSQL `READ ONLY` via `SUPABASE_DB_URL`. Il contrôle les tables et colonnes structurantes, contraintes, huit RPC et leurs permissions, RLS, policies `owner_all`, bucket et policies Storage, ainsi que les sept versions de migration.
 
-## 6. Modèle de sécurité actuel, à connaître
+Contrôler aussi :
 
-Supabase Auth n'est pas branché côté application. L'accès reste protégé par
-`LOCAL_ACCESS_CODE` et le cookie de session vérifié dans `src/proxy.ts` et les route handlers.
+- bucket `family-office-documents` privé, limite et MIME conformes ;
+- RLS activé sur les tables exposées ;
+- policy d’isolation par `user_id` ;
+- aucun grant table pour `anon` ;
+- RPC `lfo_*` exécutables uniquement par `service_role`.
 
-Le serveur accède à PostgreSQL avec la **secret key** (service role), qui **contourne RLS**.
-Conséquences :
+## 5. Seed one-shot
 
-- la clé est strictement serveur : jamais préfixée `NEXT_PUBLIC_`, jamais importée dans un
-  composant `"use client"`. `src/lib/data/supabase-client.ts` porte `import "server-only"` ;
-- RLS et les policies du bucket restent en place comme défense en profondeur et redeviendront
-  la frontière effective le jour où Supabase Auth sera branché ;
-- la frontière de sécurité effective aujourd'hui est le cookie de session. Un `SESSION_SECRET`
-  faible ou fuité expose l'ensemble des données.
+Uniquement sur une base vide :
 
-## 7. Bascule ultérieure vers Supabase Auth
+```bash
+npm run seed:supabase
+```
 
-1. Renseigner `NEXT_PUBLIC_SUPABASE_URL` et `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
-2. Remplacer `LoginForm` par un flux Supabase Auth (magic link ou passkey) et `@supabase/ssr`
-   pour la propagation de session.
-3. Dans `supabase-client.ts`, construire le client à partir du JWT de la requête au lieu de la
-   secret key, et supprimer `OWNER_USER_ID` au profit de `auth.uid()`.
-4. Tester RLS avec deux utilisateurs : A ne doit jamais lire ni écrire une ligne de B.
-5. Tester le bucket : insert, select, update et delete restreints au dossier `{auth.uid()}/`.
+Le script vérifie les tables qu’il alimente avant la première insertion. Si une donnée existe, il s’arrête avec la liste des tables concernées. `--force` est volontairement désactivé. Le script ne supprime rien et ne doit jamais être lancé automatiquement au démarrage de Next.js.
 
-## 8. Limite connue
+La taxonomie Cash Flow V2 est fournie explicitement pour chaque catégorie (`cash_flow_kind`, `essentiality`, `expense_behavior`, `archived`). Aucun moteur ne la déduit de `group_name`.
 
-PostgREST n'expose pas de transaction multi-requêtes. Côté Supabase, `add_account`
-(établissement + compte + solde) et `update_scenario` (mise à jour + version) ne sont pas
-atomiques, contrairement au `BEGIN IMMEDIATE` de l'adapter SQLite. Sur un cockpit
-mono-utilisateur le risque est faible. Le rendre atomique demande des fonctions RPC
-PostgreSQL, à envisager si des écritures concurrentes apparaissent.
+## 6. Modèle de sécurité actuel
+
+Le cookie applicatif protégé par `SESSION_SECRET` et `LOCAL_ACCESS_CODE` reste la frontière d’accès. Le client serveur utilise la secret key et contourne RLS ; sa confidentialité est donc critique. RLS reste actif comme défense en profondeur.
+
+Une future migration vers Supabase Auth devra être traitée séparément, avec tests multi-utilisateurs et client lié au JWT de la requête. Elle ne fait pas partie de l’architecture Supabase-only actuelle.

@@ -100,6 +100,10 @@ export interface MonthlyFinancialState {
 
   operatingSurplus: number;
   interestPaid: number;
+  /** Intérêt couru non décaissé sur le mois : hors trésorerie, mais bien un coût. */
+  capitalisedInterestAccrued: number;
+  /** Frais incorporés au financement sur le mois : hors trésorerie, mais bien un coût. */
+  capitalisedChargesAccrued: number;
   principalPaid: number;
   insurancePaid: number;
   feesPaid: number;
@@ -244,13 +248,32 @@ function nextDay(iso: string): string {
 
 interface DebtMonth {
   interest: number;
+  /**
+   * Intérêt couru non décaissé, ajouté au capital restant dû. Il ne touche pas la
+   * trésorerie mais alourdit la dette : l'ignorer ferait stagner l'encours pendant un
+   * différé total et laisserait le patrimoine net inchangé alors qu'il baisse.
+   */
+  capitalisedInterest: number;
+  /**
+   * Frais incorporés au financement : aucun décaissement, mais l'encours augmente. Même
+   * mécanique que l'intérêt capitalisé, et même piège s'il n'atteint pas le bilan.
+   */
+  capitalisedCharges: number;
   principal: number;
   insurance: number;
   fees: number;
   cashOut: number;
 }
 
-const NO_DEBT: DebtMonth = { interest: 0, principal: 0, insurance: 0, fees: 0, cashOut: 0 };
+const NO_DEBT: DebtMonth = {
+  interest: 0,
+  capitalisedInterest: 0,
+  capitalisedCharges: 0,
+  principal: 0,
+  insurance: 0,
+  fees: 0,
+  cashOut: 0,
+};
 
 /**
  * Échéances exigibles par mois projeté, issues du SEUL échéancier forward : le capital
@@ -271,6 +294,8 @@ export function buildDebtCalendar(
     const month: DebtMonth = { ...NO_DEBT };
     for (const entry of due) {
       month.interest += entry.interest;
+      month.capitalisedInterest += entry.capitalisedInterest;
+      month.capitalisedCharges += entry.capitalisedCharges;
       month.principal += entry.principal;
       month.insurance += entry.insurance;
       month.fees += entry.fees;
@@ -299,6 +324,8 @@ function openingState(opening: OpeningBalanceSheet): MonthlyFinancialState {
     openingNetWorth: opening.netWorth,
     operatingSurplus: 0,
     interestPaid: 0,
+    capitalisedInterestAccrued: 0,
+    capitalisedChargesAccrued: 0,
     principalPaid: 0,
     insurancePaid: 0,
     feesPaid: 0,
@@ -417,12 +444,21 @@ export function advanceMonth(
     previous.financingCostMissing || fundingGap > 0 || fundingGapChange > 0;
   if (financingCostMissing) flags.push(FINANCING_COST_FLAG);
 
-  const loanBalance = Math.max(0, openingLoan - debt.principal);
+  // ClosingDebt = OpeningDebt − PrincipalPaid + CapitalisedInterest + CapitalisedCharges.
+  // Le capital remboursé éteint le passif ; l'intérêt capitalisé et les frais financés
+  // l'augmentent sans qu'aucun euro ne sorte du compte.
+  const loanBalance = Math.max(
+    0,
+    openingLoan - debt.principal + debt.capitalisedInterest + debt.capitalisedCharges,
+  );
   const grossFinancialAssets =
     bankCash + marketInvestedAssets + openingInvestmentCash + openingOther;
   const netWorth = grossFinancialAssets - loanBalance - fundingGap;
 
-  const economicDebtCosts = debt.interest + debt.insurance + debt.fees;
+  // Tout ce qui appauvrit : intérêt décaissé, intérêt capitalisé, frais financés, frais
+  // décaissés, assurance. Le principal n'y figure jamais, il éteint un passif.
+  const economicDebtCosts =
+    debt.interest + debt.capitalisedInterest + debt.capitalisedCharges + debt.insurance + debt.fees;
   const netWorthChange = netWorth - openingNetWorth;
   // Attribution économique : le principal n'y figure pas, sa double jambe s'annule.
   const attribution = operatingSurplus - economicDebtCosts + marketPnL;
@@ -440,6 +476,8 @@ export function advanceMonth(
     openingNetWorth,
     operatingSurplus,
     interestPaid: debt.interest,
+    capitalisedInterestAccrued: debt.capitalisedInterest,
+    capitalisedChargesAccrued: debt.capitalisedCharges,
     principalPaid: debt.principal,
     insurancePaid: debt.insurance,
     feesPaid: debt.fees,
@@ -502,7 +540,8 @@ export function toAnnualPoints(result: MonthlyModelResult): AnnualBalanceSheetPo
   for (const state of result.states) {
     cumulativeOperatingSurplus += state.operatingSurplus;
     cumulativeMarketPnL += state.marketPnL;
-    cumulativeInterestPaid += state.interestPaid + state.insurancePaid + state.feesPaid;
+    cumulativeInterestPaid +=
+      state.interestPaid + state.capitalisedInterestAccrued + state.insurancePaid + state.feesPaid;
     cumulativePrincipalPaid += state.principalPaid;
     if (state.monthIndex % 12 !== 0) continue;
     points.push({

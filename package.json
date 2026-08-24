@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run lint && npm run test && npm run build",
-    "seed:supabase": "node --env-file=.env.local --experimental-strip-types scripts/seed-supabase.ts"
+    "seed:supabase": "node --env-file=.env.local --experimental-strip-types scripts/seed-supabase.ts",
+    "db:verify": "node --env-file=.env.local --experimental-strip-types scripts/verify-supabase-schema.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.7.0",
@@ -30,10 +31,12 @@
   },
   "devDependencies": {
     "@types/node": "24.10.1",
+    "@types/pg": "8.23.1",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "eslint": "9.39.1",
     "eslint-config-next": "16.1.6",
+    "pg": "8.23.0",
     "prettier": "^3.9.6",
     "typescript": "5.9.3",
     "vitest": "4.1.10"

@@ -2,53 +2,42 @@
 
 ## Principes
 
-1. **Traçabilité** — chaque valeur importante porte un type (`ACTUAL`, `USER_ASSUMPTION`, `MODEL_ASSUMPTION`, `EXTERNAL_DATA`, `DERIVED`, `MISSING`), une confiance et, si disponible, une source et une date.
-2. **Absence de double comptage** — le bilan additionne les derniers soldes des comptes. Les positions PEA/CTO expliquent ces soldes mais ne s’y ajoutent jamais.
-3. **Historique immuable** — une mise à jour de solde crée un nouvel `account_balance`; un scénario crée une nouvelle version.
-4. **Moteurs indépendants** — finance, fiscalité, Monte-Carlo, immobilier et décision sont des fonctions TypeScript pures.
-5. **Adapters** — l’interface ne connaît que l’état agrégé et les mutations applicatives. Le repository local peut être remplacé par un repository Supabase.
+1. **Traçabilité** — chaque valeur importante porte un type, une confiance et, si disponible, une source et une date.
+2. **Absence de double comptage** — le bilan additionne les derniers soldes ; les positions expliquent ces soldes sans s’y ajouter.
+3. **Historique immuable** — un solde crée un snapshot daté et un scénario crée une version.
+4. **Moteurs indépendants** — les calculs financiers, Cash Flow, Debt, Monte-Carlo, immobilier et décision restent des fonctions TypeScript pures.
+5. **Persistance unique** — Supabase PostgreSQL et Supabase Storage sont obligatoires dans tous les environnements.
 
 ## Couches
 
-- **UI layer** : App Router, composants React et graphiques Recharts.
-- **Application/service layer** : routes `/api/state`, `/api/projection`, `/api/documents`, `/api/export`.
-- **Financial engine** : compound return, inflation, FX, amortissement, VAN, TRI, MOIC, net worth.
-- **Scenario engine** : overrides, versions, trajectoire déterministe et Monte-Carlo.
-- **Decision engine** : comparaison multicritère dette vs investissement ; framework extensible.
-- **Data layer** : interface `FamilyOfficeRepository` (`src/lib/data/repository.ts`) et deux adapters interchangeables, SQLite pour le développement et Supabase/PostgreSQL pour la production. La sélection se fait par `DATA_ADAPTER`, avec import dynamique : `node:sqlite` n'est jamais évalué en production.
-- **Integration layer** : emplacements prévus pour Supabase, Open Banking, market data et imports CSV.
+- **UI** : App Router, composants React et Recharts.
+- **Application** : routes `/api/state`, `/api/projection`, `/api/documents`, `/api/export`.
+- **Moteurs** : transitions et formules financières TypeScript sans dépendance React ou base.
+- **Data** : `FamilyOfficeRepository` expose l’état agrégé et les mutations. Son unique implémentation est `supabase-repository.ts`.
+- **Schéma** : `supabase/migrations/` est la source de vérité PostgreSQL.
+- **Documents** : bucket privé `family-office-documents`, avec métadonnées dans `public.documents`.
+- **Vérification** : `db:verify` contrôle directement PostgreSQL dans une transaction `READ ONLY`; il ne constitue jamais une seconde définition du schéma.
+
+Les pages, routes et composants continuent d’appeler `getRepository()`. Aucun composant UI n’accède directement à Supabase.
+
+## Transactions
+
+La migration `202608240005_supabase_only_runtime.sql` regroupe en fonctions PostgreSQL les écritures composées : compte + solde, transaction + solde dérivé, scénario + version, duplication + version, clôture + snapshot, catégorie + budget, clôture Cash Flow versionnée et simulation + percentiles.
+
+Ces fonctions ne calculent aucune formule métier. Elles persistent des résultats déjà calculés par TypeScript. Une exception annule toute la fonction.
+
+L’upload documentaire traverse deux systèmes : Storage puis PostgreSQL. Si l’insert des métadonnées échoue, le repository supprime immédiatement l’objet Storage créé et signale aussi un éventuel échec du rollback.
+
+## Validation des données
+
+Les nombres financiers obligatoires doivent être présents et finis. Une colonne obligatoire absente est traitée comme une chaîne de migrations incomplète, jamais comme zéro ou comme une valeur par défaut applicative. Les champs réellement optionnels conservent `null`.
+
+Monte-Carlo refuse un état, un percentile ou une série contenant `NaN`, `Infinity` ou `-Infinity`. La persistance répète ce contrôle avant l’appel RPC.
 
 ## Modèle Monte-Carlo
 
-Le moteur travaille mensuellement et utilise une Student-t à 5 degrés de liberté normalisée, plus une probabilité de stress rare et un choc daté optionnel. Il évite ainsi une distribution normale naïve, sans prétendre modéliser objectivement le futur. Le seed rend chaque simulation reproductible.
+Le moteur travaille mensuellement, utilise une Student-t à 5 degrés de liberté normalisée, une probabilité de stress rare et un choc daté optionnel. Le seed rend chaque simulation reproductible. Les percentiles portent sur le patrimoine net.
 
-Les percentiles suivent cette convention :
+## Sécurité actuelle
 
-- P10 : environ 90 % des simulations du modèle terminent au-dessus ;
-- P50 : médiane ;
-- P90 : environ 10 % terminent au-dessus.
-
-## Navigation
-
-`src/lib/navigation.ts` est un module partagé serveur/client, sans `"use client"` et sans import
-de composants. Il n'exporte que des données sérialisables et des fonctions pures. Le crash de
-production `validSections.has is not a function` venait de l'export d'un `Set` depuis un module
-client vers une page serveur : la sérialisation ne préserve pas les `Set`. Aucun `Set` ne doit
-franchir cette frontière.
-
-## Passage à Supabase
-
-Le schéma de production reprend toutes les familles de données demandées, ajoute `user_id` aux tables privées, active RLS et utilise un bucket privé. Le passage en production exige :
-
-1. créer et relier le projet Supabase ;
-2. appliquer la migration et exécuter les advisors ;
-3. amorcer les données avec `pnpm seed:supabase` ;
-4. renseigner les variables Vercel listées dans le README.
-
-Le repository Supabase est implémenté (`src/lib/data/supabase-repository.ts`). Il reste à
-remplacer l’accès par code local par Supabase Auth SSR, ce qui rendra RLS de nouveau
-contraignant : voir `docs/SUPABASE_SETUP.md`, sections 6 et 7.
-
-## Extension vers l’ERP personnel
-
-Les IDs sont stables, les domaines sont séparés et le moteur ne dépend pas de l’interface. Un futur cockpit ERP pourra consommer les mêmes services sans fusionner prématurément Family Office, LM Pilot, M&A ou les autres modules.
+L’accès applicatif reste fondé sur `SESSION_SECRET` et `LOCAL_ACCESS_CODE`. Le client serveur utilise `SUPABASE_SECRET_KEY` et `OWNER_USER_ID`; aucune clé secrète n’est exposée au navigateur. RLS et le bucket privé restent une défense en profondeur jusqu’à une future migration Supabase Auth, hors du périmètre actuel.

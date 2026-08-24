@@ -2,7 +2,7 @@
 
 ## Différé volontairement
 
-- repository Supabase et Auth SSR effectifs après création du projet ;
+- migration ultérieure de l'accès temporaire vers Supabase Auth SSR ;
 - imports CSV mappés pour banques et courtiers ;
 - connecteurs Open Banking / PSD2 en lecture seule ;
 - market data, FX et inflation externes avec fallback manuel ;
@@ -21,7 +21,7 @@
 
 1. Importer trois mois de transactions pour rendre cash flow, lifestyle et réserve de sécurité crédibles.
 2. Importer le relevé PEA, le détail du CTO et l’échéancier Bpifrance pour fermer les réconciliations.
-3. Créer le projet Supabase privé, appliquer RLS et basculer l’authentification.
+3. Séparer strictement les projets Supabase development, preview et production, puis auditer RLS.
 4. Sourcer les hypothèses de carrière et les règles fiscales 2026.
 5. Persister et comparer jusqu’à quatre études/scénarios immobiliers.
 6. Ajouter les exports Excel et PDF institutionnels.

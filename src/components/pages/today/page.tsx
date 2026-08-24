@@ -17,6 +17,12 @@ import {
 } from "recharts";
 import { nextDebtEvent } from "@/lib/engine/debt";
 import {
+  cashRunwayDays,
+  computeObservedCashFlow,
+  forecastCashFlow,
+  completeMonthsPeriod,
+} from "@/lib/engine/cash-flow";
+import {
   buildOpeningBalanceSheet,
   runDeterministicModel,
   scenarioAssumptions,
@@ -91,6 +97,27 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
   ].filter((item) => item.value > 0);
   const allocationTotal = allocation.reduce((sum, item) => sum + item.value, 0);
   const upcomingDebt = nextDebtEvent(state.liabilities, state.asOfDate);
+  // Surplus réellement constaté au ledger. La moyenne n'existe que si la fenêtre est
+  // couverte : un mois sans historique n'est pas un mois à zéro euro.
+  // Trois derniers mois RÉVOLUS, le mois en cours exclu : une hypothèse mensuelle ne se
+  // compare qu'à des mois calendaires terminés et certifiés couverts.
+  const t3 = completeMonthsPeriod(state.asOfDate, 3);
+  const observedT3M = computeObservedCashFlow(
+    state.transactions,
+    state.expenseCategories,
+    t3.start,
+    t3.end,
+    { ledgerCoverageStart: state.ledgerCoverageStart, asOfDate: state.asOfDate },
+  );
+  const runway = cashRunwayDays(
+    forecastCashFlow({
+      asOfDate: state.asOfDate,
+      horizonDays: 365,
+      openingCash: state.metrics.bankCash,
+      rules: state.recurringRules,
+      liabilities: state.liabilities,
+    }),
+  );
   const primaryGoal = state.goals[0];
 
   return (
@@ -385,6 +412,26 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
               <Currency value={state.metrics.freeCashFlow} sign />
             </strong>
           </div>
+          <p className="muted-copy">
+            {observedT3M.monthlyAverageOperatingSurplus === null ? (
+              <>
+                Surplus mensuel constaté : historique insuffisant (
+                {observedT3M.coverage.completeCoveredMonths} mois complets couverts sur{" "}
+                {observedT3M.coverage.requestedMonths}
+                {observedT3M.coverage.ledgerCoverageStart === null
+                  ? ", profondeur d’historique non déclarée"
+                  : `, couverture depuis le ${formatDate(observedT3M.coverage.ledgerCoverageStart)}`}
+                )
+              </>
+            ) : (
+              <>
+                Surplus constaté sur les 3 derniers mois révolus :{" "}
+                <Currency value={observedT3M.monthlyAverageOperatingSurplus} sign />
+                /mois
+              </>
+            )}
+            {runway !== null ? ` · trésorerie négative projetée dans ${runway} jours` : ""}
+          </p>
         </article>
         <article className="panel goals-card">
           <div className="panel-header">

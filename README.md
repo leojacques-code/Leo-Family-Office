@@ -1,32 +1,62 @@
 # Léo Family Office
 
-Application patrimoniale privée, desktop-first, datée au **19 août 2026** et exprimée en EUR. Cette V1 privilégie l’exactitude des calculs, la traçabilité des données et les workflows réellement utilisables.
+Application patrimoniale privée, desktop-first, datée au **19 août 2026** et exprimée en EUR. Elle privilégie l’exactitude des calculs, la traçabilité et des workflows réellement utilisables.
+
+## Architecture de persistance
+
+Supabase est l’unique couche de persistance dans tous les environnements :
+
+- PostgreSQL est la source de vérité des données structurées ;
+- Supabase Storage, bucket privé `family-office-documents`, stocke les documents ;
+- `supabase/migrations/` est l’unique source de vérité du schéma ;
+- `FamilyOfficeRepository` conserve la séparation application/persistance ;
+- les moteurs financiers restent des fonctions TypeScript pures. Aucune formule n’est exécutée dans PostgreSQL.
+
+L’authentification applicative reste temporairement fondée sur `SESSION_SECRET` et `LOCAL_ACCESS_CODE`. `OWNER_USER_ID` et le client Supabase serveur sont conservés ; ce sprint ne branche pas Supabase Auth.
 
 ## Démarrage local
 
-Prérequis : Node.js 24.
+Prérequis : Node.js 22+ et un projet Supabase de développement, ou Supabase CLI en local. Le développement ne doit jamais pointer par défaut vers la production.
 
 ```bash
 npm ci
-npm run dev
-```
-
-Ouvrir `http://localhost:3000`. Sans fichier `.env.local`, le code de développement vous sera donné par un administrateur.
-
-Pour une configuration privée durable :
-
-```bash
 cp .env.example .env.local
 ```
 
-Renseigner ensuite deux valeurs longues et aléatoires :
+Renseigner dans `.env.local` :
 
 ```text
 SESSION_SECRET=...
 LOCAL_ACCESS_CODE=...
+SUPABASE_URL=...
+SUPABASE_SECRET_KEY=...
+SUPABASE_DB_URL=...
+OWNER_USER_ID=...
+SUPABASE_DOCUMENTS_BUCKET=family-office-documents
 ```
 
-En production, l’application refuse de créer une session si ces secrets sont absents.
+`SUPABASE_SECRET_KEY` et `SUPABASE_DB_URL` sont strictement serveur et ne doivent jamais être préfixées `NEXT_PUBLIC_`. La seconde n'est utilisée que par la vérification PostgreSQL read-only.
+
+Appliquer et vérifier le schéma sur le projet de développement, puis amorcer une base vide une seule fois :
+
+```bash
+supabase migration list
+supabase db push --dry-run
+supabase db push
+npm run db:verify
+npm run seed:supabase
+npm run dev
+```
+
+Le seed refuse toute cible déjà amorcée. Il n’existe aucun mode forcé et aucune suppression automatique.
+
+## Environnements
+
+- **Development** : Supabase CLI local ou projet Supabase de développement dédié.
+- **Preview** : projet ou branche Supabase dédiée, lorsque disponible.
+- **Production** : projet Supabase de production, jamais utilisé comme cible de développement par défaut.
+
+Chaque environnement reçoit ses propres secrets serveur. Ne jamais exécuter de reset sur une base distante et ne jamais amorcer automatiquement la production au démarrage de Next.js.
 
 ## Commandes de qualité
 
@@ -37,99 +67,47 @@ npm run build
 npm run check
 ```
 
-## Ce qui fonctionne
+`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les tables, colonnes, contraintes, huit RPC, permissions, RLS, policies, bucket Storage ou sept versions de migration divergent du code.
+
+## Fonctionnalités
 
 - cockpit patrimonial avec provenance et incertitude visibles ;
-- comptes et soldes modifiables avec historique daté ;
-- ajout de transactions et mise à jour optionnelle du solde ;
-- budget mensuel progressif, sans compléter silencieusement les catégories manquantes ;
-- PEA / CTO, positions et contrôles de réconciliation ;
-- prêt étudiant, amortissement à 0 % et arbitrage rembourser vs investir ;
-- scénarios Prudent, Central, Ambitieux, Stress et Très favorable, versionnés et duplicables ;
-- projection déterministe et Monte-Carlo à queues épaisses, seed reproductible, P10/P25/P50/P75/P90 ;
-- trajectoires de carrière, clairement marquées comme hypothèses ;
-- underwriting immobilier avec TRI, VAN, MOIC, LTV, DSCR et cash-on-cash ;
-- sandbox de valorisation business equity ;
-- objectifs, timeline et clôture mensuelle persistante ;
-- coffre documentaire local privé avec contrôle de taille et de type ;
-- exports CSV et backup JSON ;
-- bouton « Explain calculation » sur les métriques structurantes.
+- comptes, soldes, transactions, budgets et clôtures ;
+- PEA / CTO, positions et réconciliations ;
+- Debt Engine V2/V2.1 et arbitrage rembourser vs investir ;
+- scénarios versionnés et duplicables ;
+- projection déterministe et Monte-Carlo reproductible, P10/P25/P50/P75/P90 ;
+- immobilier, business equity, objectifs, exports et coffre documentaire privé.
 
-## Stockage et persistance
+## Schéma Supabase
 
-Le mode exécutable autonome utilise SQLite via `node:sqlite` et crée `data/family-office.db`. Le schéma normalisé couvre les comptes, soldes, transactions, positions, dettes, revenus, budgets, scénarios, projections, immobilier, business equity, documents, décisions et clôtures.
+Les migrations sont appliquées dans cet ordre, sans modification rétroactive :
 
-Le schéma PostgreSQL/Supabase de production est livré dans [`supabase/migrations/202608190001_initial_family_office.sql`](supabase/migrations/202608190001_initial_family_office.sql). Il active RLS sur toutes les tables utilisateur, retire l’accès `anon`, limite le stockage documentaire et isole chaque ligne par `auth.uid()`.
+1. `202608190001_initial_family_office.sql`
+2. `202608190002_scenario_parameters.sql`
+3. `202608240001_scenario_investment_allocation.sql`
+4. `202608240002_cash_flow_engine_v2.sql`
+5. `202608240003_debt_engine_v2.sql`
+6. `202608240004_debt_engine_v2_1.sql`
+7. `202608240005_supabase_only_runtime.sql`
 
-Une instance Supabase n’a pas été créée ni reliée, car aucune organisation, région ou clé de projet n’a été fournie. La migration est prête ; le branchement du repository Supabase et le remplacement de la session locale par Supabase Auth sont listés dans la roadmap.
-
-## Architecture
-
-```text
-src/app                 UI et routes Next.js
-src/components          cockpit et modules métier
-src/lib/engine          moteurs financiers purs et testables
-src/lib/data            schéma et repository persistant local
-src/lib/validation      validation des mutations
-supabase/migrations     schéma PostgreSQL, RLS et storage privé
-docs                    décisions, hypothèses et roadmap
-```
-
-Les composants UI n’embarquent pas les formules structurantes. Le moteur financier ne dépend ni de React ni de la base, et les scénarios ne modifient jamais les historiques `ACTUAL`.
+La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persistance. Elle ne déplace aucune formule financière dans la base.
 
 ## Sécurité
 
 - session HttpOnly, `SameSite=Strict`, `Secure` en production ;
-- double contrôle : proxy de routes + autorisation dans chaque API ;
-- validation Zod de toutes les mutations ;
-- limites de taille et allow-list MIME pour les documents ;
-- aucun identifiant bancaire, aucune clé sensible côté client ;
-- aucun ordre ni écriture vers une banque ou un courtier ;
-- Supabase RLS et bucket privé prêts pour le déploiement.
+- validation Zod des mutations ;
+- secret Supabase confiné aux modules serveur ;
+- bucket documentaire privé ;
+- RLS activé sur les tables exposées et aucun accès table pour `anon` ;
+- fonctions RPC runtime réservées au rôle serveur.
 
-Le mode local n’est pas destiné à être exposé directement sur Internet. Pour cela, finaliser Supabase Auth, déployer la migration, stocker les secrets dans l’hébergeur et exécuter un audit RLS.
+Le client serveur utilise actuellement la secret key et contourne donc RLS. La frontière effective reste la session applicative ; Supabase Auth est une évolution séparée.
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [Hypothèses et réconciliations](docs/ASSUMPTIONS.md)
-- [Roadmap et fonctions différées](docs/ROADMAP.md)
-- [Documents réels à vérifier](docs/DATA_VERIFICATION.md)
 - [Configuration Supabase](docs/SUPABASE_SETUP.md)
-
-## Déploiement Vercel
-
-### Variables d'environnement
-
-À créer sur les scopes **Production** et **Preview**.
-
-| Variable | Valeur | Nature |
-| --- | --- | --- |
-| `DATA_ADAPTER` | `supabase` | serveur |
-| `SESSION_SECRET` | 32 octets aléatoires (`openssl rand -base64 32`) | serveur, sensible |
-| `LOCAL_ACCESS_CODE` | code d'accès privé | serveur, sensible |
-| `SUPABASE_URL` | `https://<ref>.supabase.co` | serveur |
-| `SUPABASE_SECRET_KEY` | secret key du projet Supabase | serveur, sensible |
-| `OWNER_USER_ID` | UUID de l'utilisateur Supabase Auth propriétaire | serveur |
-| `SUPABASE_DOCUMENTS_BUCKET` | `family-office-documents` | serveur, optionnel |
-
-`SUPABASE_SECRET_KEY` ne doit jamais être préfixée `NEXT_PUBLIC_`. Elle contourne RLS et
-n'est lue que par `src/lib/data/supabase-client.ts`, qui porte `import "server-only"`.
-
-`NEXT_PUBLIC_SUPABASE_URL` et `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` ne servent qu'à la bascule
-vers Supabase Auth. Tant que l'accès passe par `LOCAL_ACCESS_CODE`, aucun composant client
-n'appelle Supabase : les laisser vides serait trompeur, les omettre est correct.
-
-### Séquence de mise en service
-
-1. Appliquer les migrations Supabase, voir `docs/SUPABASE_SETUP.md`.
-2. Créer les variables ci-dessus dans Vercel.
-3. `npm run seed:supabase` en local, pointé sur le projet de production.
-4. Déployer, puis vérifier `/login`, `/`, `/net-worth`, `/scenarios`, `/api/state`,
-   `/api/export?format=csv` et une projection.
-
-### Choix d'adapter
-
-`DATA_ADAPTER=local` utilise SQLite dans `./data`. `DATA_ADAPTER=supabase` utilise PostgreSQL.
-Sans valeur explicite, l'application choisit `supabase` si `VERCEL` est défini, `local` sinon :
-le filesystem Vercel est en lecture seule et `node:sqlite` est expérimental sous Node 22.
+- [Hypothèses et réconciliations](docs/ASSUMPTIONS.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Documents à vérifier](docs/DATA_VERIFICATION.md)
