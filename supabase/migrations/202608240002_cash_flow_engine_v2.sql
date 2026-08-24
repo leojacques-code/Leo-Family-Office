@@ -125,5 +125,26 @@ create table if not exists public.cash_flow_monthly_closes (
 
 create index if not exists cash_flow_closes_user_month_idx on public.cash_flow_monthly_closes(user_id, month desc, version desc);
 
+-- 5. Isolation par utilisateur des deux nouvelles tables.
+--
+-- La migration initiale posait RLS et la politique `owner_all` en balayant les tables
+-- portant une colonne `user_id`. Ce balayage ne s'est exécuté qu'une fois : toute table
+-- créée après lui doit poser sa propre isolation, sinon les seuls grants ci-dessous
+-- rendraient ses lignes lisibles et modifiables par n'importe quel utilisateur
+-- authentifié, tous comptes confondus.
+do $$
+declare target text;
+begin
+  foreach target in array array['recurring_cash_flow_rules', 'cash_flow_monthly_closes']
+  loop
+    execute format('alter table public.%I enable row level security', target);
+    execute format('drop policy if exists owner_all on public.%I', target);
+    execute format(
+      'create policy owner_all on public.%I for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id)',
+      target
+    );
+  end loop;
+end $$;
+
 revoke all on all tables in schema public from anon;
 grant select, insert, update, delete on all tables in schema public to authenticated;
