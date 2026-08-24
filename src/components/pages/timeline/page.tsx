@@ -2,44 +2,56 @@
 
 import { CalendarCheck } from "lucide-react";
 import { Callout, Currency, EmptyState, SectionHeader } from "@/components/ui";
-import type { SectionProps } from "@/components/pages/shared";
+import { type SectionProps, formatDate, formatEur } from "@/components/pages/shared";
+import { buildLoanSchedules } from "@/lib/engine/debt";
 
 function TimelinePage({ state, mutate, busy }: SectionProps) {
+  // Les jalons de dette viennent de l'échéancier dérivé : un passif modifié déplace
+  // immédiatement ces événements.
+  const debtMilestones = buildLoanSchedules(state.liabilities).flatMap((schedule) => {
+    const liability = state.liabilities.find((item) => item.id === schedule.liabilityId);
+    const first = schedule.entries[0];
+    const last = schedule.entries.at(-1);
+    if (!liability || !first || !last) return [];
+    return [
+      {
+        date: formatDate(first.dueDate),
+        kind: "Contractuel",
+        title: `Première échéance · ${liability.name}`,
+        detail: `${formatEur(first.totalCashOut)} exigibles`,
+        tone: "warning",
+      },
+      {
+        date: formatDate(last.dueDate),
+        kind: "Prévision",
+        title: `Dernière échéance · ${liability.name}`,
+        detail: "Échéancier dérivé, sous réserve du document bancaire",
+        tone: "warning",
+      },
+    ];
+  });
   const events = [
     {
-      date: "19 août 2026",
+      date: formatDate(state.asOfDate),
       kind: "Actual",
       title: "Date zéro",
-      detail: `Patrimoine net identifié ${new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(state.metrics.netWorth)}`,
+      detail: `Patrimoine net identifié ${formatEur(state.metrics.netWorth)}`,
       tone: "actual",
     },
+    ...debtMilestones,
     {
-      date: "5 décembre 2026",
-      kind: "Contractuel",
-      title: "Première échéance étudiant",
-      detail: "284,72 € annoncés",
-      tone: "warning",
-    },
-    {
-      date: "2027",
+      date: String(Number(state.asOfDate.slice(0, 4)) + 1),
       kind: "Hypothèse",
       title: "Premier CDI principal",
       detail: "40–45 k€ fixe brut + variable",
       tone: "model",
     },
     {
-      date: "~ 2029",
+      date: `~ ${Number(state.asOfDate.slice(0, 4)) + 3}`,
       kind: "Scénario",
       title: "Tentative de passage M&A → PE",
       detail: "Après environ deux ans, sans certitude",
       tone: "model",
-    },
-    {
-      date: "5 novembre 2031",
-      kind: "Prévision",
-      title: "Dernière échéance étudiant",
-      detail: "Sous réserve de l’échéancier réel",
-      tone: "warning",
     },
   ];
   return (
@@ -55,7 +67,7 @@ function TimelinePage({ state, mutate, busy }: SectionProps) {
             onClick={() => mutate({ action: "create_monthly_close", closeDate: state.asOfDate })}
           >
             <CalendarCheck size={15} />
-            Clôturer août 2026
+            Clôturer {formatDate(state.asOfDate, { month: "long", year: "numeric" })}
           </button>
         }
       />

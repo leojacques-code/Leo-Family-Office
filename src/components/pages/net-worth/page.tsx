@@ -15,6 +15,7 @@ import {
 import {
   type SectionProps,
   assetsExplanation,
+  formatEur,
   inputNumber,
   netWorthExplanation,
 } from "@/components/pages/shared";
@@ -32,6 +33,11 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
   });
   const bank = state.accounts.filter((item) => item.type === "BANK" || item.type === "SAVINGS");
   const investments = state.accounts.filter((item) => item.type === "PEA" || item.type === "CTO");
+  // Aucune conversion FX n'est branchée : un compte en devise étrangère est signalé plutôt
+  // qu'agrégé silencieusement à 1 pour 1.
+  const foreignCurrencyAccounts = state.accounts.filter(
+    (item) => item.currency !== state.reportingCurrency,
+  );
   async function save(event: React.FormEvent) {
     event.preventDefault();
     const ok = selected
@@ -95,8 +101,9 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
       />
       <section className="metrics-grid four">
         <MetricCard
-          label="Patrimoine brut"
+          label="Actifs financiers identifiés"
           value={<Currency value={state.metrics.grossAssets} />}
+          detail="Périmètre financier seul, hors immobilier et business equity"
           onExplain={() => setExplanation(assetsExplanation(state))}
         />
         <MetricCard
@@ -107,18 +114,55 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
         <MetricCard
           label="Patrimoine net identifié"
           value={<Currency value={state.metrics.netWorth} />}
-          tone="negative"
+          tone={state.metrics.netWorth < 0 ? "negative" : "positive"}
           onExplain={() => setExplanation(netWorthExplanation(state))}
         />
         <MetricCard
-          label="Patrimoine investi"
-          value={<Currency value={state.metrics.investedAssets} />}
+          label="Liquid net worth"
+          value={<Currency value={state.metrics.liquidNetWorth} />}
+          tone={state.metrics.liquidNetWorth < 0 ? "negative" : "positive"}
+          detail={
+            <>
+              Actifs mobilisables <Currency value={state.metrics.liquidAssets} /> − dettes
+            </>
+          }
+          onExplain={() =>
+            setExplanation({
+              title: "Liquid net worth",
+              formula: "Σ soldes des comptes dont la liquidité n’est pas ILLIQUID − Σ dettes",
+              inputs: [
+                ...state.accounts.map((account) => ({
+                  label: `${account.name} · ${account.liquidity}`,
+                  value: formatEur(account.liquidity === "ILLIQUID" ? 0 : account.balance),
+                  kind: account.provenance.kind,
+                  date: account.balanceDate,
+                })),
+                {
+                  label: "Dettes identifiées",
+                  value: formatEur(state.metrics.debt),
+                  kind: "DERIVED" as const,
+                  date: state.asOfDate,
+                },
+              ],
+              note: "Cette grandeur répond à « que resterait-il en soldant tout avec les seuls actifs liquides ». Elle est structurellement inférieure au patrimoine net dès qu’un actif est illiquide, et n’est pas un alias de celui-ci.",
+            })
+          }
         />
       </section>
       <Callout title="Périmètre identifié">
         Ce bilan inclut uniquement les actifs et dettes déclarés. Il ne prétend pas représenter un
         patrimoine économique exhaustif.
       </Callout>
+      {foreignCurrencyAccounts.length ? (
+        <Callout tone="warning" title="Devises non converties">
+          {foreignCurrencyAccounts
+            .map((account) => `${account.name} (${account.currency})`)
+            .join(", ")}{" "}
+          {foreignCurrencyAccounts.length > 1 ? "sont agrégés" : "est agrégé"} en{" "}
+          {state.reportingCurrency} sans taux de change daté. Le total affiché est donc faux à
+          hauteur de l’écart de change tant qu’aucun taux n’est branché.
+        </Callout>
+      ) : null}
       <section className="two-column">
         <AccountTable title="Cash bancaire" accounts={bank} onEdit={edit} />
         <AccountTable title="Investissements" accounts={investments} onEdit={edit} />

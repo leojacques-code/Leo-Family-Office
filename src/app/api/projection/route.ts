@@ -23,7 +23,10 @@ export async function POST(request: Request) {
     const state = await repository.getDashboardState();
     const scenario = state.scenarios.find((item) => item.id === parsed.data.scenarioId);
     if (!scenario) return NextResponse.json({ error: "Scénario introuvable" }, { status: 404 });
-    const result = runMonteCarlo({ scenario, initialAssets: state.metrics.grossAssets, years: parsed.data.years, simulations: parsed.data.simulations, seed: parsed.data.seed });
+    // Périmètre assumé : capital financier, sans dette ni actifs non financiers. Remplacer
+    // `grossAssets` par `netWorth` capitaliserait la dette comme un actif : la correction
+    // juste est le modèle patrimonial mensuel, pas un changement d'agrégat d'entrée.
+    const result = runMonteCarlo({ scenario, initialAssets: state.metrics.grossAssets, years: parsed.data.years, simulations: parsed.data.simulations, seed: parsed.data.seed, baseYear: Number(state.asOfDate.slice(0, 4)) });
     const runId = await repository.saveSimulation({ ...parsed.data, methodology: result.methodology, points: result.points });
     return NextResponse.json({ ...result, runId });
   } catch (error) {

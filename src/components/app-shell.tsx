@@ -13,6 +13,7 @@ import type { Mutation } from "@/lib/data/contracts";
 import { NAV_ITEMS, sectionLabel } from "@/lib/navigation";
 import { Modal, ExplanationPanel, type Explanation } from "@/components/ui";
 import { SectionContent } from "@/components/pages";
+import { formatDate } from "@/components/pages/shared";
 
 const ICONS: Record<string, LucideIcon> = {
   "today": LayoutDashboard,
@@ -97,6 +98,7 @@ export function AppShell({ initialState, section }: { initialState: DashboardSta
   }
 
   const label = sectionLabel(section);
+  const asOfLabel = formatDate(state.asOfDate);
   return (
     <div className="app-shell">
       <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
@@ -123,7 +125,7 @@ export function AppShell({ initialState, section }: { initialState: DashboardSta
         <header className="topbar">
           <div className="topbar-left"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)} aria-label="Ouvrir le menu"><Menu size={19} /></button><div><span className="breadcrumb">Léo Family Office</span><strong>{label}</strong></div></div>
           <div className="topbar-actions">
-            <span className="as-of"><span className="status-dot" />Au 19 août 2026</span>
+            <span className="as-of"><span className="status-dot" />Au {asOfLabel}</span>
             <button className="icon-button" onClick={refresh} aria-label="Actualiser" title="Actualiser"><RefreshCw className={busy ? "spin" : ""} size={17} /></button>
             <button className="icon-button" onClick={toggleTheme} aria-label="Changer de thème" title="Changer de thème">{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- download API route, not a page */}

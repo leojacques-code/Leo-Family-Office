@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowRight, FilePlus2 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -13,71 +13,172 @@ import {
   YAxis,
 } from "recharts";
 import { compareDebtVsInvest } from "@/lib/engine/decision";
-import { amortizeLoan } from "@/lib/engine/financial";
-import { Callout, Currency, MetricCard, Percent, SectionHeader } from "@/components/ui";
-import { type SectionProps, chartCurrency } from "@/components/pages/shared";
+import { buildLoanSchedule, monthlyDebtServiceAt, nextDebtEvent } from "@/lib/engine/debt";
+import {
+  Callout,
+  Currency,
+  DataBadge,
+  EmptyState,
+  MetricCard,
+  Percent,
+  SectionHeader,
+} from "@/components/ui";
+import { type SectionProps, chartCurrency, formatDate, formatEur } from "@/components/pages/shared";
 
 function DebtPage({ state, setExplanation }: SectionProps) {
-  const loan = state.liabilities[0];
-  const schedule = amortizeLoan(
-    loan.principal,
-    loan.annualRate,
-    loan.paymentCount,
-    loan.monthlyPayment,
-  );
-  const contractualTotal = loan.monthlyPayment * loan.paymentCount;
+  const [selectedId, setSelectedId] = useState(state.liabilities[0]?.id ?? "");
   const [investmentReturn, setInvestmentReturn] = useState(5.5);
-  const comparison = compareDebtVsInvest({
-    availableCash: 5000,
-    debtBalance: loan.currentBalance,
-    debtRate: loan.annualRate,
-    investmentReturn: investmentReturn / 100,
-    volatility: 0.15,
-    inflation: 0.02,
-    years: 5,
-    liquidityWeight: 0.03,
-  });
+  const loan = state.liabilities.find((item) => item.id === selectedId) ?? state.liabilities[0];
+  const schedule = useMemo(() => (loan ? buildLoanSchedule(loan) : null), [loan]);
+  const scenario =
+    state.scenarios.find((item) => item.name === "Central") ?? state.scenarios[0] ?? null;
+  const comparison = loan
+    ? compareDebtVsInvest({
+        availableCash: state.metrics.bankCash,
+        debtBalance: loan.currentBalance,
+        debtRate: loan.annualRate,
+        investmentReturn: investmentReturn / 100,
+        volatility: scenario?.annualVolatility ?? 0,
+        inflation: scenario?.annualInflation ?? 0,
+        years: 5,
+      })
+    : null;
+
+  const header = (
+    <SectionHeader
+      eyebrow="Liabilities"
+      title="Debt"
+      description="Échéanciers datés, coût du crédit et arbitrage remboursement vs investissement."
+      actions={
+        <button className="button secondary">
+          <FilePlus2 size={15} />
+          Importer l’échéancier <span className="soon">À connecter</span>
+        </button>
+      }
+    />
+  );
+
+  if (!loan || !schedule) {
+    return (
+      <div className="page-stack">
+        {header}
+        <EmptyState
+          title="Aucune dette enregistrée"
+          detail="Le service de dette mensuel vaut 0 € et aucun échéancier n’est projeté tant qu’aucun passif n’est saisi."
+        />
+      </div>
+    );
+  }
+
+  const currentDebtService = monthlyDebtServiceAt([loan], state.asOfDate);
+  const upcoming = nextDebtEvent([loan], state.asOfDate);
+  const paidEntries = schedule.entries.filter((entry) => entry.dueDate <= state.asOfDate);
+  const contractualTotal = loan.monthlyPayment * loan.paymentCount;
+
   return (
     <div className="page-stack">
-      <SectionHeader
-        eyebrow="Liabilities"
-        title="Debt"
-        description="Échéanciers, coût du crédit et arbitrage remboursement vs investissement."
-        actions={
-          <button className="button secondary">
-            <FilePlus2 size={15} />
-            Importer l’échéancier <span className="soon">À connecter</span>
-          </button>
-        }
-      />
+      {header}
+      {state.liabilities.length > 1 ? (
+        <section className="decision-case-strip">
+          {state.liabilities.map((item) => (
+            <button
+              key={item.id}
+              className={item.id === loan.id ? "active" : ""}
+              onClick={() => setSelectedId(item.id)}
+            >
+              {item.name}
+              <span>{item.lender}</span>
+            </button>
+          ))}
+        </section>
+      ) : null}
       <section className="metrics-grid four">
-        <MetricCard label="Capital annoncé" value={<Currency value={loan.currentBalance} />} />
-        <MetricCard label="Taux" value={<Percent value={loan.annualRate} />} tone="positive" />
-        <MetricCard label="Mensualité annoncée" value={<Currency value={loan.monthlyPayment} />} />
         <MetricCard
-          label="Écart contractuel"
-          value={<Currency value={contractualTotal - loan.principal} />}
-          tone="warning"
+          label="Capital restant dû"
+          value={<Currency value={loan.currentBalance} />}
+          detail={`${loan.name} · ${loan.lender}`}
+        />
+        <MetricCard label="Taux" value={<Percent value={loan.annualRate} />} tone="positive" />
+        <MetricCard
+          label="Service de dette du mois"
+          value={<Currency value={currentDebtService} />}
+          tone={currentDebtService > 0 ? "warning" : "neutral"}
+          detail={
+            currentDebtService === 0
+              ? upcoming
+                ? `Aucune échéance exigible ce mois · prochaine le ${formatDate(upcoming.entry.dueDate)}`
+                : "Aucune échéance exigible ce mois"
+              : `Mensualité annoncée ${formatEur(loan.monthlyPayment)}`
+          }
           onExplain={() =>
             setExplanation({
-              title: "Écart du prêt étudiant",
+              title: "Service de dette exigible",
+              formula:
+                "Σ totalCashOut des échéances dont la date d’exigibilité tombe dans le mois d’observation",
+              inputs: [
+                { label: "Date d’observation", value: formatDate(state.asOfDate), kind: "ACTUAL" },
+                {
+                  label: "Première échéance",
+                  value: schedule.firstDueDate ? formatDate(schedule.firstDueDate) : "Non datée",
+                  kind: "ACTUAL",
+                  source: loan.provenance.source,
+                },
+                {
+                  label: "Dernière échéance dérivée",
+                  value: schedule.lastDueDate ? formatDate(schedule.lastDueDate) : "Non datée",
+                  kind: "DERIVED",
+                },
+                {
+                  label: "Échéances exigibles ce mois",
+                  value: currentDebtService === 0 ? "0" : "1",
+                  kind: "DERIVED",
+                  date: state.asOfDate,
+                },
+              ],
+              note: "Avant la première échéance et après la dernière, aucune ligne n’est exigible : le service de dette vaut 0 sans cas particulier. Assurance et frais ne sont pas portés par le contrat saisi et valent 0.",
+            })
+          }
+        />
+        <MetricCard
+          label="Écart contractuel"
+          value={<Currency value={schedule.contractualGap} />}
+          tone={Math.abs(schedule.contractualGap) > 0.01 ? "warning" : "neutral"}
+          onExplain={() =>
+            setExplanation({
+              title: `Écart contractuel · ${loan.name}`,
               formula: "Mensualité × nombre d’échéances − capital annoncé",
               inputs: [
-                { label: "Mensualité", value: "284,72 €", kind: "ACTUAL", date: state.asOfDate },
-                { label: "Échéances", value: "60", kind: "ACTUAL", date: state.asOfDate },
-                { label: "Capital", value: "16 745,00 €", kind: "ACTUAL", date: state.asOfDate },
+                {
+                  label: "Mensualité",
+                  value: formatEur(loan.monthlyPayment),
+                  kind: loan.provenance.kind,
+                  date: loan.provenance.effectiveDate ?? state.asOfDate,
+                  source: loan.provenance.source,
+                },
+                {
+                  label: "Échéances annoncées",
+                  value: String(loan.paymentCount),
+                  kind: loan.provenance.kind,
+                  source: loan.provenance.source,
+                },
+                {
+                  label: "Capital",
+                  value: formatEur(loan.principal),
+                  kind: loan.provenance.kind,
+                  source: loan.provenance.source,
+                },
               ],
-              note: "17 083,20 € − 16 745,00 € = 338,20 €. Aucune explication n’est supposée.",
+              note: `${formatEur(contractualTotal)} − ${formatEur(loan.principal)} = ${formatEur(schedule.contractualGap)}. Aucune explication n’est supposée.`,
             })
           }
         />
       </section>
-      <Callout tone="warning" title="Échéancier non réconcilié">
-        284,72 € × 60 = <Currency value={contractualTotal} />, soit{" "}
-        <Currency value={contractualTotal - loan.principal} /> au-dessus du capital annoncé. Le
-        tableau arrête le principal à zéro ; seul le document bancaire pourra expliquer le reliquat
-        contractuel.
-      </Callout>
+      {schedule.flags.length ? (
+        <Callout tone="warning" title="Échéancier non réconcilié">
+          {schedule.flags.map((flag) => flag.detail).join(" ")} Le tableau arrête le principal à
+          zéro ; seul le document bancaire pourra expliquer le reliquat contractuel.
+        </Callout>
+      ) : null}
       <section className="two-column wide-left">
         <article className="panel">
           <div className="panel-header">
@@ -89,14 +190,40 @@ function DebtPage({ state, setExplanation }: SectionProps) {
               className="link-button"
               onClick={() =>
                 setExplanation({
-                  title: "Amortissement à 0 %",
-                  formula: "Principal payé = min(solde, mensualité) ; intérêts = 0",
+                  title: `Amortissement · ${loan.name}`,
+                  formula:
+                    loan.annualRate === 0
+                      ? "Intérêt = 0 ; principal payé = min(solde, mensualité)"
+                      : "Intérêt = solde × taux/12 ; principal = mensualité − intérêt",
                   inputs: [
-                    { label: "Capital", value: "16 745 €", kind: "ACTUAL" },
-                    { label: "Taux", value: "0 %", kind: "ACTUAL" },
-                    { label: "Mensualité", value: "284,72 €", kind: "ACTUAL" },
+                    {
+                      label: "Capital de départ",
+                      value: formatEur(loan.currentBalance),
+                      kind: loan.provenance.kind,
+                      source: loan.provenance.source,
+                    },
+                    {
+                      label: "Taux annuel",
+                      value: `${(loan.annualRate * 100).toFixed(2)} %`,
+                      kind: loan.provenance.kind,
+                    },
+                    {
+                      label: "Mensualité contractuelle",
+                      value: formatEur(loan.monthlyPayment),
+                      kind: loan.provenance.kind,
+                    },
+                    {
+                      label: "Échéances dérivées",
+                      value: `${schedule.entries.length} lignes datées`,
+                      kind: "DERIVED",
+                    },
+                    {
+                      label: "Intérêts totaux dérivés",
+                      value: formatEur(schedule.totalInterest),
+                      kind: "DERIVED",
+                    },
                   ],
-                  note: "La dernière ligne dérivée est plafonnée au solde restant et ne remplace pas l’échéancier contractuel.",
+                  note: "Échéancier généré à partir du contrat, provenance DERIVED. Il ne remplace pas l’échéancier bancaire et n’est jamais présenté comme contractuel.",
                 })
               }
             >
@@ -106,9 +233,12 @@ function DebtPage({ state, setExplanation }: SectionProps) {
           <div className="medium-chart">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={schedule
-                  .filter((_, index) => index % 6 === 0)
-                  .map((row) => ({ month: row.paymentNumber, balance: row.closingBalance }))}
+                data={schedule.entries
+                  .filter((_, index) => index % 6 === 0 || index === schedule.entries.length - 1)
+                  .map((entry) => ({
+                    date: entry.dueDate.slice(0, 7),
+                    balance: entry.closingBalance,
+                  }))}
               >
                 <defs>
                   <linearGradient id="debtArea" x1="0" y1="0" x2="0" y2="1">
@@ -117,7 +247,7 @@ function DebtPage({ state, setExplanation }: SectionProps) {
                   </linearGradient>
                 </defs>
                 <CartesianGrid vertical={false} stroke="var(--border-soft)" />
-                <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                <XAxis dataKey="date" axisLine={false} tickLine={false} />
                 <YAxis tickFormatter={chartCurrency} axisLine={false} tickLine={false} />
                 <Tooltip />
                 <Area dataKey="balance" stroke="#ab5a4e" fill="url(#debtArea)" />
@@ -131,71 +261,130 @@ function DebtPage({ state, setExplanation }: SectionProps) {
               <span className="eyebrow">Contrat annoncé</span>
               <h2>Dates clés</h2>
             </div>
+            <DataBadge kind={loan.provenance.kind} />
           </div>
           <dl>
             <div>
               <dt>Première échéance</dt>
-              <dd>5 décembre 2026</dd>
+              <dd>{formatDate(loan.firstPaymentDate)}</dd>
             </div>
             <div>
-              <dt>Dernière échéance prévue</dt>
-              <dd>5 novembre 2031</dd>
+              <dt>Dernière échéance annoncée</dt>
+              <dd>{formatDate(loan.maturityDate)}</dd>
+            </div>
+            <div>
+              <dt>Dernière échéance dérivée</dt>
+              <dd>{schedule.lastDueDate ? formatDate(schedule.lastDueDate) : "—"}</dd>
             </div>
             <div>
               <dt>Nombre annoncé</dt>
-              <dd>60 mensualités</dd>
+              <dd>{loan.paymentCount} mensualités</dd>
+            </div>
+            <div>
+              <dt>Échéances payées à ce jour</dt>
+              <dd>{paidEntries.length}</dd>
             </div>
             <div>
               <dt>Coût d’intérêt dérivé</dt>
-              <dd>0,00 €</dd>
+              <dd>
+                <Currency value={schedule.totalInterest} />
+              </dd>
             </div>
           </dl>
         </article>
       </section>
-      <section className="panel decision-preview">
+      <section className="panel">
         <div className="panel-header">
           <div>
-            <span className="eyebrow">Arbitrage</span>
-            <h2>Rembourser à 0 % ou investir</h2>
+            <span className="eyebrow">Échéancier daté · DERIVED</span>
+            <h2>Prochaines échéances</h2>
           </div>
-          <Link href="/decision-lab">
-            Ouvrir le Decision Lab <ArrowRight size={14} />
-          </Link>
+          <span className="panel-note">{schedule.entries.length} lignes générées</span>
         </div>
-        <div className="decision-controls">
-          <label>
-            Rendement annuel hypothétique <strong>{investmentReturn.toFixed(1)} %</strong>
-            <input
-              type="range"
-              min="0"
-              max="10"
-              step="0.1"
-              value={investmentReturn}
-              onChange={(event) => setInvestmentReturn(Number(event.target.value))}
-            />
-          </label>
-        </div>
-        <div className="comparison-cards">
-          <div>
-            <span>Rembourser 5 000 €</span>
-            <strong>
-              <Currency value={comparison.repay.nominalBenefit} />
-            </strong>
-            <small>Bénéfice certain : 0 € d’intérêt évité</small>
+        <div className="simple-table">
+          <div className="table-head">
+            <span>Date</span>
+            <span>Échéance</span>
+            <span>Intérêt</span>
+            <span>Principal</span>
+            <span>Solde</span>
           </div>
-          <div className="preferred">
-            <span>Investir 5 000 €</span>
-            <strong>
-              <Currency value={comparison.invest.nominalBenefit} />
-            </strong>
-            <small>Valeur espérée, non garantie</small>
-          </div>
+          {schedule.entries
+            .filter((entry) => entry.dueDate > state.asOfDate)
+            .slice(0, 6)
+            .map((entry) => (
+              <div className="table-row" key={entry.paymentNumber}>
+                <span>{formatDate(entry.dueDate)}</span>
+                <strong>
+                  n° {entry.paymentNumber} · <Currency value={entry.totalCashOut} />
+                </strong>
+                <span>
+                  <Currency value={entry.interest} />
+                </span>
+                <span>
+                  <Currency value={entry.principal} />
+                </span>
+                <strong>
+                  <Currency value={entry.closingBalance} />
+                </strong>
+              </div>
+            ))}
         </div>
-        <Callout title="Lecture">
-          {comparison.conclusion} La priorité reste néanmoins la constitution d’une réserve de
-          liquidité.
-        </Callout>
       </section>
+      {comparison ? (
+        <section className="panel decision-preview">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Arbitrage</span>
+              <h2>
+                Rembourser à <Percent value={loan.annualRate} /> ou investir
+              </h2>
+            </div>
+            <Link href="/decision-lab">
+              Ouvrir le Decision Lab <ArrowRight size={14} />
+            </Link>
+          </div>
+          <div className="decision-controls">
+            <label>
+              Rendement annuel hypothétique <strong>{investmentReturn.toFixed(1)} %</strong>
+              <input
+                type="range"
+                min="0"
+                max="10"
+                step="0.1"
+                value={investmentReturn}
+                onChange={(event) => setInvestmentReturn(Number(event.target.value))}
+              />
+            </label>
+          </div>
+          <div className="comparison-cards">
+            <div>
+              <span>
+                Rembourser <Currency value={comparison.capital} />
+              </span>
+              <strong>
+                <Currency value={comparison.repay.interestAvoided} />
+              </strong>
+              <small>Intérêts évités sur {comparison.horizonYears} ans, montant certain</small>
+            </div>
+            <div>
+              <span>
+                Investir <Currency value={comparison.capital} />
+              </span>
+              <strong>
+                <Currency value={comparison.invest.expectedGain} sign />
+              </strong>
+              <small>Gain espéré non garanti, dette conservée</small>
+            </div>
+          </div>
+          <Callout title="Lecture">
+            Le capital arbitrable est borné par le cash bancaire réellement disponible (
+            <Currency value={state.metrics.bankCash} />
+            ), pas par le montant de la dette. Les deux colonnes sont des grandeurs objectives :
+            aucune option n’est recommandée ici.
+          </Callout>
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -223,7 +223,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     return {
       asOfDate: AS_OF_DATE, reportingCurrency: REPORTING_CURRENCY, accounts, positions, liabilities, incomes,
       expenseCategories, transactions, scenarios, goals, alerts, monthlyCloses, documents,
-      metrics: deriveMetrics(accounts, liabilities, incomes, expenseCategories, positions), assumptions,
+      metrics: deriveMetrics(accounts, liabilities, incomes, expenseCategories, positions, transactions, AS_OF_DATE), assumptions,
     };
   }
 
@@ -259,14 +259,18 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           data_kind: "ACTUAL", confidence: "HIGH", source: "Saisie manuelle",
         }).select("id"), "insertion de transaction");
         if (mutation.updateBalance) {
-          const latest = unwrap(await db.from("account_balances").select("balance")
+          const latest = unwrap(await db.from("account_balances").select("balance, balance_date")
             .eq("user_id", user).eq("account_id", mutation.accountId)
             .order("balance_date", { ascending: false }).order("created_at", { ascending: false })
             .limit(1), "lecture du dernier solde") as Row[];
           if (latest.length === 0) throw new Error("Aucun solde connu pour ce compte");
+          // Le solde dérivé doit primer sur le dernier solde connu, sinon une transaction
+          // antérieure à ce dernier relevé n'aurait aucun effet visible sur le compte.
+          const latestDate = str(latest[0].balance_date);
           unwrap(await db.from("account_balances").insert({
             user_id: user, account_id: mutation.accountId, balance: num(latest[0].balance) + mutation.amount,
-            balance_date: mutation.date, data_kind: "DERIVED", confidence: "HIGH", source: "Transaction saisie",
+            balance_date: mutation.date > latestDate ? mutation.date : latestDate,
+            data_kind: "DERIVED", confidence: "HIGH", source: "Transaction saisie",
           }).select("id"), "solde dérivé");
         }
         break;

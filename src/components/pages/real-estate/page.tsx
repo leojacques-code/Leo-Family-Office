@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Save } from "lucide-react";
 import { underwriteRealEstate, type RealEstateInputs } from "@/lib/engine/real-estate";
 import { Callout, Currency, DataBadge, MetricCard, Percent, SectionHeader } from "@/components/ui";
-import type { SectionProps } from "@/components/pages/shared";
+import { type SectionProps, formatEur } from "@/components/pages/shared";
 
 const defaultProperty: RealEstateInputs = {
   purchasePrice: 220000,
@@ -27,7 +27,11 @@ const defaultProperty: RealEstateInputs = {
 
 function RealEstatePage({ setExplanation }: SectionProps) {
   const [inputs, setInputs] = useState(defaultProperty);
-  const result = useMemo(() => underwriteRealEstate(inputs), [inputs]);
+  const [discountRate, setDiscountRate] = useState(6);
+  const result = useMemo(
+    () => underwriteRealEstate(inputs, discountRate / 100),
+    [inputs, discountRate],
+  );
   function field(key: keyof RealEstateInputs, label: string, suffix: string, step = "1") {
     const display =
       key.toLowerCase().includes("rate") ||
@@ -112,6 +116,18 @@ function RealEstatePage({ setExplanation }: SectionProps) {
               {field("taxRate", "Taux fiscal effectif", "%", "0.1")}
               {field("annualPropertyGrowth", "Croissance valeur", "%", "0.1")}
               {field("holdingYears", "Horizon", "ans")}
+              <label>
+                Taux d’actualisation
+                <div className="suffix-input">
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={discountRate}
+                    onChange={(event) => setDiscountRate(Number(event.target.value))}
+                  />
+                  <span>%</span>
+                </div>
+              </label>
             </div>
           </div>
         </article>
@@ -127,12 +143,9 @@ function RealEstatePage({ setExplanation }: SectionProps) {
                   formula: "Taux r tel que Σ CFₜ / (1+r)ᵗ = 0",
                   inputs: [
                     {
-                      label: "Equity initiale",
-                      value: new Intl.NumberFormat("fr-FR", {
-                        style: "currency",
-                        currency: "EUR",
-                      }).format(-result.cashFlows[0]),
-                      kind: "USER_ASSUMPTION",
+                      label: "Equity initiale (coût total − emprunt)",
+                      value: formatEur(result.investedEquity),
+                      kind: "DERIVED",
                     },
                     {
                       label: "Cash flows annuels",
@@ -153,11 +166,45 @@ function RealEstatePage({ setExplanation }: SectionProps) {
               }
             />
             <MetricCard
-              label="VAN à 6 %"
+              label={`VAN à ${discountRate.toFixed(1)} %`}
               value={<Currency value={result.npv} />}
               tone={result.npv >= 0 ? "positive" : "negative"}
+              detail="Taux d’actualisation modifiable dans les hypothèses"
             />
-            <MetricCard label="MOIC" value={`${result.moic.toFixed(2)}×`} />
+            <MetricCard
+              label="MOIC"
+              value={`${result.moic.toFixed(2)}×`}
+              onExplain={() =>
+                setExplanation({
+                  title: "MOIC",
+                  formula:
+                    "(Σ distributions encaissées + valeur résiduelle) ÷ Σ contributions en equity",
+                  inputs: [
+                    {
+                      label: "Distributions encaissées",
+                      value: formatEur(result.distributions),
+                      kind: "DERIVED",
+                    },
+                    {
+                      label: "Valeur résiduelle après cession",
+                      value: formatEur(result.residualValue),
+                      kind: "DERIVED",
+                    },
+                    {
+                      label: "Equity initiale",
+                      value: formatEur(result.investedEquity),
+                      kind: "DERIVED",
+                    },
+                    {
+                      label: "Apports complémentaires (flux négatifs)",
+                      value: formatEur(result.contributions - result.investedEquity),
+                      kind: "DERIVED",
+                    },
+                  ],
+                  note: "Un flux périodique négatif est un apport complémentaire, jamais une distribution négative : il entre au dénominateur et ne se retranche pas du numérateur.",
+                })
+              }
+            />
             <MetricCard
               label="Cash flow annuel"
               value={<Currency value={result.annualCashFlow} sign />}
@@ -176,6 +223,12 @@ function RealEstatePage({ setExplanation }: SectionProps) {
                 <dt>Coût total projet</dt>
                 <dd>
                   <Currency value={result.totalProjectCost} />
+                </dd>
+              </div>
+              <div>
+                <dt>Equity réellement engagée</dt>
+                <dd>
+                  <Currency value={result.investedEquity} />
                 </dd>
               </div>
               <div>
@@ -221,6 +274,12 @@ function RealEstatePage({ setExplanation }: SectionProps) {
                 </dd>
               </div>
               <div>
+                <dt>Capital restant dû à la sortie</dt>
+                <dd>
+                  <Currency value={result.outstandingAtExit} />
+                </dd>
+              </div>
+              <div>
                 <dt>Valeur de sortie brute</dt>
                 <dd>
                   <Currency value={result.exitValue} />
@@ -228,6 +287,11 @@ function RealEstatePage({ setExplanation }: SectionProps) {
               </div>
             </dl>
           </article>
+          {result.flags.map((flag) => (
+            <Callout key={flag} tone="warning" title="Point de structure du financement">
+              {flag}
+            </Callout>
+          ))}
           <Callout
             tone={result.annualCashFlow < 0 ? "warning" : "success"}
             title={result.annualCashFlow < 0 ? "Effort d’épargne requis" : "Cash flow positif"}
