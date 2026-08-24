@@ -13,7 +13,15 @@ import {
   YAxis,
 } from "recharts";
 import type { Scenario } from "@/lib/types";
-import { Currency, DataBadge, EmptyState, Modal, Percent, SectionHeader } from "@/components/ui";
+import {
+  Callout,
+  Currency,
+  DataBadge,
+  EmptyState,
+  Modal,
+  Percent,
+  SectionHeader,
+} from "@/components/ui";
 import {
   type SectionProps,
   chartCurrency,
@@ -92,10 +100,16 @@ function ScenariosPage({
   const selected =
     state.scenarios.find((scenario) => scenario.id === selectedId) ?? state.scenarios[0];
   const opening = buildOpeningBalanceSheet(state);
-  const deterministic = toAnnualPoints(
-    runDeterministicModel(opening, state.liabilities, scenarioAssumptions(selected), 30 * 12),
+  const monthly = runDeterministicModel(
+    opening,
+    state.liabilities,
+    scenarioAssumptions(selected),
+    30 * 12,
   );
+  const deterministic = toAnnualPoints(monthly);
   const horizon = deterministic.at(-1);
+  // Le pic se lit sur le déroulé mensuel : les points annuels le sous-échantillonnent.
+  const peakFundingGap = Math.max(...monthly.states.map((month) => month.fundingGap), 0);
   return (
     <div className="page-stack">
       <SectionHeader
@@ -259,6 +273,15 @@ function ScenariosPage({
             </small>
           </div>
         </div>
+        {horizon?.financingCostMissing ? (
+          <Callout tone="warning" title="Projection partielle : coût de financement manquant">
+            Le surplus mensuel ne couvre pas toujours le service de dette : un besoin de financement
+            atteint <Currency value={peakFundingGap} /> avant d’être résorbé par les surplus
+            suivants. Aucun taux ne lui est appliqué, faute de conditions de financement connues,
+            donc la trajectoire est optimiste de ce coût. Tant qu’il subsiste, aucun euro n’est
+            investi.
+          </Callout>
+        ) : null}
         <p className="muted-copy">
           Surplus mensuel <Currency value={selected.monthlySavings} /> avant service de dette, dont{" "}
           <Percent value={selected.investmentAllocationRate} /> du solde après dette dirigé vers les

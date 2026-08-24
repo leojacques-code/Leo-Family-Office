@@ -11,6 +11,7 @@ import {
   type MonthlyScenarioAssumptions,
   type OpeningBalanceSheet,
 } from "@/lib/engine/monthly-financial-model";
+import { FINANCING_COST_FLAG, FUNDING_GAP_FLAG } from "@/lib/engine/monthly-financial-model";
 import { runMonteCarlo } from "@/lib/engine/monte-carlo";
 import type { DashboardState, Liability, Provenance, Scenario } from "@/lib/types";
 
@@ -674,5 +675,215 @@ describe("bilan d’ouverture", () => {
     expect(result.states[0].netWorth).toBeCloseTo(state.metrics.netWorth, 6);
     expect(result.states[0].monthIndex).toBe(0);
     expect(result.states[0].operatingSurplus).toBe(0);
+  });
+});
+
+/**
+ * Cycle de vie du besoin de financement. Un `fundingGap` n'est pas une ligne de crédit
+ * gratuite : tant qu'il subsiste, aucun euro ne part en cash disponible ni en
+ * investissement.
+ */
+describe("CASE R — surplus insuffisant pour solder le gap", () => {
+  it("affecte tout le surplus au gap et n’investit rien", () => {
+    const start = opening({ bankCash: 0, fundingGap: 100 });
+    const month = oneMonth(start, {}, { operatingSurplus: 50, investmentAllocationRate: 1 });
+    expect(month.gapRepayment).toBeCloseTo(50, 8);
+    expect(month.fundingGap).toBeCloseTo(50, 8);
+    expect(month.surplusAfterGap).toBeCloseTo(0, 8);
+    expect(month.investmentContribution).toBe(0);
+    expect(month.bankCash).toBeCloseTo(0, 8);
+    // Résorber un besoin de financement est neutre : seul le surplus crée du patrimoine.
+    expect(month.netWorthChange).toBeCloseTo(50, 8);
+    expect(month.attributionResidual).toBeCloseTo(0, 8);
+  });
+});
+
+describe("CASE S — surplus supérieur au gap, allocation 100 %", () => {
+  it("solde le gap puis n’investit que le reliquat", () => {
+    const start = opening({ bankCash: 0, fundingGap: 100 });
+    const month = oneMonth(start, {}, { operatingSurplus: 150, investmentAllocationRate: 1 });
+    expect(month.gapRepayment).toBeCloseTo(100, 8);
+    expect(month.fundingGap).toBe(0);
+    expect(month.surplusAfterGap).toBeCloseTo(50, 8);
+    expect(month.investmentContribution).toBeCloseTo(50, 8);
+    expect(month.bankCash).toBeCloseTo(0, 8);
+    expect(month.netWorthChange).toBeCloseTo(150, 8);
+  });
+});
+
+describe("CASE T — surplus supérieur au gap, allocation 40 %", () => {
+  it("répartit le seul reliquat entre marché et cash", () => {
+    const start = opening({ bankCash: 0, fundingGap: 100 });
+    const month = oneMonth(start, {}, { operatingSurplus: 150, investmentAllocationRate: 0.4 });
+    expect(month.gapRepayment).toBeCloseTo(100, 8);
+    expect(month.surplusAfterGap).toBeCloseTo(50, 8);
+    expect(month.investmentContribution).toBeCloseTo(20, 8);
+    expect(month.cashContribution).toBeCloseTo(30, 8);
+    expect(month.bankCash).toBeCloseTo(30, 8);
+    expect(month.fundingGap).toBe(0);
+  });
+});
+
+describe("invariants du besoin de financement", () => {
+  const liability: Liability = {
+    id: "lia",
+    name: "Prêt étudiant",
+    lender: "Bpifrance",
+    principal: 16745,
+    currentBalance: 16745,
+    annualRate: 0,
+    monthlyPayment: 284.72,
+    paymentCount: 60,
+    firstPaymentDate: "2026-12-05",
+    maturityDate: "2031-11-05",
+    provenance,
+  };
+  const central = assumptions({
+    operatingSurplus: 250,
+    investmentAllocationRate: 1,
+    annualReturn: 0.055,
+  });
+  const start = opening({
+    bankCash: 354.08,
+    marketInvestedAssets: 8912.28,
+    investmentCash: 6304.57,
+    otherFinancialAssets: 0.56,
+    loanBalance: 16745,
+  });
+  const result = runDeterministicModel(start, [liability], central, 30 * 12);
+
+  it("ne laisse jamais le cash négatif ni le gap négatif", () => {
+    for (const state of result.states) {
+      expect(state.bankCash).toBeGreaterThanOrEqual(0);
+      expect(state.fundingGap).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("ne fait jamais coexister trésorerie et besoin de financement", () => {
+    for (const state of result.states) {
+      expect(state.bankCash > 0.005 && state.fundingGap > 0.005).toBe(false);
+    }
+  });
+
+  it("n’investit jamais tant qu’un besoin de financement subsiste", () => {
+    for (const state of result.states) {
+      if (state.openingFundingGap > 0.005 && state.investmentContribution > 0) {
+        // Seul le reliquat d'un surplus qui solde intégralement le gap peut être investi.
+        expect(state.fundingGap).toBeCloseTo(0, 6);
+      }
+    }
+  });
+
+  it("réconcilie l’attribution malgré les mouvements de gap", () => {
+    for (const state of result.states) {
+      expect(state.attributionResidual).toBeCloseTo(0, 6);
+    }
+  });
+});
+
+describe("CASE U — scénario Central réel", () => {
+  const liability: Liability = {
+    id: "lia",
+    name: "Prêt étudiant",
+    lender: "Bpifrance",
+    principal: 16745,
+    currentBalance: 16745,
+    annualRate: 0,
+    monthlyPayment: 284.72,
+    paymentCount: 60,
+    firstPaymentDate: "2026-12-05",
+    maturityDate: "2031-11-05",
+    provenance,
+  };
+  const start = opening({
+    bankCash: 354.08,
+    marketInvestedAssets: 8912.28,
+    investmentCash: 6304.57,
+    otherFinancialAssets: 0.56,
+    loanBalance: 16745,
+  });
+  const result = runDeterministicModel(
+    start,
+    [liability],
+    assumptions({ operatingSurplus: 250, investmentAllocationRate: 1, annualReturn: 0.055 }),
+    30 * 12,
+  );
+
+  it("laisse un besoin de financement apparaître pendant le remboursement", () => {
+    const peak = Math.max(...result.states.map((state) => state.fundingGap));
+    expect(peak).toBeGreaterThan(0);
+    expect(result.states.some((state) => state.flags.includes(FUNDING_GAP_FLAG))).toBe(true);
+  });
+
+  it("le résorbe entièrement après l’extinction de la dette", () => {
+    const afterDebt = result.states.filter(
+      (state) => state.loanBalance <= 0.01 && state.monthIndex > 0,
+    );
+    expect(afterDebt.length).toBeGreaterThan(0);
+    expect(afterDebt.at(-1)?.fundingGap).toBeCloseTo(0, 6);
+    // La reprise des investissements suit la résorption, elle ne la précède pas.
+    const firstReinvest = afterDebt.find((state) => state.investmentContribution > 0);
+    const lastGap = afterDebt.filter((state) => state.fundingGap > 0.005).at(-1);
+    if (firstReinvest && lastGap) {
+      expect(firstReinvest.monthIndex).toBeGreaterThan(lastGap.monthIndex);
+    }
+  });
+
+  it("marque la trajectoire comme partielle faute de coût de financement", () => {
+    expect(result.states.at(-1)?.financingCostMissing).toBe(true);
+    expect(result.states.at(-1)?.flags).toContain(FINANCING_COST_FLAG);
+  });
+});
+
+function zeroRateLoan(monthlyPayment: number, paymentCount: number): Liability {
+  return {
+    id: `l-${monthlyPayment}`,
+    name: "Prêt 0 %",
+    lender: "X",
+    principal: 12000,
+    currentBalance: 12000,
+    annualRate: 0,
+    monthlyPayment,
+    paymentCount,
+    firstPaymentDate: "2026-09-05",
+    maturityDate: "2036-08-05",
+    provenance,
+  };
+}
+
+describe("CASE V — dette à 0 %, rendement nul", () => {
+  it("ne crée aucune richesse par le seul calendrier de remboursement", () => {
+    const start = opening({ bankCash: 20000, loanBalance: 12000 });
+    const assume = assumptions({
+      operatingSurplus: 500,
+      investmentAllocationRate: 1,
+      annualReturn: 0,
+    });
+    const slow = runDeterministicModel(start, [zeroRateLoan(100, 120)], assume, 180);
+    const fast = runDeterministicModel(start, [zeroRateLoan(500, 24)], assume, 180);
+    // À rendement nul, la date de remboursement d'un principal à 0 % est sans effet.
+    expect(fast.states[180].netWorth).toBeCloseTo(slow.states[180].netWorth, 6);
+  });
+});
+
+describe("CASE W — dette à 0 %, rendement positif", () => {
+  it("ne récompense jamais le remboursement accéléré par un financement gratuit", () => {
+    const start = opening({ bankCash: 500, marketInvestedAssets: 5000, loanBalance: 12000 });
+    const assume = assumptions({
+      operatingSurplus: 300,
+      investmentAllocationRate: 1,
+      annualReturn: 0.055,
+    });
+    const slow = runDeterministicModel(start, [zeroRateLoan(100, 120)], assume, 180);
+    const fast = runDeterministicModel(start, [zeroRateLoan(500, 24)], assume, 180);
+    // Rembourser vite une dette à 0 % immobilise de la trésorerie qui aurait pu être
+    // investie : le résultat doit être défavorable, jamais l'inverse.
+    expect(fast.states[180].netWorth).toBeLessThan(slow.states[180].netWorth);
+    // Et aucun euro n'a été investi pendant qu'un besoin de financement subsistait.
+    for (const state of fast.states) {
+      if (state.openingFundingGap > 0.005 && state.investmentContribution > 0) {
+        expect(state.fundingGap).toBeCloseTo(0, 6);
+      }
+    }
   });
 });

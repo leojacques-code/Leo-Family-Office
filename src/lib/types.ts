@@ -241,6 +241,8 @@ export interface AnnualBalanceSheetPoint {
   cumulativeMarketPnL: number;
   cumulativeInterestPaid: number;
   cumulativePrincipalPaid: number;
+  /** Vrai dès qu'un besoin de financement est apparu : la trajectoire est partielle. */
+  financingCostMissing: boolean;
 }
 
 export interface ProjectionEnvelope extends ProjectionResult {

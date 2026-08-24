@@ -278,6 +278,9 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
                 <Percent value={central.investmentAllocationRate} />
               </strong>{" "}
               de ce surplus investi · périmètre financier uniquement
+              {annual.at(-1)?.financingCostMissing
+                ? " · besoin de financement non chiffré sur une partie de la trajectoire"
+                : ""}
             </span>
             <Link href="/scenarios">
               Tester les scénarios <ArrowRight size={14} />

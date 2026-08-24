@@ -45,6 +45,10 @@ import type {
  * - Un actif financier dont l'exposition n'est pas connue ne reçoit aucun rendement.
  * - Le cash ne devient jamais négatif : le déficit non couvert devient un `fundingGap`,
  *   sans taux d'intérêt inventé.
+ * - Le `fundingGap` est un besoin de financement, pas une ligne de crédit gratuite : tant
+ *   qu'il subsiste, tout surplus disponible le résorbe AVANT la moindre contribution en
+ *   cash ou en investissement. Son remboursement est neutre sur le patrimoine net, au même
+ *   titre que le remboursement d'un principal.
  */
 
 /** Bilan financier d'ouverture, dérivé de l'état du dossier à la date d'observation. */
@@ -103,6 +107,10 @@ export interface MonthlyFinancialState {
   postDebtSurplus: number;
   investmentContribution: number;
   cashContribution: number;
+  /** Résorption du besoin de financement. Neutre sur le patrimoine net. */
+  gapRepayment: number;
+  /** Surplus réellement allouable, après résorption du besoin de financement. */
+  surplusAfterGap: number;
   marketReturnRate: number;
   marketPnL: number;
   marketShockPnL: number;
@@ -122,8 +130,16 @@ export interface MonthlyFinancialState {
   netWorthChange: number;
   /** Écart entre variation constatée et attribution. Doit rester nul à l'arrondi près. */
   attributionResidual: number;
+  /**
+   * Sticky dès qu'un besoin de financement est apparu : la trajectoire reste calculable
+   * mais partielle tant qu'aucun coût de financement n'est défini.
+   */
+  financingCostMissing: boolean;
   flags: string[];
 }
+
+export const FUNDING_GAP_FLAG = "FUNDING_GAP / financing terms missing";
+export const FINANCING_COST_FLAG = "FINANCING_COST_MISSING";
 
 export interface MonthlyModelInput {
   opening: OpeningBalanceSheet;
@@ -290,6 +306,8 @@ function openingState(opening: OpeningBalanceSheet): MonthlyFinancialState {
     postDebtSurplus: 0,
     investmentContribution: 0,
     cashContribution: 0,
+    gapRepayment: 0,
+    surplusAfterGap: 0,
     marketReturnRate: 0,
     marketPnL: 0,
     marketShockPnL: 0,
@@ -305,6 +323,7 @@ function openingState(opening: OpeningBalanceSheet): MonthlyFinancialState {
     economicDebtCosts: 0,
     netWorthChange: 0,
     attributionResidual: 0,
+    financingCostMissing: opening.fundingGap > 0,
     flags: opening.flags,
   };
 }
@@ -338,11 +357,49 @@ export function advanceMonth(
   const postDebtSurplus = operatingSurplus - debtCashOut;
 
   const rate = Math.min(1, Math.max(0, assumptions.investmentAllocationRate));
-  // On n'investit jamais une part d'un surplus déjà consommée par une échéance, et on
-  // n'emprunte jamais implicitement pour maintenir le taux d'investissement.
-  const investmentContribution = postDebtSurplus > 0 ? postDebtSurplus * rate : 0;
-  const cashContribution =
-    postDebtSurplus > 0 ? postDebtSurplus - investmentContribution : postDebtSurplus;
+  let bankCash = openingBankCash;
+  let fundingGap = openingFundingGap;
+  let gapRepayment = 0;
+  let fundingGapChange = 0;
+  let investmentContribution = 0;
+  let cashContribution = 0;
+  let surplusAfterGap = 0;
+
+  // Cas défensif : trésorerie et besoin de financement ne peuvent pas coexister. La
+  // transition maintient l'invariant, donc cet état ne peut venir que d'un bilan
+  // d'ouverture incohérent. On le résorbe et on le signale plutôt que de le laisser vivre.
+  if (fundingGap > 0 && bankCash > 0) {
+    const settled = Math.min(fundingGap, bankCash);
+    fundingGap -= settled;
+    bankCash -= settled;
+    gapRepayment += settled;
+    flags.push("INCONSISTENT_OPENING / cash et besoin de financement simultanés");
+  }
+
+  if (postDebtSurplus < 0) {
+    // Déficit : la trésorerie encaisse d'abord, le reliquat devient un besoin de
+    // financement. Aucun investissement n'est effectué ce mois-ci.
+    const covered = Math.min(bankCash, -postDebtSurplus);
+    bankCash -= covered;
+    cashContribution = -covered;
+    const uncovered = -postDebtSurplus - covered;
+    if (uncovered > 0) {
+      fundingGap += uncovered;
+      fundingGapChange = uncovered;
+      flags.push(FUNDING_GAP_FLAG);
+    }
+  } else {
+    // Surplus : le besoin de financement passe AVANT toute allocation. On n'investit pas
+    // un euro tant qu'un engagement reste non financé, et on n'emprunte jamais
+    // implicitement à taux nul pour investir à un taux positif.
+    const repaid = Math.min(fundingGap, postDebtSurplus);
+    fundingGap -= repaid;
+    gapRepayment += repaid;
+    surplusAfterGap = postDebtSurplus - repaid;
+    investmentContribution = surplusAfterGap * rate;
+    cashContribution = surplusAfterGap - investmentContribution;
+    bankCash += cashContribution;
+  }
 
   // Performance appliquée au capital d'ouverture : la contribution du mois ne produit de
   // rendement qu'à partir du mois suivant.
@@ -356,16 +413,9 @@ export function advanceMonth(
   const marketInvestedAssets = Math.max(0, marketBeforeShock + marketShockPnL);
   const marketPnL = marketInvestedAssets - openingMarket - investmentContribution;
 
-  let bankCash = openingBankCash + cashContribution;
-  let fundingGapChange = 0;
-  if (bankCash < 0) {
-    // Le cash ne devient jamais un actif négatif : le déficit non couvert est un besoin
-    // de financement, sans conditions ni taux inventés.
-    fundingGapChange = -bankCash;
-    bankCash = 0;
-    flags.push("FUNDING_GAP / financing terms missing");
-  }
-  const fundingGap = openingFundingGap + fundingGapChange;
+  const financingCostMissing =
+    previous.financingCostMissing || fundingGap > 0 || fundingGapChange > 0;
+  if (financingCostMissing) flags.push(FINANCING_COST_FLAG);
 
   const loanBalance = Math.max(0, openingLoan - debt.principal);
   const grossFinancialAssets =
@@ -397,6 +447,8 @@ export function advanceMonth(
     postDebtSurplus,
     investmentContribution,
     cashContribution,
+    gapRepayment,
+    surplusAfterGap,
     marketReturnRate,
     marketPnL,
     marketShockPnL,
@@ -412,6 +464,7 @@ export function advanceMonth(
     economicDebtCosts,
     netWorthChange,
     attributionResidual: netWorthChange - attribution,
+    financingCostMissing,
     flags,
   };
 }
@@ -465,6 +518,7 @@ export function toAnnualPoints(result: MonthlyModelResult): AnnualBalanceSheetPo
       cumulativeMarketPnL,
       cumulativeInterestPaid,
       cumulativePrincipalPaid,
+      financingCostMissing: state.financingCostMissing,
     });
   }
   return points;
