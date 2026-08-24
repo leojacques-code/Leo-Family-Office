@@ -158,16 +158,18 @@ function seed(databaseInstance: DatabaseSync) {
       insertBudget.run(`bud_${id}`, USER_ID, id, amount, kind, kind === "ACTUAL" ? "HIGH" : "UNKNOWN", kind === "ACTUAL" ? "Données communiquées par Léo" : "À renseigner", AS_OF_DATE);
     });
 
+    // monthly_savings = surplus mensuel AVANT service de dette (voir monthly-financial-model.ts).
+    // investment_allocation_rate = 1 reproduit l'hypothèse implicite antérieure, désormais explicite.
     const scenarios = [
-      ["scn_prudent", "Prudent", "Rendement modéré et épargne progressive", "#5b7c74", 0.035, 0.10, 0.025, 150, 0.02, 0.02, null, null],
-      ["scn_central", "Central", "Trajectoire de référence modifiable", "#31676f", 0.055, 0.15, 0.02, 250, 0.035, 0.025, null, null],
-      ["scn_ambitious", "Ambitieux", "Progression de carrière et épargne soutenues", "#3157a4", 0.07, 0.18, 0.02, 500, 0.055, 0.025, null, null],
-      ["scn_stress", "Stress", "Chômage et choc de marché en année 2", "#a84f45", 0.025, 0.24, 0.035, 0, 0.01, 0.05, 2, -0.35],
-      ["scn_favorable", "Très favorable", "Forte progression sans être traitée comme certitude", "#80643a", 0.085, 0.20, 0.018, 750, 0.07, 0.02, null, null],
+      ["scn_prudent", "Prudent", "Rendement modéré et épargne progressive", "#5b7c74", 0.035, 0.10, 0.025, 150, 1, 0.02, 0.02, null, null],
+      ["scn_central", "Central", "Trajectoire de référence modifiable", "#31676f", 0.055, 0.15, 0.02, 250, 1, 0.035, 0.025, null, null],
+      ["scn_ambitious", "Ambitieux", "Progression de carrière et épargne soutenues", "#3157a4", 0.07, 0.18, 0.02, 500, 1, 0.055, 0.025, null, null],
+      ["scn_stress", "Stress", "Chômage et choc de marché en année 2", "#a84f45", 0.025, 0.24, 0.035, 0, 1, 0.01, 0.05, 2, -0.35],
+      ["scn_favorable", "Très favorable", "Forte progression sans être traitée comme certitude", "#80643a", 0.085, 0.20, 0.018, 750, 1, 0.07, 0.02, null, null],
     ];
     const insertScenario = databaseInstance.prepare(`INSERT INTO scenarios
-      (id,user_id,name,description,color,current_version,annual_return,annual_volatility,annual_inflation,monthly_savings,salary_growth,stress_probability,shock_year,shock_magnitude,kind,confidence,created_at,updated_at)
-      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'MODEL_ASSUMPTION', 'MEDIUM', ?, ?)`);
+      (id,user_id,name,description,color,current_version,annual_return,annual_volatility,annual_inflation,monthly_savings,investment_allocation_rate,salary_growth,stress_probability,shock_year,shock_magnitude,kind,confidence,created_at,updated_at)
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MODEL_ASSUMPTION', 'MEDIUM', ?, ?)`);
     scenarios.forEach((entry) => insertScenario.run(entry[0], USER_ID, ...entry.slice(1), now, now));
     const scenarioRows = databaseInstance.prepare("SELECT * FROM scenarios").all() as SqlRow[];
     const insertVersion = databaseInstance.prepare("INSERT INTO scenario_versions VALUES (?, ?, 1, ?, ?)");
@@ -263,7 +265,7 @@ function getTransactions(): Transaction[] {
 
 function getScenarios(): Scenario[] {
   return (db().prepare("SELECT * FROM scenarios WHERE user_id=? ORDER BY CASE name WHEN 'Prudent' THEN 1 WHEN 'Central' THEN 2 WHEN 'Ambitieux' THEN 3 WHEN 'Stress' THEN 4 ELSE 5 END").all(USER_ID) as SqlRow[]).map((row) => ({
-    id: String(row.id), name: String(row.name), description: String(row.description), version: Number(row.current_version), color: String(row.color), annualReturn: Number(row.annual_return), annualVolatility: Number(row.annual_volatility), annualInflation: Number(row.annual_inflation), monthlySavings: Number(row.monthly_savings), salaryGrowth: Number(row.salary_growth), stressProbability: Number(row.stress_probability), shockYear: row.shock_year === null ? null : Number(row.shock_year), shockMagnitude: row.shock_magnitude === null ? null : Number(row.shock_magnitude), provenance: provenance(row),
+    id: String(row.id), name: String(row.name), description: String(row.description), version: Number(row.current_version), color: String(row.color), annualReturn: Number(row.annual_return), annualVolatility: Number(row.annual_volatility), annualInflation: Number(row.annual_inflation), monthlySavings: Number(row.monthly_savings), investmentAllocationRate: row.investment_allocation_rate === null ? 1 : Number(row.investment_allocation_rate), salaryGrowth: Number(row.salary_growth), stressProbability: Number(row.stress_probability), shockYear: row.shock_year === null ? null : Number(row.shock_year), shockMagnitude: row.shock_magnitude === null ? null : Number(row.shock_magnitude), provenance: provenance(row),
   }));
 }
 
@@ -322,8 +324,8 @@ function applyMutation(mutation: Mutation) {
       case "update_scenario": {
         const existing = databaseInstance.prepare("SELECT * FROM scenarios WHERE id=? AND user_id=?").get(mutation.scenarioId, USER_ID) as SqlRow | undefined;
         if (!existing) throw new Error("Scenario not found");
-        const allowed = ["annualReturn", "annualVolatility", "annualInflation", "monthlySavings", "salaryGrowth", "stressProbability", "shockYear", "shockMagnitude"] as const;
-        const columns: Record<(typeof allowed)[number], string> = { annualReturn: "annual_return", annualVolatility: "annual_volatility", annualInflation: "annual_inflation", monthlySavings: "monthly_savings", salaryGrowth: "salary_growth", stressProbability: "stress_probability", shockYear: "shock_year", shockMagnitude: "shock_magnitude" };
+        const allowed = ["annualReturn", "annualVolatility", "annualInflation", "monthlySavings", "investmentAllocationRate", "salaryGrowth", "stressProbability", "shockYear", "shockMagnitude"] as const;
+        const columns: Record<(typeof allowed)[number], string> = { annualReturn: "annual_return", annualVolatility: "annual_volatility", annualInflation: "annual_inflation", monthlySavings: "monthly_savings", investmentAllocationRate: "investment_allocation_rate", salaryGrowth: "salary_growth", stressProbability: "stress_probability", shockYear: "shock_year", shockMagnitude: "shock_magnitude" };
         const entries = allowed.filter((key) => mutation.patch[key] !== undefined);
         if (entries.length) {
           const version = Number(existing.current_version) + 1;
@@ -338,8 +340,8 @@ function applyMutation(mutation: Mutation) {
         const source = databaseInstance.prepare("SELECT * FROM scenarios WHERE id=? AND user_id=?").get(mutation.scenarioId, USER_ID) as SqlRow | undefined;
         if (!source) throw new Error("Scenario not found");
         const id = `scn_${randomUUID()}`;
-        databaseInstance.prepare(`INSERT INTO scenarios (id,user_id,name,description,color,current_version,annual_return,annual_volatility,annual_inflation,monthly_savings,salary_growth,stress_probability,shock_year,shock_magnitude,kind,confidence,created_at,updated_at)
-          VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?, 'USER_ASSUMPTION','HIGH',?,?)`).run(id, USER_ID, `${source.name} — copie`, source.description, source.color, source.annual_return, source.annual_volatility, source.annual_inflation, source.monthly_savings, source.salary_growth, source.stress_probability, source.shock_year, source.shock_magnitude, now, now);
+        databaseInstance.prepare(`INSERT INTO scenarios (id,user_id,name,description,color,current_version,annual_return,annual_volatility,annual_inflation,monthly_savings,investment_allocation_rate,salary_growth,stress_probability,shock_year,shock_magnitude,kind,confidence,created_at,updated_at)
+          VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?, 'USER_ASSUMPTION','HIGH',?,?)`).run(id, USER_ID, `${source.name} — copie`, source.description, source.color, source.annual_return, source.annual_volatility, source.annual_inflation, source.monthly_savings, source.investment_allocation_rate, source.salary_growth, source.stress_probability, source.shock_year, source.shock_magnitude, now, now);
         const copied = databaseInstance.prepare("SELECT * FROM scenarios WHERE id=?").get(id);
         databaseInstance.prepare("INSERT INTO scenario_versions VALUES (?,?,?,?,?)").run(randomUUID(), id, 1, JSON.stringify(copied), now);
         break;

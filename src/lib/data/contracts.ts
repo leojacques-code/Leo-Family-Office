@@ -7,7 +7,7 @@ export type Mutation =
   | { action: "add_account"; institution: string; name: string; accountType: FinancialAccount["type"]; balance: number; currency: string }
   | { action: "add_transaction"; accountId: string; categoryId: string; date: string; label: string; amount: number; updateBalance: boolean }
   | { action: "update_expense"; categoryId: string; monthlyAmount: number | null }
-  | { action: "update_scenario"; scenarioId: string; patch: Partial<Pick<Scenario, "annualReturn" | "annualVolatility" | "annualInflation" | "monthlySavings" | "salaryGrowth" | "stressProbability" | "shockYear" | "shockMagnitude">> }
+  | { action: "update_scenario"; scenarioId: string; patch: Partial<Pick<Scenario, "annualReturn" | "annualVolatility" | "annualInflation" | "monthlySavings" | "investmentAllocationRate" | "salaryGrowth" | "stressProbability" | "shockYear" | "shockMagnitude">> }
   | { action: "duplicate_scenario"; scenarioId: string }
   | { action: "create_monthly_close"; closeDate: string }
   | { action: "add_goal"; name: string; targetAmount: number; targetDate: string | null };

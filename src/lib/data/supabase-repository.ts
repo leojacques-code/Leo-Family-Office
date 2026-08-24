@@ -80,6 +80,7 @@ const SCENARIO_COLUMNS: Record<string, string> = {
   annualVolatility: "annual_volatility",
   annualInflation: "annual_inflation",
   monthlySavings: "monthly_savings",
+  investmentAllocationRate: "investment_allocation_rate",
   salaryGrowth: "salary_growth",
   stressProbability: "stress_probability",
   shockYear: "shock_year",
@@ -90,7 +91,9 @@ function mapScenario(row: Row): Scenario {
   return {
     id: str(row.id), name: str(row.name), description: str(row.description), version: num(row.current_version), color: str(row.color),
     annualReturn: num(row.annual_return), annualVolatility: num(row.annual_volatility), annualInflation: num(row.annual_inflation),
-    monthlySavings: num(row.monthly_savings), salaryGrowth: num(row.salary_growth), stressProbability: num(row.stress_probability),
+    monthlySavings: num(row.monthly_savings),
+    investmentAllocationRate: row.investment_allocation_rate === null || row.investment_allocation_rate === undefined ? 1 : num(row.investment_allocation_rate),
+    salaryGrowth: num(row.salary_growth), stressProbability: num(row.stress_probability),
     shockYear: numOrNull(row.shock_year), shockMagnitude: numOrNull(row.shock_magnitude), provenance: provenance(row),
   };
 }
@@ -344,7 +347,8 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         const copy = unwrap(await db.from("scenarios").insert({
           user_id: user, name: `${str(source.name)} — copie`, description: source.description, color: source.color, current_version: 1,
           annual_return: source.annual_return, annual_volatility: source.annual_volatility, annual_inflation: source.annual_inflation,
-          monthly_savings: source.monthly_savings, salary_growth: source.salary_growth, stress_probability: source.stress_probability,
+          monthly_savings: source.monthly_savings, investment_allocation_rate: source.investment_allocation_rate,
+          salary_growth: source.salary_growth, stress_probability: source.stress_probability,
           shock_year: source.shock_year, shock_magnitude: source.shock_magnitude,
           data_kind: "USER_ASSUMPTION", confidence: "HIGH", created_at: now, updated_at: now,
         }).select("*").single(), "duplication de scénario") as Row;

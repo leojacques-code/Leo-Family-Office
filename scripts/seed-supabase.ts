@@ -169,17 +169,19 @@ async function main() {
     source: kind === "ACTUAL" ? "Données communiquées par Léo" : "À renseigner", effective_date: AS_OF_DATE,
   })));
 
-  const scenarioSeed: Array<[string, string, string, number, number, number, number, number, number, number | null, number | null]> = [
-    ["Prudent", "Rendement modéré et épargne progressive", "#5b7c74", 0.035, 0.10, 0.025, 150, 0.02, 0.02, null, null],
-    ["Central", "Trajectoire de référence modifiable", "#31676f", 0.055, 0.15, 0.02, 250, 0.035, 0.025, null, null],
-    ["Ambitieux", "Progression de carrière et épargne soutenues", "#3157a4", 0.07, 0.18, 0.02, 500, 0.055, 0.025, null, null],
-    ["Stress", "Chômage et choc de marché en année 2", "#a84f45", 0.025, 0.24, 0.035, 0, 0.01, 0.05, 2, -0.35],
-    ["Très favorable", "Forte progression sans être traitée comme certitude", "#80643a", 0.085, 0.20, 0.018, 750, 0.07, 0.02, null, null],
+  // savings = surplus mensuel AVANT service de dette ; allocation = part investie du surplus post-dette.
+  const scenarioSeed: Array<[string, string, string, number, number, number, number, number, number, number, number | null, number | null]> = [
+    ["Prudent", "Rendement modéré et épargne progressive", "#5b7c74", 0.035, 0.10, 0.025, 150, 1, 0.02, 0.02, null, null],
+    ["Central", "Trajectoire de référence modifiable", "#31676f", 0.055, 0.15, 0.02, 250, 1, 0.035, 0.025, null, null],
+    ["Ambitieux", "Progression de carrière et épargne soutenues", "#3157a4", 0.07, 0.18, 0.02, 500, 1, 0.055, 0.025, null, null],
+    ["Stress", "Chômage et choc de marché en année 2", "#a84f45", 0.025, 0.24, 0.035, 0, 1, 0.01, 0.05, 2, -0.35],
+    ["Très favorable", "Forte progression sans être traitée comme certitude", "#80643a", 0.085, 0.20, 0.018, 750, 1, 0.07, 0.02, null, null],
   ];
 
-  const scenarios = await insert("scenarios", scenarioSeed.map(([name, description, color, annualReturn, volatility, inflation, savings, salaryGrowth, stress, shockYear, shockMagnitude]) => ({
+  const scenarios = await insert("scenarios", scenarioSeed.map(([name, description, color, annualReturn, volatility, inflation, savings, allocation, salaryGrowth, stress, shockYear, shockMagnitude]) => ({
     name, description, color, current_version: 1, annual_return: annualReturn, annual_volatility: volatility,
-    annual_inflation: inflation, monthly_savings: savings, salary_growth: salaryGrowth, stress_probability: stress,
+    annual_inflation: inflation, monthly_savings: savings, investment_allocation_rate: allocation,
+    salary_growth: salaryGrowth, stress_probability: stress,
     shock_year: shockYear, shock_magnitude: shockMagnitude, data_kind: "MODEL_ASSUMPTION", confidence: "MEDIUM",
     created_at: NOW, updated_at: NOW,
   })));

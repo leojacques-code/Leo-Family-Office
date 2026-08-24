@@ -14,7 +14,19 @@ import {
 } from "recharts";
 import type { Scenario } from "@/lib/types";
 import { Currency, DataBadge, EmptyState, Modal, Percent, SectionHeader } from "@/components/ui";
-import { type SectionProps, chartCurrency, inputNumber } from "@/components/pages/shared";
+import {
+  type SectionProps,
+  chartCurrency,
+  formatEur,
+  inputNumber,
+  projectionExplanation,
+} from "@/components/pages/shared";
+import {
+  buildOpeningBalanceSheet,
+  runDeterministicModel,
+  scenarioAssumptions,
+  toAnnualPoints,
+} from "@/lib/engine/monthly-financial-model";
 
 function ScenariosPage({
   state,
@@ -33,6 +45,7 @@ function ScenariosPage({
     annualVolatility: "",
     annualInflation: "",
     monthlySavings: "",
+    investmentAllocationRate: "",
     salaryGrowth: "",
     stressProbability: "",
     shockYear: "",
@@ -46,6 +59,7 @@ function ScenariosPage({
       annualVolatility: String(scenario.annualVolatility * 100),
       annualInflation: String(scenario.annualInflation * 100),
       monthlySavings: String(scenario.monthlySavings),
+      investmentAllocationRate: String(scenario.investmentAllocationRate * 100),
       salaryGrowth: String(scenario.salaryGrowth * 100),
       stressProbability: String(scenario.stressProbability * 100),
       shockYear: scenario.shockYear === null ? "" : String(scenario.shockYear),
@@ -63,6 +77,7 @@ function ScenariosPage({
         annualVolatility: inputNumber(form.annualVolatility) / 100,
         annualInflation: inputNumber(form.annualInflation) / 100,
         monthlySavings: inputNumber(form.monthlySavings),
+        investmentAllocationRate: inputNumber(form.investmentAllocationRate) / 100,
         salaryGrowth: inputNumber(form.salaryGrowth) / 100,
         stressProbability: inputNumber(form.stressProbability) / 100,
         shockYear: form.shockYear ? inputNumber(form.shockYear) : null,
@@ -72,6 +87,15 @@ function ScenariosPage({
     if (ok) setEditing(null);
   }
   const finalPoint = projection?.points.at(-1);
+  // Trajectoire déterministe recalculée côté client : déplacer la part investie ou le
+  // surplus modifie immédiatement le bilan projeté, sans relancer le Monte-Carlo.
+  const selected =
+    state.scenarios.find((scenario) => scenario.id === selectedId) ?? state.scenarios[0];
+  const opening = buildOpeningBalanceSheet(state);
+  const deterministic = toAnnualPoints(
+    runDeterministicModel(opening, state.liabilities, scenarioAssumptions(selected), 30 * 12),
+  );
+  const horizon = deterministic.at(-1);
   return (
     <div className="page-stack">
       <SectionHeader
@@ -118,9 +142,15 @@ function ScenariosPage({
                 </strong>
               </div>
               <div>
-                <span>Épargne</span>
+                <span>Surplus avant dette</span>
                 <strong>
                   <Currency value={scenario.monthlySavings} />
+                </strong>
+              </div>
+              <div>
+                <span>Part investie</span>
+                <strong>
+                  <Percent value={scenario.investmentAllocationRate} />
                 </strong>
               </div>
             </div>
@@ -136,10 +166,109 @@ function ScenariosPage({
           </article>
         ))}
       </div>
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <span className="eyebrow">Bilan projeté déterministe · {selected.name}</span>
+            <h2>Trajectoire mensuelle sur 30 ans</h2>
+          </div>
+          <button
+            className="link-button"
+            onClick={() =>
+              setExplanation(
+                projectionExplanation(
+                  state,
+                  selected,
+                  opening,
+                  deterministic[1] ?? deterministic[0],
+                  deterministic[0],
+                ),
+              )
+            }
+          >
+            Explain calculation
+          </button>
+        </div>
+        <div className="medium-chart">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={deterministic}>
+              <defs>
+                <linearGradient id="netWorthArea" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stopColor="#39747a" stopOpacity={0.24} />
+                  <stop offset="1" stopColor="#39747a" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} stroke="var(--border-soft)" />
+              <XAxis dataKey="year" axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={chartCurrency} axisLine={false} tickLine={false} />
+              <Tooltip
+                formatter={(value) => formatEur(Number(value))}
+                labelFormatter={(label) => `Année ${label}`}
+              />
+              <Area
+                type="monotone"
+                dataKey="netWorth"
+                name="Patrimoine net"
+                stroke="#39747a"
+                strokeWidth={2.2}
+                fill="url(#netWorthArea)"
+              />
+              <Line
+                type="monotone"
+                dataKey="marketInvestedAssets"
+                name="Actifs de marché"
+                stroke="#c0a66a"
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="bankCash"
+                name="Cash bancaire"
+                stroke="#89a7a2"
+                strokeDasharray="4 3"
+                dot={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="percentile-cards">
+          <div>
+            <span>Patrimoine net</span>
+            <strong>
+              <Currency value={horizon?.netWorth ?? 0} compact />
+            </strong>
+            <small>À l’horizon, périmètre financier</small>
+          </div>
+          <div>
+            <span>Actifs financiers</span>
+            <strong>
+              <Currency value={horizon?.grossFinancialAssets ?? 0} compact />
+            </strong>
+            <small>
+              dont marché <Currency value={horizon?.marketInvestedAssets ?? 0} compact /> · dont
+              cash <Currency value={horizon?.bankCash ?? 0} compact />
+            </small>
+          </div>
+          <div>
+            <span>Dette restante</span>
+            <strong>
+              <Currency value={horizon?.debt ?? 0} compact />
+            </strong>
+            <small>
+              Intérêts cumulés <Currency value={horizon?.cumulativeInterestPaid ?? 0} compact />
+            </small>
+          </div>
+        </div>
+        <p className="muted-copy">
+          Surplus mensuel <Currency value={selected.monthlySavings} /> avant service de dette, dont{" "}
+          <Percent value={selected.investmentAllocationRate} /> du solde après dette dirigé vers les
+          actifs de marché. Le service de dette est retranché explicitement chaque mois.
+        </p>
+      </section>
       <section className="panel simulation-panel">
         <div className="panel-header">
           <div>
-            <span className="eyebrow">Monte-Carlo</span>
+            <span className="eyebrow">Monte-Carlo · patrimoine net financier simulé</span>
             <h2>Distribution projetée</h2>
           </div>
           <div className="simulation-actions">
@@ -217,21 +346,21 @@ function ScenariosPage({
                 <strong>
                   <Currency value={finalPoint?.p10 ?? 0} compact />
                 </strong>
-                <small>Dépassé favorablement dans ~90 % des simulations du modèle</small>
+                <small>Patrimoine net dépassé dans ~90 % des simulations</small>
               </div>
               <div>
                 <span>P50</span>
                 <strong>
                   <Currency value={finalPoint?.p50 ?? 0} compact />
                 </strong>
-                <small>Médiane des simulations</small>
+                <small>Patrimoine net médian des simulations</small>
               </div>
               <div>
                 <span>P90</span>
                 <strong>
                   <Currency value={finalPoint?.p90 ?? 0} compact />
                 </strong>
-                <small>Atteint ou dépassé dans ~10 % des simulations du modèle</small>
+                <small>Patrimoine net atteint ou dépassé dans ~10 % des simulations</small>
               </div>
             </div>
             <button
@@ -239,7 +368,8 @@ function ScenariosPage({
               onClick={() =>
                 setExplanation({
                   title: "Monte-Carlo",
-                  formula: "Aₜ₊₁ = max(0, Aₜ × (1 + rₜ) + épargne mensuelle)",
+                  formula:
+                    "Transition mensuelle du bilan : surplus − service de dette → allocation cash/marché → performance sur le capital d’ouverture",
                   inputs: [
                     {
                       label: "Simulations",
@@ -274,7 +404,7 @@ function ScenariosPage({
         ) : (
           <EmptyState
             title="Projection non lancée"
-            detail="Le moteur utilise des rendements mensuels à queues épaisses, des stress rares et un seed reproductible."
+            detail="Le Monte-Carlo rejoue la transition mensuelle de la projection déterministe : seul le rendement de marché est tiré au sort, avec des queues épaisses, des stress rares et un seed reproductible. Immobilier, business equity, carrière et fiscalité future n’y sont pas intégrés."
             action={
               <button
                 className="button primary"
@@ -324,12 +454,26 @@ function ScenariosPage({
             />
           </label>
           <label>
-            Épargne mensuelle
+            Surplus mensuel avant service de dette
             <input
               className="text-input"
               type="number"
               value={form.monthlySavings}
               onChange={(event) => setForm({ ...form, monthlySavings: event.target.value })}
+            />
+          </label>
+          <label>
+            Part du surplus investie (%)
+            <input
+              className="text-input"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={form.investmentAllocationRate}
+              onChange={(event) =>
+                setForm({ ...form, investmentAllocationRate: event.target.value })
+              }
             />
           </label>
           <label>

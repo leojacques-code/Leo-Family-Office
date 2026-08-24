@@ -231,6 +231,7 @@ CREATE TABLE IF NOT EXISTS scenarios (
   annual_volatility REAL NOT NULL,
   annual_inflation REAL NOT NULL,
   monthly_savings REAL NOT NULL,
+  investment_allocation_rate REAL NOT NULL DEFAULT 1,
   salary_growth REAL NOT NULL,
   stress_probability REAL NOT NULL,
   shock_year INTEGER,

@@ -1,8 +1,12 @@
 "use client";
 
 import type { Mutation } from "@/lib/data/contracts";
-import type { DashboardState, ProjectionResult } from "@/lib/types";
+import type { DashboardState, ProjectionEnvelope } from "@/lib/types";
 import { nextDebtEvent } from "@/lib/engine/debt";
+import type {
+  AnnualBalanceSheetPoint,
+  OpeningBalanceSheet,
+} from "@/lib/engine/monthly-financial-model";
 import type { Explanation } from "@/components/ui";
 import { Currency, DataBadge } from "@/components/ui";
 import type { FinancialAccount } from "@/lib/types";
@@ -15,13 +19,13 @@ export interface SectionProps {
   mutate: Mutate;
   busy: boolean;
   setExplanation: (explanation: Explanation) => void;
-  projection: ProjectionResult | null;
+  projection: ProjectionEnvelope | null;
   runProjection: (
     scenarioId: string,
     years?: number,
     simulations?: number,
     seed?: number,
-  ) => Promise<ProjectionResult | null>;
+  ) => Promise<ProjectionEnvelope | null>;
   refresh: () => Promise<void>;
 }
 
@@ -224,5 +228,72 @@ export function cashFlowExplanation(state: DashboardState): Explanation {
       },
     ],
     note: `${upcoming ? `Prochaine échéance le ${formatDate(upcoming.entry.dueDate)} pour ${formatEur(upcoming.entry.totalCashOut)}. ` : "Aucune échéance de dette à venir. "}La majorité des dépenses n’est pas encore renseignée : ce cash flow est une borne haute, avant impôt sur le revenu.`,
+  };
+}
+
+/**
+ * Explication d'un point annuel de la projection mensuelle. La variation de patrimoine
+ * net y est réconciliée par ses composantes économiques : le principal remboursé n'y
+ * apparaît pas, ses deux jambes s'annulent.
+ */
+export function projectionExplanation(
+  state: DashboardState,
+  scenario: {
+    name: string;
+    annualReturn: number;
+    monthlySavings: number;
+    investmentAllocationRate: number;
+  },
+  opening: OpeningBalanceSheet,
+  point: AnnualBalanceSheetPoint,
+  previous: AnnualBalanceSheetPoint | undefined,
+): Explanation {
+  const openingNetWorth = previous?.netWorth ?? opening.netWorth;
+  const surplus = point.cumulativeOperatingSurplus - (previous?.cumulativeOperatingSurplus ?? 0);
+  const marketPnL = point.cumulativeMarketPnL - (previous?.cumulativeMarketPnL ?? 0);
+  const debtCosts = point.cumulativeInterestPaid - (previous?.cumulativeInterestPaid ?? 0);
+  const principal = point.cumulativePrincipalPaid - (previous?.cumulativePrincipalPaid ?? 0);
+  return {
+    title: `Patrimoine net projeté en ${point.year}`,
+    formula:
+      "Patrimoine net d’ouverture + surplus d’exploitation − coûts économiques de dette + performance de marché = patrimoine net de clôture",
+    inputs: [
+      {
+        label: "Patrimoine net d’ouverture",
+        value: formatEur(openingNetWorth),
+        kind: previous ? "DERIVED" : "ACTUAL",
+        date: previous ? undefined : state.asOfDate,
+      },
+      {
+        label: "Surplus d’exploitation avant service de dette",
+        value: formatEur(surplus),
+        kind: "MODEL_ASSUMPTION",
+        source: `Scénario ${scenario.name}, ${formatEur(scenario.monthlySavings)}/mois`,
+      },
+      {
+        label: "Coûts économiques de dette (intérêts, assurance, frais)",
+        value: `− ${formatEur(debtCosts)}`,
+        kind: "DERIVED",
+        source: "Échéancier forward dérivé du contrat",
+      },
+      {
+        label: "Performance de marché",
+        value: formatEur(marketPnL),
+        kind: "DERIVED",
+        source: `Rendement annuel ${(scenario.annualReturn * 100).toFixed(1)} % composé mensuellement`,
+      },
+      {
+        label: "Principal remboursé (mouvement de structure)",
+        value: `${formatEur(principal)} · effet nul sur le patrimoine`,
+        kind: "DERIVED",
+        source: "Trésorerie et passif diminuent du même montant",
+      },
+      {
+        label: "Patrimoine net de clôture",
+        value: formatEur(point.netWorth),
+        kind: "DERIVED",
+      },
+    ],
+    note: `Périmètre financier uniquement : trésorerie, actifs exposés au marché, actifs financiers sans exposition connue et dette. Ni immobilier, ni business equity, ni carrière, ni fiscalité future. La part investie du surplus après service de dette vaut ${(scenario.investmentAllocationRate * 100).toFixed(0)} %.`,
   };
 }

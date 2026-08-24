@@ -15,8 +15,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { deterministicProjection } from "@/lib/engine/financial";
 import { nextDebtEvent } from "@/lib/engine/debt";
+import {
+  buildOpeningBalanceSheet,
+  runDeterministicModel,
+  scenarioAssumptions,
+  toAnnualPoints,
+} from "@/lib/engine/monthly-financial-model";
 import {
   Currency,
   DataBadge,
@@ -33,15 +38,25 @@ import {
   formatDate,
   liquidityExplanation,
   netWorthExplanation,
+  projectionExplanation,
 } from "@/components/pages/shared";
 
 function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
   const central =
     state.scenarios.find((scenario) => scenario.name === "Central") ?? state.scenarios[0];
-  const baseYear = Number(state.asOfDate.slice(0, 4));
-  const projection = deterministicProjection(state.metrics.grossAssets, 12, central).map(
-    (point) => ({ year: baseYear + point.year, value: point.nominal, real: point.real }),
+  // Le graphique consomme le Personal Monthly Financial Model : bilan mois par mois,
+  // point de départ égal au patrimoine net observé, dette et cash inclus.
+  const opening = buildOpeningBalanceSheet(state);
+  const assumptions = scenarioAssumptions(central);
+  const annual = toAnnualPoints(
+    runDeterministicModel(opening, state.liabilities, assumptions, 144),
   );
+  const projection = annual.map((point) => ({
+    year: point.year,
+    value: point.netWorth,
+    assets: point.grossFinancialAssets,
+    debt: point.debt,
+  }));
   const ALLOCATION_COLORS = ["#356b72", "#89a7a2", "#c0a66a", "#7d8fa8", "#b58a7a"];
   const investmentAccountIds = new Set(
     state.accounts
@@ -169,17 +184,33 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           <div className="panel-header">
             <div>
               <span className="eyebrow">Trajectoire centrale déterministe</span>
-              <h2>Actifs financiers projetés</h2>
+              <h2>Patrimoine net financier projeté</h2>
             </div>
             <div className="legend">
               <span>
                 <i className="legend-line nominal" />
-                Nominal
+                Patrimoine net
               </span>
               <span>
                 <i className="legend-line real" />
-                Réel
+                Actifs financiers
               </span>
+              <button
+                className="link-button"
+                onClick={() =>
+                  setExplanation(
+                    projectionExplanation(
+                      state,
+                      central,
+                      opening,
+                      annual[1] ?? annual[0],
+                      annual[0],
+                    ),
+                  )
+                }
+              >
+                Explain calculation
+              </button>
             </div>
           </div>
           <div className="hero-chart">
@@ -224,7 +255,7 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
                 />
                 <Line
                   type="monotone"
-                  dataKey="real"
+                  dataKey="assets"
                   stroke="#9b8555"
                   strokeDasharray="5 4"
                   dot={false}
@@ -234,15 +265,19 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           </div>
           <div className="chart-foot">
             <span>
-              Hypothèse :{" "}
+              Scénario <strong>{central.name}</strong> ·{" "}
               <strong>
                 <Percent value={central.annualReturn} />
               </strong>{" "}
-              de rendement,{" "}
+              de rendement ·{" "}
               <strong>
                 <Currency value={central.monthlySavings} />
               </strong>
-              /mois
+              /mois de surplus avant service de dette ·{" "}
+              <strong>
+                <Percent value={central.investmentAllocationRate} />
+              </strong>{" "}
+              de ce surplus investi · périmètre financier uniquement
             </span>
             <Link href="/scenarios">
               Tester les scénarios <ArrowRight size={14} />
