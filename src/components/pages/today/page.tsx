@@ -97,11 +97,15 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
   ].filter((item) => item.value > 0);
   const allocationTotal = allocation.reduce((sum, item) => sum + item.value, 0);
   const upcomingDebt = nextDebtEvent(state.liabilities, state.asOfDate);
-  // Surplus réellement constaté au ledger, à confronter à l'hypothèse du scénario.
+  // Surplus réellement constaté au ledger. La moyenne n'existe que si la fenêtre est
+  // couverte : un mois sans historique n'est pas un mois à zéro euro.
   const t3 = trailingPeriod(state.asOfDate, 3);
-  const observedT3M =
-    computeObservedCashFlow(state.transactions, state.expenseCategories, t3.start, t3.end)
-      .operatingCashFlowBeforeDebt / 3;
+  const observedT3M = computeObservedCashFlow(
+    state.transactions,
+    state.expenseCategories,
+    t3.start,
+    t3.end,
+  );
   const runway = cashRunwayDays(
     forecastCashFlow({
       asOfDate: state.asOfDate,
@@ -406,8 +410,23 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
             </strong>
           </div>
           <p className="muted-copy">
-            Surplus constaté au ledger sur 3 mois : <Currency value={observedT3M} sign />
-            /mois
+            {observedT3M.monthlyAverageOperatingSurplus === null ? (
+              <>
+                Surplus mensuel constaté : historique insuffisant (
+                {observedT3M.coverage.coveredMonths} mois couverts sur{" "}
+                {observedT3M.coverage.requestedMonths}
+                {observedT3M.coverage.coverageStart
+                  ? `, depuis le ${formatDate(observedT3M.coverage.coverageStart)}`
+                  : ""}
+                )
+              </>
+            ) : (
+              <>
+                Surplus constaté au ledger sur 3 mois :{" "}
+                <Currency value={observedT3M.monthlyAverageOperatingSurplus} sign />
+                /mois
+              </>
+            )}
             {runway !== null ? ` · trésorerie négative projetée dans ${runway} jours` : ""}
           </p>
         </article>

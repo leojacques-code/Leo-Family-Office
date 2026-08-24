@@ -477,27 +477,61 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
             <div>
               <dt>Hypothèse du scénario {central?.name}</dt>
               <dd>
-                <Currency value={comparison.scenarioAssumption} />
+                <Currency value={comparison.scenarioAssumption} /> par mois
               </dd>
             </div>
             <div>
-              <dt>Observé sur 3 mois glissants</dt>
+              <dt>Mois en cours à date</dt>
               <dd>
-                <Currency value={comparison.observedT3M} /> ·{" "}
-                <Currency value={comparison.differenceT3M} sign />
+                <Currency value={comparison.monthToDate} sign /> ·{" "}
+                {QUALITY_LABELS[comparison.monthToDateQuality]}
               </dd>
             </div>
             <div>
-              <dt>Observé sur 12 mois glissants</dt>
+              <dt>Moyenne mensuelle sur 3 mois glissants</dt>
               <dd>
-                <Currency value={comparison.observedT12M} /> ·{" "}
-                <Currency value={comparison.differenceT12M} sign />
+                {comparison.observedT3M === null ? (
+                  <span className="warning-text">
+                    Historique insuffisant · {comparison.coverageT3M.coveredMonths} mois couverts
+                    sur {comparison.coverageT3M.requestedMonths}
+                  </span>
+                ) : (
+                  <>
+                    <Currency value={comparison.observedT3M} /> ·{" "}
+                    <Currency value={comparison.differenceT3M ?? 0} sign />
+                  </>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Moyenne mensuelle sur 12 mois glissants</dt>
+              <dd>
+                {comparison.observedT12M === null ? (
+                  <span className="warning-text">
+                    Historique insuffisant · {comparison.coverageT12M.coveredMonths} mois couverts
+                    sur {comparison.coverageT12M.requestedMonths}
+                  </span>
+                ) : (
+                  <>
+                    <Currency value={comparison.observedT12M} /> ·{" "}
+                    <Currency value={comparison.differenceT12M ?? 0} sign />
+                  </>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Historique disponible depuis</dt>
+              <dd>
+                {comparison.historyStart ? formatDate(comparison.historyStart) : "Aucun historique"}
               </dd>
             </div>
           </dl>
           <p className="muted-copy">
-            Comparaison seulement : l’hypothèse du scénario reste une MODEL_ASSUMPTION et n’est
-            jamais remplacée automatiquement par la valeur observée.
+            Une hypothèse mensuelle ne se compare qu’à une moyenne mensuelle réellement calculable :
+            tant qu’une fenêtre n’est pas couverte par l’historique, la comparaison reste impossible
+            plutôt que d’attribuer zéro euro aux mois inconnus. Le mois en cours est partiel par
+            nature et n’est jamais présenté comme une moyenne. L’hypothèse du scénario reste une
+            MODEL_ASSUMPTION, jamais remplacée automatiquement.
           </p>
         </section>
       ) : null}
@@ -1014,8 +1048,14 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         ) : (
           <Percent value={observed.observedSavingsRate} />
         )}{" "}
-        · surplus T3M <Currency value={observedT3M.operatingCashFlowBeforeDebt / 3} />
-        /mois. Sans revenu encaissé observé sur la période, aucun taux n’est substitué.
+        · moyenne mensuelle T3M{" "}
+        {observedT3M.monthlyAverageOperatingSurplus === null ? (
+          <span className="warning-text">non calculable, historique insuffisant</span>
+        ) : (
+          <Currency value={observedT3M.monthlyAverageOperatingSurplus} />
+        )}
+        . Sans revenu encaissé observé, aucun taux n’est substitué ; sans historique couvrant la
+        fenêtre, aucune moyenne n’est fabriquée.
       </Callout>
     </div>
   );

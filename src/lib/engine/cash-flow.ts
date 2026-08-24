@@ -19,11 +19,22 @@ import type {
  *   1. Le signe ne détermine jamais la nature. Un remboursement entrant sur une catégorie
  *      de dépense la réduit ; il ne devient pas un revenu.
  *   2. Un transfert entre deux poches du même patrimoine ne crée ni revenu, ni dépense,
- *      ni enrichissement. Il ne fait que déplacer un actif.
+ *      ni enrichissement. Il ne fait que déplacer un actif. Cela vaut aussi À L'INTÉRIEUR
+ *      d'une enveloppe : acheter un ETF avec du cash déjà logé dans le PEA est un arbitrage,
+ *      donc un INTERNAL_TRANSFER. Seul un apport d'argent NEUF vers une enveloppe est un
+ *      INVESTMENT. Confondre les deux gonflerait l'épargne constatée à chaque arbitrage,
+ *      ce qu'une future synchronisation courtier rendrait massif.
  *   3. Le remboursement du principal d'une dette n'est pas une consommation. Le service de
  *      dette est isolé, et le surplus d'exploitation se mesure avant lui.
  *
  * Le moteur ne recalcule jamais un échéancier : il consomme le Debt Engine.
+ *
+ * QUATRIÈME RÈGLE, aussi importante que les trois autres :
+ * l'ABSENCE DE DONNÉE N'EST PAS UNE VALEUR NULLE. Un mois antérieur au début de
+ * l'historique connu n'est pas un mois à zéro euro. Toute moyenne mensuelle porte donc une
+ * couverture explicite, et reste NOT_COMPUTABLE tant que la fenêtre demandée n'est pas
+ * réellement couverte : diviser un total par trois ou par douze quand deux ou onze mois
+ * manquent fabriquerait une précision qui n'existe pas.
  */
 
 export const INTERNAL_TRANSFER_NOTICE = "Transferts internes exclus des revenus et dépenses.";
@@ -52,6 +63,25 @@ export interface ExpenseBreakdown {
 }
 
 export type DataQualityStatus = "COMPLETE" | "PARTIAL" | "INCOMPLETE";
+export type CoverageStatus = "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
+
+/**
+ * Couverture réelle d'une fenêtre par l'historique disponible.
+ *
+ * `coverageStart` est la première date à partir de laquelle le ledger est connu. Faute de
+ * synchronisation bancaire, c'est la date de la plus ancienne transaction enregistrée : le
+ * produit ne peut rien affirmer avant elle. Un mois antérieur est UNKNOWN, jamais zéro.
+ */
+export interface PeriodCoverage {
+  requestedStart: string;
+  requestedEnd: string;
+  coverageStart: string | null;
+  requestedMonths: number;
+  coveredMonths: number;
+  /** Mois couverts portant au moins une transaction. */
+  monthsWithActivity: number;
+  status: CoverageStatus;
+}
 
 export interface DataQuality {
   status: DataQualityStatus;
@@ -93,6 +123,70 @@ export interface ObservedCashFlow {
 
   breakdown: ExpenseBreakdown;
   dataQuality: DataQuality;
+  coverage: PeriodCoverage;
+  /**
+   * Surplus mensuel moyen sur la fenêtre. `null` dès que la fenêtre n'est pas
+   * intégralement couverte : on ne divise jamais par des mois dont on ignore tout.
+   */
+  monthlyAverageOperatingSurplus: number | null;
+}
+
+/** Nombre de mois civils distincts entre deux bornes, inclus. */
+function monthSpan(start: string, end: string): number {
+  const [startYear, startMonth] = start.split("-").map(Number);
+  const [endYear, endMonth] = end.split("-").map(Number);
+  return (endYear - startYear) * 12 + (endMonth - startMonth) + 1;
+}
+
+/**
+ * Détermine ce que l'historique couvre réellement sur la fenêtre demandée.
+ *
+ * `ledgerStart` peut être fourni explicitement lorsque la source connaît sa propre date de
+ * début. À défaut, il est déduit de la plus ancienne transaction : c'est la seule date à
+ * partir de laquelle le produit peut affirmer quoi que ce soit.
+ */
+export function computeCoverage(
+  transactions: Transaction[],
+  periodStart: string,
+  periodEnd: string,
+  ledgerStart?: string | null,
+): PeriodCoverage {
+  const earliest = transactions.reduce<string | null>(
+    (oldest, transaction) =>
+      oldest === null || transaction.date < oldest ? transaction.date : oldest,
+    null,
+  );
+  const coverageStart = ledgerStart ?? earliest;
+  const requestedMonths = monthSpan(periodStart, periodEnd);
+  const coveredMonths =
+    coverageStart === null
+      ? 0
+      : Math.max(
+          0,
+          Math.min(
+            requestedMonths,
+            monthSpan(coverageStart > periodStart ? coverageStart : periodStart, periodEnd),
+          ),
+        );
+  const activeMonths = new Set(
+    transactions
+      .filter((transaction) => transaction.date >= periodStart && transaction.date <= periodEnd)
+      .map((transaction) => transaction.date.slice(0, 7)),
+  );
+  return {
+    requestedStart: periodStart,
+    requestedEnd: periodEnd,
+    coverageStart,
+    requestedMonths,
+    coveredMonths,
+    monthsWithActivity: activeMonths.size,
+    status:
+      coveredMonths === 0
+        ? "INSUFFICIENT"
+        : coveredMonths >= requestedMonths
+          ? "COMPLETE"
+          : "PARTIAL",
+  };
 }
 
 function emptyBreakdown(): ExpenseBreakdown {
@@ -117,6 +211,7 @@ export function computeObservedCashFlow(
   categories: ExpenseCategory[],
   periodStart: string,
   periodEnd: string,
+  ledgerStart?: string | null,
 ): ObservedCashFlow {
   const index = categoryIndex(categories);
   const breakdown = emptyBreakdown();
@@ -211,7 +306,16 @@ export function computeObservedCashFlow(
   const cashFlowAfterDebt = operatingCashFlowBeforeDebt - debtServicePaid;
   const observedSavings = savingFlows + investmentFlows;
 
+  const coverage = computeCoverage(transactions, periodStart, periodEnd, ledgerStart);
+
   const reasons: string[] = [];
+  if (coverage.status !== "COMPLETE") {
+    reasons.push(
+      coverage.coverageStart === null
+        ? "aucun historique disponible"
+        : `historique disponible depuis le ${coverage.coverageStart} : ${coverage.coveredMonths} mois couverts sur ${coverage.requestedMonths}`,
+    );
+  }
   if (unclassifiedTransactionCount > 0) {
     reasons.push(`${unclassifiedTransactionCount} transaction(s) non classifiée(s)`);
   }
@@ -221,7 +325,7 @@ export function computeObservedCashFlow(
   if (income <= 0) reasons.push("aucun revenu encaissé observé sur la période");
   if (inPeriod.length === 0) reasons.push("aucune transaction sur la période");
   const status: DataQualityStatus =
-    inPeriod.length === 0 || income <= 0
+    inPeriod.length === 0 || income <= 0 || coverage.status === "INSUFFICIENT"
       ? "INCOMPLETE"
       : reasons.length > 0
         ? "PARTIAL"
@@ -255,6 +359,13 @@ export function computeObservedCashFlow(
     observedInvestmentRate: income > 0 ? investmentFlows / income : null,
     breakdown,
     dataQuality: { status, reasons, unclassifiedTransactionCount, unmatchedTransferCount },
+    coverage,
+    // Une moyenne mensuelle n'a de sens que sur une fenêtre réellement couverte : diviser
+    // par des mois inconnus reviendrait à affirmer qu'ils valent zéro.
+    monthlyAverageOperatingSurplus:
+      coverage.status === "COMPLETE"
+        ? operatingCashFlowBeforeDebt / coverage.requestedMonths
+        : null,
   };
 }
 
@@ -529,44 +640,74 @@ export function compareBudgets(
 
 export interface SurplusComparison {
   scenarioAssumption: number;
-  observedMonth: number;
-  observedT3M: number;
-  observedT12M: number;
-  differenceT3M: number;
-  differenceT12M: number;
-  monthQuality: DataQualityStatus;
+  /** Surplus du mois en cours. Partiel par nature : ce n'est pas une moyenne mensuelle. */
+  monthToDate: number;
+  monthToDateQuality: DataQualityStatus;
+  /** Moyennes mensuelles observées. `null` tant que la fenêtre n'est pas couverte. */
+  observedT3M: number | null;
+  observedT12M: number | null;
+  coverageT3M: PeriodCoverage;
+  coverageT12M: PeriodCoverage;
+  differenceT3M: number | null;
+  differenceT12M: number | null;
+  /** Première date à partir de laquelle le ledger est connu. */
+  historyStart: string | null;
 }
 
 /**
  * Confronte l'hypothèse de surplus du scénario au surplus réellement observé.
  *
- * Aucune correction automatique : `scenario.monthlySavings` reste une MODEL_ASSUMPTION.
- * Le remplacement par la valeur observée relève d'une décision produit ultérieure, une
- * fois le Forecast Engine validé.
+ * `scenario.monthlySavings` est une hypothèse MENSUELLE : elle ne peut être comparée qu'à
+ * une moyenne mensuelle réellement calculable. Tant qu'une fenêtre n'est pas intégralement
+ * couverte par l'historique, la comparaison est NOT_COMPARABLE et vaut `null`. Un mois en
+ * cours partiel est exposé séparément comme month-to-date, jamais annualisé ni présenté
+ * comme une moyenne.
+ *
+ * Aucune correction automatique : l'hypothèse reste une MODEL_ASSUMPTION.
  */
 export function compareSurplusToScenario(
   transactions: Transaction[],
   categories: ExpenseCategory[],
   asOfDate: string,
   scenarioAssumption: number,
+  ledgerStart?: string | null,
 ): SurplusComparison {
   const month = monthPeriod(asOfDate);
-  const monthly = computeObservedCashFlow(transactions, categories, month.start, month.end);
+  const monthly = computeObservedCashFlow(
+    transactions,
+    categories,
+    month.start,
+    month.end,
+    ledgerStart,
+  );
   const t3 = trailingPeriod(asOfDate, 3);
   const t12 = trailingPeriod(asOfDate, 12);
-  const observedT3M =
-    computeObservedCashFlow(transactions, categories, t3.start, t3.end)
-      .operatingCashFlowBeforeDebt / 3;
-  const observedT12M =
-    computeObservedCashFlow(transactions, categories, t12.start, t12.end)
-      .operatingCashFlowBeforeDebt / 12;
+  const observed3 = computeObservedCashFlow(
+    transactions,
+    categories,
+    t3.start,
+    t3.end,
+    ledgerStart,
+  );
+  const observed12 = computeObservedCashFlow(
+    transactions,
+    categories,
+    t12.start,
+    t12.end,
+    ledgerStart,
+  );
+  const observedT3M = observed3.monthlyAverageOperatingSurplus;
+  const observedT12M = observed12.monthlyAverageOperatingSurplus;
   return {
     scenarioAssumption,
-    observedMonth: monthly.operatingCashFlowBeforeDebt,
+    monthToDate: monthly.operatingCashFlowBeforeDebt,
+    monthToDateQuality: monthly.dataQuality.status,
     observedT3M,
     observedT12M,
-    differenceT3M: observedT3M - scenarioAssumption,
-    differenceT12M: observedT12M - scenarioAssumption,
-    monthQuality: monthly.dataQuality.status,
+    coverageT3M: observed3.coverage,
+    coverageT12M: observed12.coverage,
+    differenceT3M: observedT3M === null ? null : observedT3M - scenarioAssumption,
+    differenceT12M: observedT12M === null ? null : observedT12M - scenarioAssumption,
+    historyStart: observed3.coverage.coverageStart,
   };
 }

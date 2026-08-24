@@ -407,14 +407,159 @@ describe("CASE V — périodes glissantes", () => {
   });
 });
 
-describe("comparaison au scénario", () => {
-  it("confronte l’hypothèse au surplus observé sans jamais la remplacer", () => {
-    const transactions = [tx("c_salary", 3000), tx("c_rent", -1100), tx("c_tax", -150)];
+/* ------------------------------------------------------------------ *
+ * Couverture de l'historique : l'absence de donnée n'est pas un zéro
+ * ------------------------------------------------------------------ */
+
+describe("CASE X — un seul mois observé, fenêtre T3M", () => {
+  it("ne divise pas le total par trois", () => {
+    const transactions = [tx("c_salary", 3000), tx("c_rent", -1100), tx("c_groceries", -720)];
+    const t3 = trailingPeriod(AS_OF, 3);
+    const result = computeObservedCashFlow(transactions, categories, t3.start, t3.end);
+    expect(result.operatingCashFlowBeforeDebt).toBeCloseTo(1180, 6);
+    // 1 180 / 3 = 393,33 serait faux : deux mois sont inconnus, pas nuls.
+    expect(result.monthlyAverageOperatingSurplus).toBeNull();
+    expect(result.coverage.status).toBe("PARTIAL");
+    expect(result.coverage.coveredMonths).toBe(1);
+    expect(result.coverage.requestedMonths).toBe(3);
+  });
+});
+
+describe("CASE Y — un seul mois observé, fenêtre T12M", () => {
+  it("ne divise pas le total par douze", () => {
+    const transactions = [tx("c_salary", 3000), tx("c_rent", -1100), tx("c_groceries", -720)];
+    const t12 = trailingPeriod(AS_OF, 12);
+    const result = computeObservedCashFlow(transactions, categories, t12.start, t12.end);
+    expect(result.monthlyAverageOperatingSurplus).toBeNull();
+    expect(result.coverage.coveredMonths).toBe(1);
+    expect(result.coverage.requestedMonths).toBe(12);
+    expect(result.coverage.status).toBe("PARTIAL");
+  });
+});
+
+describe("CASE Z — trois mois réellement couverts", () => {
+  it("rend la moyenne mensuelle exacte", () => {
+    const transactions = [
+      tx("c_salary", 1000, "2026-06-10"),
+      tx("c_salary", 1200, "2026-07-10"),
+      tx("c_salary", 800, "2026-08-10"),
+    ];
+    const t3 = trailingPeriod(AS_OF, 3);
+    const result = computeObservedCashFlow(transactions, categories, t3.start, t3.end);
+    expect(result.coverage.status).toBe("COMPLETE");
+    expect(result.coverage.coveredMonths).toBe(3);
+    expect(result.monthlyAverageOperatingSurplus).toBeCloseTo(1000, 6);
+  });
+});
+
+describe("CASE AA — mois couvert sans aucune transaction", () => {
+  it("autorise une valeur nulle observée", () => {
+    // L'historique démarre en juin ; juillet est couvert et réellement vide.
+    const transactions = [tx("c_salary", 900, "2026-06-10"), tx("c_salary", 900, "2026-08-10")];
+    const t3 = trailingPeriod(AS_OF, 3);
+    const result = computeObservedCashFlow(transactions, categories, t3.start, t3.end);
+    expect(result.coverage.status).toBe("COMPLETE");
+    expect(result.coverage.monthsWithActivity).toBe(2);
+    expect(result.monthlyAverageOperatingSurplus).toBeCloseTo(600, 6);
+
+    const july = computeObservedCashFlow(transactions, categories, "2026-07-01", "2026-07-31");
+    expect(july.coverage.status).toBe("COMPLETE");
+    expect(july.operatingCashFlowBeforeDebt).toBe(0);
+    expect(july.monthlyAverageOperatingSurplus).toBe(0);
+  });
+});
+
+describe("CASE AB — mois antérieur au début de l’historique", () => {
+  it("est inconnu, jamais zéro", () => {
+    const transactions = [tx("c_salary", 900, "2026-08-10")];
+    const may = computeObservedCashFlow(transactions, categories, "2026-05-01", "2026-05-31");
+    expect(may.coverage.status).toBe("INSUFFICIENT");
+    expect(may.coverage.coveredMonths).toBe(0);
+    expect(may.monthlyAverageOperatingSurplus).toBeNull();
+    expect(may.dataQuality.status).toBe("INCOMPLETE");
+  });
+
+  it("distingue un mois vide couvert d’un mois hors couverture", () => {
+    const transactions = [tx("c_salary", 900, "2026-06-10")];
+    const covered = computeObservedCashFlow(transactions, categories, "2026-07-01", "2026-07-31");
+    const uncovered = computeObservedCashFlow(transactions, categories, "2026-05-01", "2026-05-31");
+    expect(covered.monthlyAverageOperatingSurplus).toBe(0);
+    expect(uncovered.monthlyAverageOperatingSurplus).toBeNull();
+  });
+});
+
+describe("CASE AC — arbitrage à l’intérieur d’une enveloppe", () => {
+  it("ne gonfle ni l’épargne constatée ni le taux d’investissement", () => {
+    const base = observe([tx("c_salary", 3000), tx("c_rent", -1100)]);
+    // Achat d'ETF avec du cash déjà logé dans le PEA : réallocation, pas argent neuf.
+    const withArbitrage = observe([
+      tx("c_salary", 3000),
+      tx("c_rent", -1100),
+      tx("c_transfer", -2000, "2026-08-06", { transferGroupId: "pea-arb" }),
+      tx("c_transfer", 2000, "2026-08-06", { transferGroupId: "pea-arb" }),
+    ]);
+    expect(withArbitrage.consumerExpenses).toBeCloseTo(base.consumerExpenses, 6);
+    expect(withArbitrage.operatingCashFlowBeforeDebt).toBeCloseTo(
+      base.operatingCashFlowBeforeDebt,
+      6,
+    );
+    expect(withArbitrage.observedSavings).toBeCloseTo(base.observedSavings, 6);
+    expect(withArbitrage.observedInvestmentRate).toBe(base.observedInvestmentRate);
+    expect(withArbitrage.internalTransfers).toBeCloseTo(0, 6);
+  });
+
+  it("compte en revanche un apport d’argent neuf vers l’enveloppe", () => {
+    const withNewMoney = observe([tx("c_salary", 3000), tx("c_invest", -500)]);
+    expect(withNewMoney.investmentFlows).toBeCloseTo(500, 6);
+    expect(withNewMoney.observedInvestmentRate).toBeCloseTo(500 / 3000, 6);
+  });
+});
+
+describe("comparaison au scénario avec historique insuffisant", () => {
+  it("refuse de comparer plutôt que d’inventer une moyenne", () => {
+    const transactions = [tx("c_salary", 3000), tx("c_rent", -1100), tx("c_groceries", -720)];
     const comparison = compareSurplusToScenario(transactions, categories, AS_OF, 250);
-    expect(comparison.scenarioAssumption).toBe(250);
-    expect(comparison.observedMonth).toBeCloseTo(1750, 6);
-    // Un seul mois observé sur trois : la moyenne T3M dilue mécaniquement.
-    expect(comparison.observedT3M).toBeCloseTo(1750 / 3, 6);
-    expect(comparison.differenceT3M).toBeCloseTo(1750 / 3 - 250, 6);
+    expect(comparison.monthToDate).toBeCloseTo(1180, 6);
+    expect(comparison.observedT3M).toBeNull();
+    expect(comparison.observedT12M).toBeNull();
+    expect(comparison.differenceT3M).toBeNull();
+    expect(comparison.differenceT12M).toBeNull();
+    expect(comparison.historyStart).toBe("2026-08-05");
+  });
+
+  it("compare dès que la fenêtre est couverte", () => {
+    const transactions = [
+      tx("c_salary", 1000, "2026-06-10"),
+      tx("c_salary", 1200, "2026-07-10"),
+      tx("c_salary", 800, "2026-08-10"),
+    ];
+    const comparison = compareSurplusToScenario(transactions, categories, AS_OF, 250);
+    expect(comparison.observedT3M).toBeCloseTo(1000, 6);
+    expect(comparison.differenceT3M).toBeCloseTo(750, 6);
+    expect(comparison.observedT12M).toBeNull();
+  });
+});
+
+describe("CASE AD — invariance d’une clôture mensuelle", () => {
+  it("ne recalcule jamais une clôture figée après reclassification", () => {
+    const transactions = [tx("c_salary", 3000), tx("c_resto", -80)];
+    // v1 est calculée puis figée : c'est une photographie, pas une vue.
+    const v1 = computeObservedCashFlow(transactions, categories, MONTH.start, MONTH.end);
+    const frozen = {
+      operatingSurplusBeforeDebt: v1.operatingCashFlowBeforeDebt,
+      consumerExpenses: v1.consumerExpenses,
+    };
+    // Le restaurant est ensuite requalifié en transfert interne.
+    const reclassified = transactions.map((transaction) =>
+      transaction.categoryId === "c_resto"
+        ? { ...transaction, kindOverride: "INTERNAL_TRANSFER" as CashFlowKind }
+        : transaction,
+    );
+    const v2 = computeObservedCashFlow(reclassified, categories, MONTH.start, MONTH.end);
+    expect(frozen.operatingSurplusBeforeDebt).toBeCloseTo(2920, 6);
+    expect(frozen.consumerExpenses).toBeCloseTo(80, 6);
+    // v2 diffère, v1 est intacte.
+    expect(v2.operatingCashFlowBeforeDebt).toBeCloseTo(3000, 6);
+    expect(frozen.operatingSurplusBeforeDebt).toBeCloseTo(2920, 6);
   });
 });
