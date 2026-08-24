@@ -30,11 +30,20 @@ import type {
  * Le moteur ne recalcule jamais un échéancier : il consomme le Debt Engine.
  *
  * QUATRIÈME RÈGLE, aussi importante que les trois autres :
- * l'ABSENCE DE DONNÉE N'EST PAS UNE VALEUR NULLE. Un mois antérieur au début de
- * l'historique connu n'est pas un mois à zéro euro. Toute moyenne mensuelle porte donc une
- * couverture explicite, et reste NOT_COMPUTABLE tant que la fenêtre demandée n'est pas
- * réellement couverte : diviser un total par trois ou par douze quand deux ou onze mois
- * manquent fabriquerait une précision qui n'existe pas.
+ * l'ABSENCE DE DONNÉE N'EST PAS UNE VALEUR NULLE, et une donnée observée ne prouve pas la
+ * complétude de ce qui l'entoure. Trois notions distinctes, jamais interchangeables :
+ *
+ *   firstObservedTransactionDate — date du plus ancien mouvement enregistré. Purement
+ *       DESCRIPTIVE. Trouver une transaction le 5 juin ne prouve pas qu'il ne s'est rien
+ *       passé du 1er au 4 : ces lignes peuvent simplement n'avoir jamais été importées.
+ *   ledgerCoverageStart — date à partir de laquelle la SOURCE certifie fournir un
+ *       historique exhaustif. Elle ne peut venir que de la source (API bancaire, période
+ *       déclarée d'un import, saisie utilisateur). Le moteur ne la devine jamais.
+ *   mois calendaire complet — mois dont le dernier jour est révolu à la date d'observation.
+ *       Le mois en cours n'en est jamais un.
+ *
+ * Une moyenne mensuelle ne porte que sur des mois à la fois RÉVOLUS et COUVERTS. Sans
+ * `ledgerCoverageStart`, aucun mois ne peut être certifié : la moyenne est NOT_COMPUTABLE.
  */
 
 export const INTERNAL_TRANSFER_NOTICE = "Transferts internes exclus des revenus et dépenses.";
@@ -66,19 +75,27 @@ export type DataQualityStatus = "COMPLETE" | "PARTIAL" | "INCOMPLETE";
 export type CoverageStatus = "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
 
 /**
- * Couverture réelle d'une fenêtre par l'historique disponible.
- *
- * `coverageStart` est la première date à partir de laquelle le ledger est connu. Faute de
- * synchronisation bancaire, c'est la date de la plus ancienne transaction enregistrée : le
- * produit ne peut rien affirmer avant elle. Un mois antérieur est UNKNOWN, jamais zéro.
+ * Ce que la source certifie fournir. `ledgerCoverageStart` reste `null` tant qu'aucune
+ * source ne l'a déclaré : le moteur préfère annoncer qu'il ne sait pas plutôt que de
+ * déduire une profondeur d'historique de la première ligne trouvée.
  */
+export interface CoverageOptions {
+  ledgerCoverageStart?: string | null;
+  /** Date d'observation. Détermine quel mois calendaire est révolu. */
+  asOfDate?: string;
+}
+
 export interface PeriodCoverage {
   requestedStart: string;
   requestedEnd: string;
-  coverageStart: string | null;
+  /** Descriptif seulement. Ne prouve jamais le début de couverture. */
+  firstObservedTransactionDate: string | null;
+  /** Déclaré par la source. `null` = profondeur d'historique inconnue. */
+  ledgerCoverageStart: string | null;
+  coverageThrough: string;
   requestedMonths: number;
-  coveredMonths: number;
-  /** Mois couverts portant au moins une transaction. */
+  /** Mois à la fois révolus et couverts par la source. */
+  completeCoveredMonths: number;
   monthsWithActivity: number;
   status: CoverageStatus;
 }
@@ -138,52 +155,73 @@ function monthSpan(start: string, end: string): number {
   return (endYear - startYear) * 12 + (endMonth - startMonth) + 1;
 }
 
+/** Dernier jour du dernier mois calendaire RÉVOLU à la date d'observation. */
+export function lastCompleteMonthEnd(asOfDate: string): string {
+  const current = monthBounds(asOfDate);
+  // Un mois n'est révolu que si son dernier jour est atteint.
+  return current.end <= asOfDate ? current.end : monthBounds(addMonths(asOfDate, -1)).end;
+}
+
 /**
- * Détermine ce que l'historique couvre réellement sur la fenêtre demandée.
+ * Fenêtre des `months` derniers mois calendaires RÉVOLUS. Le mois en cours en est exclu :
+ * il n'est pas comparable à une hypothèse mensuelle tant qu'il n'est pas terminé.
+ */
+export function completeMonthsPeriod(asOfDate: string, months: number) {
+  const end = lastCompleteMonthEnd(asOfDate);
+  return { start: monthBounds(addMonths(end, -(months - 1))).start, end };
+}
+
+/**
+ * Couverture réelle d'une fenêtre.
  *
- * `ledgerStart` peut être fourni explicitement lorsque la source connaît sa propre date de
- * début. À défaut, il est déduit de la plus ancienne transaction : c'est la seule date à
- * partir de laquelle le produit peut affirmer quoi que ce soit.
+ * Un mois n'est compté que s'il est RÉVOLU à la date d'observation ET couvert par la
+ * source. Sans `ledgerCoverageStart` déclaré, aucun mois n'est certifiable : la couverture
+ * est INSUFFICIENT quelles que soient les transactions trouvées.
  */
 export function computeCoverage(
   transactions: Transaction[],
   periodStart: string,
   periodEnd: string,
-  ledgerStart?: string | null,
+  options: CoverageOptions = {},
 ): PeriodCoverage {
-  const earliest = transactions.reduce<string | null>(
+  const firstObservedTransactionDate = transactions.reduce<string | null>(
     (oldest, transaction) =>
       oldest === null || transaction.date < oldest ? transaction.date : oldest,
     null,
   );
-  const coverageStart = ledgerStart ?? earliest;
+  const ledgerCoverageStart = options.ledgerCoverageStart ?? null;
+  const coverageThrough = options.asOfDate ?? periodEnd;
   const requestedMonths = monthSpan(periodStart, periodEnd);
-  const coveredMonths =
-    coverageStart === null
-      ? 0
-      : Math.max(
-          0,
-          Math.min(
-            requestedMonths,
-            monthSpan(coverageStart > periodStart ? coverageStart : periodStart, periodEnd),
-          ),
-        );
+
+  let completeCoveredMonths = 0;
+  if (ledgerCoverageStart !== null) {
+    for (let index = 0; index < requestedMonths; index += 1) {
+      const month = monthBounds(addMonths(periodStart, index));
+      const elapsed = month.end <= coverageThrough;
+      const covered = ledgerCoverageStart <= month.start;
+      if (elapsed && covered) completeCoveredMonths += 1;
+    }
+  }
+
   const activeMonths = new Set(
     transactions
       .filter((transaction) => transaction.date >= periodStart && transaction.date <= periodEnd)
       .map((transaction) => transaction.date.slice(0, 7)),
   );
+
   return {
     requestedStart: periodStart,
     requestedEnd: periodEnd,
-    coverageStart,
+    firstObservedTransactionDate,
+    ledgerCoverageStart,
+    coverageThrough,
     requestedMonths,
-    coveredMonths,
+    completeCoveredMonths,
     monthsWithActivity: activeMonths.size,
     status:
-      coveredMonths === 0
+      completeCoveredMonths === 0
         ? "INSUFFICIENT"
-        : coveredMonths >= requestedMonths
+        : completeCoveredMonths >= requestedMonths
           ? "COMPLETE"
           : "PARTIAL",
   };
@@ -211,7 +249,7 @@ export function computeObservedCashFlow(
   categories: ExpenseCategory[],
   periodStart: string,
   periodEnd: string,
-  ledgerStart?: string | null,
+  options: CoverageOptions = {},
 ): ObservedCashFlow {
   const index = categoryIndex(categories);
   const breakdown = emptyBreakdown();
@@ -306,14 +344,14 @@ export function computeObservedCashFlow(
   const cashFlowAfterDebt = operatingCashFlowBeforeDebt - debtServicePaid;
   const observedSavings = savingFlows + investmentFlows;
 
-  const coverage = computeCoverage(transactions, periodStart, periodEnd, ledgerStart);
+  const coverage = computeCoverage(transactions, periodStart, periodEnd, options);
 
   const reasons: string[] = [];
   if (coverage.status !== "COMPLETE") {
     reasons.push(
-      coverage.coverageStart === null
-        ? "aucun historique disponible"
-        : `historique disponible depuis le ${coverage.coverageStart} : ${coverage.coveredMonths} mois couverts sur ${coverage.requestedMonths}`,
+      coverage.ledgerCoverageStart === null
+        ? "profondeur d’historique non déclarée par la source : aucun mois ne peut être certifié complet"
+        : `${coverage.completeCoveredMonths} mois calendaires complets et couverts sur ${coverage.requestedMonths}`,
     );
   }
   if (unclassifiedTransactionCount > 0) {
@@ -640,28 +678,30 @@ export function compareBudgets(
 
 export interface SurplusComparison {
   scenarioAssumption: number;
-  /** Surplus du mois en cours. Partiel par nature : ce n'est pas une moyenne mensuelle. */
+  /** Mois en cours à date. Partiel par nature : jamais une moyenne mensuelle. */
   monthToDate: number;
-  monthToDateQuality: DataQualityStatus;
-  /** Moyennes mensuelles observées. `null` tant que la fenêtre n'est pas couverte. */
+  /** Période réellement observée pour le MTD. */
+  monthToDateStart: string;
+  monthToDateEnd: string;
+  /** Vrai si la couverture ne commence qu'après le premier jour du mois en cours. */
+  monthToDatePartialCoverage: boolean;
+  /** Moyennes sur les derniers mois calendaires RÉVOLUS. `null` si non certifiables. */
   observedT3M: number | null;
   observedT12M: number | null;
   coverageT3M: PeriodCoverage;
   coverageT12M: PeriodCoverage;
   differenceT3M: number | null;
   differenceT12M: number | null;
-  /** Première date à partir de laquelle le ledger est connu. */
-  historyStart: string | null;
+  firstObservedTransactionDate: string | null;
+  ledgerCoverageStart: string | null;
 }
 
 /**
  * Confronte l'hypothèse de surplus du scénario au surplus réellement observé.
  *
- * `scenario.monthlySavings` est une hypothèse MENSUELLE : elle ne peut être comparée qu'à
- * une moyenne mensuelle réellement calculable. Tant qu'une fenêtre n'est pas intégralement
- * couverte par l'historique, la comparaison est NOT_COMPARABLE et vaut `null`. Un mois en
- * cours partiel est exposé séparément comme month-to-date, jamais annualisé ni présenté
- * comme une moyenne.
+ * `scenario.monthlySavings` est une hypothèse MENSUELLE : elle ne se compare qu'à une
+ * moyenne portant sur des mois calendaires RÉVOLUS et COUVERTS. Le mois en cours en est
+ * donc exclu et exposé séparément comme month-to-date, jamais annualisé.
  *
  * Aucune correction automatique : l'hypothèse reste une MODEL_ASSUMPTION.
  */
@@ -670,44 +710,35 @@ export function compareSurplusToScenario(
   categories: ExpenseCategory[],
   asOfDate: string,
   scenarioAssumption: number,
-  ledgerStart?: string | null,
+  ledgerCoverageStart?: string | null,
 ): SurplusComparison {
+  const options: CoverageOptions = { ledgerCoverageStart, asOfDate };
   const month = monthPeriod(asOfDate);
-  const monthly = computeObservedCashFlow(
-    transactions,
-    categories,
-    month.start,
-    month.end,
-    ledgerStart,
-  );
-  const t3 = trailingPeriod(asOfDate, 3);
-  const t12 = trailingPeriod(asOfDate, 12);
-  const observed3 = computeObservedCashFlow(
-    transactions,
-    categories,
-    t3.start,
-    t3.end,
-    ledgerStart,
-  );
-  const observed12 = computeObservedCashFlow(
-    transactions,
-    categories,
-    t12.start,
-    t12.end,
-    ledgerStart,
-  );
+  const mtdStart =
+    ledgerCoverageStart && ledgerCoverageStart > month.start ? ledgerCoverageStart : month.start;
+  const mtdEnd = asOfDate < month.end ? asOfDate : month.end;
+  const monthly = computeObservedCashFlow(transactions, categories, mtdStart, mtdEnd, options);
+
+  const t3 = completeMonthsPeriod(asOfDate, 3);
+  const t12 = completeMonthsPeriod(asOfDate, 12);
+  const observed3 = computeObservedCashFlow(transactions, categories, t3.start, t3.end, options);
+  const observed12 = computeObservedCashFlow(transactions, categories, t12.start, t12.end, options);
   const observedT3M = observed3.monthlyAverageOperatingSurplus;
   const observedT12M = observed12.monthlyAverageOperatingSurplus;
+
   return {
     scenarioAssumption,
     monthToDate: monthly.operatingCashFlowBeforeDebt,
-    monthToDateQuality: monthly.dataQuality.status,
+    monthToDateStart: mtdStart,
+    monthToDateEnd: mtdEnd,
+    monthToDatePartialCoverage: mtdStart > month.start,
     observedT3M,
     observedT12M,
     coverageT3M: observed3.coverage,
     coverageT12M: observed12.coverage,
     differenceT3M: observedT3M === null ? null : observedT3M - scenarioAssumption,
     differenceT12M: observedT12M === null ? null : observedT12M - scenarioAssumption,
-    historyStart: observed3.coverage.coverageStart,
+    firstObservedTransactionDate: observed3.coverage.firstObservedTransactionDate,
+    ledgerCoverageStart: ledgerCoverageStart ?? null,
   };
 }

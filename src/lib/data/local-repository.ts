@@ -1083,6 +1083,8 @@ function readDashboardState(): DashboardState {
   return {
     asOfDate: AS_OF_DATE,
     reportingCurrency: REPORTING_CURRENCY,
+    // Aucune source ne déclare encore sa profondeur d'historique : elle reste inconnue.
+    ledgerCoverageStart: null,
     accounts,
     positions,
     liabilities,

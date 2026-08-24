@@ -20,7 +20,7 @@ import {
   cashRunwayDays,
   computeObservedCashFlow,
   forecastCashFlow,
-  trailingPeriod,
+  completeMonthsPeriod,
 } from "@/lib/engine/cash-flow";
 import {
   buildOpeningBalanceSheet,
@@ -99,12 +99,15 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
   const upcomingDebt = nextDebtEvent(state.liabilities, state.asOfDate);
   // Surplus réellement constaté au ledger. La moyenne n'existe que si la fenêtre est
   // couverte : un mois sans historique n'est pas un mois à zéro euro.
-  const t3 = trailingPeriod(state.asOfDate, 3);
+  // Trois derniers mois RÉVOLUS, le mois en cours exclu : une hypothèse mensuelle ne se
+  // compare qu'à des mois calendaires terminés et certifiés couverts.
+  const t3 = completeMonthsPeriod(state.asOfDate, 3);
   const observedT3M = computeObservedCashFlow(
     state.transactions,
     state.expenseCategories,
     t3.start,
     t3.end,
+    { ledgerCoverageStart: state.ledgerCoverageStart, asOfDate: state.asOfDate },
   );
   const runway = cashRunwayDays(
     forecastCashFlow({
@@ -413,16 +416,16 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
             {observedT3M.monthlyAverageOperatingSurplus === null ? (
               <>
                 Surplus mensuel constaté : historique insuffisant (
-                {observedT3M.coverage.coveredMonths} mois couverts sur{" "}
+                {observedT3M.coverage.completeCoveredMonths} mois complets couverts sur{" "}
                 {observedT3M.coverage.requestedMonths}
-                {observedT3M.coverage.coverageStart
-                  ? `, depuis le ${formatDate(observedT3M.coverage.coverageStart)}`
-                  : ""}
+                {observedT3M.coverage.ledgerCoverageStart === null
+                  ? ", profondeur d’historique non déclarée"
+                  : `, couverture depuis le ${formatDate(observedT3M.coverage.ledgerCoverageStart)}`}
                 )
               </>
             ) : (
               <>
-                Surplus constaté au ledger sur 3 mois :{" "}
+                Surplus constaté sur les 3 derniers mois révolus :{" "}
                 <Currency value={observedT3M.monthlyAverageOperatingSurplus} sign />
                 /mois
               </>

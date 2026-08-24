@@ -605,6 +605,7 @@ describe("bilan d’ouverture", () => {
     return {
       asOfDate: "2026-08-19",
       reportingCurrency: "EUR",
+      ledgerCoverageStart: null,
       accounts,
       positions,
       liabilities: [

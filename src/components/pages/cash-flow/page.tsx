@@ -32,8 +32,8 @@ import {
   effectiveCashFlowKind,
   categoryIndex,
   forecastCashFlow,
+  completeMonthsPeriod,
   monthPeriod,
-  trailingPeriod,
 } from "@/lib/engine/cash-flow";
 import { CASH_FLOW_KINDS, type CashFlowKind } from "@/lib/types";
 
@@ -91,10 +91,22 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       computeObservedCashFlow(state.transactions, state.expenseCategories, month.start, month.end),
     [state.transactions, state.expenseCategories, month.start, month.end],
   );
-  const t3 = trailingPeriod(state.asOfDate, 3);
+  // Moyenne sur les trois derniers mois RÉVOLUS : le mois en cours en est exclu.
+  const t3 = completeMonthsPeriod(state.asOfDate, 3);
   const observedT3M = useMemo(
-    () => computeObservedCashFlow(state.transactions, state.expenseCategories, t3.start, t3.end),
-    [state.transactions, state.expenseCategories, t3.start, t3.end],
+    () =>
+      computeObservedCashFlow(state.transactions, state.expenseCategories, t3.start, t3.end, {
+        ledgerCoverageStart: state.ledgerCoverageStart,
+        asOfDate: state.asOfDate,
+      }),
+    [
+      state.transactions,
+      state.expenseCategories,
+      t3.start,
+      t3.end,
+      state.ledgerCoverageStart,
+      state.asOfDate,
+    ],
   );
   const central =
     state.scenarios.find((scenario) => scenario.name === "Central") ?? state.scenarios[0];
@@ -104,6 +116,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         state.expenseCategories,
         state.asOfDate,
         central.monthlySavings,
+        state.ledgerCoverageStart,
       )
     : null;
   const forecast = useMemo(
@@ -481,10 +494,18 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               </dd>
             </div>
             <div>
-              <dt>Mois en cours à date</dt>
+              <dt>
+                Mois en cours à date ({formatDate(comparison.monthToDateStart)} →{" "}
+                {formatDate(comparison.monthToDateEnd)})
+              </dt>
               <dd>
-                <Currency value={comparison.monthToDate} sign /> ·{" "}
-                {QUALITY_LABELS[comparison.monthToDateQuality]}
+                <Currency value={comparison.monthToDate} sign />
+                {comparison.monthToDatePartialCoverage ? (
+                  <span className="warning-text">
+                    {" "}
+                    · données partielles depuis le {formatDate(comparison.monthToDateStart)}
+                  </span>
+                ) : null}
               </dd>
             </div>
             <div>
@@ -492,8 +513,8 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <dd>
                 {comparison.observedT3M === null ? (
                   <span className="warning-text">
-                    Historique insuffisant · {comparison.coverageT3M.coveredMonths} mois couverts
-                    sur {comparison.coverageT3M.requestedMonths}
+                    Historique insuffisant · {comparison.coverageT3M.completeCoveredMonths} mois
+                    couverts sur {comparison.coverageT3M.requestedMonths}
                   </span>
                 ) : (
                   <>
@@ -508,8 +529,8 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <dd>
                 {comparison.observedT12M === null ? (
                   <span className="warning-text">
-                    Historique insuffisant · {comparison.coverageT12M.coveredMonths} mois couverts
-                    sur {comparison.coverageT12M.requestedMonths}
+                    Historique insuffisant · {comparison.coverageT12M.completeCoveredMonths} mois
+                    couverts sur {comparison.coverageT12M.requestedMonths}
                   </span>
                 ) : (
                   <>
@@ -520,18 +541,31 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               </dd>
             </div>
             <div>
-              <dt>Historique disponible depuis</dt>
+              <dt>Profondeur d’historique déclarée par la source</dt>
               <dd>
-                {comparison.historyStart ? formatDate(comparison.historyStart) : "Aucun historique"}
+                {comparison.ledgerCoverageStart ? (
+                  formatDate(comparison.ledgerCoverageStart)
+                ) : (
+                  <span className="warning-text">Non déclarée</span>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Plus ancienne transaction enregistrée</dt>
+              <dd>
+                {comparison.firstObservedTransactionDate
+                  ? `${formatDate(comparison.firstObservedTransactionDate)} · descriptif, ne prouve pas la couverture`
+                  : "Aucune"}
               </dd>
             </div>
           </dl>
           <p className="muted-copy">
-            Une hypothèse mensuelle ne se compare qu’à une moyenne mensuelle réellement calculable :
-            tant qu’une fenêtre n’est pas couverte par l’historique, la comparaison reste impossible
-            plutôt que d’attribuer zéro euro aux mois inconnus. Le mois en cours est partiel par
-            nature et n’est jamais présenté comme une moyenne. L’hypothèse du scénario reste une
-            MODEL_ASSUMPTION, jamais remplacée automatiquement.
+            Une hypothèse mensuelle ne se compare qu’à une moyenne portant sur des mois calendaires
+            révolus et réellement couverts. Le mois en cours en est exclu : il est partiel par
+            nature. Trouver une transaction ancienne ne prouve pas que le mois qui la contient soit
+            complet, donc tant que la source n’a pas déclaré sa profondeur d’historique, aucune
+            moyenne n’est certifiable. L’hypothèse du scénario reste une MODEL_ASSUMPTION, jamais
+            remplacée automatiquement.
           </p>
         </section>
       ) : null}
@@ -1048,14 +1082,14 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         ) : (
           <Percent value={observed.observedSavingsRate} />
         )}{" "}
-        · moyenne mensuelle T3M{" "}
+        · moyenne mensuelle sur les 3 derniers mois révolus{" "}
         {observedT3M.monthlyAverageOperatingSurplus === null ? (
           <span className="warning-text">non calculable, historique insuffisant</span>
         ) : (
           <Currency value={observedT3M.monthlyAverageOperatingSurplus} />
         )}
-        . Sans revenu encaissé observé, aucun taux n’est substitué ; sans historique couvrant la
-        fenêtre, aucune moyenne n’est fabriquée.
+        . Sans revenu encaissé observé, aucun taux n’est substitué ; sans mois révolu certifié
+        couvert, aucune moyenne n’est fabriquée.
       </Callout>
     </div>
   );

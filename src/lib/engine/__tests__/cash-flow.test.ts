@@ -8,6 +8,8 @@ import {
   categoryIndex,
   expandRecurringRule,
   forecastCashFlow,
+  completeMonthsPeriod,
+  lastCompleteMonthEnd,
   monthPeriod,
   trailingPeriod,
 } from "@/lib/engine/cash-flow";
@@ -88,8 +90,15 @@ function tx(
   };
 }
 
+/**
+ * Helper des tests d'agrégation : la couverture du mois est déclarée, pour que ces cas
+ * isolent la classification des flux et non la profondeur d'historique, testée à part.
+ */
 const observe = (transactions: Transaction[]) =>
-  computeObservedCashFlow(transactions, categories, MONTH.start, MONTH.end);
+  computeObservedCashFlow(transactions, categories, MONTH.start, MONTH.end, {
+    ledgerCoverageStart: MONTH.start,
+    asOfDate: MONTH.end,
+  });
 
 describe("CASE A — revenu et dépense", () => {
   it("sépare le revenu de la dépense de consommation", () => {
@@ -408,83 +417,228 @@ describe("CASE V — périodes glissantes", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * Couverture de l'historique : l'absence de donnée n'est pas un zéro
+ * Couverture : observation ≠ certitude, mois en cours ≠ mois complet
  * ------------------------------------------------------------------ */
 
-describe("CASE X — un seul mois observé, fenêtre T3M", () => {
-  it("ne divise pas le total par trois", () => {
-    const transactions = [tx("c_salary", 3000), tx("c_rent", -1100), tx("c_groceries", -720)];
-    const t3 = trailingPeriod(AS_OF, 3);
-    const result = computeObservedCashFlow(transactions, categories, t3.start, t3.end);
-    expect(result.operatingCashFlowBeforeDebt).toBeCloseTo(1180, 6);
-    // 1 180 / 3 = 393,33 serait faux : deux mois sont inconnus, pas nuls.
-    expect(result.monthlyAverageOperatingSurplus).toBeNull();
-    expect(result.coverage.status).toBe("PARTIAL");
-    expect(result.coverage.coveredMonths).toBe(1);
-    expect(result.coverage.requestedMonths).toBe(3);
+describe("mois calendaires révolus", () => {
+  it("exclut le mois en cours et l’inclut une fois terminé", () => {
+    expect(lastCompleteMonthEnd("2026-08-24")).toBe("2026-07-31");
+    expect(lastCompleteMonthEnd("2026-08-31")).toBe("2026-08-31");
+    // Au 24 août, les trois derniers mois révolus sont mai, juin et juillet.
+    expect(completeMonthsPeriod("2026-08-24", 3)).toEqual({
+      start: "2026-05-01",
+      end: "2026-07-31",
+    });
+    expect(completeMonthsPeriod("2026-08-31", 3)).toEqual({
+      start: "2026-06-01",
+      end: "2026-08-31",
+    });
   });
 });
 
-describe("CASE Y — un seul mois observé, fenêtre T12M", () => {
-  it("ne divise pas le total par douze", () => {
-    const transactions = [tx("c_salary", 3000), tx("c_rent", -1100), tx("c_groceries", -720)];
-    const t12 = trailingPeriod(AS_OF, 12);
-    const result = computeObservedCashFlow(transactions, categories, t12.start, t12.end);
+describe("CASE AE — première transaction sans couverture déclarée", () => {
+  it("reste descriptive et ne certifie aucun mois", () => {
+    const transactions = [tx("c_salary", 1000, "2026-06-05")];
+    const t3 = completeMonthsPeriod("2026-08-24", 3);
+    const result = computeObservedCashFlow(transactions, categories, t3.start, t3.end, {
+      asOfDate: "2026-08-24",
+    });
+    expect(result.coverage.firstObservedTransactionDate).toBe("2026-06-05");
+    // Trouver une ligne le 5 juin ne prouve pas que le 1er au 4 juin soient vides.
+    expect(result.coverage.ledgerCoverageStart).toBeNull();
+    expect(result.coverage.completeCoveredMonths).toBe(0);
+    expect(result.coverage.status).toBe("INSUFFICIENT");
     expect(result.monthlyAverageOperatingSurplus).toBeNull();
-    expect(result.coverage.coveredMonths).toBe(1);
-    expect(result.coverage.requestedMonths).toBe(12);
-    expect(result.coverage.status).toBe("PARTIAL");
   });
 });
 
-describe("CASE Z — trois mois réellement couverts", () => {
-  it("rend la moyenne mensuelle exacte", () => {
+describe("CASE AF — couverture déclarée au 01/05, observation au 24/08", () => {
+  it("certifie mai, juin et juillet et exclut août", () => {
     const transactions = [
-      tx("c_salary", 1000, "2026-06-10"),
-      tx("c_salary", 1200, "2026-07-10"),
-      tx("c_salary", 800, "2026-08-10"),
+      tx("c_salary", 1000, "2026-05-10"),
+      tx("c_salary", 1200, "2026-06-10"),
+      tx("c_salary", 800, "2026-07-10"),
+      tx("c_salary", 5000, "2026-08-10"),
     ];
-    const t3 = trailingPeriod(AS_OF, 3);
-    const result = computeObservedCashFlow(transactions, categories, t3.start, t3.end);
+    const t3 = completeMonthsPeriod("2026-08-24", 3);
+    expect(t3).toEqual({ start: "2026-05-01", end: "2026-07-31" });
+    const result = computeObservedCashFlow(transactions, categories, t3.start, t3.end, {
+      ledgerCoverageStart: "2026-05-01",
+      asOfDate: "2026-08-24",
+    });
+    expect(result.coverage.completeCoveredMonths).toBe(3);
     expect(result.coverage.status).toBe("COMPLETE");
-    expect(result.coverage.coveredMonths).toBe(3);
+    // Le salaire d'août n'entre pas : le mois n'est pas révolu.
     expect(result.monthlyAverageOperatingSurplus).toBeCloseTo(1000, 6);
   });
 });
 
-describe("CASE AA — mois couvert sans aucune transaction", () => {
-  it("autorise une valeur nulle observée", () => {
-    // L'historique démarre en juin ; juillet est couvert et réellement vide.
-    const transactions = [tx("c_salary", 900, "2026-06-10"), tx("c_salary", 900, "2026-08-10")];
-    const t3 = trailingPeriod(AS_OF, 3);
-    const result = computeObservedCashFlow(transactions, categories, t3.start, t3.end);
-    expect(result.coverage.status).toBe("COMPLETE");
-    expect(result.coverage.monthsWithActivity).toBe(2);
-    expect(result.monthlyAverageOperatingSurplus).toBeCloseTo(600, 6);
-
-    const july = computeObservedCashFlow(transactions, categories, "2026-07-01", "2026-07-31");
-    expect(july.coverage.status).toBe("COMPLETE");
-    expect(july.operatingCashFlowBeforeDebt).toBe(0);
-    expect(july.monthlyAverageOperatingSurplus).toBe(0);
+describe("CASE AG — couverture déclarée au 05/06", () => {
+  it("laisse juin partiel et rend T3M non calculable", () => {
+    const transactions = [tx("c_salary", 1200, "2026-06-10"), tx("c_salary", 800, "2026-07-10")];
+    const t3 = completeMonthsPeriod("2026-08-24", 3);
+    const result = computeObservedCashFlow(transactions, categories, t3.start, t3.end, {
+      ledgerCoverageStart: "2026-06-05",
+      asOfDate: "2026-08-24",
+    });
+    // Mai non couvert, juin couvert seulement à partir du 5 : seul juillet est certifiable.
+    expect(result.coverage.completeCoveredMonths).toBe(1);
+    expect(result.coverage.status).toBe("PARTIAL");
+    expect(result.monthlyAverageOperatingSurplus).toBeNull();
   });
 });
 
-describe("CASE AB — mois antérieur au début de l’historique", () => {
-  it("est inconnu, jamais zéro", () => {
-    const transactions = [tx("c_salary", 900, "2026-08-10")];
-    const may = computeObservedCashFlow(transactions, categories, "2026-05-01", "2026-05-31");
-    expect(may.coverage.status).toBe("INSUFFICIENT");
-    expect(may.coverage.coveredMonths).toBe(0);
-    expect(may.monthlyAverageOperatingSurplus).toBeNull();
-    expect(may.dataQuality.status).toBe("INCOMPLETE");
+describe("CASE AH — la fin du mois rend le mois courant complet", () => {
+  it("fait basculer août dans les mois révolus au 31/08", () => {
+    const transactions = [
+      tx("c_salary", 900, "2026-06-10"),
+      tx("c_salary", 900, "2026-07-10"),
+      tx("c_salary", 900, "2026-08-10"),
+    ];
+    const options = { ledgerCoverageStart: "2026-06-01" };
+    const before = completeMonthsPeriod("2026-08-24", 3);
+    const atEnd = completeMonthsPeriod("2026-08-31", 3);
+    expect(before.end).toBe("2026-07-31");
+    expect(atEnd.end).toBe("2026-08-31");
+    const partial = computeObservedCashFlow(transactions, categories, before.start, before.end, {
+      ...options,
+      asOfDate: "2026-08-24",
+    });
+    // Mai n'est pas couvert : la fenêtre mai-juillet reste incomplète.
+    expect(partial.monthlyAverageOperatingSurplus).toBeNull();
+    const complete = computeObservedCashFlow(transactions, categories, atEnd.start, atEnd.end, {
+      ...options,
+      asOfDate: "2026-08-31",
+    });
+    expect(complete.coverage.completeCoveredMonths).toBe(3);
+    expect(complete.monthlyAverageOperatingSurplus).toBeCloseTo(900, 6);
+  });
+});
+
+describe("CASE AI — mois complet couvert sans aucune transaction", () => {
+  it("compte zéro comme une vraie observation", () => {
+    // Juillet est couvert et réellement vide : ce n'est pas une donnée manquante.
+    const transactions = [tx("c_salary", 1500, "2026-05-10"), tx("c_salary", 1500, "2026-06-10")];
+    const t3 = completeMonthsPeriod("2026-08-24", 3);
+    const result = computeObservedCashFlow(transactions, categories, t3.start, t3.end, {
+      ledgerCoverageStart: "2026-05-01",
+      asOfDate: "2026-08-24",
+    });
+    expect(result.coverage.status).toBe("COMPLETE");
+    expect(result.coverage.monthsWithActivity).toBe(2);
+    expect(result.monthlyAverageOperatingSurplus).toBeCloseTo(1000, 6);
+
+    const july = computeObservedCashFlow(transactions, categories, "2026-07-01", "2026-07-31", {
+      ledgerCoverageStart: "2026-05-01",
+      asOfDate: "2026-08-24",
+    });
+    expect(july.coverage.status).toBe("COMPLETE");
+    expect(july.monthlyAverageOperatingSurplus).toBe(0);
   });
 
-  it("distingue un mois vide couvert d’un mois hors couverture", () => {
-    const transactions = [tx("c_salary", 900, "2026-06-10")];
-    const covered = computeObservedCashFlow(transactions, categories, "2026-07-01", "2026-07-31");
-    const uncovered = computeObservedCashFlow(transactions, categories, "2026-05-01", "2026-05-31");
-    expect(covered.monthlyAverageOperatingSurplus).toBe(0);
+  it("distingue ce zéro d’un mois hors couverture", () => {
+    const transactions = [tx("c_salary", 1500, "2026-06-10")];
+    const uncovered = computeObservedCashFlow(
+      transactions,
+      categories,
+      "2026-04-01",
+      "2026-04-30",
+      {
+        ledgerCoverageStart: "2026-06-01",
+        asOfDate: "2026-08-24",
+      },
+    );
+    expect(uncovered.coverage.status).toBe("INSUFFICIENT");
     expect(uncovered.monthlyAverageOperatingSurplus).toBeNull();
+  });
+});
+
+describe("CASE AJ — month-to-date", () => {
+  it("n’est jamais compté comme un mois complet", () => {
+    const transactions = [
+      tx("c_salary", 3000, "2026-08-05"),
+      tx("c_rent", -1100, "2026-08-05"),
+      tx("c_groceries", -720, "2026-08-08"),
+    ];
+    const comparison = compareSurplusToScenario(
+      transactions,
+      categories,
+      "2026-08-24",
+      250,
+      "2026-08-01",
+    );
+    expect(comparison.monthToDate).toBeCloseTo(1180, 6);
+    expect(comparison.monthToDateStart).toBe("2026-08-01");
+    expect(comparison.monthToDateEnd).toBe("2026-08-24");
+    expect(comparison.monthToDatePartialCoverage).toBe(false);
+    // Août n'est pas révolu : il n'entre dans aucune moyenne.
+    expect(comparison.observedT3M).toBeNull();
+    expect(comparison.observedT12M).toBeNull();
+  });
+
+  it("signale une couverture commençant après le début du mois", () => {
+    const comparison = compareSurplusToScenario(
+      [tx("c_salary", 1000, "2026-08-10")],
+      categories,
+      "2026-08-24",
+      250,
+      "2026-08-05",
+    );
+    expect(comparison.monthToDateStart).toBe("2026-08-05");
+    expect(comparison.monthToDatePartialCoverage).toBe(true);
+  });
+});
+
+describe("comparaison au scénario", () => {
+  it("refuse de comparer sans profondeur d’historique déclarée", () => {
+    const transactions = [
+      tx("c_salary", 1000, "2026-05-10"),
+      tx("c_salary", 1200, "2026-06-10"),
+      tx("c_salary", 800, "2026-07-10"),
+    ];
+    const comparison = compareSurplusToScenario(transactions, categories, "2026-08-24", 250);
+    expect(comparison.firstObservedTransactionDate).toBe("2026-05-10");
+    expect(comparison.ledgerCoverageStart).toBeNull();
+    expect(comparison.observedT3M).toBeNull();
+    expect(comparison.differenceT3M).toBeNull();
+  });
+
+  it("compare dès que la source a déclaré couvrir les mois révolus", () => {
+    const transactions = [
+      tx("c_salary", 1000, "2026-05-10"),
+      tx("c_salary", 1200, "2026-06-10"),
+      tx("c_salary", 800, "2026-07-10"),
+    ];
+    const comparison = compareSurplusToScenario(
+      transactions,
+      categories,
+      "2026-08-24",
+      250,
+      "2026-05-01",
+    );
+    expect(comparison.observedT3M).toBeCloseTo(1000, 6);
+    expect(comparison.differenceT3M).toBeCloseTo(750, 6);
+    // Douze mois révolus exigent une couverture depuis août 2025.
+    expect(comparison.observedT12M).toBeNull();
+  });
+
+  it("calcule T12M quand les douze mois révolus sont couverts", () => {
+    const transactions = Array.from({ length: 12 }, (_, index) =>
+      tx(
+        "c_salary",
+        600,
+        `2025-${String(index + 8).padStart(2, "0")}-10`.replace("2025-13", "2026-01"),
+      ),
+    );
+    const comparison = compareSurplusToScenario(
+      transactions,
+      categories,
+      "2026-08-24",
+      250,
+      "2025-01-01",
+    );
+    expect(comparison.coverageT12M.completeCoveredMonths).toBe(12);
+    expect(comparison.observedT12M).not.toBeNull();
   });
 });
 
@@ -515,41 +669,14 @@ describe("CASE AC — arbitrage à l’intérieur d’une enveloppe", () => {
   });
 });
 
-describe("comparaison au scénario avec historique insuffisant", () => {
-  it("refuse de comparer plutôt que d’inventer une moyenne", () => {
-    const transactions = [tx("c_salary", 3000), tx("c_rent", -1100), tx("c_groceries", -720)];
-    const comparison = compareSurplusToScenario(transactions, categories, AS_OF, 250);
-    expect(comparison.monthToDate).toBeCloseTo(1180, 6);
-    expect(comparison.observedT3M).toBeNull();
-    expect(comparison.observedT12M).toBeNull();
-    expect(comparison.differenceT3M).toBeNull();
-    expect(comparison.differenceT12M).toBeNull();
-    expect(comparison.historyStart).toBe("2026-08-05");
-  });
-
-  it("compare dès que la fenêtre est couverte", () => {
-    const transactions = [
-      tx("c_salary", 1000, "2026-06-10"),
-      tx("c_salary", 1200, "2026-07-10"),
-      tx("c_salary", 800, "2026-08-10"),
-    ];
-    const comparison = compareSurplusToScenario(transactions, categories, AS_OF, 250);
-    expect(comparison.observedT3M).toBeCloseTo(1000, 6);
-    expect(comparison.differenceT3M).toBeCloseTo(750, 6);
-    expect(comparison.observedT12M).toBeNull();
-  });
-});
-
 describe("CASE AD — invariance d’une clôture mensuelle", () => {
   it("ne recalcule jamais une clôture figée après reclassification", () => {
     const transactions = [tx("c_salary", 3000), tx("c_resto", -80)];
-    // v1 est calculée puis figée : c'est une photographie, pas une vue.
     const v1 = computeObservedCashFlow(transactions, categories, MONTH.start, MONTH.end);
     const frozen = {
       operatingSurplusBeforeDebt: v1.operatingCashFlowBeforeDebt,
       consumerExpenses: v1.consumerExpenses,
     };
-    // Le restaurant est ensuite requalifié en transfert interne.
     const reclassified = transactions.map((transaction) =>
       transaction.categoryId === "c_resto"
         ? { ...transaction, kindOverride: "INTERNAL_TRANSFER" as CashFlowKind }
@@ -557,9 +684,7 @@ describe("CASE AD — invariance d’une clôture mensuelle", () => {
     );
     const v2 = computeObservedCashFlow(reclassified, categories, MONTH.start, MONTH.end);
     expect(frozen.operatingSurplusBeforeDebt).toBeCloseTo(2920, 6);
-    expect(frozen.consumerExpenses).toBeCloseTo(80, 6);
-    // v2 diffère, v1 est intacte.
     expect(v2.operatingCashFlowBeforeDebt).toBeCloseTo(3000, 6);
-    expect(frozen.operatingSurplusBeforeDebt).toBeCloseTo(2920, 6);
+    expect(frozen.consumerExpenses).toBeCloseTo(80, 6);
   });
 });

@@ -278,6 +278,13 @@ export interface DashboardMetrics {
 export interface DashboardState {
   asOfDate: string;
   reportingCurrency: string;
+  /**
+   * Date à partir de laquelle la source certifie fournir un historique exhaustif de flux.
+   * `null` tant qu'aucune source ne l'a déclarée : ni un import, ni une synchronisation
+   * bancaire, ni une saisie utilisateur. Le produit ne la déduit jamais de la plus ancienne
+   * transaction trouvée, qui n'est qu'une observation.
+   */
+  ledgerCoverageStart: string | null;
   accounts: FinancialAccount[];
   positions: Position[];
   liabilities: Liability[];
