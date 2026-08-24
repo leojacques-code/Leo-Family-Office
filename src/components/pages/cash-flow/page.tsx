@@ -505,6 +505,11 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                     {" "}
                     · données partielles depuis le {formatDate(comparison.monthToDateStart)}
                   </span>
+                ) : comparison.ledgerCoverageStart === null ? (
+                  <span className="warning-text">
+                    {" "}
+                    · flux observés sur la période, exhaustivité non certifiée
+                  </span>
                 ) : null}
               </dd>
             </div>
