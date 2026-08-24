@@ -275,16 +275,32 @@ export interface DashboardMetrics {
   dataCompleteness: number;
 }
 
+/**
+ * Origine d'une déclaration de profondeur d'historique. Volontairement grossier : trois
+ * provenances observables, aucun niveau de confiance inventé par-dessus.
+ */
+export const LEDGER_COVERAGE_SOURCES = ["MANUAL", "IMPORT", "API"] as const;
+export type LedgerCoverageSource = (typeof LEDGER_COVERAGE_SOURCES)[number];
+
 export interface DashboardState {
   asOfDate: string;
   reportingCurrency: string;
   /**
-   * Date à partir de laquelle la source certifie fournir un historique exhaustif de flux.
-   * `null` tant qu'aucune source ne l'a déclarée : ni un import, ni une synchronisation
-   * bancaire, ni une saisie utilisateur. Le produit ne la déduit jamais de la plus ancienne
-   * transaction trouvée, qui n'est qu'une observation.
+   * Date à partir de laquelle l'ensemble du ledger actuellement considéré par LFO est
+   * déclaré exhaustif.
+   *
+   * C'est une propriété GLOBALE du ledger, pas la couverture d'un établissement donné :
+   * LFO n'a pas encore de modèle multi-source où chaque banque ou connecteur porterait sa
+   * propre profondeur. Le jour où il l'aura, cette valeur globale pourra en être dérivée
+   * de façon conservatrice ; elle n'est pas construite aujourd'hui.
+   *
+   * `null` est la valeur normale et signifie « non déclarée », jamais « depuis toujours ».
+   * Le produit ne la déduit jamais de la plus ancienne transaction trouvée, qui n'est
+   * qu'une observation.
    */
   ledgerCoverageStart: string | null;
+  /** Origine de la déclaration ci-dessus. Ce n'est pas un niveau de confiance. */
+  ledgerCoverageSource: LedgerCoverageSource;
   accounts: FinancialAccount[];
   positions: Position[];
   liabilities: Liability[];

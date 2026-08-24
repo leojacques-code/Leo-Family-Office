@@ -5,7 +5,13 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   display_name TEXT NOT NULL,
   reporting_currency TEXT NOT NULL DEFAULT 'EUR',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  -- Profondeur d'historique déclarée du ledger LFO, globale et non par établissement.
+  -- NULL signifie « non déclarée », jamais « depuis toujours ». Jamais déduite d'une
+  -- transaction observée. Miroir exact de profiles.ledger_coverage_start côté Postgres.
+  ledger_coverage_start TEXT,
+  ledger_coverage_source TEXT NOT NULL DEFAULT 'MANUAL'
+    CHECK (ledger_coverage_source IN ('MANUAL', 'IMPORT', 'API'))
 );
 
 CREATE TABLE IF NOT EXISTS institutions (

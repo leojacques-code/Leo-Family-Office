@@ -11,6 +11,7 @@ import {
   REPORTING_CURRENCY,
   deriveMetrics,
   ledgerWindowStart,
+  readLedgerCoverage,
   shouldDeriveBalance,
 } from "@/lib/data/shared";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
@@ -54,8 +55,30 @@ function db() {
   mkdirSync(dataDirectory, { recursive: true });
   database = new DatabaseSync(path.join(dataDirectory, "family-office.db"));
   database.exec(readFileSync(path.join(process.cwd(), "src", "lib", "data", "schema.sql"), "utf8"));
+  ensureLedgerCoverageColumns(database);
   seed(database);
   return database;
+}
+
+/**
+ * `CREATE TABLE IF NOT EXISTS` laisse intactes les bases locales déjà créées : sans cela,
+ * une base de développement existante resterait sans colonne de couverture et la
+ * déclaration disparaîtrait au redémarrage. Ajout idempotent, vérifié colonne par colonne.
+ */
+function ensureLedgerCoverageColumns(databaseInstance: DatabaseSync) {
+  const existing = new Set(
+    (databaseInstance.prepare("PRAGMA table_info(users)").all() as SqlRow[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  if (!existing.has("ledger_coverage_start")) {
+    databaseInstance.exec("ALTER TABLE users ADD COLUMN ledger_coverage_start TEXT");
+  }
+  if (!existing.has("ledger_coverage_source")) {
+    databaseInstance.exec(
+      "ALTER TABLE users ADD COLUMN ledger_coverage_source TEXT NOT NULL DEFAULT 'MANUAL'",
+    );
+  }
 }
 
 function provenance(row: SqlRow) {
@@ -78,7 +101,9 @@ function seed(databaseInstance: DatabaseSync) {
   databaseInstance.exec("BEGIN IMMEDIATE");
   try {
     databaseInstance
-      .prepare("INSERT INTO users VALUES (?, ?, ?, ?)")
+      .prepare(
+        "INSERT INTO users (id, display_name, reporting_currency, created_at, ledger_coverage_start, ledger_coverage_source) VALUES (?, ?, ?, ?, NULL, 'MANUAL')",
+      )
       .run(USER_ID, "Léo", "EUR", now);
     const institutions = [
       ["ins_boursobank", "Boursobank", "FR"],
@@ -1080,11 +1105,16 @@ function readDashboardState(): DashboardState {
     unit: String(row.unit),
     provenance: provenance(row),
   }));
+  const coverage = readLedgerCoverage(
+    db()
+      .prepare("SELECT ledger_coverage_start, ledger_coverage_source FROM users WHERE id=?")
+      .get(USER_ID) as Record<string, unknown> | undefined,
+  );
   return {
     asOfDate: AS_OF_DATE,
     reportingCurrency: REPORTING_CURRENCY,
-    // Aucune source ne déclare encore sa profondeur d'historique : elle reste inconnue.
-    ledgerCoverageStart: null,
+    ledgerCoverageStart: coverage.start,
+    ledgerCoverageSource: coverage.source,
     accounts,
     positions,
     liabilities,
@@ -1474,6 +1504,13 @@ function applyMutation(mutation: Mutation) {
           );
         break;
       }
+      case "set_ledger_coverage":
+        // La déclaration est écrasée telle quelle, `null` compris : remettre la profondeur
+        // à « non déclarée » est une opération légitime, pas un effacement accidentel.
+        databaseInstance
+          .prepare("UPDATE users SET ledger_coverage_start=?, ledger_coverage_source=? WHERE id=?")
+          .run(mutation.startDate, mutation.source, USER_ID);
+        break;
       case "add_goal":
         databaseInstance
           .prepare("INSERT INTO goals VALUES (?, ?, ?, ?, ?, 99, 'ACTIVE')")

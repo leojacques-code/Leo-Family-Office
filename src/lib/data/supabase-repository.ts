@@ -10,6 +10,7 @@ import {
   SCENARIO_NAME_ORDER,
   deriveMetrics,
   ledgerWindowStart,
+  readLedgerCoverage,
   shouldDeriveBalance,
 } from "@/lib/data/shared";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
@@ -180,6 +181,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       closeRows,
       documentRows,
       assumptionRows,
+      profileRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -201,6 +203,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("monthly_closes"),
       mine("documents"),
       mine("economic_assumptions"),
+      db.from("profiles").select("*").eq("user_id", user),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -440,11 +443,12 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
 
+    const coverage = readLedgerCoverage(profileRows[0]);
     return {
       asOfDate: AS_OF_DATE,
       reportingCurrency: REPORTING_CURRENCY,
-      // Aucune source ne déclare encore sa profondeur d'historique : elle reste inconnue.
-      ledgerCoverageStart: null,
+      ledgerCoverageStart: coverage.start,
+      ledgerCoverageSource: coverage.source,
       accounts,
       positions,
       liabilities,
@@ -912,6 +916,21 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             .eq("user_id", user)
             .select("id"),
           "suppression de règle récurrente",
+        );
+        break;
+      }
+      case "set_ledger_coverage": {
+        // `null` remet la profondeur à « non déclarée » : c'est une valeur, pas un oubli.
+        unwrap(
+          await db
+            .from("profiles")
+            .update({
+              ledger_coverage_start: mutation.startDate,
+              ledger_coverage_source: mutation.source,
+            })
+            .eq("user_id", user)
+            .select("user_id"),
+          "déclaration de profondeur d'historique",
         );
         break;
       }

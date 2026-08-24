@@ -1,7 +1,19 @@
 import { z } from "zod";
 
+import { AS_OF_DATE } from "@/lib/data/shared";
+
 const finite = z.number().finite();
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+/**
+ * `date` ne vérifie que la forme. Un 2026-02-31 la satisfait sans exister : la profondeur
+ * d'historique est comparée à des bornes de mois, une date fantôme y produirait des
+ * dénominateurs faux plutôt qu'une erreur visible.
+ */
+function isRealCalendarDate(value: string): boolean {
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 const cashFlowKind = z.enum([
   "INCOME",
   "EXPENSE",
@@ -129,5 +141,19 @@ export const mutationSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("close_cash_flow_month"),
     month: z.string().regex(/^\d{4}-\d{2}$/, "Mois attendu au format AAAA-MM"),
+  }),
+  z.object({
+    action: z.literal("set_ledger_coverage"),
+    // `null` est une valeur légitime : elle remet la profondeur à « non déclarée ».
+    // Une date postérieure à la date d'observation est refusée : on ne peut pas certifier
+    // exhaustif un historique qui n'a pas encore eu lieu.
+    startDate: date
+      .refine(isRealCalendarDate, "Date inexistante au calendrier")
+      .refine(
+        (value) => value <= AS_OF_DATE,
+        "La couverture ne peut pas être postérieure à la date d'observation",
+      )
+      .nullable(),
+    source: z.enum(["MANUAL", "IMPORT", "API"]),
   }),
 ]);

@@ -6,6 +6,7 @@ import type {
   Essentiality,
   ExpenseBehavior,
   FinancialAccount,
+  LedgerCoverageSource,
   RecurrenceFrequency,
   Scenario,
 } from "@/lib/types";
@@ -97,7 +98,16 @@ export type Mutation =
       patch: Partial<{ amount: number; active: boolean; endDate: string | null }>;
     }
   | { action: "delete_recurring_rule"; ruleId: string }
-  | { action: "close_cash_flow_month"; month: string };
+  | { action: "close_cash_flow_month"; month: string }
+  | {
+      /**
+       * Déclare, corrige ou efface la profondeur d'historique du ledger LFO.
+       * `startDate: null` remet la déclaration à l'état « non déclarée ».
+       */
+      action: "set_ledger_coverage";
+      startDate: string | null;
+      source: LedgerCoverageSource;
+    };
 
 export interface DocumentUpload {
   name: string;

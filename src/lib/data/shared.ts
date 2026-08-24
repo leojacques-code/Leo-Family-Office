@@ -1,8 +1,10 @@
 import { calculateNetWorth } from "@/lib/engine/financial";
 import { addMonths, monthBounds, monthlyDebtServiceAt } from "@/lib/engine/debt";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
+import { LEDGER_COVERAGE_SOURCES } from "@/lib/types";
 import type {
   DashboardMetrics,
+  LedgerCoverageSource,
   ExpenseCategory,
   FinancialAccount,
   IncomeSource,
@@ -21,6 +23,30 @@ export const REPORTING_CURRENCY = "EUR";
  * arbitraire fausserait silencieusement le graphique et les taux dès que le ledger la
  * dépasse.
  */
+/**
+ * Normalisation unique de la profondeur d'historique, partagée par les deux adaptateurs.
+ *
+ * SQLite et Postgres rendent la colonne différemment (`undefined` pour une colonne absente
+ * d'une base locale ancienne, `null` pour une valeur non déclarée). Les faire converger ici
+ * plutôt que dans chaque repository est ce qui garantit que les deux exposent le même
+ * contrat : une divergence de traitement du `null` suffirait à rendre une moyenne
+ * calculable d'un côté et pas de l'autre.
+ *
+ * Une provenance inconnue retombe sur MANUAL plutôt que d'inventer un niveau de confiance.
+ */
+export function readLedgerCoverage(row: Record<string, unknown> | null | undefined): {
+  start: string | null;
+  source: LedgerCoverageSource;
+} {
+  const rawStart = row?.ledger_coverage_start;
+  const rawSource = row?.ledger_coverage_source;
+  const source = LEDGER_COVERAGE_SOURCES.find((candidate) => candidate === rawSource);
+  return {
+    start: rawStart === null || rawStart === undefined ? null : String(rawStart),
+    source: source ?? "MANUAL",
+  };
+}
+
 export const LEDGER_WINDOW_MONTHS = 6;
 
 export function ledgerWindowStart(asOfDate: string = AS_OF_DATE): string {

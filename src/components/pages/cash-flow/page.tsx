@@ -35,7 +35,7 @@ import {
   completeMonthsPeriod,
   monthPeriod,
 } from "@/lib/engine/cash-flow";
-import { CASH_FLOW_KINDS, type CashFlowKind } from "@/lib/types";
+import { CASH_FLOW_KINDS, type CashFlowKind, type LedgerCoverageSource } from "@/lib/types";
 
 /** Lignes rendues dans la table. Les agrégats, eux, portent sur toute la fenêtre lue. */
 const LEDGER_TABLE_ROWS = 50;
@@ -57,9 +57,21 @@ const KIND_LABELS: Record<CashFlowKind, string> = {
 
 const QUALITY_LABELS = { COMPLETE: "Complet", PARTIAL: "Partiel", INCOMPLETE: "Incomplet" };
 
+const COVERAGE_SOURCE_LABELS: Record<LedgerCoverageSource, string> = {
+  MANUAL: "Déclarée manuellement",
+  IMPORT: "Déclarée par un import",
+  API: "Déclarée par un connecteur",
+};
+
 function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const [modal, setModal] = useState<"transaction" | "rule" | "category" | null>(null);
   const [horizon, setHorizon] = useState(90);
+  /**
+   * `null` signifie « suivre la valeur persistée ». Conserver une copie locale même après
+   * sauvegarde ferait diverger le champ de ce que la base contient réellement, ce qui est
+   * précisément le genre d'écart que ce panneau existe pour rendre visible.
+   */
+  const [coverageEdit, setCoverageEdit] = useState<string | null>(null);
   const [form, setForm] = useState({
     accountId: state.accounts[0]?.id ?? "",
     categoryId: "exp_groceries",
@@ -165,6 +177,10 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
     (close) => close.month === month.start.slice(0, 7),
   );
 
+  const currentCoverage = state.ledgerCoverageStart ?? "";
+  const coverageDraft = coverageEdit ?? currentCoverage;
+  const setCoverageDraft = setCoverageEdit;
+
   async function addTransaction(event: React.FormEvent) {
     event.preventDefault();
     const account = state.accounts.find((item) => item.id === form.accountId);
@@ -203,6 +219,26 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       setModal(null);
       setRuleForm({ ...ruleForm, name: "", amount: "" });
     }
+  }
+
+  /**
+   * La profondeur est déclarée, jamais devinée. Le champ n'est donc pas pré-rempli avec la
+   * plus ancienne transaction connue : ce serait transformer une observation en preuve.
+   */
+  async function saveCoverage(event: React.FormEvent) {
+    event.preventDefault();
+    if (!coverageDraft) return;
+    const ok = await mutate({
+      action: "set_ledger_coverage",
+      startDate: coverageDraft,
+      source: "MANUAL",
+    });
+    if (ok) setCoverageEdit(null);
+  }
+
+  async function clearCoverage() {
+    const ok = await mutate({ action: "set_ledger_coverage", startDate: null, source: "MANUAL" });
+    if (ok) setCoverageEdit(null);
   }
 
   async function addCategory(event: React.FormEvent) {
@@ -546,13 +582,44 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               </dd>
             </div>
             <div>
-              <dt>Profondeur d’historique déclarée par la source</dt>
+              <dt>Profondeur d’historique certifiée</dt>
               <dd>
-                {comparison.ledgerCoverageStart ? (
-                  formatDate(comparison.ledgerCoverageStart)
-                ) : (
-                  <span className="warning-text">Non déclarée</span>
-                )}
+                <form className="coverage-form" onSubmit={saveCoverage}>
+                  <input
+                    className="text-input"
+                    type="date"
+                    max={state.asOfDate}
+                    value={coverageDraft}
+                    onChange={(event) => setCoverageDraft(event.target.value)}
+                    aria-label="Historique considéré exhaustif depuis"
+                  />
+                  <button
+                    type="submit"
+                    className="button primary"
+                    disabled={busy || !coverageDraft || coverageDraft === currentCoverage}
+                  >
+                    Enregistrer
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary"
+                    disabled={busy || currentCoverage === ""}
+                    onClick={() => void clearCoverage()}
+                  >
+                    Effacer
+                  </button>
+                </form>
+                <span className="muted-copy">
+                  {comparison.ledgerCoverageStart ? (
+                    <>
+                      Historique considéré exhaustif depuis le{" "}
+                      {formatDate(comparison.ledgerCoverageStart)} ·{" "}
+                      {COVERAGE_SOURCE_LABELS[state.ledgerCoverageSource]}
+                    </>
+                  ) : (
+                    <span className="warning-text">Non déclarée</span>
+                  )}
+                </span>
               </dd>
             </div>
             <div>
@@ -564,6 +631,12 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               </dd>
             </div>
           </dl>
+          <p className="muted-copy">
+            Cette date doit correspondre au début d’un historique que vous considérez complet. La
+            première transaction observée n’est pas utilisée comme preuve : elle reste affichée à
+            titre descriptif. La déclaration porte sur l’ensemble du ledger considéré par LFO, pas
+            sur un établissement en particulier.
+          </p>
           <p className="muted-copy">
             Une hypothèse mensuelle ne se compare qu’à une moyenne portant sur des mois calendaires
             révolus et réellement couverts. Le mois en cours en est exclu : il est partiel par

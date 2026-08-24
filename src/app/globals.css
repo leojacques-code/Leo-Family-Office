@@ -250,6 +250,8 @@ button { color: inherit; }
 
 .text-input, .suffix-input input, .simulation-actions input, .inline-amount input, .decision-slider-list input[type="number"] { width: 100%; min-height: 38px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; outline: none; background: var(--surface); color: var(--text); font-size: 11px; }
 .text-input:focus, .suffix-input input:focus, .simulation-actions input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-soft); }
+.coverage-form { margin-bottom: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.coverage-form .text-input { width: auto; min-width: 140px; min-height: 34px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
 .form-grid label, .mini-form-grid label { display: flex; flex-direction: column; gap: 6px; color: var(--text-soft); font-size: 9px; font-weight: 650; }
 .form-grid .full { grid-column: 1 / -1; }

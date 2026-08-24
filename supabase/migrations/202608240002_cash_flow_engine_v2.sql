@@ -125,7 +125,35 @@ create table if not exists public.cash_flow_monthly_closes (
 
 create index if not exists cash_flow_closes_user_month_idx on public.cash_flow_monthly_closes(user_id, month desc, version desc);
 
--- 5. Isolation par utilisateur des deux nouvelles tables.
+-- 5. Profondeur d'historique déclarée du ledger.
+--
+-- Propriété GLOBALE du ledger considéré par LFO, et non couverture d'une banque donnée :
+-- « date à partir de laquelle l'ensemble du ledger actuellement considéré est déclaré
+-- exhaustif ». LFO n'a pas encore de modèle multi-source permettant une profondeur par
+-- compte ou par connecteur ; le jour où il l'aura, cette valeur globale pourra en être
+-- dérivée de façon conservatrice (la plus tardive des couvertures). Elle n'est pas
+-- construite ici.
+--
+-- `null` est la valeur normale et signifie « non déclarée », jamais « depuis toujours ».
+-- Elle n'est jamais déduite de la plus ancienne transaction observée.
+alter table public.profiles
+  add column if not exists ledger_coverage_start date,
+  add column if not exists ledger_coverage_source text not null default 'MANUAL';
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_ledger_coverage_source_ck') then
+    alter table public.profiles add constraint profiles_ledger_coverage_source_ck
+      check (ledger_coverage_source in ('MANUAL', 'IMPORT', 'API'));
+  end if;
+end $$;
+
+comment on column public.profiles.ledger_coverage_start is
+  'Date à partir de laquelle l''ensemble du ledger considéré par LFO est déclaré exhaustif. Déclarée, jamais déduite. null = non déclarée.';
+comment on column public.profiles.ledger_coverage_source is
+  'Origine de la déclaration : MANUAL (saisie), IMPORT (fichier), API (connecteur). Pas un niveau de confiance.';
+
+-- 6. Isolation par utilisateur des deux nouvelles tables.
 --
 -- La migration initiale posait RLS et la politique `owner_all` en balayant les tables
 -- portant une colonne `user_id`. Ce balayage ne s'est exécuté qu'une fois : toute table
