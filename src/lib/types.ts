@@ -1,4 +1,5 @@
-export type DataKind = "ACTUAL" | "USER_ASSUMPTION" | "MODEL_ASSUMPTION" | "EXTERNAL_DATA" | "DERIVED" | "MISSING";
+export type DataKind =
+  "ACTUAL" | "USER_ASSUMPTION" | "MODEL_ASSUMPTION" | "EXTERNAL_DATA" | "DERIVED" | "MISSING";
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
 
 export interface Provenance {
@@ -107,7 +108,14 @@ export interface Scenario {
   annualReturn: number;
   annualVolatility: number;
   annualInflation: number;
+  /**
+   * Surplus mensuel AVANT service de dette : après revenus, fiscalité et dépenses de vie,
+   * mais avant intérêts, principal, assurance et frais de prêt. La colonne persistée garde
+   * son nom historique `monthly_savings`.
+   */
   monthlySavings: number;
+  /** Part du surplus post-dette dirigée vers les actifs de marché, entre 0 et 1. */
+  investmentAllocationRate: number;
   salaryGrowth: number;
   stressProbability: number;
   shockYear: number | null;
@@ -214,6 +222,36 @@ export interface ProjectionResult {
   scenarioId: string;
   seed: number;
   simulations: number;
+  /** Percentiles du PATRIMOINE NET financier, année par année. */
   points: ProjectionPoint[];
   methodology: string;
+}
+
+/** Point annuel réduit depuis le déroulé mensuel. Aucun calcul annuel parallèle. */
+export interface AnnualBalanceSheetPoint {
+  year: number;
+  monthIndex: number;
+  grossFinancialAssets: number;
+  debt: number;
+  fundingGap: number;
+  netWorth: number;
+  bankCash: number;
+  marketInvestedAssets: number;
+  cumulativeOperatingSurplus: number;
+  cumulativeMarketPnL: number;
+  cumulativeInterestPaid: number;
+  cumulativePrincipalPaid: number;
+  /** Vrai dès qu'un besoin de financement est apparu : la trajectoire est partielle. */
+  financingCostMissing: boolean;
+}
+
+export interface ProjectionEnvelope extends ProjectionResult {
+  /** Trajectoire déterministe issue de la même transition mensuelle. */
+  deterministic: AnnualBalanceSheetPoint[];
+  openingNetWorth: number;
+  assumptions: {
+    operatingSurplusBeforeDebt: number;
+    investmentAllocationRate: number;
+    annualReturn: number;
+  };
 }

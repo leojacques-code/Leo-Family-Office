@@ -4,6 +4,11 @@ import { CalendarCheck } from "lucide-react";
 import { Callout, Currency, EmptyState, SectionHeader } from "@/components/ui";
 import { type SectionProps, formatDate, formatEur } from "@/components/pages/shared";
 import { buildLoanTimeline } from "@/lib/engine/debt";
+import {
+  buildOpeningBalanceSheet,
+  runDeterministicModel,
+  scenarioAssumptions,
+} from "@/lib/engine/monthly-financial-model";
 
 function TimelinePage({ state, mutate, busy }: SectionProps) {
   // Les jalons de dette viennent de l'échéancier dérivé : un passif modifié déplace
@@ -31,6 +36,48 @@ function TimelinePage({ state, mutate, busy }: SectionProps) {
       },
     ];
   });
+  // Jalons réellement calculables par le modèle mensuel. Aucune date n'est fabriquée :
+  // un seuil jamais franchi dans l'horizon est annoncé comme non atteint.
+  const central =
+    state.scenarios.find((scenario) => scenario.name === "Central") ?? state.scenarios[0];
+  const projected = central
+    ? runDeterministicModel(
+        buildOpeningBalanceSheet(state),
+        state.liabilities,
+        scenarioAssumptions(central),
+        30 * 12,
+      )
+    : null;
+  const breakEven = projected?.states.find(
+    (monthly) => monthly.monthIndex > 0 && monthly.netWorth >= 0,
+  );
+  const debtFree = projected?.states.find(
+    (monthly) => monthly.monthIndex > 0 && monthly.loanBalance <= 0.01,
+  );
+  const modelMilestones = [
+    {
+      date: breakEven ? formatDate(breakEven.date) : "Non atteint dans le scénario",
+      kind: "Projection",
+      title: "Patrimoine net financier au-dessus de zéro",
+      detail: breakEven
+        ? `Scénario ${central?.name ?? ""}, périmètre financier uniquement`
+        : `Le patrimoine net reste négatif sur 30 ans sous le scénario ${central?.name ?? ""}`,
+      tone: "model",
+    },
+    ...(state.liabilities.length
+      ? [
+          {
+            date: debtFree ? formatDate(debtFree.date) : "Non atteint dans le scénario",
+            kind: "Projection",
+            title: "Extinction projetée de la dette",
+            detail: debtFree
+              ? "Dernière échéance de l’échéancier forward dérivé"
+              : "L’encours subsiste au-delà de l’horizon projeté",
+            tone: "model",
+          },
+        ]
+      : []),
+  ];
   const events = [
     {
       date: formatDate(state.asOfDate),
@@ -40,6 +87,7 @@ function TimelinePage({ state, mutate, busy }: SectionProps) {
       tone: "actual",
     },
     ...debtMilestones,
+    ...modelMilestones,
     {
       date: String(Number(state.asOfDate.slice(0, 4)) + 1),
       kind: "Hypothèse",

@@ -1,13 +1,20 @@
-import type { ProjectionResult, Scenario } from "@/lib/types";
+import {
+  runMonthlyModel,
+  scenarioAssumptions,
+  type MonthlyFinancialState,
+  type MonthlyScenarioAssumptions,
+  type OpeningBalanceSheet,
+} from "@/lib/engine/monthly-financial-model";
+import type { Liability, ProjectionResult, Scenario } from "@/lib/types";
 
 export interface MonteCarloInput {
   scenario: Scenario;
-  initialAssets: number;
+  /** Bilan financier d'ouverture, identique à celui de la projection déterministe. */
+  opening: OpeningBalanceSheet;
+  liabilities: Liability[];
   years: number;
   simulations: number;
   seed: number;
-  /** Première année civile de la distribution, dérivée de la date d'observation. */
-  baseYear: number;
   startingAge?: number;
 }
 
@@ -39,36 +46,64 @@ function percentile(sorted: number[], probability: number) {
   const index = (sorted.length - 1) * probability;
   const lower = Math.floor(index);
   const fraction = index - lower;
-  return sorted[lower + 1] === undefined ? sorted[lower] : sorted[lower] + fraction * (sorted[lower + 1] - sorted[lower]);
+  return sorted[lower + 1] === undefined
+    ? sorted[lower]
+    : sorted[lower] + fraction * (sorted[lower + 1] - sorted[lower]);
+}
+
+/**
+ * Tirage du rendement mensuel de marché. C'est la SEULE différence entre le mode
+ * déterministe et le mode Monte-Carlo : épargne, allocation, dette, dates, principal,
+ * intérêts, bilan et funding gap passent par la même transition mensuelle.
+ *
+ * Le choc et le stress ne frappent que les actifs exposés au marché, jamais le cash, la
+ * dette ou les actifs financiers sans exposition connue : c'est la transition du modèle
+ * mensuel qui l'impose, pas ce fichier.
+ */
+function stochasticMonthlyReturn(
+  random: () => number,
+  assumptions: MonthlyScenarioAssumptions,
+  scenario: Scenario,
+) {
+  const expectedMonthly = Math.pow(1 + assumptions.annualReturn, 1 / 12) - 1;
+  const volatilityMonthly = scenario.annualVolatility / Math.sqrt(12);
+  return () => {
+    let monthlyReturn = expectedMonthly + volatilityMonthly * studentT5(random);
+    if (random() < scenario.stressProbability / 12) monthlyReturn -= 0.12 + random() * 0.15;
+    return monthlyReturn;
+  };
 }
 
 export function runMonteCarlo(input: MonteCarloInput): ProjectionResult {
-  const { scenario, initialAssets, years, simulations, seed } = input;
-  if (simulations < 100 || years < 1) throw new Error("Projection requires at least 100 simulations and one year");
+  const { scenario, opening, liabilities, years, simulations, seed } = input;
+  if (simulations < 100 || years < 1)
+    throw new Error("Projection requires at least 100 simulations and one year");
   const random = mulberry32(seed);
+  const assumptions = scenarioAssumptions(scenario);
+  const months = years * 12;
+  const baseYear = Number(opening.date.slice(0, 4));
   const byYear: number[][] = Array.from({ length: years + 1 }, () => []);
 
   for (let simulation = 0; simulation < simulations; simulation += 1) {
-    let assets = initialAssets;
-    byYear[0].push(assets);
-    for (let year = 1; year <= years; year += 1) {
-      for (let month = 0; month < 12; month += 1) {
-        const tailShock = studentT5(random);
-        const expectedMonthly = Math.pow(1 + scenario.annualReturn, 1 / 12) - 1;
-        const volatilityMonthly = scenario.annualVolatility / Math.sqrt(12);
-        let monthlyReturn = expectedMonthly + volatilityMonthly * tailShock;
-        if (random() < scenario.stressProbability / 12) monthlyReturn -= 0.12 + random() * 0.15;
-        assets = Math.max(0, assets * (1 + monthlyReturn) + scenario.monthlySavings);
-      }
-      if (scenario.shockYear === year && scenario.shockMagnitude !== null) assets = Math.max(0, assets * (1 + scenario.shockMagnitude));
-      byYear[year].push(assets);
+    const draw = stochasticMonthlyReturn(random, assumptions, scenario);
+    const result = runMonthlyModel({
+      opening,
+      liabilities,
+      assumptions,
+      months,
+      marketReturn: draw,
+    });
+    // Le percentile porte sur le PATRIMOINE NET, pas sur un capital brut.
+    for (let year = 0; year <= years; year += 1) {
+      const state: MonthlyFinancialState | undefined = result.states[year * 12];
+      byYear[year].push(state?.netWorth ?? 0);
     }
   }
 
   const points = byYear.map((values, year) => {
     values.sort((a, b) => a - b);
     return {
-      year: input.baseYear + year,
+      year: baseYear + year,
       age: (input.startingAge ?? 23) + year,
       p10: percentile(values, 0.1),
       p25: percentile(values, 0.25),
@@ -83,6 +118,7 @@ export function runMonteCarlo(input: MonteCarloInput): ProjectionResult {
     seed,
     simulations,
     points,
-    methodology: "Périmètre simulé : capital financier initial et contributions mensuelles du scénario. Ni dette, ni immobilier, ni business equity, ni fiscalité n'entrent dans la trajectoire : ce n'est pas une projection du patrimoine net. Rendements mensuels à queues épaisses (Student-t, 5 ddl), stress rares et choc daté optionnel. Les percentiles décrivent uniquement le modèle et ses hypothèses.",
+    methodology:
+      "Patrimoine net financier simulé par le Personal Monthly Financial Model : même transition mensuelle que la projection déterministe, seul le rendement de marché est tiré au sort (Student-t à 5 ddl, stress rares, choc daté optionnel). Le choc ne frappe que les actifs exposés au marché ; cash, dette et actifs sans exposition connue en sont exclus. Périmètre financier uniquement : ni immobilier, ni business equity, ni carrière, ni fiscalité future. Les percentiles décrivent le modèle et ses hypothèses, pas l'avenir.",
   };
 }

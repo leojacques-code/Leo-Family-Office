@@ -101,6 +101,12 @@ export function applyScenarioOverrides<T extends Record<string, unknown>>(base: 
   return { ...base, ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined)) } as T;
 }
 
+/**
+ * @deprecated Capitalise un scalaire année par année. Remplacée par le Personal Monthly
+ * Financial Model (`monthly-financial-model.ts`), qui fait évoluer un bilan mois par mois.
+ * Conservée le temps de vérifier qu'aucun consommateur externe n'en dépend ; plus aucun
+ * écran du produit ne l'utilise.
+ */
 export function deterministicProjection(
   initialAssets: number,
   years: number,

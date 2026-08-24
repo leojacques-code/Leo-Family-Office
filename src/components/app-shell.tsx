@@ -8,7 +8,7 @@ import {
   RefreshCw, Settings2, ShieldCheck, Sun, Target, TrendingUp, WalletCards, X,
   type LucideIcon,
 } from "lucide-react";
-import type { DashboardState, ProjectionResult } from "@/lib/types";
+import type { DashboardState, ProjectionEnvelope } from "@/lib/types";
 import type { Mutation } from "@/lib/data/contracts";
 import { NAV_ITEMS, sectionLabel } from "@/lib/navigation";
 import { Modal, ExplanationPanel, type Explanation } from "@/components/ui";
@@ -40,7 +40,7 @@ export function AppShell({ initialState, section }: { initialState: DashboardSta
   const [mobileOpen, setMobileOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [explanation, setExplanation] = useState<Explanation | null>(null);
-  const [projection, setProjection] = useState<ProjectionResult | null>(null);
+  const [projection, setProjection] = useState<ProjectionEnvelope | null>(null);
 
   async function mutate(mutation: Mutation) {
     setBusy(true);
@@ -79,7 +79,7 @@ export function AppShell({ initialState, section }: { initialState: DashboardSta
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Projection impossible");
       setProjection(body);
-      return body as ProjectionResult;
+      return body as ProjectionEnvelope;
     } catch (projectionError) {
       setError(projectionError instanceof Error ? projectionError.message : "Projection impossible");
       return null;
