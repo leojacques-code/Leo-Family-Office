@@ -6,6 +6,8 @@ export interface MonteCarloInput {
   years: number;
   simulations: number;
   seed: number;
+  /** Première année civile de la distribution, dérivée de la date d'observation. */
+  baseYear: number;
   startingAge?: number;
 }
 
@@ -66,7 +68,7 @@ export function runMonteCarlo(input: MonteCarloInput): ProjectionResult {
   const points = byYear.map((values, year) => {
     values.sort((a, b) => a - b);
     return {
-      year: 2026 + year,
+      year: input.baseYear + year,
       age: (input.startingAge ?? 23) + year,
       p10: percentile(values, 0.1),
       p25: percentile(values, 0.25),
@@ -81,6 +83,6 @@ export function runMonteCarlo(input: MonteCarloInput): ProjectionResult {
     seed,
     simulations,
     points,
-    methodology: "Rendements mensuels à queues épaisses (Student-t, 5 ddl), stress rares et choc daté optionnel. Les percentiles décrivent uniquement le modèle et ses hypothèses.",
+    methodology: "Périmètre simulé : capital financier initial et contributions mensuelles du scénario. Ni dette, ni immobilier, ni business equity, ni fiscalité n'entrent dans la trajectoire : ce n'est pas une projection du patrimoine net. Rendements mensuels à queues épaisses (Student-t, 5 ddl), stress rares et choc daté optionnel. Les percentiles décrivent uniquement le modèle et ses hypothèses.",
   };
 }

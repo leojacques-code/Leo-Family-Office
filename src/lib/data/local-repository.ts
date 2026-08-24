@@ -271,12 +271,13 @@ function readDashboardState(): DashboardState {
   const incomes = getIncomes();
   const expenseCategories = getExpenses();
   const scenarios = getScenarios();
+  const transactions = getTransactions();
   const goals = (db().prepare("SELECT * FROM goals WHERE user_id=? ORDER BY priority").all(USER_ID) as SqlRow[]).map((row) => ({ id: String(row.id), name: String(row.name), targetAmount: Number(row.target_amount), targetDate: row.target_date ? String(row.target_date) : null, priority: Number(row.priority), status: String(row.status) as Goal["status"] }));
   const alerts = (db().prepare("SELECT * FROM alerts WHERE user_id=? AND status='OPEN' ORDER BY CASE severity WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END").all(USER_ID) as SqlRow[]).map((row) => ({ id: String(row.id), severity: String(row.severity) as Alert["severity"], title: String(row.title), detail: String(row.detail), status: String(row.status) as Alert["status"], createdAt: String(row.created_at) }));
   const monthlyCloses = (db().prepare("SELECT * FROM monthly_closes WHERE user_id=? ORDER BY close_date DESC").all(USER_ID) as SqlRow[]).map((row) => ({ id: String(row.id), closeDate: String(row.close_date), grossAssets: Number(row.gross_assets), debt: Number(row.debt), netWorth: Number(row.net_worth), forecastNetWorth: row.forecast_net_worth === null ? null : Number(row.forecast_net_worth), variance: row.variance === null ? null : Number(row.variance), createdAt: String(row.created_at) }));
   const documents = (db().prepare("SELECT * FROM documents WHERE user_id=? ORDER BY uploaded_at DESC").all(USER_ID) as SqlRow[]).map((row) => ({ id: String(row.id), name: String(row.name), category: String(row.category), size: Number(row.size_bytes), uploadedAt: String(row.uploaded_at), status: String(row.status) as DocumentRecord["status"] }));
   const assumptions = (db().prepare("SELECT * FROM economic_assumptions WHERE user_id=? ORDER BY name").all(USER_ID) as SqlRow[]).map((row) => ({ id: String(row.id), name: String(row.name), value: row.value_number === null ? row.value_text === null ? null : String(row.value_text) : Number(row.value_number), unit: String(row.unit), provenance: provenance(row) }));
-  return { asOfDate: AS_OF_DATE, reportingCurrency: REPORTING_CURRENCY, accounts, positions, liabilities, incomes, expenseCategories, transactions: getTransactions(), scenarios, goals, alerts, monthlyCloses, documents, metrics: deriveMetrics(accounts, liabilities, incomes, expenseCategories, positions), assumptions };
+  return { asOfDate: AS_OF_DATE, reportingCurrency: REPORTING_CURRENCY, accounts, positions, liabilities, incomes, expenseCategories, transactions, scenarios, goals, alerts, monthlyCloses, documents, metrics: deriveMetrics(accounts, liabilities, incomes, expenseCategories, positions, transactions, AS_OF_DATE), assumptions };
 }
 
 function applyMutation(mutation: Mutation) {
@@ -301,8 +302,11 @@ function applyMutation(mutation: Mutation) {
         databaseInstance.prepare(`INSERT INTO transactions (id,user_id,account_id,category_id,transaction_date,label,amount,currency,kind,confidence,source,created_at)
           VALUES (?,?,?,?,?,?,?,'EUR','ACTUAL','HIGH','Saisie manuelle',?)`).run(`txn_${randomUUID()}`, USER_ID, mutation.accountId, mutation.categoryId, mutation.date, mutation.label, mutation.amount, now);
         if (mutation.updateBalance) {
-          const latest = databaseInstance.prepare("SELECT balance FROM account_balances WHERE account_id=? ORDER BY balance_date DESC,created_at DESC LIMIT 1").get(mutation.accountId) as { balance: number };
-          databaseInstance.prepare("INSERT INTO account_balances VALUES (?, ?, ?, ?, 'DERIVED', 'HIGH', 'Transaction saisie', ?)").run(randomUUID(), mutation.accountId, latest.balance + mutation.amount, mutation.date, now);
+          const latest = databaseInstance.prepare("SELECT balance, balance_date FROM account_balances WHERE account_id=? ORDER BY balance_date DESC,created_at DESC LIMIT 1").get(mutation.accountId) as { balance: number; balance_date: string };
+          // Le solde dérivé doit primer sur le dernier solde connu, sinon une transaction
+          // antérieure à ce dernier relevé n'aurait aucun effet visible sur le compte.
+          const balanceDate = mutation.date > latest.balance_date ? mutation.date : latest.balance_date;
+          databaseInstance.prepare("INSERT INTO account_balances VALUES (?, ?, ?, ?, 'DERIVED', 'HIGH', 'Transaction saisie', ?)").run(randomUUID(), mutation.accountId, latest.balance + mutation.amount, balanceDate, now);
         }
         break;
       }

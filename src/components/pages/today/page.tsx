@@ -16,6 +16,7 @@ import {
   YAxis,
 } from "recharts";
 import { deterministicProjection } from "@/lib/engine/financial";
+import { nextDebtEvent } from "@/lib/engine/debt";
 import {
   Currency,
   DataBadge,
@@ -29,6 +30,7 @@ import {
   assetsExplanation,
   cashFlowExplanation,
   chartCurrency,
+  formatDate,
   liquidityExplanation,
   netWorthExplanation,
 } from "@/components/pages/shared";
@@ -36,39 +38,55 @@ import {
 function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
   const central =
     state.scenarios.find((scenario) => scenario.name === "Central") ?? state.scenarios[0];
+  const baseYear = Number(state.asOfDate.slice(0, 4));
   const projection = deterministicProjection(state.metrics.grossAssets, 12, central).map(
-    (point) => ({ year: 2026 + point.year, value: point.nominal, real: point.real }),
+    (point) => ({ year: baseYear + point.year, value: point.nominal, real: point.real }),
   );
+  const ALLOCATION_COLORS = ["#356b72", "#89a7a2", "#c0a66a", "#7d8fa8", "#b58a7a"];
+  const investmentAccountIds = new Set(
+    state.accounts
+      .filter((account) => account.type === "PEA" || account.type === "CTO")
+      .map((account) => account.id),
+  );
+  const positionsByClass = new Map<string, number>();
+  state.positions.forEach((position) => {
+    const key = position.isCash ? "Cash d’enveloppe" : position.assetClass;
+    positionsByClass.set(key, (positionsByClass.get(key) ?? 0) + position.value);
+  });
+  // Un compte d'investissement dont les positions n'expliquent pas le solde garde son
+  // reliquat visible plutôt que d'être aligné en silence sur la somme des positions.
+  const unallocated = state.accounts
+    .filter((account) => investmentAccountIds.has(account.id))
+    .reduce((sum, account) => {
+      const covered = state.positions
+        .filter((position) => position.accountId === account.id)
+        .reduce((total, position) => total + position.value, 0);
+      return sum + Math.max(0, account.balance - covered);
+    }, 0);
   const allocation = [
-    {
-      name: "Actions monde",
-      value: state.positions
-        .filter((position) => position.assetClass === "Actions monde")
-        .reduce((sum, position) => sum + position.value, 0),
-      color: "#356b72",
-    },
-    {
-      name: "Cash PEA",
-      value: state.positions
-        .filter((position) => position.isCash)
-        .reduce((sum, position) => sum + position.value, 0),
-      color: "#89a7a2",
-    },
-    {
-      name: "CTO non ventilé",
-      value: state.positions
-        .filter((position) => position.accountId === "acc_cto")
-        .reduce((sum, position) => sum + position.value, 0),
-      color: "#c0a66a",
-    },
+    ...[...positionsByClass.entries()]
+      .sort(([, a], [, b]) => b - a)
+      .map(([name, value], index) => ({
+        name,
+        value,
+        color: ALLOCATION_COLORS[index % ALLOCATION_COLORS.length],
+      })),
+    { name: "Solde non ventilé", value: unallocated, color: "#b1bcbd" },
     { name: "Cash bancaire", value: state.metrics.bankCash, color: "#dce5e2" },
   ].filter((item) => item.value > 0);
+  const allocationTotal = allocation.reduce((sum, item) => sum + item.value, 0);
+  const upcomingDebt = nextDebtEvent(state.liabilities, state.asOfDate);
   const primaryGoal = state.goals[0];
 
   return (
     <div className="page-stack">
       <SectionHeader
-        eyebrow="Mercredi 19 août 2026"
+        eyebrow={formatDate(state.asOfDate, {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        })}
         title="Bonjour Léo."
         description="Voici votre situation financière identifiée et ce qui mérite votre attention."
         actions={
@@ -98,10 +116,15 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
         <MetricCard
           label="Patrimoine net identifié"
           value={<Currency value={state.metrics.netWorth} />}
-          tone="negative"
+          tone={state.metrics.netWorth < 0 ? "negative" : "positive"}
           detail={
             <>
-              <span className="negative-text">Sous zéro</span> · périmètre non exhaustif
+              {state.metrics.netWorth < 0 ? (
+                <span className="negative-text">Sous zéro</span>
+              ) : (
+                <span className="positive-text">Au-dessus de zéro</span>
+              )}{" "}
+              · périmètre non exhaustif
             </>
           }
           onExplain={() => setExplanation(netWorthExplanation(state))}
@@ -119,9 +142,12 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           detail={
             <>
               <span className="warning-text">
-                <Currency value={state.metrics.emergencyCoverageMonths} /> mois
+                {state.metrics.emergencyCoverageMonths.toLocaleString("fr-FR", {
+                  maximumFractionDigits: 1,
+                })}{" "}
+                mois
               </span>{" "}
-              de loyer couvert
+              de dépenses essentielles connues
             </>
           }
           onExplain={() => setExplanation(liquidityExplanation(state))}
@@ -130,7 +156,11 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           label="Cash flow mensuel connu"
           value={<Currency value={state.metrics.freeCashFlow} sign />}
           tone={state.metrics.freeCashFlow >= 0 ? "positive" : "negative"}
-          detail="Avant échéance du prêt · dépenses incomplètes"
+          detail={
+            state.metrics.monthlyDebtService > 0
+              ? "Service de dette du mois déduit · dépenses incomplètes"
+              : "Aucune échéance de dette exigible ce mois · dépenses incomplètes"
+          }
           onExplain={() => setExplanation(cashFlowExplanation(state))}
         />
       </section>
@@ -139,7 +169,7 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           <div className="panel-header">
             <div>
               <span className="eyebrow">Trajectoire centrale déterministe</span>
-              <h2>Patrimoine brut projeté</h2>
+              <h2>Actifs financiers projetés</h2>
             </div>
             <div className="legend">
               <span>
@@ -247,7 +277,7 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
               </ResponsiveContainer>
               <div className="donut-center">
                 <strong>
-                  <Currency value={state.metrics.grossAssets} compact />
+                  <Currency value={allocationTotal} compact />
                 </strong>
                 <span>actifs</span>
               </div>
@@ -260,7 +290,7 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
                     {item.name}
                   </span>
                   <strong>
-                    <Percent value={item.value / state.metrics.grossAssets} />
+                    <Percent value={item.value / allocationTotal} />
                   </strong>
                 </div>
               ))}
@@ -299,18 +329,20 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
             <div>
               <span>
                 <i className="flow-dot debt" />
-                Dette dès déc. 2026
+                {state.metrics.monthlyDebtService > 0
+                  ? "Service de dette exigible"
+                  : upcomingDebt
+                    ? `Dette à partir du ${formatDate(upcomingDebt.entry.dueDate, { day: "numeric", month: "short", year: "numeric" })}`
+                    : "Aucune dette exigible"}
               </span>
               <strong>
-                −
-                <Currency
-                  value={state.liabilities.reduce((sum, item) => sum + item.monthlyPayment, 0)}
-                />
+                {state.metrics.monthlyDebtService > 0 ? "−" : ""}
+                <Currency value={state.metrics.monthlyDebtService} />
               </strong>
             </div>
           </div>
           <div className="flow-total">
-            <span>Disponible avant prêt</span>
+            <span>Disponible ce mois</span>
             <strong>
               <Currency value={state.metrics.freeCashFlow} sign />
             </strong>
@@ -372,29 +404,45 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           <div className="panel-header">
             <div>
               <span className="eyebrow">Prochain événement majeur</span>
-              <h2>Prêt étudiant</h2>
+              <h2>{upcomingDebt ? upcomingDebt.liability.name : "Aucun événement daté"}</h2>
             </div>
             <Flag size={18} />
           </div>
-          <div className="event-date">
-            <strong>05</strong>
-            <span>
-              DÉC
-              <br />
-              2026
-            </span>
-          </div>
-          <p>
-            Première échéance annoncée de{" "}
-            <strong>
-              <Currency value={284.72} />
-            </strong>
-            .
-          </p>
-          <div className="event-foot">
-            <span>Dans 108 jours à la date zéro</span>
-            <Link href="/debt">Voir l’échéancier</Link>
-          </div>
+          {upcomingDebt ? (
+            <>
+              <div className="event-date">
+                <strong>{upcomingDebt.entry.dueDate.slice(8, 10)}</strong>
+                <span>
+                  {formatDate(upcomingDebt.entry.dueDate, { month: "short" }).toUpperCase()}
+                  <br />
+                  {upcomingDebt.entry.dueDate.slice(0, 4)}
+                </span>
+              </div>
+              <p>
+                {upcomingDebt.isFirstPayment
+                  ? "Première échéance"
+                  : `Échéance n° ${upcomingDebt.entry.paymentNumber}`}{" "}
+                de{" "}
+                <strong>
+                  <Currency value={upcomingDebt.entry.totalCashOut} />
+                </strong>
+                .
+              </p>
+              <div className="event-foot">
+                <span>
+                  {upcomingDebt.daysAway === null
+                    ? "Date non calculable"
+                    : `Dans ${upcomingDebt.daysAway} jours à la date d’observation`}
+                </span>
+                <Link href="/debt">Voir l’échéancier</Link>
+              </div>
+            </>
+          ) : (
+            <p>
+              Aucune échéance de dette n’est exigible dans l’échéancier dérivé. Un événement
+              apparaîtra dès qu’un passif daté sera enregistré.
+            </p>
+          )}
         </article>
       </section>
     </div>

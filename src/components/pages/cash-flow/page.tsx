@@ -17,8 +17,10 @@ import {
   type SectionProps,
   cashFlowExplanation,
   chartCurrency,
+  formatDate,
   inputNumber,
 } from "@/components/pages/shared";
+import { addMonths, monthBounds, upcomingDebtEvents } from "@/lib/engine/debt";
 
 function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const [modal, setModal] = useState(false);
@@ -30,11 +32,26 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
     amount: "",
     updateBalance: true,
   });
-  const chart = ["Mars", "Avr.", "Mai", "Juin", "Juil.", "Août"].map((month, index) => ({
-    month,
-    income: index === 5 ? state.metrics.monthlyIncome : 0,
-    expense: index === 5 ? state.metrics.monthlyExpenses : 0,
-  }));
+  // Agrégats mensuels construits depuis le ledger, jamais depuis les métriques courantes :
+  // un mois sans transaction reste distinct d'un mois sans donnée.
+  const months = Array.from({ length: 6 }, (_, index) => {
+    const anchor = addMonths(state.asOfDate, index - 5);
+    const { start, end } = monthBounds(anchor);
+    const inMonth = state.transactions.filter(
+      (transaction) => transaction.date >= start && transaction.date <= end,
+    );
+    return {
+      month: formatDate(start, { month: "short", year: "2-digit" }),
+      income: inMonth.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0),
+      expense: inMonth
+        .filter((item) => item.amount < 0)
+        .reduce((sum, item) => sum + Math.abs(item.amount), 0),
+      count: inMonth.length,
+    };
+  });
+  const ledgerMonths = months.filter((month) => month.count > 0).length;
+  const futureEvents = upcomingDebtEvents(state.liabilities, state.asOfDate, 365);
+  const undatedIncomes = state.incomes.filter((income) => !income.active);
   async function addTransaction(event: React.FormEvent) {
     event.preventDefault();
     const ok = await mutate({
@@ -80,9 +97,24 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           onExplain={() => setExplanation(cashFlowExplanation(state))}
         />
         <MetricCard
-          label="Taux d’épargne provisoire"
-          value={<Percent value={state.metrics.savingsRate} />}
-          tone={state.metrics.savingsRate < 0 ? "negative" : "neutral"}
+          label="Taux d’épargne constaté"
+          value={
+            state.metrics.savingsRate === null ? (
+              "Non calculable"
+            ) : (
+              <Percent value={state.metrics.savingsRate} />
+            )
+          }
+          tone={
+            state.metrics.savingsRate !== null && state.metrics.savingsRate < 0
+              ? "negative"
+              : "neutral"
+          }
+          detail={
+            state.metrics.savingsRate === null
+              ? "Aucun revenu encaissé observé au ledger sur le mois"
+              : "Épargne constatée ÷ revenu encaissé"
+          }
         />
       </section>
       <Callout tone="warning" title="Données partielles">
@@ -96,20 +128,38 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <span className="eyebrow">Historique observé</span>
               <h2>Revenus et dépenses</h2>
             </div>
+            <span className="panel-note">{state.transactions.length} transactions au ledger</span>
           </div>
-          <div className="medium-chart">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chart}>
-                <CartesianGrid vertical={false} stroke="var(--border-soft)" />
-                <XAxis dataKey="month" axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={chartCurrency} axisLine={false} tickLine={false} />
-                <Tooltip />
-                <Bar dataKey="income" name="Revenus" fill="#39747a" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="expense" name="Dépenses" fill="#c6a765" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="muted-copy">Les mois sans données sont affichés à zéro, et non estimés.</p>
+          {ledgerMonths ? (
+            <>
+              <div className="medium-chart">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={months}>
+                    <CartesianGrid vertical={false} stroke="var(--border-soft)" />
+                    <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                    <YAxis tickFormatter={chartCurrency} axisLine={false} tickLine={false} />
+                    <Tooltip />
+                    <Bar dataKey="income" name="Revenus" fill="#39747a" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="expense" name="Dépenses" fill="#c6a765" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="muted-copy">
+                {ledgerMonths} mois sur 6 portent au moins une transaction. Les autres sont vides
+                parce que le ledger ne contient rien, pas parce que le montant serait nul.
+              </p>
+            </>
+          ) : (
+            <EmptyState
+              title="Aucun historique au ledger"
+              detail="Les six derniers mois ne contiennent aucune transaction. Aucun mois n’est affiché à zéro : l’absence de donnée n’est pas un montant nul."
+              action={
+                <button className="button secondary" onClick={() => setModal(true)}>
+                  Ajouter une transaction
+                </button>
+              }
+            />
+          )}
         </article>
         <article className="panel">
           <div className="panel-header">
@@ -119,31 +169,53 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
             </div>
           </div>
           <div className="timeline-mini">
-            <div>
-              <i />
-              <span>
-                <strong>5 déc. 2026</strong>
-                <small>Première mensualité étudiant</small>
-              </span>
-              <b>−284,72 €</b>
-            </div>
-            <div className="muted">
-              <i />
-              <span>
-                <strong>À dater</strong>
-                <small>Revenu professeur de tennis</small>
-              </span>
-              <b>+130 €</b>
-            </div>
-            <div className="muted">
-              <i />
-              <span>
-                <strong>À confirmer</strong>
-                <small>CAF</small>
-              </span>
-              <b>—</b>
-            </div>
+            {futureEvents.slice(0, 3).map((event) => (
+              <div key={`${event.liability.id}-${event.entry.paymentNumber}`}>
+                <i />
+                <span>
+                  <strong>
+                    {formatDate(event.entry.dueDate, {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </strong>
+                  <small>
+                    {event.isFirstPayment ? "Première mensualité" : "Mensualité"} ·{" "}
+                    {event.liability.name}
+                  </small>
+                </span>
+                <b>
+                  −<Currency value={event.entry.totalCashOut} />
+                </b>
+              </div>
+            ))}
+            {undatedIncomes.map((income) => (
+              <div className="muted" key={income.id}>
+                <i />
+                <span>
+                  <strong>À dater</strong>
+                  <small>{income.name}</small>
+                </span>
+                <b>
+                  {income.monthlyNet === null ? (
+                    "—"
+                  ) : (
+                    <>
+                      +<Currency value={income.monthlyNet} />
+                    </>
+                  )}
+                </b>
+              </div>
+            ))}
+            {!futureEvents.length && !undatedIncomes.length ? (
+              <p className="muted-copy">Aucun événement daté dans les 365 prochains jours.</p>
+            ) : null}
           </div>
+          <p className="muted-copy">
+            Les échéances proviennent de l’échéancier dérivé des passifs. Un revenu sans date de
+            début reste « À dater » et n’entre dans aucun agrégat.
+          </p>
         </article>
       </section>
       <section className="panel">

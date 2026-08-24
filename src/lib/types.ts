@@ -51,6 +51,22 @@ export interface Liability {
   provenance: Provenance;
 }
 
+export interface LoanScheduleEntry {
+  liabilityId: string;
+  paymentNumber: number;
+  /** Date d'exigibilité réelle de l'échéance. */
+  dueDate: string;
+  openingBalance: number;
+  interest: number;
+  principal: number;
+  insurance: number;
+  fees: number;
+  /** Ce qui sort réellement du compte : interest + principal + insurance + fees. */
+  totalCashOut: number;
+  closingBalance: number;
+  kind: DataKind;
+}
+
 export interface IncomeSource {
   id: string;
   name: string;
@@ -142,6 +158,9 @@ export interface DashboardMetrics {
   debt: number;
   netWorth: number;
   bankCash: number;
+  /** Actifs mobilisables : comptes dont la liquidité n'est pas ILLIQUID. */
+  liquidAssets: number;
+  /** LiquidAssets − dettes. Peut être négatif sans que le patrimoine net le soit. */
   liquidNetWorth: number;
   investedAssets: number;
   productiveNetWorth: number;
@@ -149,8 +168,9 @@ export interface DashboardMetrics {
   monthlyExpenses: number;
   monthlyDebtService: number;
   freeCashFlow: number;
-  savingsRate: number;
-  investmentRate: number;
+  /** Flux constatés au ledger. `null` = non calculable faute de flux observés. */
+  savingsRate: number | null;
+  investmentRate: number | null;
   emergencyCoverageMonths: number;
   dataCompleteness: number;
 }
