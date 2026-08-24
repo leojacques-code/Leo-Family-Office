@@ -12,10 +12,15 @@ import {
   ledgerWindowStart,
   readLedgerCoverage,
   readLoanTerms,
-  shouldDeriveBalance,
 } from "@/lib/data/shared";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
 import { monthBounds } from "@/lib/engine/debt";
+import {
+  enumValue,
+  finiteNumber,
+  nullableFiniteNumber,
+  requiredField,
+} from "@/lib/data/row-validation";
 import type { FamilyOfficeRepository } from "@/lib/data/repository";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type {
@@ -35,6 +40,7 @@ import type {
   Scenario,
   Transaction,
 } from "@/lib/types";
+import { CASH_FLOW_KINDS } from "@/lib/types";
 
 /** Garde-fou de pagination du ledger : 20 000 lignes sur la fenêtre lue. */
 const LEDGER_MAX_PAGES = 20;
@@ -50,9 +56,6 @@ function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, con
 const str = (value: unknown): string => String(value ?? "");
 const optional = (value: unknown): string | undefined =>
   value === null || value === undefined ? undefined : String(value);
-const num = (value: unknown): number => Number(value ?? 0);
-const numOrNull = (value: unknown): number | null =>
-  value === null || value === undefined ? null : Number(value);
 const bool = (value: unknown): boolean => value === true || value === 1 || value === "true";
 
 function provenance(row: Row): Provenance {
@@ -97,27 +100,46 @@ const SCENARIO_COLUMNS: Record<string, string> = {
   shockMagnitude: "shock_magnitude",
 };
 
-function mapScenario(row: Row): Scenario {
+export function mapScenario(row: Row): Scenario {
+  const context = `scenarios[id=${str(row.id) || "inconnu"}]`;
   return {
     id: str(row.id),
     name: str(row.name),
     description: str(row.description),
-    version: num(row.current_version),
+    version: finiteNumber(row.current_version, `${context}.current_version`),
     color: str(row.color),
-    annualReturn: num(row.annual_return),
-    annualVolatility: num(row.annual_volatility),
-    annualInflation: num(row.annual_inflation),
-    monthlySavings: num(row.monthly_savings),
-    investmentAllocationRate:
-      row.investment_allocation_rate === null || row.investment_allocation_rate === undefined
-        ? 1
-        : num(row.investment_allocation_rate),
-    salaryGrowth: num(row.salary_growth),
-    stressProbability: num(row.stress_probability),
-    shockYear: numOrNull(row.shock_year),
-    shockMagnitude: numOrNull(row.shock_magnitude),
+    annualReturn: finiteNumber(row.annual_return, `${context}.annual_return`),
+    annualVolatility: finiteNumber(row.annual_volatility, `${context}.annual_volatility`),
+    annualInflation: finiteNumber(row.annual_inflation, `${context}.annual_inflation`),
+    monthlySavings: finiteNumber(row.monthly_savings, `${context}.monthly_savings`),
+    investmentAllocationRate: finiteNumber(
+      requiredField(row, "investment_allocation_rate", context),
+      `${context}.investment_allocation_rate`,
+    ),
+    salaryGrowth: finiteNumber(row.salary_growth, `${context}.salary_growth`),
+    stressProbability: finiteNumber(row.stress_probability, `${context}.stress_probability`),
+    shockYear: nullableFiniteNumber(row.shock_year, `${context}.shock_year`),
+    shockMagnitude: nullableFiniteNumber(row.shock_magnitude, `${context}.shock_magnitude`),
     provenance: provenance(row),
   };
+}
+
+export function validateSimulationRun(run: SimulationRun): void {
+  finiteNumber(run.seed, "simulation_runs.seed");
+  finiteNumber(run.simulations, "simulation_runs.simulations");
+  finiteNumber(run.years, "simulation_runs.years");
+  if (run.points.length === 0) {
+    throw new Error("Supabase donnée invalide (simulation_results) : aucun percentile à persister");
+  }
+  for (const [index, point] of run.points.entries()) {
+    const context = `simulation_results[index=${index},year=${String(point.year)}]`;
+    finiteNumber(point.year, `${context}.year`);
+    finiteNumber(point.p10, `${context}.p10`);
+    finiteNumber(point.p25, `${context}.p25`);
+    finiteNumber(point.p50, `${context}.p50`);
+    finiteNumber(point.p75, `${context}.p75`);
+    finiteNumber(point.p90, `${context}.p90`);
+  }
 }
 
 export function createSupabaseRepository(): FamilyOfficeRepository {
@@ -232,7 +254,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           name: str(row.name),
           type: str(row.account_type) as FinancialAccount["type"],
           currency: str(row.currency),
-          balance: num(balance?.balance),
+          balance: finiteNumber(
+            balance?.balance,
+            `account_balances[account_id=${str(row.id)}].balance`,
+          ),
           balanceDate: balance ? str(balance.balance_date) : AS_OF_DATE,
           liquidity: str(row.liquidity) as FinancialAccount["liquidity"],
           provenance: provenance(row),
@@ -257,9 +282,22 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           securityName: security ? str(security.name) : "",
           ticker: security ? optional(security.ticker) : undefined,
           assetClass: security ? (assetClassNames.get(str(security.asset_class_id)) ?? "") : "",
-          quantity: snapshot ? (numOrNull(snapshot.quantity) ?? undefined) : undefined,
-          costBasis: snapshot ? (numOrNull(snapshot.cost_basis) ?? undefined) : undefined,
-          value: num(snapshot?.market_value),
+          quantity: snapshot
+            ? (nullableFiniteNumber(
+                snapshot.quantity,
+                `position_snapshots[position_id=${str(row.id)}].quantity`,
+              ) ?? undefined)
+            : undefined,
+          costBasis: snapshot
+            ? (nullableFiniteNumber(
+                snapshot.cost_basis,
+                `position_snapshots[position_id=${str(row.id)}].cost_basis`,
+              ) ?? undefined)
+            : undefined,
+          value: finiteNumber(
+            snapshot?.market_value,
+            `position_snapshots[position_id=${str(row.id)}].market_value`,
+          ),
           currency: snapshot ? str(snapshot.currency) : REPORTING_CURRENCY,
           isCash: bool(row.is_cash),
           provenance: provenance(row),
@@ -278,11 +316,17 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       id: str(row.id),
       name: str(row.name),
       lender: str(row.lender),
-      principal: num(row.principal),
-      currentBalance: num(row.current_balance),
-      annualRate: num(row.annual_rate),
-      monthlyPayment: num(row.monthly_payment),
-      paymentCount: num(row.payment_count),
+      principal: finiteNumber(row.principal, `liabilities[id=${str(row.id)}].principal`),
+      currentBalance: finiteNumber(
+        row.current_balance,
+        `liabilities[id=${str(row.id)}].current_balance`,
+      ),
+      annualRate: finiteNumber(row.annual_rate, `liabilities[id=${str(row.id)}].annual_rate`),
+      monthlyPayment: finiteNumber(
+        row.monthly_payment,
+        `liabilities[id=${str(row.id)}].monthly_payment`,
+      ),
+      paymentCount: finiteNumber(row.payment_count, `liabilities[id=${str(row.id)}].payment_count`),
       firstPaymentDate: str(row.first_payment_date),
       maturityDate: str(row.maturity_date),
       provenance: provenance(row),
@@ -292,7 +336,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       .map((row) => ({
         id: str(row.id),
         name: str(row.name),
-        monthlyNet: numOrNull(row.monthly_net),
+        monthlyNet: nullableFiniteNumber(
+          row.monthly_net,
+          `income_sources[id=${str(row.id)}].monthly_net`,
+        ),
         active: bool(row.active),
         startDate:
           row.start_date === null || row.start_date === undefined ? null : str(row.start_date),
@@ -313,22 +360,39 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           id: str(row.id),
           name: str(row.name),
           groupName: str(row.group_name),
-          // Repli sur la sémantique historique tant que la migration n'est pas appliquée.
-          cashFlowKind: (row.cash_flow_kind
-            ? str(row.cash_flow_kind)
-            : "EXPENSE") as ExpenseCategory["cashFlowKind"],
-          essentiality: (row.essentiality
-            ? str(row.essentiality)
-            : bool(row.essential)
-              ? "ESSENTIAL"
-              : "NON_ESSENTIAL") as ExpenseCategory["essentiality"],
-          behavior: (row.expense_behavior
-            ? str(row.expense_behavior)
-            : "UNKNOWN") as ExpenseCategory["behavior"],
-          monthlyAmount: numOrNull(budget.monthly_amount),
-          essential: row.essentiality ? str(row.essentiality) === "ESSENTIAL" : bool(row.essential),
-          archived:
-            row.archived === undefined || row.archived === null ? false : bool(row.archived),
+          cashFlowKind: enumValue(
+            requiredField(row, "cash_flow_kind", `expense_categories[id=${str(row.id)}]`),
+            CASH_FLOW_KINDS,
+            `expense_categories[id=${str(row.id)}].cash_flow_kind`,
+          ) as ExpenseCategory["cashFlowKind"],
+          essentiality: enumValue(
+            requiredField(row, "essentiality", `expense_categories[id=${str(row.id)}]`),
+            ["ESSENTIAL", "NON_ESSENTIAL", "UNKNOWN"] as const,
+            `expense_categories[id=${str(row.id)}].essentiality`,
+          ) as ExpenseCategory["essentiality"],
+          behavior: enumValue(
+            requiredField(row, "expense_behavior", `expense_categories[id=${str(row.id)}]`),
+            ["FIXED", "VARIABLE", "DISCRETIONARY", "UNKNOWN"] as const,
+            `expense_categories[id=${str(row.id)}].expense_behavior`,
+          ) as ExpenseCategory["behavior"],
+          monthlyAmount: nullableFiniteNumber(
+            budget.monthly_amount,
+            `budgets[category_id=${str(row.id)}].monthly_amount`,
+          ),
+          essential: str(row.essentiality) === "ESSENTIAL",
+          archived: (() => {
+            const archived = requiredField(
+              row,
+              "archived",
+              `expense_categories[id=${str(row.id)}]`,
+            );
+            if (typeof archived !== "boolean") {
+              throw new Error(
+                `Supabase donnée invalide (expense_categories[id=${str(row.id)}].archived) : booléen obligatoire, reçu ${String(archived)}`,
+              );
+            }
+            return archived;
+          })(),
           provenance: provenance(budget),
         };
       })
@@ -344,11 +408,14 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           ? str(categoryRows.find((category) => str(category.id) === str(row.category_id))!.name)
           : "",
         accountId: row.account_id ? str(row.account_id) : null,
-        amount: num(row.amount),
+        amount: finiteNumber(row.amount, `recurring_cash_flow_rules[id=${str(row.id)}].amount`),
         frequency: str(row.frequency) as RecurringCashFlowRule["frequency"],
         startDate: str(row.start_date),
         endDate: row.end_date ? str(row.end_date) : null,
-        dayOfMonth: numOrNull(row.day_of_month),
+        dayOfMonth: nullableFiniteNumber(
+          row.day_of_month,
+          `recurring_cash_flow_rules[id=${str(row.id)}].day_of_month`,
+        ),
         active: bool(row.active),
         provenance: provenance(row),
       }))
@@ -358,17 +425,44 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       .map((row) => ({
         id: str(row.id),
         month: str(row.month),
-        version: num(row.version),
-        income: num(row.income),
-        consumerExpenses: num(row.consumer_expenses),
-        essentialExpenses: num(row.essential_expenses),
-        taxesPaid: num(row.taxes_paid),
-        debtServicePaid: num(row.debt_service_paid),
-        investmentFlows: num(row.investment_flows),
-        internalTransfers: num(row.internal_transfers),
-        operatingSurplusBeforeDebt: num(row.operating_surplus_before_debt),
-        postDebtSurplus: num(row.post_debt_surplus),
-        unclassifiedTransactionCount: num(row.unclassified_transaction_count),
+        version: finiteNumber(row.version, `cash_flow_monthly_closes[id=${str(row.id)}].version`),
+        income: finiteNumber(row.income, `cash_flow_monthly_closes[id=${str(row.id)}].income`),
+        consumerExpenses: finiteNumber(
+          row.consumer_expenses,
+          `cash_flow_monthly_closes[id=${str(row.id)}].consumer_expenses`,
+        ),
+        essentialExpenses: finiteNumber(
+          row.essential_expenses,
+          `cash_flow_monthly_closes[id=${str(row.id)}].essential_expenses`,
+        ),
+        taxesPaid: finiteNumber(
+          row.taxes_paid,
+          `cash_flow_monthly_closes[id=${str(row.id)}].taxes_paid`,
+        ),
+        debtServicePaid: finiteNumber(
+          row.debt_service_paid,
+          `cash_flow_monthly_closes[id=${str(row.id)}].debt_service_paid`,
+        ),
+        investmentFlows: finiteNumber(
+          row.investment_flows,
+          `cash_flow_monthly_closes[id=${str(row.id)}].investment_flows`,
+        ),
+        internalTransfers: finiteNumber(
+          row.internal_transfers,
+          `cash_flow_monthly_closes[id=${str(row.id)}].internal_transfers`,
+        ),
+        operatingSurplusBeforeDebt: finiteNumber(
+          row.operating_surplus_before_debt,
+          `cash_flow_monthly_closes[id=${str(row.id)}].operating_surplus_before_debt`,
+        ),
+        postDebtSurplus: finiteNumber(
+          row.post_debt_surplus,
+          `cash_flow_monthly_closes[id=${str(row.id)}].post_debt_surplus`,
+        ),
+        unclassifiedTransactionCount: finiteNumber(
+          row.unclassified_transaction_count,
+          `cash_flow_monthly_closes[id=${str(row.id)}].unclassified_transaction_count`,
+        ),
         closedAt: str(row.closed_at),
       }))
       .sort((a, b) => b.month.localeCompare(a.month) || b.version - a.version);
@@ -383,7 +477,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       label: str(row.label),
       categoryId: str(row.category_id),
       categoryName: categoryNames.get(str(row.category_id)) ?? "",
-      amount: num(row.amount),
+      amount: finiteNumber(row.amount, `transactions[id=${str(row.id)}].amount`),
       currency: str(row.currency),
       kindOverride: row.kind_override
         ? (str(row.kind_override) as Transaction["kindOverride"])
@@ -401,10 +495,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       .map((row) => ({
         id: str(row.id),
         name: str(row.name),
-        targetAmount: num(row.target_amount),
+        targetAmount: finiteNumber(row.target_amount, `goals[id=${str(row.id)}].target_amount`),
         targetDate:
           row.target_date === null || row.target_date === undefined ? null : str(row.target_date),
-        priority: num(row.priority),
+        priority: finiteNumber(row.priority, `goals[id=${str(row.id)}].priority`),
         status: str(row.status) as Goal["status"],
       }))
       .sort((a, b) => a.priority - b.priority);
@@ -426,11 +520,17 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       .map((row) => ({
         id: str(row.id),
         closeDate: str(row.close_date),
-        grossAssets: num(row.gross_assets),
-        debt: num(row.debt),
-        netWorth: num(row.net_worth),
-        forecastNetWorth: numOrNull(row.forecast_net_worth),
-        variance: numOrNull(row.variance),
+        grossAssets: finiteNumber(
+          row.gross_assets,
+          `monthly_closes[id=${str(row.id)}].gross_assets`,
+        ),
+        debt: finiteNumber(row.debt, `monthly_closes[id=${str(row.id)}].debt`),
+        netWorth: finiteNumber(row.net_worth, `monthly_closes[id=${str(row.id)}].net_worth`),
+        forecastNetWorth: nullableFiniteNumber(
+          row.forecast_net_worth,
+          `monthly_closes[id=${str(row.id)}].forecast_net_worth`,
+        ),
+        variance: nullableFiniteNumber(row.variance, `monthly_closes[id=${str(row.id)}].variance`),
         createdAt: str(row.created_at),
       }))
       .sort((a, b) => b.closeDate.localeCompare(a.closeDate));
@@ -440,7 +540,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         id: str(row.id),
         name: str(row.name),
         category: str(row.category),
-        size: num(row.size_bytes),
+        size: finiteNumber(row.size_bytes, `documents[id=${str(row.id)}].size_bytes`),
         uploadedAt: str(row.uploaded_at),
         status: str(row.status) as DocumentRecord["status"],
       }))
@@ -515,111 +615,34 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         break;
       }
       case "add_account": {
-        const institution = unwrap(
-          await db
-            .from("institutions")
-            .upsert(
-              { user_id: user, name: mutation.institution, country_code: "FR" },
-              { onConflict: "user_id,name" },
-            )
-            .select("id")
-            .single(),
-          "création d'établissement",
-        ) as Row;
-        const account = unwrap(
-          await db
-            .from("financial_accounts")
-            .insert({
-              user_id: user,
-              institution_id: institution.id,
-              name: mutation.name,
-              account_type: mutation.accountType,
-              currency: mutation.currency,
-              liquidity:
-                mutation.accountType === "BANK" || mutation.accountType === "SAVINGS"
-                  ? "IMMEDIATE"
-                  : "LIQUID",
-              status: "ACTIVE",
-              data_kind: "ACTUAL",
-              confidence: "HIGH",
-              source: "Saisie manuelle",
-              effective_date: AS_OF_DATE,
-            })
-            .select("id")
-            .single(),
-          "création de compte",
-        ) as Row;
         unwrap(
-          await db
-            .from("account_balances")
-            .insert({
-              user_id: user,
-              account_id: account.id,
-              balance: mutation.balance,
-              balance_date: AS_OF_DATE,
-              data_kind: "ACTUAL",
-              confidence: "HIGH",
-              source: "Saisie manuelle",
-            })
-            .select("id"),
-          "solde initial",
+          await db.rpc("lfo_add_account", {
+            p_user_id: user,
+            p_institution: mutation.institution,
+            p_name: mutation.name,
+            p_account_type: mutation.accountType,
+            p_balance: finiteNumber(mutation.balance, "add_account.balance"),
+            p_currency: mutation.currency,
+            p_as_of_date: AS_OF_DATE,
+          }),
+          "création atomique de compte",
         );
         break;
       }
       case "add_transaction": {
         unwrap(
-          await db
-            .from("transactions")
-            .insert({
-              user_id: user,
-              account_id: mutation.accountId,
-              category_id: mutation.categoryId,
-              transaction_date: mutation.date,
-              label: mutation.label,
-              amount: mutation.amount,
-              currency: REPORTING_CURRENCY,
-              data_kind: "ACTUAL",
-              confidence: "HIGH",
-              source: "Saisie manuelle",
-            })
-            .select("id"),
-          "insertion de transaction",
+          await db.rpc("lfo_add_transaction", {
+            p_user_id: user,
+            p_account_id: mutation.accountId,
+            p_category_id: mutation.categoryId,
+            p_transaction_date: mutation.date,
+            p_label: mutation.label,
+            p_amount: finiteNumber(mutation.amount, "add_transaction.amount"),
+            p_currency: REPORTING_CURRENCY,
+            p_update_balance: mutation.updateBalance,
+          }),
+          "insertion atomique de transaction",
         );
-        if (mutation.updateBalance) {
-          const latest = unwrap(
-            await db
-              .from("account_balances")
-              .select("balance, balance_date")
-              .eq("user_id", user)
-              .eq("account_id", mutation.accountId)
-              .order("balance_date", { ascending: false })
-              .order("created_at", { ascending: false })
-              .limit(1),
-            "lecture du dernier solde",
-          ) as Row[];
-          if (latest.length === 0) throw new Error("Aucun solde connu pour ce compte");
-          // Un snapshot de solde daté est la vérité du compte à cette date : il contient
-          // déjà les mouvements antérieurs. Une transaction plus ancienne enrichit donc le
-          // ledger sans toucher au solde observé, sinon elle serait comptée deux fois.
-          const latestDate = str(latest[0].balance_date);
-          if (shouldDeriveBalance(mutation.date, latestDate)) {
-            unwrap(
-              await db
-                .from("account_balances")
-                .insert({
-                  user_id: user,
-                  account_id: mutation.accountId,
-                  balance: num(latest[0].balance) + mutation.amount,
-                  balance_date: mutation.date,
-                  data_kind: "DERIVED",
-                  confidence: "HIGH",
-                  source: "Transaction saisie",
-                })
-                .select("id"),
-              "solde dérivé",
-            );
-          }
-        }
         break;
       }
       case "update_expense": {
@@ -642,102 +665,31 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         break;
       }
       case "update_scenario": {
-        const existing = unwrap(
-          await db
-            .from("scenarios")
-            .select("*")
-            .eq("user_id", user)
-            .eq("id", mutation.scenarioId)
-            .maybeSingle(),
-          "lecture de scénario",
-        ) as Row | null;
-        if (!existing) throw new Error("Scenario not found");
         const patch: Row = {};
         for (const [key, column] of Object.entries(SCENARIO_COLUMNS)) {
           const value = (mutation.patch as Record<string, unknown>)[key];
           if (value !== undefined) patch[column] = value;
         }
         if (Object.keys(patch).length === 0) break;
-        const version = num(existing.current_version) + 1;
-        const updated = unwrap(
-          await db
-            .from("scenarios")
-            .update({
-              ...patch,
-              current_version: version,
-              data_kind: "USER_ASSUMPTION",
-              confidence: "HIGH",
-              updated_at: now,
-            })
-            .eq("id", mutation.scenarioId)
-            .eq("user_id", user)
-            .select("*")
-            .single(),
-          "mise à jour de scénario",
-        ) as Row;
         unwrap(
-          await db
-            .from("scenario_versions")
-            .insert({
-              user_id: user,
-              scenario_id: mutation.scenarioId,
-              version,
-              payload: updated,
-            })
-            .select("id"),
-          "versionnage de scénario",
+          await db.rpc("lfo_update_scenario", {
+            p_user_id: user,
+            p_scenario_id: mutation.scenarioId,
+            p_patch: patch,
+            p_updated_at: now,
+          }),
+          "mise à jour atomique de scénario",
         );
         break;
       }
       case "duplicate_scenario": {
-        const source = unwrap(
-          await db
-            .from("scenarios")
-            .select("*")
-            .eq("user_id", user)
-            .eq("id", mutation.scenarioId)
-            .maybeSingle(),
-          "lecture de scénario",
-        ) as Row | null;
-        if (!source) throw new Error("Scenario not found");
-        const copy = unwrap(
-          await db
-            .from("scenarios")
-            .insert({
-              user_id: user,
-              name: `${str(source.name)} — copie`,
-              description: source.description,
-              color: source.color,
-              current_version: 1,
-              annual_return: source.annual_return,
-              annual_volatility: source.annual_volatility,
-              annual_inflation: source.annual_inflation,
-              monthly_savings: source.monthly_savings,
-              investment_allocation_rate: source.investment_allocation_rate,
-              salary_growth: source.salary_growth,
-              stress_probability: source.stress_probability,
-              shock_year: source.shock_year,
-              shock_magnitude: source.shock_magnitude,
-              data_kind: "USER_ASSUMPTION",
-              confidence: "HIGH",
-              created_at: now,
-              updated_at: now,
-            })
-            .select("*")
-            .single(),
-          "duplication de scénario",
-        ) as Row;
         unwrap(
-          await db
-            .from("scenario_versions")
-            .insert({
-              user_id: user,
-              scenario_id: copy.id,
-              version: 1,
-              payload: copy,
-            })
-            .select("id"),
-          "versionnage de la copie",
+          await db.rpc("lfo_duplicate_scenario", {
+            p_user_id: user,
+            p_scenario_id: mutation.scenarioId,
+            p_now: now,
+          }),
+          "duplication atomique de scénario",
         );
         break;
       }
@@ -747,39 +699,16 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         const forecast = prior?.netWorth ?? null;
         const variance = forecast === null ? null : state.metrics.netWorth - forecast;
         unwrap(
-          await db
-            .from("monthly_closes")
-            .upsert(
-              {
-                user_id: user,
-                close_date: mutation.closeDate,
-                gross_assets: state.metrics.grossAssets,
-                debt: state.metrics.debt,
-                net_worth: state.metrics.netWorth,
-                forecast_net_worth: forecast,
-                variance,
-              },
-              { onConflict: "user_id,close_date" },
-            )
-            .select("id"),
-          "clôture mensuelle",
-        );
-        unwrap(
-          await db
-            .from("net_worth_snapshots")
-            .upsert(
-              {
-                user_id: user,
-                snapshot_date: mutation.closeDate,
-                gross_assets: state.metrics.grossAssets,
-                debt: state.metrics.debt,
-                net_worth: state.metrics.netWorth,
-                data_kind: "ACTUAL",
-              },
-              { onConflict: "user_id,snapshot_date" },
-            )
-            .select("id"),
-          "photo de patrimoine",
+          await db.rpc("lfo_create_monthly_close", {
+            p_user_id: user,
+            p_close_date: mutation.closeDate,
+            p_gross_assets: finiteNumber(state.metrics.grossAssets, "monthly_close.gross_assets"),
+            p_debt: finiteNumber(state.metrics.debt, "monthly_close.debt"),
+            p_net_worth: finiteNumber(state.metrics.netWorth, "monthly_close.net_worth"),
+            p_forecast_net_worth: forecast,
+            p_variance: variance,
+          }),
+          "clôture mensuelle atomique",
         );
         break;
       }
@@ -826,38 +755,17 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         break;
       }
       case "add_category": {
-        const category = unwrap(
-          await db
-            .from("expense_categories")
-            .insert({
-              user_id: user,
-              name: mutation.name,
-              group_name: mutation.groupName,
-              essential: mutation.essentiality === "ESSENTIAL",
-              cash_flow_kind: mutation.cashFlowKind,
-              essentiality: mutation.essentiality,
-              expense_behavior: mutation.behavior,
-              archived: false,
-            })
-            .select("id")
-            .single(),
-          "création de catégorie",
-        ) as Row;
         unwrap(
-          await db
-            .from("budgets")
-            .insert({
-              user_id: user,
-              category_id: category.id,
-              lifestyle: "COMFORTABLE",
-              monthly_amount: null,
-              data_kind: "MISSING",
-              confidence: "UNKNOWN",
-              source: "À renseigner",
-              effective_date: AS_OF_DATE,
-            })
-            .select("id"),
-          "budget de catégorie",
+          await db.rpc("lfo_add_category", {
+            p_user_id: user,
+            p_name: mutation.name,
+            p_group_name: mutation.groupName,
+            p_cash_flow_kind: mutation.cashFlowKind,
+            p_essentiality: mutation.essentiality,
+            p_expense_behavior: mutation.behavior,
+            p_as_of_date: AS_OF_DATE,
+          }),
+          "création atomique de catégorie",
         );
         break;
       }
@@ -961,38 +869,22 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           bounds.start,
           bounds.end,
         );
-        // Jamais d'écrasement : une clôture existante donne lieu à une version supplémentaire.
-        const existing = unwrap(
-          await db
-            .from("cash_flow_monthly_closes")
-            .select("version")
-            .eq("user_id", user)
-            .eq("month", mutation.month)
-            .order("version", { ascending: false })
-            .limit(1),
-          "lecture de clôture",
-        ) as Row[];
-        const version = existing.length ? num(existing[0].version) + 1 : 1;
         unwrap(
-          await db
-            .from("cash_flow_monthly_closes")
-            .insert({
-              user_id: user,
-              month: mutation.month,
-              version,
-              income: observed.income,
-              consumer_expenses: observed.consumerExpenses,
-              essential_expenses: observed.essentialExpenses,
-              taxes_paid: observed.taxesPaid,
-              debt_service_paid: observed.debtServicePaid,
-              investment_flows: observed.investmentFlows,
-              internal_transfers: observed.internalTransfers,
-              operating_surplus_before_debt: observed.operatingCashFlowBeforeDebt,
-              post_debt_surplus: observed.cashFlowAfterDebt,
-              unclassified_transaction_count: observed.dataQuality.unclassifiedTransactionCount,
-            })
-            .select("id"),
-          "clôture Cash Flow",
+          await db.rpc("lfo_close_cash_flow_month", {
+            p_user_id: user,
+            p_month: mutation.month,
+            p_income: observed.income,
+            p_consumer_expenses: observed.consumerExpenses,
+            p_essential_expenses: observed.essentialExpenses,
+            p_taxes_paid: observed.taxesPaid,
+            p_debt_service_paid: observed.debtServicePaid,
+            p_investment_flows: observed.investmentFlows,
+            p_internal_transfers: observed.internalTransfers,
+            p_operating_surplus_before_debt: observed.operatingCashFlowBeforeDebt,
+            p_post_debt_surplus: observed.cashFlowAfterDebt,
+            p_unclassified_transaction_count: observed.dataQuality.unclassifiedTransactionCount,
+          }),
+          "clôture Cash Flow atomique",
         );
         break;
       }
@@ -1014,67 +906,57 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       upsert: false,
     });
     if (uploaded.error) throw new Error(`Supabase stockage : ${uploaded.error.message}`);
-    const row = unwrap(
-      await db
-        .from("documents")
-        .insert({
-          user_id: user,
-          name: upload.name,
-          category: upload.category,
-          storage_path: storagePath,
-          size_bytes: upload.size,
-          status: "INBOX",
-        })
-        .select("*")
-        .single(),
-      "enregistrement de document",
-    ) as Row;
+    let row: Row;
+    try {
+      row = unwrap(
+        await db
+          .from("documents")
+          .insert({
+            user_id: user,
+            name: upload.name,
+            category: upload.category,
+            storage_path: storagePath,
+            size_bytes: finiteNumber(upload.size, "documents.size_bytes"),
+            status: "INBOX",
+          })
+          .select("*")
+          .single(),
+        "enregistrement de document",
+      ) as Row;
+    } catch (error) {
+      const rollback = await db.storage.from(DOCUMENTS_BUCKET).remove([storagePath]);
+      const message = error instanceof Error ? error.message : String(error);
+      if (rollback.error) {
+        throw new Error(
+          `${message}. Rollback Storage échoué pour ${storagePath} : ${rollback.error.message}`,
+        );
+      }
+      throw error;
+    }
     return {
       id: str(row.id),
       name: str(row.name),
       category: str(row.category),
-      size: num(row.size_bytes),
+      size: finiteNumber(row.size_bytes, `documents[id=${str(row.id)}].size_bytes`),
       uploadedAt: str(row.uploaded_at),
       status: str(row.status) as DocumentRecord["status"],
     };
   }
 
   async function saveSimulation(run: SimulationRun): Promise<string> {
-    const created = unwrap(
-      await db
-        .from("simulation_runs")
-        .insert({
-          user_id: user,
-          scenario_id: run.scenarioId,
-          seed: run.seed,
-          simulations: run.simulations,
-          years: run.years,
-          methodology: run.methodology,
-        })
-        .select("id")
-        .single(),
-      "enregistrement de simulation",
-    ) as Row;
-    const runId = str(created.id);
-    unwrap(
-      await db
-        .from("simulation_results")
-        .insert(
-          run.points.map((point) => ({
-            user_id: user,
-            run_id: runId,
-            year: point.year,
-            p10: point.p10,
-            p25: point.p25,
-            p50: point.p50,
-            p75: point.p75,
-            p90: point.p90,
-          })),
-        )
-        .select("id"),
-      "résultats de simulation",
-    );
-    return runId;
+    validateSimulationRun(run);
+    return unwrap(
+      await db.rpc("lfo_save_simulation", {
+        p_user_id: user,
+        p_scenario_id: run.scenarioId,
+        p_seed: run.seed,
+        p_simulations: run.simulations,
+        p_years: run.years,
+        p_methodology: run.methodology,
+        p_points: run.points,
+      }),
+      "enregistrement atomique de simulation",
+    ) as string;
   }
 
   return { adapter: "supabase", getDashboardState, mutateState, storeDocument, saveSimulation };
