@@ -30,16 +30,18 @@ SESSION_SECRET=...
 LOCAL_ACCESS_CODE=...
 SUPABASE_URL=...
 SUPABASE_SECRET_KEY=...
+SUPABASE_DB_URL=...
 OWNER_USER_ID=...
 SUPABASE_DOCUMENTS_BUCKET=family-office-documents
 ```
 
-`SUPABASE_SECRET_KEY` est strictement serveur et ne doit jamais être préfixée `NEXT_PUBLIC_`.
+`SUPABASE_SECRET_KEY` et `SUPABASE_DB_URL` sont strictement serveur et ne doivent jamais être préfixées `NEXT_PUBLIC_`. La seconde n'est utilisée que par la vérification PostgreSQL read-only.
 
 Appliquer et vérifier le schéma sur le projet de développement, puis amorcer une base vide une seule fois :
 
 ```bash
 supabase migration list
+supabase db push --dry-run
 supabase db push
 npm run db:verify
 npm run seed:supabase
@@ -65,7 +67,7 @@ npm run build
 npm run check
 ```
 
-`npm run db:verify` effectue uniquement des lectures et échoue avec un diagnostic précis si une table ou colonne obligatoire manque.
+`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les tables, colonnes, contraintes, huit RPC, permissions, RLS, policies, bucket Storage ou sept versions de migration divergent du code.
 
 ## Fonctionnalités
 

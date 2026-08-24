@@ -7,13 +7,15 @@ npm ci
 cp .env.example .env.local
 ```
 
-Renseigner `SESSION_SECRET`, `LOCAL_ACCESS_CODE`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `OWNER_USER_ID` et `SUPABASE_DOCUMENTS_BUCKET`.
+Renseigner `SESSION_SECRET`, `LOCAL_ACCESS_CODE`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_DB_URL`, `OWNER_USER_ID` et `SUPABASE_DOCUMENTS_BUCKET`.
 
 Avant toute mise à jour du schéma :
 
 ```bash
 supabase --version
 supabase migration list
+supabase db reset # cible locale uniquement
+supabase db push --dry-run
 supabase db push
 npm run db:verify
 ```

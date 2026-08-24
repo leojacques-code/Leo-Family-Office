@@ -11,11 +11,12 @@ SESSION_SECRET=
 LOCAL_ACCESS_CODE=
 SUPABASE_URL=
 SUPABASE_SECRET_KEY=
+SUPABASE_DB_URL=
 OWNER_USER_ID=
 SUPABASE_DOCUMENTS_BUCKET=family-office-documents
 ```
 
-`SUPABASE_SECRET_KEY` est strictement serveur. Ne jamais la préfixer `NEXT_PUBLIC_` et ne jamais l’importer dans un composant client.
+`SUPABASE_SECRET_KEY` et `SUPABASE_DB_URL` sont strictement serveur. Ne jamais les préfixer `NEXT_PUBLIC_` ni les importer dans un composant client. `SUPABASE_DB_URL` sert uniquement à `db:verify` et doit viser le même environnement que les autres variables.
 
 Environnements recommandés :
 
@@ -35,6 +36,8 @@ Vérifier la CLI avec ses aides intégrées, puis inspecter l’état avant tout
 supabase --version
 supabase --help
 supabase migration list
+supabase db reset # cible locale uniquement
+supabase db push --dry-run
 supabase db push
 ```
 
@@ -61,7 +64,7 @@ npm run db:verify
 supabase db advisors
 ```
 
-`db:verify` est read-only et contrôle les tables/colonnes structurantes des scénarios, Cash Flow V2, Debt V2/V2.1, ledger et simulations.
+`db:verify` ouvre une transaction PostgreSQL `READ ONLY` via `SUPABASE_DB_URL`. Il contrôle les tables et colonnes structurantes, contraintes, huit RPC et leurs permissions, RLS, policies `owner_all`, bucket et policies Storage, ainsi que les sept versions de migration.
 
 Contrôler aussi :
 
