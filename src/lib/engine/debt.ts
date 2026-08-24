@@ -365,6 +365,20 @@ function amortise(input: AmortiseInput): AmortiseResult {
     }
   }
 
+  // Assurance déclarée sans sa convention : l'amortissement dépend d'une hypothèse, il
+  // faut donc que l'échéancier le dise, pas seulement un drapeau de la timeline.
+  if (
+    liability.monthlyPayment > 0 &&
+    insurance > 0 &&
+    liability.paymentIncludesInsurance === null
+  ) {
+    flags.push({
+      code: "INSURANCE_TREATMENT_UNKNOWN",
+      detail: `Assurance de ${EUR.format(insurance)} par échéance déclarée sans préciser si la mensualité ${EUR.format(liability.monthlyPayment)} la contient. Supposée en sus : si elle était incluse, l'amortissement serait plus lent et le coût du crédit plus élevé.`,
+    });
+    assumed = true;
+  }
+
   const events = [...input.events].sort((a, b) => a.date.localeCompare(b.date));
   let eventIndex = 0;
   let balance = input.openingBalance;
@@ -394,6 +408,9 @@ function amortise(input: AmortiseInput): AmortiseResult {
     const repayment = event.repayment;
     const repaid = Math.min(balance, Math.max(0, repayment.amount));
     if (repayment.penalty === null) {
+      // Une indemnité inconnue sous-estime le décaissement : la trajectoire entière devient
+      // une hypothèse, pas seulement la ligne concernée.
+      assumed = true;
       flags.push({
         code: "EARLY_REPAYMENT_PENALTY_UNKNOWN",
         detail: `Remboursement anticipé du ${frDate(event.date)} : indemnité inconnue, exclue du décaissement plutôt que supposée nulle.`,
@@ -635,7 +652,28 @@ export function buildForwardSchedule(liability: Liability, asOfDate: string): Lo
             kind: event.repayment.penalty === null ? "MODEL_ASSUMPTION" : "ACTUAL",
           }),
     );
-    return summarise(liability.id, [...future, ...extra], "ACTUAL");
+    // Un échéancier bancaire reste ACTUAL, mais un événement dont la convention est
+    // inconnue rend la trajectoire hypothétique : la marquer ACTUAL la ferait passer pour
+    // certifiée par la banque.
+    const assumedEvent = extra.some((row) => row.kind === "MODEL_ASSUMPTION");
+    const unknownConvention = events.some(
+      (event) => event.type === "EARLY_REPAYMENT" && event.repayment.outcome === "UNKNOWN",
+    );
+    const scheduleFlags: LoanScheduleFlag[] = unknownConvention
+      ? [
+          {
+            code: "EARLY_REPAYMENT_CONVENTION_UNKNOWN",
+            detail:
+              "Remboursement anticipé de convention inconnue sur un prêt à échéancier bancaire : les prélèvements postérieurs ne sont plus ceux du document.",
+          },
+        ]
+      : [];
+    return summarise(
+      liability.id,
+      [...future, ...extra],
+      assumedEvent || unknownConvention ? "MODEL_ASSUMPTION" : "ACTUAL",
+      scheduleFlags,
+    );
   }
 
   if (!isUsable(liability)) return EMPTY_SCHEDULE(liability.id, "MISSING");
@@ -721,12 +759,15 @@ export function projectedBalanceAt(
   targetDate: string,
 ): number {
   if (targetDate <= asOfDate) return liability.currentBalance;
-  const forward = buildForwardSchedule(liability, asOfDate);
-  const due = forward.entries.filter(
-    (row) => row.dueDate <= targetDate && row.entryKind !== "CHARGE",
+  const due = buildForwardSchedule(liability, asOfDate).entries.filter(
+    (row) => row.dueDate <= targetDate,
   );
   if (!due.length) return liability.currentBalance;
-  return due.at(-1)?.closingBalance ?? 0;
+  // L'encours observé ancre la projection ; l'échéancier n'en fournit que les variations.
+  // Reprendre le `closingBalance` absolu d'un échéancier bancaire écraserait silencieusement
+  // une observation plus récente, alors que c'est elle la vérité du bilan à `asOfDate`.
+  const change = due.reduce((sum, row) => sum + row.principal - row.capitalisedInterest, 0);
+  return Math.max(0, liability.currentBalance - change);
 }
 
 /**
@@ -763,18 +804,6 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
     elapsed === 0
       ? (paymentRows[0]?.openingBalance ?? liability.principal)
       : (paymentRows.filter((row) => row.dueDate <= asOfDate).at(-1)?.closingBalance ?? 0);
-
-  const insurance = insurancePerPayment(liability);
-  if (
-    liability.monthlyPayment > 0 &&
-    insurance > 0 &&
-    liability.paymentIncludesInsurance === null
-  ) {
-    flags.push({
-      code: "INSURANCE_TREATMENT_UNKNOWN",
-      detail: `Assurance de ${EUR.format(insurance)} par échéance déclarée sans préciser si la mensualité ${EUR.format(liability.monthlyPayment)} la contient. Supposée en sus : si elle était incluse, l'amortissement serait plus lent et le coût du crédit plus élevé.`,
-    });
-  }
 
   const declaredCount = hasProvidedSchedule(liability)
     ? paymentRows.length

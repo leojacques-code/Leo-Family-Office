@@ -12,6 +12,7 @@ import {
   upcomingDebtEvents,
   amortisingPayment,
   debtServiceBreakdownForPeriod,
+  projectedBalanceAt,
   UNDECLARED_LOAN_TERMS,
 } from "@/lib/engine/debt";
 import type { Liability, LoanScheduleEntry, Provenance } from "@/lib/types";
@@ -862,5 +863,213 @@ describe("CASE D16 — la charge implicite réconcilie le prêt étudiant", () =
     // fourni reviendrait à figer nos propres hypothèses en faits de la banque.
     expect(studentLoan.providedSchedule).toHaveLength(0);
     expect(buildContractualSchedule(studentLoan).kind).toBe("DERIVED");
+  });
+});
+
+describe("CASE D17 — échéancier bancaire contre encours observé", () => {
+  const provided = [
+    {
+      paymentNumber: 1,
+      dueDate: "2026-09-05",
+      openingBalance: 10000,
+      interest: 30,
+      principal: 470,
+      insurance: 12,
+      fees: 2,
+      closingBalance: 9530,
+    },
+    {
+      paymentNumber: 2,
+      dueDate: "2026-10-05",
+      openingBalance: 9530,
+      interest: 28.59,
+      principal: 471.41,
+      insurance: 12,
+      fees: 2,
+      closingBalance: 9058.59,
+    },
+    {
+      paymentNumber: 3,
+      dueDate: "2026-11-05",
+      openingBalance: 9058.59,
+      interest: 27.18,
+      principal: 472.82,
+      insurance: 12,
+      fees: 2,
+      closingBalance: 8585.77,
+    },
+  ];
+
+  /** Échéancier bancaire devenu obsolète : l'encours réel est 800 € au-dessus. */
+  const obsolete = loan({
+    principal: 10000,
+    currentBalance: 10330,
+    paymentCount: 24,
+    providedSchedule: provided,
+  });
+  const asOf = "2026-09-20";
+
+  it("l’encours observé reste la vérité du bilan à la date d’analyse", () => {
+    expect(outstandingBalanceAt(obsolete, asOf)).toBeCloseTo(10330, 6);
+    expect(buildLoanTimeline(obsolete, asOf).balance.observed).toBeCloseTo(10330, 6);
+  });
+
+  it("l’échéancier bancaire reste la vérité des prélèvements futurs", () => {
+    const forward = buildForwardSchedule(obsolete, asOf);
+    expect(forward.kind).toBe("ACTUAL");
+    expect(forward.entries.map((row) => row.dueDate)).toEqual(["2026-10-05", "2026-11-05"]);
+    expect(forward.entries[0].totalCashOut).toBeCloseTo(514, 6);
+  });
+
+  it("la contradiction est signalée, jamais résorbée en silence", () => {
+    const timeline = buildLoanTimeline(obsolete, asOf);
+    expect(timeline.balance.reconciled).toBe(false);
+    expect(timeline.balance.contractual).toBeCloseTo(9530, 6);
+    expect(timeline.balance.difference).toBeCloseTo(800, 6);
+    expect(timeline.flags.some((flag) => flag.code === "BALANCE_MISMATCH")).toBe(true);
+  });
+
+  it("l’échéancier bancaire n’écrase jamais l’encours observé dans la projection", () => {
+    // Le document annonce 9 058,59 € au 5 octobre. L'observation dit 800 € de plus.
+    // La projection part de l'observé et n'applique que les variations du document.
+    expect(projectedBalanceAt(obsolete, asOf, "2026-10-05")).toBeCloseTo(10330 - 471.41, 6);
+    expect(projectedBalanceAt(obsolete, asOf, "2026-11-05")).toBeCloseTo(
+      10330 - 471.41 - 472.82,
+      6,
+    );
+    // L'écart de 800 € est conservé, ni absorbé ni amplifié.
+    expect(projectedBalanceAt(obsolete, asOf, "2026-11-05") - 8585.77).toBeCloseTo(800, 6);
+  });
+
+  it("un encours observé réconcilié donne la même projection que le document", () => {
+    const conforme = { ...obsolete, currentBalance: 9530 };
+    expect(buildLoanTimeline(conforme, asOf).balance.reconciled).toBe(true);
+    expect(projectedBalanceAt(conforme, asOf, "2026-11-05")).toBeCloseTo(8585.77, 6);
+  });
+});
+
+describe("CASE D18 — propagation des hypothèses", () => {
+  const cas = [
+    {
+      nom: "assurance de convention inconnue",
+      liability: loan({
+        monthlyPayment: 702.13,
+        monthlyInsurance: 25,
+        paymentIncludesInsurance: null,
+      }),
+      code: "INSURANCE_TREATMENT_UNKNOWN" as const,
+    },
+    {
+      nom: "différé total de traitement inconnu",
+      liability: loan({
+        monthlyPayment: 702.13,
+        deferral: { kind: "TOTAL" as const, months: 6, interestTreatment: "UNKNOWN" as const },
+      }),
+      code: "DEFERRAL_INTEREST_UNKNOWN" as const,
+    },
+    {
+      nom: "remboursement anticipé de convention inconnue",
+      liability: loan({
+        monthlyPayment: 702.13,
+        earlyRepayments: [
+          {
+            id: "er",
+            liabilityId: "lia_v2",
+            date: "2030-06-15",
+            amount: 10000,
+            penalty: 100,
+            outcome: "UNKNOWN" as const,
+          },
+        ],
+      }),
+      code: "EARLY_REPAYMENT_CONVENTION_UNKNOWN" as const,
+    },
+    {
+      nom: "indemnité de remboursement inconnue",
+      liability: loan({
+        monthlyPayment: 702.13,
+        earlyRepayments: [
+          {
+            id: "er",
+            liabilityId: "lia_v2",
+            date: "2030-06-15",
+            amount: 10000,
+            penalty: null,
+            outcome: "SHORTEN_TERM" as const,
+          },
+        ],
+      }),
+      code: "EARLY_REPAYMENT_PENALTY_UNKNOWN" as const,
+    },
+  ];
+
+  for (const { nom, liability, code } of cas) {
+    it(`${nom} : échéancier et lignes marqués MODEL_ASSUMPTION, drapeau visible`, () => {
+      const timeline = buildLoanTimeline(liability, "2026-08-19");
+      const schedule = code.startsWith("EARLY_REPAYMENT") ? timeline.forward : timeline.contractual;
+      expect(timeline.flags.some((flag) => flag.code === code)).toBe(true);
+      // Le niveau qui compte pour un consommateur est celui de l'échéancier : c'est la
+      // TRAJECTOIRE qui devient hypothétique.
+      expect(schedule.kind).toBe("MODEL_ASSUMPTION");
+      expect(schedule.entries.some((row) => row.kind === "MODEL_ASSUMPTION")).toBe(true);
+      // Aucune échéance projetée ne peut passer pour constatée. Une ligne qui enregistre un
+      // fait déclaré, comme un remboursement dont le montant et l'indemnité sont connus,
+      // reste ACTUAL : la dégrader serait moins précis, pas plus prudent.
+      expect(
+        schedule.entries
+          .filter((row) => row.entryKind === "PAYMENT")
+          .every((row) => row.kind !== "ACTUAL"),
+      ).toBe(true);
+    });
+  }
+
+  it("un contrat complet reste DERIVED, sans hypothèse superflue", () => {
+    const net = loan({
+      monthlyPayment: 702.13,
+      monthlyInsurance: 25,
+      paymentIncludesInsurance: false,
+      recurringFees: 2,
+    });
+    const timeline = buildLoanTimeline(net, "2026-08-19");
+    expect(timeline.contractual.kind).toBe("DERIVED");
+    expect(timeline.forward.kind).toBe("DERIVED");
+    expect(timeline.flags.filter((flag) => flag.code.endsWith("_UNKNOWN"))).toHaveLength(0);
+  });
+
+  it("un échéancier bancaire perd son statut ACTUAL si un événement est hypothétique", () => {
+    const banque = loan({
+      principal: 10000,
+      currentBalance: 10000,
+      paymentCount: 24,
+      providedSchedule: [
+        {
+          paymentNumber: 1,
+          dueDate: "2027-01-05",
+          openingBalance: 10000,
+          interest: 30,
+          principal: 470,
+          insurance: 0,
+          fees: 0,
+          closingBalance: 9530,
+        },
+      ],
+    });
+    expect(buildForwardSchedule(banque, "2026-08-19").kind).toBe("ACTUAL");
+    const avecEvenement = {
+      ...banque,
+      earlyRepayments: [
+        {
+          id: "er",
+          liabilityId: "lia_v2",
+          date: "2027-02-01",
+          amount: 5000,
+          penalty: null,
+          outcome: "UNKNOWN" as const,
+        },
+      ],
+    };
+    // Le document bancaire ne prévoit pas ce remboursement : ses prélèvements postérieurs
+    // ne sont plus ceux qu'il annonce.
+    expect(buildForwardSchedule(avecEvenement, "2026-08-19").kind).toBe("MODEL_ASSUMPTION");
   });
 });
