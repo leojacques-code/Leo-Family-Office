@@ -17,6 +17,12 @@ import {
 } from "recharts";
 import { nextDebtEvent } from "@/lib/engine/debt";
 import {
+  cashRunwayDays,
+  computeObservedCashFlow,
+  forecastCashFlow,
+  trailingPeriod,
+} from "@/lib/engine/cash-flow";
+import {
   buildOpeningBalanceSheet,
   runDeterministicModel,
   scenarioAssumptions,
@@ -91,6 +97,20 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
   ].filter((item) => item.value > 0);
   const allocationTotal = allocation.reduce((sum, item) => sum + item.value, 0);
   const upcomingDebt = nextDebtEvent(state.liabilities, state.asOfDate);
+  // Surplus réellement constaté au ledger, à confronter à l'hypothèse du scénario.
+  const t3 = trailingPeriod(state.asOfDate, 3);
+  const observedT3M =
+    computeObservedCashFlow(state.transactions, state.expenseCategories, t3.start, t3.end)
+      .operatingCashFlowBeforeDebt / 3;
+  const runway = cashRunwayDays(
+    forecastCashFlow({
+      asOfDate: state.asOfDate,
+      horizonDays: 365,
+      openingCash: state.metrics.bankCash,
+      rules: state.recurringRules,
+      liabilities: state.liabilities,
+    }),
+  );
   const primaryGoal = state.goals[0];
 
   return (
@@ -385,6 +405,11 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
               <Currency value={state.metrics.freeCashFlow} sign />
             </strong>
           </div>
+          <p className="muted-copy">
+            Surplus constaté au ledger sur 3 mois : <Currency value={observedT3M} sign />
+            /mois
+            {runway !== null ? ` · trésorerie négative projetée dans ${runway} jours` : ""}
+          </p>
         </article>
         <article className="panel goals-card">
           <div className="panel-header">

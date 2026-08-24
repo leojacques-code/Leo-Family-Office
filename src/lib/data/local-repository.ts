@@ -7,6 +7,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { amortizeLoan } from "@/lib/engine/financial";
 import { AS_OF_DATE, REPORTING_CURRENCY, deriveMetrics, ledgerWindowStart, shouldDeriveBalance } from "@/lib/data/shared";
+import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
+import { monthBounds } from "@/lib/engine/debt";
 import type { FamilyOfficeRepository } from "@/lib/data/repository";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type {
@@ -19,11 +21,18 @@ import type {
   IncomeSource,
   Liability,
   Position,
+  RecurringCashFlowRule,
+  CashFlowMonthlyClose,
   Scenario,
   Transaction,
 } from "@/lib/types";
 
 const USER_ID = "usr_leo";
+
+/** Bornes du mois civil désigné par une clé AAAA-MM. */
+function monthBoundsFromKey(month: string) {
+  return monthBounds(`${month}-01`);
+}
 let database: DatabaseSync | undefined;
 
 type SqlRow = Record<string, string | number | null>;
@@ -136,25 +145,41 @@ function seed(databaseInstance: DatabaseSync) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     incomes.forEach(([id, name, amount, active, startDate, kind, confidence, source, notes]) => insertIncome.run(id, USER_ID, name, amount, active, startDate, kind, confidence, source, startDate, notes));
 
+    // [id, nom, groupe, essentiel, budget, provenance, cashFlowKind, essentialité, comportement]
+    // La nature est portée par `cashFlowKind`, jamais par le nom du groupe.
     const categories = [
-      ["exp_rent", "Loyer charges comprises", "Logement", 1, 1140, "ACTUAL"],
-      ["exp_electricity", "Électricité", "Logement", 1, null, "MISSING"], ["exp_internet", "Internet", "Logement", 1, null, "MISSING"],
-      ["exp_phone", "Téléphone", "Vie courante", 1, null, "MISSING"], ["exp_insurance", "Assurance", "Vie courante", 1, null, "MISSING"],
-      ["exp_transport", "Transport", "Vie courante", 1, null, "MISSING"], ["exp_groceries", "Courses", "Vie courante", 1, null, "MISSING"],
-      ["exp_restaurants", "Restaurants", "Lifestyle", 0, null, "MISSING"], ["exp_bars", "Bars", "Lifestyle", 0, null, "MISSING"],
-      ["exp_clothing", "Habillement", "Lifestyle", 0, null, "MISSING"], ["exp_fragrance", "Parfums", "Lifestyle", 0, null, "MISSING"],
-      ["exp_decor", "Décoration", "Lifestyle", 0, null, "MISSING"], ["exp_holidays", "Vacances", "Lifestyle", 0, null, "MISSING"],
-      ["exp_gifts", "Cadeaux", "Lifestyle", 0, null, "MISSING"], ["exp_sport", "Sport", "Lifestyle", 0, null, "MISSING"],
-      ["exp_subscriptions", "Abonnements", "Lifestyle", 0, null, "MISSING"], ["exp_health", "Santé", "Vie courante", 1, null, "MISSING"],
-      ["exp_other", "Autres", "Autres", 0, null, "MISSING"], ["exp_income", "Revenu", "Revenus", 0, null, "MISSING"],
-      ["exp_investment", "Investissement", "Épargne", 0, null, "MISSING"],
+      ["exp_rent", "Loyer charges comprises", "Logement", 1, 1140, "ACTUAL", "EXPENSE", "ESSENTIAL", "FIXED"],
+      ["exp_electricity", "Électricité", "Logement", 1, null, "MISSING", "EXPENSE", "ESSENTIAL", "VARIABLE"],
+      ["exp_internet", "Internet", "Logement", 1, null, "MISSING", "EXPENSE", "ESSENTIAL", "FIXED"],
+      ["exp_phone", "Téléphone", "Vie courante", 1, null, "MISSING", "EXPENSE", "ESSENTIAL", "FIXED"],
+      ["exp_insurance", "Assurance", "Vie courante", 1, null, "MISSING", "EXPENSE", "ESSENTIAL", "FIXED"],
+      ["exp_transport", "Transport", "Vie courante", 1, null, "MISSING", "EXPENSE", "ESSENTIAL", "VARIABLE"],
+      ["exp_groceries", "Courses", "Vie courante", 1, null, "MISSING", "EXPENSE", "ESSENTIAL", "VARIABLE"],
+      ["exp_restaurants", "Restaurants", "Lifestyle", 0, null, "MISSING", "EXPENSE", "NON_ESSENTIAL", "DISCRETIONARY"],
+      ["exp_bars", "Bars", "Lifestyle", 0, null, "MISSING", "EXPENSE", "NON_ESSENTIAL", "DISCRETIONARY"],
+      ["exp_clothing", "Habillement", "Lifestyle", 0, null, "MISSING", "EXPENSE", "NON_ESSENTIAL", "DISCRETIONARY"],
+      ["exp_fragrance", "Parfums", "Lifestyle", 0, null, "MISSING", "EXPENSE", "NON_ESSENTIAL", "DISCRETIONARY"],
+      ["exp_decor", "Décoration", "Lifestyle", 0, null, "MISSING", "EXPENSE", "NON_ESSENTIAL", "DISCRETIONARY"],
+      ["exp_holidays", "Vacances", "Lifestyle", 0, null, "MISSING", "EXPENSE", "NON_ESSENTIAL", "DISCRETIONARY"],
+      ["exp_gifts", "Cadeaux", "Lifestyle", 0, null, "MISSING", "EXPENSE", "NON_ESSENTIAL", "DISCRETIONARY"],
+      ["exp_sport", "Sport", "Lifestyle", 0, null, "MISSING", "EXPENSE", "NON_ESSENTIAL", "DISCRETIONARY"],
+      ["exp_subscriptions", "Abonnements", "Lifestyle", 0, null, "MISSING", "EXPENSE", "NON_ESSENTIAL", "FIXED"],
+      ["exp_health", "Santé", "Vie courante", 1, null, "MISSING", "EXPENSE", "ESSENTIAL", "VARIABLE"],
+      ["exp_other", "Autres", "Autres", 0, null, "MISSING", "EXPENSE", "UNKNOWN", "UNKNOWN"],
+      ["exp_income", "Revenu", "Revenus", 0, null, "MISSING", "INCOME", "UNKNOWN", "UNKNOWN"],
+      ["exp_investment", "Investissement", "Épargne", 0, null, "MISSING", "INVESTMENT", "UNKNOWN", "UNKNOWN"],
+      ["exp_transfer", "Transfert interne", "Transferts", 0, null, "MISSING", "INTERNAL_TRANSFER", "UNKNOWN", "UNKNOWN"],
+      ["exp_debt", "Service de dette", "Dette", 1, null, "MISSING", "DEBT_SERVICE", "UNKNOWN", "UNKNOWN"],
+      ["exp_tax", "Impôts", "Impôts", 1, null, "MISSING", "TAX", "UNKNOWN", "UNKNOWN"],
+      ["exp_refund", "Remboursement reçu", "Autres", 0, null, "MISSING", "REFUND", "UNKNOWN", "UNKNOWN"],
+      ["exp_unclassified", "À classer", "Autres", 0, null, "MISSING", "UNCLASSIFIED", "UNKNOWN", "UNKNOWN"],
     ];
-    const insertCategory = databaseInstance.prepare("INSERT INTO expense_categories VALUES (?, ?, ?, ?, ?)");
+    const insertCategory = databaseInstance.prepare("INSERT INTO expense_categories (id,user_id,name,group_name,essential,cash_flow_kind,essentiality,expense_behavior,archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)");
     const insertBudget = databaseInstance.prepare(`INSERT INTO budgets
       (id,user_id,category_id,lifestyle,monthly_amount,kind,confidence,source,effective_date)
       VALUES (?, ?, ?, 'COMFORTABLE', ?, ?, ?, ?, ?)`);
-    categories.forEach(([id, name, groupName, essential, amount, kind]) => {
-      insertCategory.run(id, USER_ID, name, groupName, essential);
+    categories.forEach(([id, name, groupName, essential, amount, kind, cashFlowKind, essentiality, behavior]) => {
+      insertCategory.run(id, USER_ID, name, groupName, essential, cashFlowKind, essentiality, behavior);
       insertBudget.run(`bud_${id}`, USER_ID, id, amount, kind, kind === "ACTUAL" ? "HIGH" : "UNKNOWN", kind === "ACTUAL" ? "Données communiquées par Léo" : "À renseigner", AS_OF_DATE);
     });
 
@@ -249,7 +274,15 @@ function getIncomes(): IncomeSource[] {
 function getExpenses(): ExpenseCategory[] {
   return (db().prepare(`SELECT c.*,b.monthly_amount,b.kind,b.confidence,b.source,b.effective_date FROM expense_categories c
     JOIN budgets b ON b.category_id=c.id AND b.user_id=c.user_id AND b.lifestyle='COMFORTABLE' WHERE c.user_id=? ORDER BY c.group_name,c.name`).all(USER_ID) as SqlRow[]).map((row) => ({
-      id: String(row.id), name: String(row.name), groupName: String(row.group_name), monthlyAmount: row.monthly_amount === null ? null : Number(row.monthly_amount), essential: Boolean(row.essential), provenance: provenance(row),
+      id: String(row.id), name: String(row.name), groupName: String(row.group_name),
+      cashFlowKind: String(row.cash_flow_kind) as ExpenseCategory["cashFlowKind"],
+      essentiality: String(row.essentiality) as ExpenseCategory["essentiality"],
+      behavior: String(row.expense_behavior) as ExpenseCategory["behavior"],
+      monthlyAmount: row.monthly_amount === null ? null : Number(row.monthly_amount),
+      // Dérivé, jamais une seconde source de vérité.
+      essential: String(row.essentiality) === "ESSENTIAL",
+      archived: Boolean(row.archived),
+      provenance: provenance(row),
     }));
 }
 
@@ -259,8 +292,42 @@ function getTransactions(): Transaction[] {
   // sans aucun avertissement.
   return (db().prepare(`SELECT t.*,a.name account_name,c.name category_name FROM transactions t JOIN financial_accounts a ON a.id=t.account_id
     JOIN expense_categories c ON c.id=t.category_id WHERE t.user_id=? AND t.transaction_date>=? ORDER BY t.transaction_date DESC,t.created_at DESC`).all(USER_ID, ledgerWindowStart(AS_OF_DATE)) as SqlRow[]).map((row) => ({
-      id: String(row.id), accountId: String(row.account_id), accountName: String(row.account_name), date: String(row.transaction_date), label: String(row.label), categoryId: String(row.category_id), categoryName: String(row.category_name), amount: Number(row.amount), currency: String(row.currency), provenance: provenance(row),
+      id: String(row.id), accountId: String(row.account_id), accountName: String(row.account_name),
+      date: String(row.transaction_date), label: String(row.label), categoryId: String(row.category_id),
+      categoryName: String(row.category_name), amount: Number(row.amount), currency: String(row.currency),
+      kindOverride: row.kind_override ? (String(row.kind_override) as Transaction["kindOverride"]) : null,
+      transferGroupId: row.transfer_group_id ? String(row.transfer_group_id) : null,
+      notes: row.notes ? String(row.notes) : null,
+      provenance: provenance(row),
     }));
+}
+
+function getRecurringRules(): RecurringCashFlowRule[] {
+  return (db().prepare(`SELECT r.*, c.name AS category_name FROM recurring_cash_flow_rules r
+    JOIN expense_categories c ON c.id=r.category_id WHERE r.user_id=? ORDER BY r.active DESC, r.name`).all(USER_ID) as SqlRow[]).map((row) => ({
+      id: String(row.id), name: String(row.name),
+      cashFlowKind: String(row.cash_flow_kind) as RecurringCashFlowRule["cashFlowKind"],
+      categoryId: String(row.category_id), categoryName: String(row.category_name),
+      accountId: row.account_id ? String(row.account_id) : null,
+      amount: Number(row.amount), frequency: String(row.frequency) as RecurringCashFlowRule["frequency"],
+      startDate: String(row.start_date), endDate: row.end_date ? String(row.end_date) : null,
+      dayOfMonth: row.day_of_month === null ? null : Number(row.day_of_month),
+      active: Boolean(row.active), provenance: provenance(row),
+    }));
+}
+
+function getCashFlowCloses(): CashFlowMonthlyClose[] {
+  return (db().prepare("SELECT * FROM cash_flow_monthly_closes WHERE user_id=? ORDER BY month DESC, version DESC").all(USER_ID) as SqlRow[]).map((row) => ({
+    id: String(row.id), month: String(row.month), version: Number(row.version),
+    income: Number(row.income), consumerExpenses: Number(row.consumer_expenses),
+    essentialExpenses: Number(row.essential_expenses), taxesPaid: Number(row.taxes_paid),
+    debtServicePaid: Number(row.debt_service_paid), investmentFlows: Number(row.investment_flows),
+    internalTransfers: Number(row.internal_transfers),
+    operatingSurplusBeforeDebt: Number(row.operating_surplus_before_debt),
+    postDebtSurplus: Number(row.post_debt_surplus),
+    unclassifiedTransactionCount: Number(row.unclassified_transaction_count),
+    closedAt: String(row.closed_at),
+  }));
 }
 
 function getScenarios(): Scenario[] {
@@ -277,12 +344,14 @@ function readDashboardState(): DashboardState {
   const expenseCategories = getExpenses();
   const scenarios = getScenarios();
   const transactions = getTransactions();
+  const recurringRules = getRecurringRules();
+  const cashFlowCloses = getCashFlowCloses();
   const goals = (db().prepare("SELECT * FROM goals WHERE user_id=? ORDER BY priority").all(USER_ID) as SqlRow[]).map((row) => ({ id: String(row.id), name: String(row.name), targetAmount: Number(row.target_amount), targetDate: row.target_date ? String(row.target_date) : null, priority: Number(row.priority), status: String(row.status) as Goal["status"] }));
   const alerts = (db().prepare("SELECT * FROM alerts WHERE user_id=? AND status='OPEN' ORDER BY CASE severity WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END").all(USER_ID) as SqlRow[]).map((row) => ({ id: String(row.id), severity: String(row.severity) as Alert["severity"], title: String(row.title), detail: String(row.detail), status: String(row.status) as Alert["status"], createdAt: String(row.created_at) }));
   const monthlyCloses = (db().prepare("SELECT * FROM monthly_closes WHERE user_id=? ORDER BY close_date DESC").all(USER_ID) as SqlRow[]).map((row) => ({ id: String(row.id), closeDate: String(row.close_date), grossAssets: Number(row.gross_assets), debt: Number(row.debt), netWorth: Number(row.net_worth), forecastNetWorth: row.forecast_net_worth === null ? null : Number(row.forecast_net_worth), variance: row.variance === null ? null : Number(row.variance), createdAt: String(row.created_at) }));
   const documents = (db().prepare("SELECT * FROM documents WHERE user_id=? ORDER BY uploaded_at DESC").all(USER_ID) as SqlRow[]).map((row) => ({ id: String(row.id), name: String(row.name), category: String(row.category), size: Number(row.size_bytes), uploadedAt: String(row.uploaded_at), status: String(row.status) as DocumentRecord["status"] }));
   const assumptions = (db().prepare("SELECT * FROM economic_assumptions WHERE user_id=? ORDER BY name").all(USER_ID) as SqlRow[]).map((row) => ({ id: String(row.id), name: String(row.name), value: row.value_number === null ? row.value_text === null ? null : String(row.value_text) : Number(row.value_number), unit: String(row.unit), provenance: provenance(row) }));
-  return { asOfDate: AS_OF_DATE, reportingCurrency: REPORTING_CURRENCY, accounts, positions, liabilities, incomes, expenseCategories, transactions, scenarios, goals, alerts, monthlyCloses, documents, metrics: deriveMetrics(accounts, liabilities, incomes, expenseCategories, positions, transactions, AS_OF_DATE), assumptions };
+  return { asOfDate: AS_OF_DATE, reportingCurrency: REPORTING_CURRENCY, accounts, positions, liabilities, incomes, expenseCategories, transactions, recurringRules, cashFlowCloses, scenarios, goals, alerts, monthlyCloses, documents, metrics: deriveMetrics(accounts, liabilities, incomes, expenseCategories, positions, transactions, AS_OF_DATE), assumptions };
 }
 
 function applyMutation(mutation: Mutation) {
@@ -353,6 +422,71 @@ function applyMutation(mutation: Mutation) {
         const variance = forecast === null ? null : state.metrics.netWorth - forecast;
         databaseInstance.prepare(`INSERT OR REPLACE INTO monthly_closes VALUES (?,?,?,?,?,?,?,?,?)`).run(`close_${mutation.closeDate}`, USER_ID, mutation.closeDate, state.metrics.grossAssets, state.metrics.debt, state.metrics.netWorth, forecast, variance, now);
         databaseInstance.prepare("INSERT INTO net_worth_snapshots VALUES (?, ?, ?, ?, ?, ?, 'ACTUAL', ?)").run(randomUUID(), USER_ID, mutation.closeDate, state.metrics.grossAssets, state.metrics.debt, state.metrics.netWorth, now);
+        break;
+      }
+      case "update_category": {
+        const columns: Record<string, string> = { name: "name", groupName: "group_name", cashFlowKind: "cash_flow_kind", essentiality: "essentiality", behavior: "expense_behavior", archived: "archived" };
+        const entries = Object.entries(mutation.patch).filter(([, value]) => value !== undefined);
+        if (entries.length) {
+          const assignments = entries.map(([key]) => `${columns[key]}=?`).join(",");
+          const values = entries.map(([, value]) => (typeof value === "boolean" ? (value ? 1 : 0) : (value as string)));
+          databaseInstance.prepare(`UPDATE expense_categories SET ${assignments} WHERE id=? AND user_id=?`).run(...values, mutation.categoryId, USER_ID);
+        }
+        break;
+      }
+      case "add_category": {
+        const categoryId = `cat_${randomUUID()}`;
+        databaseInstance.prepare("INSERT INTO expense_categories (id,user_id,name,group_name,essential,cash_flow_kind,essentiality,expense_behavior,archived) VALUES (?,?,?,?,?,?,?,?,0)")
+          .run(categoryId, USER_ID, mutation.name, mutation.groupName, mutation.essentiality === "ESSENTIAL" ? 1 : 0, mutation.cashFlowKind, mutation.essentiality, mutation.behavior);
+        databaseInstance.prepare(`INSERT INTO budgets (id,user_id,category_id,lifestyle,monthly_amount,kind,confidence,source,effective_date)
+          VALUES (?,?,?,'COMFORTABLE',NULL,'MISSING','UNKNOWN','À renseigner',?)`).run(`bud_${categoryId}`, USER_ID, categoryId, AS_OF_DATE);
+        break;
+      }
+      case "classify_transaction": {
+        const assignments: string[] = [];
+        const values: Array<string | null> = [];
+        if (mutation.categoryId !== undefined) { assignments.push("category_id=?"); values.push(mutation.categoryId); }
+        if (mutation.kindOverride !== undefined) { assignments.push("kind_override=?"); values.push(mutation.kindOverride); }
+        if (mutation.transferGroupId !== undefined) { assignments.push("transfer_group_id=?"); values.push(mutation.transferGroupId); }
+        if (mutation.notes !== undefined) { assignments.push("notes=?"); values.push(mutation.notes); }
+        // Reclasser une transaction ne touche jamais au solde : un snapshot postérieur
+        // reste la vérité du compte à sa date.
+        if (assignments.length) {
+          databaseInstance.prepare(`UPDATE transactions SET ${assignments.join(",")} WHERE id=? AND user_id=?`).run(...values, mutation.transactionId, USER_ID);
+        }
+        break;
+      }
+      case "add_recurring_rule":
+        databaseInstance.prepare(`INSERT INTO recurring_cash_flow_rules
+          (id,user_id,name,cash_flow_kind,category_id,account_id,amount,frequency,start_date,end_date,day_of_month,active,kind,confidence,source,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,1,'USER_ASSUMPTION','HIGH','Règle saisie manuellement',?)`)
+          .run(`rec_${randomUUID()}`, USER_ID, mutation.name, mutation.cashFlowKind, mutation.categoryId, mutation.accountId, mutation.amount, mutation.frequency, mutation.startDate, mutation.endDate, mutation.dayOfMonth, now);
+        break;
+      case "update_recurring_rule": {
+        const columns: Record<string, string> = { amount: "amount", active: "active", endDate: "end_date" };
+        const entries = Object.entries(mutation.patch).filter(([, value]) => value !== undefined);
+        if (entries.length) {
+          const assignments = entries.map(([key]) => `${columns[key]}=?`).join(",");
+          const values = entries.map(([, value]) => (typeof value === "boolean" ? (value ? 1 : 0) : (value as number | string | null)));
+          databaseInstance.prepare(`UPDATE recurring_cash_flow_rules SET ${assignments} WHERE id=? AND user_id=?`).run(...values, mutation.ruleId, USER_ID);
+        }
+        break;
+      }
+      case "delete_recurring_rule":
+        databaseInstance.prepare("DELETE FROM recurring_cash_flow_rules WHERE id=? AND user_id=?").run(mutation.ruleId, USER_ID);
+        break;
+      case "close_cash_flow_month": {
+        const state = readDashboardState();
+        const bounds = monthBoundsFromKey(mutation.month);
+        const observed = computeObservedCashFlow(state.transactions, state.expenseCategories, bounds.start, bounds.end);
+        // Une clôture existante n'est jamais écrasée : une version supplémentaire est créée
+        // et toutes les versions restent consultables.
+        const previous = databaseInstance.prepare("SELECT MAX(version) AS version FROM cash_flow_monthly_closes WHERE user_id=? AND month=?").get(USER_ID, mutation.month) as { version: number | null };
+        const version = (previous?.version ?? 0) + 1;
+        databaseInstance.prepare(`INSERT INTO cash_flow_monthly_closes
+          (id,user_id,month,version,income,consumer_expenses,essential_expenses,taxes_paid,debt_service_paid,investment_flows,internal_transfers,operating_surplus_before_debt,post_debt_surplus,unclassified_transaction_count,closed_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(`cfc_${randomUUID()}`, USER_ID, mutation.month, version, observed.income, observed.consumerExpenses, observed.essentialExpenses, observed.taxesPaid, observed.debtServicePaid, observed.investmentFlows, observed.internalTransfers, observed.operatingCashFlowBeforeDebt, observed.cashFlowAfterDebt, observed.dataQuality.unclassifiedTransactionCount, now);
         break;
       }
       case "add_goal":

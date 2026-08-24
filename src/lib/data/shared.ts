@@ -1,5 +1,6 @@
 import { calculateNetWorth } from "@/lib/engine/financial";
 import { addMonths, monthBounds, monthlyDebtServiceAt } from "@/lib/engine/debt";
+import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
 import type {
   DashboardMetrics,
   ExpenseCategory,
@@ -26,11 +27,6 @@ export function ledgerWindowStart(asOfDate: string = AS_OF_DATE): string {
   return monthBounds(addMonths(asOfDate, -(LEDGER_WINDOW_MONTHS - 1))).start;
 }
 
-/** Groupes de catégories utilisés pour lire la nature d'un flux du ledger. */
-const SAVINGS_GROUP = "Épargne";
-const INCOME_GROUP = "Revenus";
-const INVESTMENT_CATEGORY = "Investissement";
-
 /**
  * Un snapshot de solde daté est la vérité du compte à cette date : il incorpore déjà les
  * mouvements antérieurs. Une transaction plus ancienne enrichit donc le ledger sans
@@ -42,65 +38,12 @@ export function shouldDeriveBalance(transactionDate: string, latestBalanceDate: 
 }
 
 /**
- * Nature d'un flux. Le signe du montant ne suffit pas : un versement de 500 € vers le
- * PEA sort du compte courant sans être une dépense de consommation, et un remboursement
- * entrant sur une catégorie de dépense n'est pas un revenu.
- */
-export type FlowKind = "INCOME" | "SAVING" | "EXPENSE";
-
-export function classifyFlow(categoryGroup: string | undefined): FlowKind {
-  if (categoryGroup === INCOME_GROUP) return "INCOME";
-  if (categoryGroup === SAVINGS_GROUP) return "SAVING";
-  return "EXPENSE";
-}
-
-export interface FlowAggregate {
-  /** Revenus encaissés, signés : une régularisation négative les réduit. */
-  income: number;
-  /** Dépenses de consommation, en valeur positive. Un remboursement les réduit. */
-  expense: number;
-  /** Épargne et investissement sortis du compte, en valeur positive. Jamais une dépense. */
-  saving: number;
-  /** Part de l'épargne dirigée vers la catégorie d'investissement. */
-  investment: number;
-  count: number;
-}
-
-/** Agrège les flux d'une période par nature, jamais par signe. */
-export function aggregateFlows(
-  transactions: Transaction[],
-  expenses: ExpenseCategory[],
-  periodStart: string,
-  periodEnd: string,
-): FlowAggregate {
-  const groupOf = new Map(expenses.map((expense) => [expense.id, expense.groupName]));
-  const nameOf = new Map(expenses.map((expense) => [expense.id, expense.name]));
-  const aggregate: FlowAggregate = { income: 0, expense: 0, saving: 0, investment: 0, count: 0 };
-  for (const transaction of transactions) {
-    if (transaction.date < periodStart || transaction.date > periodEnd) continue;
-    aggregate.count += 1;
-    switch (classifyFlow(groupOf.get(transaction.categoryId))) {
-      case "INCOME":
-        aggregate.income += transaction.amount;
-        break;
-      case "SAVING":
-        aggregate.saving += -transaction.amount;
-        if (nameOf.get(transaction.categoryId) === INVESTMENT_CATEGORY) {
-          aggregate.investment += -transaction.amount;
-        }
-        break;
-      default:
-        aggregate.expense += -transaction.amount;
-    }
-  }
-  return aggregate;
-}
-
-/**
- * Taux d'épargne et taux d'investissement constatés, lus dans le ledger de flux sur la
- * période. Ce ne sont pas des proxys du free cash flow : le FCF est une capacité,
- * l'épargne est un fait. Sans revenu encaissé observé sur la période, les deux
- * grandeurs sont NOT_COMPUTABLE et valent `null`.
+ * Taux d'épargne et taux d'investissement constatés, lus dans le ledger sur la période.
+ *
+ * Ce ne sont pas des proxys du free cash flow : le FCF est une capacité, l'épargne est un
+ * fait. La classification passe par le Cash Flow Engine, donc par la nature canonique de
+ * chaque flux et jamais par le signe du montant ni le libellé de la catégorie. Sans revenu
+ * encaissé observé, les deux grandeurs sont NOT_COMPUTABLE.
  */
 export function computeFlowRates(
   transactions: Transaction[],
@@ -108,11 +51,10 @@ export function computeFlowRates(
   periodStart: string,
   periodEnd: string,
 ): { savingsRate: number | null; investmentRate: number | null } {
-  const flows = aggregateFlows(transactions, expenses, periodStart, periodEnd);
-  if (flows.income <= 0) return { savingsRate: null, investmentRate: null };
+  const observed = computeObservedCashFlow(transactions, expenses, periodStart, periodEnd);
   return {
-    savingsRate: flows.saving / flows.income,
-    investmentRate: flows.investment / flows.income,
+    savingsRate: observed.observedSavingsRate,
+    investmentRate: observed.observedInvestmentRate,
   };
 }
 

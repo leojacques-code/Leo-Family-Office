@@ -55,7 +55,12 @@ CREATE TABLE IF NOT EXISTS expense_categories (
   user_id TEXT NOT NULL REFERENCES users(id),
   name TEXT NOT NULL,
   group_name TEXT NOT NULL,
-  essential INTEGER NOT NULL DEFAULT 0
+  essential INTEGER NOT NULL DEFAULT 0,
+  -- Nature canonique du flux. Le moteur ne lit jamais le libellé de la catégorie.
+  cash_flow_kind TEXT NOT NULL DEFAULT 'EXPENSE',
+  essentiality TEXT NOT NULL DEFAULT 'UNKNOWN',
+  expense_behavior TEXT NOT NULL DEFAULT 'UNKNOWN',
+  archived INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -71,6 +76,10 @@ CREATE TABLE IF NOT EXISTS transactions (
   confidence TEXT NOT NULL,
   source TEXT,
   notes TEXT,
+  -- Nature imposée à cette ligne seule, prioritaire sur celle de la catégorie.
+  kind_override TEXT,
+  -- Rapproche les deux jambes d'un même transfert interne.
+  transfer_group_id TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, transaction_date DESC);
@@ -448,4 +457,43 @@ CREATE TABLE IF NOT EXISTS decision_cases (
   status TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recurring_cash_flow_rules (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  name TEXT NOT NULL,
+  cash_flow_kind TEXT NOT NULL,
+  category_id TEXT NOT NULL REFERENCES expense_categories(id),
+  account_id TEXT REFERENCES financial_accounts(id),
+  amount REAL NOT NULL,
+  frequency TEXT NOT NULL,
+  start_date TEXT NOT NULL,
+  end_date TEXT,
+  day_of_month INTEGER,
+  active INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  source TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_rules_user ON recurring_cash_flow_rules(user_id, active);
+
+CREATE TABLE IF NOT EXISTS cash_flow_monthly_closes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  month TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  income REAL NOT NULL,
+  consumer_expenses REAL NOT NULL,
+  essential_expenses REAL NOT NULL,
+  taxes_paid REAL NOT NULL,
+  debt_service_paid REAL NOT NULL,
+  investment_flows REAL NOT NULL,
+  internal_transfers REAL NOT NULL,
+  operating_surplus_before_debt REAL NOT NULL,
+  post_debt_surplus REAL NOT NULL,
+  unclassified_transaction_count INTEGER NOT NULL,
+  closed_at TEXT NOT NULL,
+  UNIQUE(user_id, month, version)
 );

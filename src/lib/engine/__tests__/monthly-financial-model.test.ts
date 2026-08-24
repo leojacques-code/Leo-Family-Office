@@ -625,6 +625,8 @@ describe("bilan d’ouverture", () => {
       incomes: [],
       expenseCategories: [],
       transactions: [],
+      recurringRules: [],
+      cashFlowCloses: [],
       scenarios: [],
       goals: [],
       alerts: [],

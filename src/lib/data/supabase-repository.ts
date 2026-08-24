@@ -12,10 +12,13 @@ import {
   ledgerWindowStart,
   shouldDeriveBalance,
 } from "@/lib/data/shared";
+import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
+import { monthBounds } from "@/lib/engine/debt";
 import type { FamilyOfficeRepository } from "@/lib/data/repository";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type {
   Alert,
+  CashFlowMonthlyClose,
   DashboardState,
   DocumentRecord,
   ExpenseCategory,
@@ -26,6 +29,7 @@ import type {
   MonthlyClose,
   Position,
   Provenance,
+  RecurringCashFlowRule,
   Scenario,
   Transaction,
 } from "@/lib/types";
@@ -137,6 +141,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     const [
       institutionRows, accountRows, balanceRows, assetClassRows, securityRows, positionRows, snapshotRows,
       liabilityRows, incomeRows, categoryRows, budgetRows, transactionRows, scenarioRows, goalRows,
+      recurringRuleRows, cashFlowCloseRows,
       alertRows, closeRows, documentRows, assumptionRows,
     ] = await Promise.all([
       mine("institutions"), mine("financial_accounts"), mine("account_balances"), mine("asset_classes"),
@@ -144,6 +149,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("income_sources"), mine("expense_categories"), mine("budgets"),
       fetchLedgerWindow(),
       mine("scenarios"), mine("goals"),
+      mine("recurring_cash_flow_rules"), mine("cash_flow_monthly_closes"),
       db.from("alerts").select("*").eq("user_id", user).eq("status", "OPEN"),
       mine("monthly_closes"), mine("documents"), mine("economic_assumptions"),
     ]).then((results) => results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]));
@@ -197,15 +203,55 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
 
     const budgets = new Map(budgetRows.filter((row) => str(row.lifestyle) === "COMFORTABLE").map((row) => [str(row.category_id), row]));
     const expenseCategories: ExpenseCategory[] = categoryRows
-      .filter((row) => budgets.has(str(row.id)))
+      .filter((row) => budgets.has(str(row.id)) && !(row.archived === true))
       .map((row) => {
         const budget = budgets.get(str(row.id)) as Row;
         return {
           id: str(row.id), name: str(row.name), groupName: str(row.group_name),
-          monthlyAmount: numOrNull(budget.monthly_amount), essential: bool(row.essential), provenance: provenance(budget),
+          // Repli sur la sémantique historique tant que la migration n'est pas appliquée.
+          cashFlowKind: (row.cash_flow_kind ? str(row.cash_flow_kind) : "EXPENSE") as ExpenseCategory["cashFlowKind"],
+          essentiality: (row.essentiality
+            ? str(row.essentiality)
+            : bool(row.essential)
+              ? "ESSENTIAL"
+              : "NON_ESSENTIAL") as ExpenseCategory["essentiality"],
+          behavior: (row.expense_behavior ? str(row.expense_behavior) : "UNKNOWN") as ExpenseCategory["behavior"],
+          monthlyAmount: numOrNull(budget.monthly_amount),
+          essential: (row.essentiality ? str(row.essentiality) === "ESSENTIAL" : bool(row.essential)),
+          archived: row.archived === undefined || row.archived === null ? false : bool(row.archived),
+          provenance: provenance(budget),
         };
       })
       .sort((a, b) => a.groupName.localeCompare(b.groupName) || a.name.localeCompare(b.name));
+
+    const recurringRules: RecurringCashFlowRule[] = recurringRuleRows
+      .map((row) => ({
+        id: str(row.id), name: str(row.name),
+        cashFlowKind: str(row.cash_flow_kind) as RecurringCashFlowRule["cashFlowKind"],
+        categoryId: str(row.category_id),
+        categoryName: categoryRows.find((category) => str(category.id) === str(row.category_id))
+          ? str(categoryRows.find((category) => str(category.id) === str(row.category_id))!.name)
+          : "",
+        accountId: row.account_id ? str(row.account_id) : null,
+        amount: num(row.amount), frequency: str(row.frequency) as RecurringCashFlowRule["frequency"],
+        startDate: str(row.start_date), endDate: row.end_date ? str(row.end_date) : null,
+        dayOfMonth: numOrNull(row.day_of_month), active: bool(row.active), provenance: provenance(row),
+      }))
+      .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
+
+    const cashFlowCloses: CashFlowMonthlyClose[] = cashFlowCloseRows
+      .map((row) => ({
+        id: str(row.id), month: str(row.month), version: num(row.version),
+        income: num(row.income), consumerExpenses: num(row.consumer_expenses),
+        essentialExpenses: num(row.essential_expenses), taxesPaid: num(row.taxes_paid),
+        debtServicePaid: num(row.debt_service_paid), investmentFlows: num(row.investment_flows),
+        internalTransfers: num(row.internal_transfers),
+        operatingSurplusBeforeDebt: num(row.operating_surplus_before_debt),
+        postDebtSurplus: num(row.post_debt_surplus),
+        unclassifiedTransactionCount: num(row.unclassified_transaction_count),
+        closedAt: str(row.closed_at),
+      }))
+      .sort((a, b) => b.month.localeCompare(a.month) || b.version - a.version);
 
     const accountNames = new Map(accountRows.map((row) => [str(row.id), str(row.name)]));
     const categoryNames = new Map(categoryRows.map((row) => [str(row.id), str(row.name)]));
@@ -213,6 +259,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       id: str(row.id), accountId: str(row.account_id), accountName: accountNames.get(str(row.account_id)) ?? "",
       date: str(row.transaction_date), label: str(row.label), categoryId: str(row.category_id),
       categoryName: categoryNames.get(str(row.category_id)) ?? "", amount: num(row.amount), currency: str(row.currency),
+      kindOverride: row.kind_override ? (str(row.kind_override) as Transaction["kindOverride"]) : null,
+      transferGroupId: row.transfer_group_id ? str(row.transfer_group_id) : null,
+      notes: row.notes ? str(row.notes) : null,
       provenance: provenance(row),
     }));
 
@@ -260,7 +309,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
 
     return {
       asOfDate: AS_OF_DATE, reportingCurrency: REPORTING_CURRENCY, accounts, positions, liabilities, incomes,
-      expenseCategories, transactions, scenarios, goals, alerts, monthlyCloses, documents,
+      expenseCategories, transactions, recurringRules, cashFlowCloses, scenarios, goals, alerts, monthlyCloses, documents,
       metrics: deriveMetrics(accounts, liabilities, incomes, expenseCategories, positions, transactions, AS_OF_DATE), assumptions,
     };
   }
@@ -377,6 +426,90 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           user_id: user, name: mutation.name, target_amount: mutation.targetAmount, target_date: mutation.targetDate,
           priority: 99, status: "ACTIVE",
         }).select("id"), "création d'objectif");
+        break;
+      }
+      case "update_category": {
+        const patch: Record<string, unknown> = {};
+        if (mutation.patch.name !== undefined) patch.name = mutation.patch.name;
+        if (mutation.patch.groupName !== undefined) patch.group_name = mutation.patch.groupName;
+        if (mutation.patch.cashFlowKind !== undefined) patch.cash_flow_kind = mutation.patch.cashFlowKind;
+        if (mutation.patch.essentiality !== undefined) {
+          patch.essentiality = mutation.patch.essentiality;
+          patch.essential = mutation.patch.essentiality === "ESSENTIAL";
+        }
+        if (mutation.patch.behavior !== undefined) patch.expense_behavior = mutation.patch.behavior;
+        if (mutation.patch.archived !== undefined) patch.archived = mutation.patch.archived;
+        if (Object.keys(patch).length) {
+          unwrap(await db.from("expense_categories").update(patch).eq("id", mutation.categoryId).eq("user_id", user).select("id"), "mise à jour de catégorie");
+        }
+        break;
+      }
+      case "add_category": {
+        const category = unwrap(await db.from("expense_categories").insert({
+          user_id: user, name: mutation.name, group_name: mutation.groupName,
+          essential: mutation.essentiality === "ESSENTIAL", cash_flow_kind: mutation.cashFlowKind,
+          essentiality: mutation.essentiality, expense_behavior: mutation.behavior, archived: false,
+        }).select("id").single(), "création de catégorie") as Row;
+        unwrap(await db.from("budgets").insert({
+          user_id: user, category_id: category.id, lifestyle: "COMFORTABLE", monthly_amount: null,
+          data_kind: "MISSING", confidence: "UNKNOWN", source: "À renseigner", effective_date: AS_OF_DATE,
+        }).select("id"), "budget de catégorie");
+        break;
+      }
+      case "classify_transaction": {
+        const patch: Record<string, unknown> = {};
+        if (mutation.categoryId !== undefined) patch.category_id = mutation.categoryId;
+        if (mutation.kindOverride !== undefined) patch.kind_override = mutation.kindOverride;
+        if (mutation.transferGroupId !== undefined) patch.transfer_group_id = mutation.transferGroupId;
+        if (mutation.notes !== undefined) patch.notes = mutation.notes;
+        // Reclasser ne touche jamais au solde : un snapshot postérieur reste la vérité.
+        if (Object.keys(patch).length) {
+          unwrap(await db.from("transactions").update(patch).eq("id", mutation.transactionId).eq("user_id", user).select("id"), "classification de transaction");
+        }
+        break;
+      }
+      case "add_recurring_rule": {
+        unwrap(await db.from("recurring_cash_flow_rules").insert({
+          user_id: user, name: mutation.name, cash_flow_kind: mutation.cashFlowKind,
+          category_id: mutation.categoryId, account_id: mutation.accountId, amount: mutation.amount,
+          frequency: mutation.frequency, start_date: mutation.startDate, end_date: mutation.endDate,
+          day_of_month: mutation.dayOfMonth, active: true,
+          data_kind: "USER_ASSUMPTION", confidence: "HIGH", source: "Règle saisie manuellement",
+        }).select("id"), "création de règle récurrente");
+        break;
+      }
+      case "update_recurring_rule": {
+        const patch: Record<string, unknown> = {};
+        if (mutation.patch.amount !== undefined) patch.amount = mutation.patch.amount;
+        if (mutation.patch.active !== undefined) patch.active = mutation.patch.active;
+        if (mutation.patch.endDate !== undefined) patch.end_date = mutation.patch.endDate;
+        if (Object.keys(patch).length) {
+          unwrap(await db.from("recurring_cash_flow_rules").update(patch).eq("id", mutation.ruleId).eq("user_id", user).select("id"), "mise à jour de règle récurrente");
+        }
+        break;
+      }
+      case "delete_recurring_rule": {
+        unwrap(await db.from("recurring_cash_flow_rules").delete().eq("id", mutation.ruleId).eq("user_id", user).select("id"), "suppression de règle récurrente");
+        break;
+      }
+      case "close_cash_flow_month": {
+        const state = await getDashboardState();
+        const bounds = monthBounds(`${mutation.month}-01`);
+        const observed = computeObservedCashFlow(state.transactions, state.expenseCategories, bounds.start, bounds.end);
+        // Jamais d'écrasement : une clôture existante donne lieu à une version supplémentaire.
+        const existing = unwrap(await db.from("cash_flow_monthly_closes").select("version")
+          .eq("user_id", user).eq("month", mutation.month).order("version", { ascending: false }).limit(1), "lecture de clôture") as Row[];
+        const version = existing.length ? num(existing[0].version) + 1 : 1;
+        unwrap(await db.from("cash_flow_monthly_closes").insert({
+          user_id: user, month: mutation.month, version,
+          income: observed.income, consumer_expenses: observed.consumerExpenses,
+          essential_expenses: observed.essentialExpenses, taxes_paid: observed.taxesPaid,
+          debt_service_paid: observed.debtServicePaid, investment_flows: observed.investmentFlows,
+          internal_transfers: observed.internalTransfers,
+          operating_surplus_before_debt: observed.operatingCashFlowBeforeDebt,
+          post_debt_surplus: observed.cashFlowAfterDebt,
+          unclassified_transaction_count: observed.dataQuality.unclassifiedTransactionCount,
+        }).select("id"), "clôture Cash Flow");
         break;
       }
     }

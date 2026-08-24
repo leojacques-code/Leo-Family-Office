@@ -77,12 +77,52 @@ export interface IncomeSource {
   provenance: Provenance;
 }
 
+/**
+ * Nature économique canonique d'un flux. C'est ce champ, jamais le signe du montant ni le
+ * libellé français de la catégorie, qui détermine comment un mouvement est agrégé.
+ */
+export type CashFlowKind =
+  | "INCOME"
+  | "EXPENSE"
+  | "INTERNAL_TRANSFER"
+  | "INVESTMENT"
+  | "SAVING"
+  | "DEBT_SERVICE"
+  | "TAX"
+  | "REFUND"
+  | "OTHER_INFLOW"
+  | "OTHER_OUTFLOW"
+  | "UNCLASSIFIED";
+
+export const CASH_FLOW_KINDS: CashFlowKind[] = [
+  "INCOME",
+  "EXPENSE",
+  "INTERNAL_TRANSFER",
+  "INVESTMENT",
+  "SAVING",
+  "DEBT_SERVICE",
+  "TAX",
+  "REFUND",
+  "OTHER_INFLOW",
+  "OTHER_OUTFLOW",
+  "UNCLASSIFIED",
+];
+
+export type Essentiality = "ESSENTIAL" | "NON_ESSENTIAL" | "UNKNOWN";
+export type ExpenseBehavior = "FIXED" | "VARIABLE" | "DISCRETIONARY" | "UNKNOWN";
+
 export interface ExpenseCategory {
   id: string;
   name: string;
   groupName: string;
+  /** Nature canonique des flux portés par cette catégorie. */
+  cashFlowKind: CashFlowKind;
+  essentiality: Essentiality;
+  behavior: ExpenseBehavior;
   monthlyAmount: number | null;
+  /** Dérivé de `essentiality`. Conservé pour les consommateurs existants, jamais stocké. */
   essential: boolean;
+  archived: boolean;
   provenance: Provenance;
 }
 
@@ -94,9 +134,61 @@ export interface Transaction {
   label: string;
   categoryId: string;
   categoryName: string;
+  /** Montant signé : négatif pour une sortie. Le signe ne détermine jamais la nature. */
   amount: number;
   currency: string;
+  /**
+   * Nature imposée à cette transaction seule, prioritaire sur celle de sa catégorie.
+   * Sert notamment à marquer un mouvement comme transfert interne.
+   */
+  kindOverride: CashFlowKind | null;
+  /** Rapproche les deux jambes d'un même transfert interne. */
+  transferGroupId: string | null;
+  notes: string | null;
   provenance: Provenance;
+}
+
+export type RecurrenceFrequency = "MONTHLY" | "QUARTERLY" | "ANNUAL";
+
+/**
+ * Règle de flux récurrent, persistée et traçable. Aucune récurrence n'est jamais déduite
+ * en silence d'un historique : elle est créée explicitement et porte sa provenance.
+ */
+export interface RecurringCashFlowRule {
+  id: string;
+  name: string;
+  cashFlowKind: CashFlowKind;
+  categoryId: string;
+  categoryName: string;
+  accountId: string | null;
+  /** Montant signé d'une occurrence. */
+  amount: number;
+  frequency: RecurrenceFrequency;
+  startDate: string;
+  endDate: string | null;
+  /** Jour d'exigibilité. À défaut, le jour de `startDate`. */
+  dayOfMonth: number | null;
+  active: boolean;
+  provenance: Provenance;
+}
+
+/** Clôture mensuelle du périmètre Cash Flow. Versionnée, jamais écrasée en silence. */
+export interface CashFlowMonthlyClose {
+  id: string;
+  /** Mois clôturé, au format AAAA-MM. */
+  month: string;
+  version: number;
+  income: number;
+  consumerExpenses: number;
+  essentialExpenses: number;
+  taxesPaid: number;
+  debtServicePaid: number;
+  investmentFlows: number;
+  internalTransfers: number;
+  operatingSurplusBeforeDebt: number;
+  postDebtSurplus: number;
+  unclassifiedTransactionCount: number;
+  closedAt: string;
 }
 
 export interface Scenario {
@@ -192,6 +284,8 @@ export interface DashboardState {
   incomes: IncomeSource[];
   expenseCategories: ExpenseCategory[];
   transactions: Transaction[];
+  recurringRules: RecurringCashFlowRule[];
+  cashFlowCloses: CashFlowMonthlyClose[];
   scenarios: Scenario[];
   goals: Goal[];
   alerts: Alert[];
