@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeFlowRates, deriveMetrics } from "@/lib/data/shared";
+import { aggregateFlows, computeFlowRates, deriveMetrics, ledgerWindowStart, shouldDeriveBalance } from "@/lib/data/shared";
 import type { ExpenseCategory, FinancialAccount, IncomeSource, Liability, Position, Provenance, Transaction } from "@/lib/types";
 
 const provenance: Provenance = { kind: "ACTUAL", confidence: "HIGH" };
@@ -97,6 +97,44 @@ describe("deriveMetrics", () => {
   });
 });
 
+describe("aggregateFlows", () => {
+  const categories: ExpenseCategory[] = [
+    { id: "exp_income", name: "Revenu", groupName: "Revenus", monthlyAmount: null, essential: false, provenance },
+    { id: "exp_investment", name: "Investissement", groupName: "Épargne", monthlyAmount: null, essential: false, provenance },
+    { id: "exp_rent", name: "Loyer", groupName: "Logement", monthlyAmount: 1140, essential: true, provenance },
+  ];
+  const transaction = (categoryId: string, amount: number, date = "2026-08-05"): Transaction => ({
+    id: `${categoryId}-${amount}`, accountId: "a", accountName: "Ultim", date, label: categoryId,
+    categoryId, categoryName: categoryId, amount, currency: "EUR", provenance,
+  });
+
+  it("classe par nature de catégorie, jamais par signe du montant", () => {
+    const flows = aggregateFlows(
+      [transaction("exp_income", 3000), transaction("exp_rent", -1100), transaction("exp_investment", -500)],
+      categories,
+      "2026-08-01",
+      "2026-08-31",
+    );
+    expect(flows.income).toBeCloseTo(3000, 2);
+    // Un versement vers le PEA n'est pas une dépense de consommation : 1 100, pas 1 600.
+    expect(flows.expense).toBeCloseTo(1100, 2);
+    expect(flows.saving).toBeCloseTo(500, 2);
+    expect(flows.investment).toBeCloseTo(500, 2);
+    expect(flows.count).toBe(3);
+  });
+
+  it("traite un remboursement entrant comme une dépense réduite, pas comme un revenu", () => {
+    const flows = aggregateFlows(
+      [transaction("exp_rent", -1100), transaction("exp_rent", 200)],
+      categories,
+      "2026-08-01",
+      "2026-08-31",
+    );
+    expect(flows.income).toBe(0);
+    expect(flows.expense).toBeCloseTo(900, 2);
+  });
+});
+
 describe("computeFlowRates", () => {
   const categories: ExpenseCategory[] = [
     { id: "exp_income", name: "Revenu", groupName: "Revenus", monthlyAmount: null, essential: false, provenance },
@@ -134,5 +172,40 @@ describe("computeFlowRates", () => {
       "2026-08-31",
     );
     expect(rates.savingsRate).toBe(0);
+  });
+});
+
+describe("emergencyCoverageMonths", () => {
+  it("ignore le service de dette quand aucune échéance n’est exigible", () => {
+    const metrics = deriveMetrics(accounts, liabilities, incomes, expenses, positions, [], "2026-08-19");
+    expect(metrics.monthlyDebtService).toBe(0);
+    expect(metrics.emergencyCoverageMonths).toBeCloseTo(355.48 / 1140, 6);
+  });
+
+  it("intègre le service de dette dans les dépenses incompressibles", () => {
+    const metrics = deriveMetrics(accounts, liabilities, incomes, expenses, positions, [], "2026-12-19");
+    expect(metrics.monthlyDebtService).toBeCloseTo(284.72, 2);
+    // La réserve doit couvrir loyer ET échéance : le dénominateur est 1 140 + 284,72.
+    expect(metrics.emergencyCoverageMonths).toBeCloseTo(355.48 / (1140 + 284.72), 6);
+  });
+});
+
+describe("shouldDeriveBalance", () => {
+  it("répercute une transaction postérieure au dernier relevé", () => {
+    expect(shouldDeriveBalance("2026-08-20", "2026-08-19")).toBe(true);
+  });
+
+  it("ne touche pas au solde pour une transaction antérieure ou du même jour", () => {
+    // Un relevé du 19/08 contient déjà le mouvement du 10/08 : le répercuter le
+    // compterait deux fois.
+    expect(shouldDeriveBalance("2026-08-10", "2026-08-19")).toBe(false);
+    expect(shouldDeriveBalance("2026-08-19", "2026-08-19")).toBe(false);
+  });
+});
+
+describe("ledgerWindowStart", () => {
+  it("ouvre la fenêtre au premier jour du sixième mois glissant", () => {
+    expect(ledgerWindowStart("2026-08-19")).toBe("2026-03-01");
+    expect(ledgerWindowStart("2027-01-05")).toBe("2026-08-01");
   });
 });

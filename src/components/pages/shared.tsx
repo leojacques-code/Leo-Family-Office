@@ -39,6 +39,22 @@ export function formatDate(
 }
 export const inputNumber = (value: string) => Number(value.replace(",", "."));
 
+export const NOT_COMPUTABLE = "Non calculable";
+
+/** Montant qui peut être NOT_COMPUTABLE : jamais de zéro affiché à la place d'un inconnu. */
+export function OptionalCurrency({
+  value,
+  sign = false,
+  fallback = NOT_COMPUTABLE,
+}: {
+  value: number | null;
+  sign?: boolean;
+  fallback?: string;
+}) {
+  if (value === null) return <span className="warning-text">{fallback}</span>;
+  return <Currency value={value} sign={sign} />;
+}
+
 export function AccountTable({
   title,
   accounts,
@@ -88,13 +104,21 @@ export function assetsExplanation(state: DashboardState): Explanation {
   return {
     title: "Actifs bruts identifiés",
     formula: "Σ dernier solde de chaque compte actif",
-    inputs: state.accounts.map((account) => ({
-      label: account.name,
-      value: formatEur(account.balance),
-      kind: account.provenance.kind,
-      date: account.balanceDate,
-      source: account.provenance.source,
-    })),
+    inputs: [
+      ...state.accounts.map((account) => ({
+        label: account.name,
+        value: formatEur(account.balance),
+        kind: account.provenance.kind,
+        date: account.balanceDate,
+        source: account.provenance.source,
+      })),
+      {
+        label: `Total consolidé (${state.accounts.length} comptes)`,
+        value: formatEur(state.metrics.grossAssets),
+        kind: "DERIVED" as const,
+        date: state.asOfDate,
+      },
+    ],
     note: "Les positions PEA et CTO ne sont pas ajoutées : elles expliquent le solde du compte et évitent le double comptage.",
   };
 }
@@ -142,7 +166,8 @@ export function liquidityExplanation(state: DashboardState): Explanation {
   ).length;
   return {
     title: "Couverture de liquidité",
-    formula: "Cash bancaire immédiat ÷ dépenses essentielles mensuelles connues",
+    formula:
+      "Cash bancaire immédiat ÷ (dépenses essentielles mensuelles connues + service de dette exigible)",
     inputs: [
       {
         label: "Cash bancaire",
@@ -153,7 +178,13 @@ export function liquidityExplanation(state: DashboardState): Explanation {
       {
         label: `Dépenses essentielles connues (${essential.length} catégories)`,
         value: formatEur(essentialTotal),
-        kind: "ACTUAL",
+        kind: "DERIVED",
+        date: state.asOfDate,
+      },
+      {
+        label: "Service de dette exigible du mois",
+        value: formatEur(state.metrics.monthlyDebtService),
+        kind: "DERIVED",
         date: state.asOfDate,
       },
       {
@@ -163,7 +194,7 @@ export function liquidityExplanation(state: DashboardState): Explanation {
         date: state.asOfDate,
       },
     ],
-    note: `${missingEssential} catégories essentielles n’ont pas de montant : la couverture réelle est probablement inférieure. Le cash logé dans un PEA ou un CTO est exclu du cash bancaire disponible.`,
+    note: `Le service de dette est incompressible et entre au dénominateur. ${missingEssential} catégories essentielles n’ont pas de montant : la couverture réelle est probablement inférieure. Le cash logé dans un PEA ou un CTO est exclu du cash bancaire disponible.`,
   };
 }
 export function cashFlowExplanation(state: DashboardState): Explanation {
@@ -174,15 +205,15 @@ export function cashFlowExplanation(state: DashboardState): Explanation {
       "Revenus actifs − dépenses renseignées − Σ échéances de dette exigibles dans le mois d’observation",
     inputs: [
       {
-        label: "Revenus actifs",
+        label: `Revenus actifs (${state.incomes.filter((income) => income.active).length} sources)`,
         value: formatEur(state.metrics.monthlyIncome),
-        kind: "ACTUAL",
+        kind: "DERIVED",
         date: state.asOfDate,
       },
       {
-        label: "Dépenses connues",
+        label: `Dépenses connues (${state.expenseCategories.filter((category) => category.monthlyAmount !== null).length} catégories)`,
         value: formatEur(state.metrics.monthlyExpenses),
-        kind: "ACTUAL",
+        kind: "DERIVED",
         date: state.asOfDate,
       },
       {

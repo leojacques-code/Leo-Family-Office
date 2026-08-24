@@ -6,7 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { amortizeLoan } from "@/lib/engine/financial";
-import { AS_OF_DATE, REPORTING_CURRENCY, deriveMetrics } from "@/lib/data/shared";
+import { AS_OF_DATE, REPORTING_CURRENCY, deriveMetrics, ledgerWindowStart, shouldDeriveBalance } from "@/lib/data/shared";
 import type { FamilyOfficeRepository } from "@/lib/data/repository";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type {
@@ -252,8 +252,11 @@ function getExpenses(): ExpenseCategory[] {
 }
 
 function getTransactions(): Transaction[] {
+  // Bornage par date et non par nombre de lignes : la fenêtre affichée et calculée doit
+  // être lue en entier, sinon le graphique 6 mois et les taux de flux deviennent faux
+  // sans aucun avertissement.
   return (db().prepare(`SELECT t.*,a.name account_name,c.name category_name FROM transactions t JOIN financial_accounts a ON a.id=t.account_id
-    JOIN expense_categories c ON c.id=t.category_id WHERE t.user_id=? ORDER BY t.transaction_date DESC,t.created_at DESC LIMIT 100`).all(USER_ID) as SqlRow[]).map((row) => ({
+    JOIN expense_categories c ON c.id=t.category_id WHERE t.user_id=? AND t.transaction_date>=? ORDER BY t.transaction_date DESC,t.created_at DESC`).all(USER_ID, ledgerWindowStart(AS_OF_DATE)) as SqlRow[]).map((row) => ({
       id: String(row.id), accountId: String(row.account_id), accountName: String(row.account_name), date: String(row.transaction_date), label: String(row.label), categoryId: String(row.category_id), categoryName: String(row.category_name), amount: Number(row.amount), currency: String(row.currency), provenance: provenance(row),
     }));
 }
@@ -302,11 +305,14 @@ function applyMutation(mutation: Mutation) {
         databaseInstance.prepare(`INSERT INTO transactions (id,user_id,account_id,category_id,transaction_date,label,amount,currency,kind,confidence,source,created_at)
           VALUES (?,?,?,?,?,?,?,'EUR','ACTUAL','HIGH','Saisie manuelle',?)`).run(`txn_${randomUUID()}`, USER_ID, mutation.accountId, mutation.categoryId, mutation.date, mutation.label, mutation.amount, now);
         if (mutation.updateBalance) {
-          const latest = databaseInstance.prepare("SELECT balance, balance_date FROM account_balances WHERE account_id=? ORDER BY balance_date DESC,created_at DESC LIMIT 1").get(mutation.accountId) as { balance: number; balance_date: string };
-          // Le solde dérivé doit primer sur le dernier solde connu, sinon une transaction
-          // antérieure à ce dernier relevé n'aurait aucun effet visible sur le compte.
-          const balanceDate = mutation.date > latest.balance_date ? mutation.date : latest.balance_date;
-          databaseInstance.prepare("INSERT INTO account_balances VALUES (?, ?, ?, ?, 'DERIVED', 'HIGH', 'Transaction saisie', ?)").run(randomUUID(), mutation.accountId, latest.balance + mutation.amount, balanceDate, now);
+          const latest = databaseInstance.prepare("SELECT balance, balance_date FROM account_balances WHERE account_id=? ORDER BY balance_date DESC,created_at DESC LIMIT 1").get(mutation.accountId) as { balance: number; balance_date: string } | undefined;
+          if (!latest) throw new Error("Aucun solde connu pour ce compte");
+          // Un snapshot de solde daté est la vérité du compte à cette date : il contient
+          // déjà les mouvements antérieurs. Une transaction plus ancienne enrichit donc le
+          // ledger sans toucher au solde observé, sinon elle serait comptée deux fois.
+          if (shouldDeriveBalance(mutation.date, latest.balance_date)) {
+            databaseInstance.prepare("INSERT INTO account_balances VALUES (?, ?, ?, ?, 'DERIVED', 'HIGH', 'Transaction saisie', ?)").run(randomUUID(), mutation.accountId, latest.balance + mutation.amount, mutation.date, now);
+          }
         }
         break;
       }

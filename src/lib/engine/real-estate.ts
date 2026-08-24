@@ -39,20 +39,30 @@ export interface RealEstateResult {
   /** Σ des flux périodiques positifs encaissés. */
   distributions: number;
   residualValue: number;
-  totalInterest: number;
+  /** Intérêts réellement dus jusqu'au mois de cession. Le crédit est soldé à la sortie. */
+  interestPaidThroughExit: number;
+  /** Intérêts du prêt s'il était conservé jusqu'à maturité. Jamais payés en cas de sortie anticipée. */
+  fullTermInterestIfHeld: number;
   exitValue: number;
   outstandingAtExit: number;
   cashFlows: number[];
   flags: string[];
 }
 
-export function underwriteRealEstate(input: RealEstateInputs, discountRate = 0.06): RealEstateResult {
+export function underwriteRealEstate(
+  input: RealEstateInputs,
+  discountRate = 0.06,
+): RealEstateResult {
   const flags: string[] = [];
-  const totalProjectCost = input.purchasePrice + input.acquisitionCosts + input.renovation + input.furniture;
+  const totalProjectCost =
+    input.purchasePrice + input.acquisitionCosts + input.renovation + input.furniture;
   const months = Math.max(0, Math.round(input.loanYears * 12));
 
   // Un seul moteur d'amortissement pour tout LFO : celui de `financial.ts`.
-  const schedule = input.loanAmount > 0 && months > 0 ? amortizeLoan(input.loanAmount, input.annualRate, months) : [];
+  const schedule =
+    input.loanAmount > 0 && months > 0
+      ? amortizeLoan(input.loanAmount, input.annualRate, months)
+      : [];
   const monthlyPayment = schedule[0]?.payment ?? 0;
   const debtServiceForYear = (year: number) =>
     schedule
@@ -86,18 +96,23 @@ export function underwriteRealEstate(input: RealEstateInputs, discountRate = 0.0
     const yearDebtService = debtServiceForYear(year);
     let equityCashFlow = (yearNoi - yearDebtService) * (1 - input.taxRate);
     if (year === input.holdingYears) {
-      const exitGross = input.purchasePrice * Math.pow(1 + input.annualPropertyGrowth, input.holdingYears);
-      const remaining = schedule.filter((row) => row.paymentNumber <= input.holdingYears * 12).at(-1)?.closingBalance
-        ?? (schedule.length ? 0 : input.loanAmount);
+      const exitGross =
+        input.purchasePrice * Math.pow(1 + input.annualPropertyGrowth, input.holdingYears);
+      const remaining =
+        schedule.filter((row) => row.paymentNumber <= input.holdingYears * 12).at(-1)
+          ?.closingBalance ?? (schedule.length ? 0 : input.loanAmount);
       equityCashFlow += exitGross * (1 - input.sellingCostsRate) - remaining;
     }
     cashFlows.push(equityCashFlow);
   }
   if (input.holdingYears * 12 > months && input.loanAmount > 0) {
-    flags.push(`Le crédit s’éteint à l’année ${input.loanYears} : aucun service de dette n’est retranché ensuite.`);
+    flags.push(
+      `Le crédit s’éteint à l’année ${input.loanYears} : aucun service de dette n’est retranché ensuite.`,
+    );
   }
 
-  const exitValue = input.purchasePrice * Math.pow(1 + input.annualPropertyGrowth, input.holdingYears);
+  const exitValue =
+    input.purchasePrice * Math.pow(1 + input.annualPropertyGrowth, input.holdingYears);
   const outstandingAtExit =
     schedule.filter((row) => row.paymentNumber <= input.holdingYears * 12).at(-1)?.closingBalance ??
     (schedule.length ? 0 : input.loanAmount);
@@ -109,7 +124,14 @@ export function underwriteRealEstate(input: RealEstateInputs, discountRate = 0.0
   const contributions = investedEquity + additionalContributions;
   // Le projet est cédé à l'horizon : la valeur résiduelle après cession est nulle.
   const residualValue = 0;
-  const totalInterest = schedule.reduce((sum, row) => sum + row.interest, 0);
+  // Un projet cédé à l'année 10 sur un crédit de 25 ans ne paie pas les intérêts des
+  // années 11 à 25 : l'encours est soldé à la cession. Les deux grandeurs sont donc
+  // distinctes et ne portent jamais le même nom.
+  const exitMonth = input.holdingYears * 12;
+  const interestPaidThroughExit = schedule
+    .filter((row) => row.paymentNumber <= exitMonth)
+    .reduce((sum, row) => sum + row.interest, 0);
+  const fullTermInterestIfHeld = schedule.reduce((sum, row) => sum + row.interest, 0);
 
   return {
     totalProjectCost,
@@ -120,7 +142,10 @@ export function underwriteRealEstate(input: RealEstateInputs, discountRate = 0.0
     annualCashFlow,
     cashOnCash: investedEquity === 0 ? 0 : annualCashFlow / investedEquity,
     ltv: input.purchasePrice === 0 ? 0 : input.loanAmount / input.purchasePrice,
-    dscr: firstYearDebtService === 0 ? Number.POSITIVE_INFINITY : netOperatingIncome / firstYearDebtService,
+    dscr:
+      firstYearDebtService === 0
+        ? Number.POSITIVE_INFINITY
+        : netOperatingIncome / firstYearDebtService,
     irr: irr(cashFlows),
     npv: npv(discountRate, cashFlows),
     discountRate,
@@ -128,7 +153,8 @@ export function underwriteRealEstate(input: RealEstateInputs, discountRate = 0.0
     contributions,
     distributions,
     residualValue,
-    totalInterest,
+    interestPaidThroughExit,
+    fullTermInterestIfHeld,
     exitValue,
     outstandingAtExit,
     cashFlows,

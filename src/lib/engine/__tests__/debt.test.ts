@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   addMonths,
-  buildLoanSchedule,
+  buildContractualSchedule,
+  buildForwardSchedule,
+  buildLoanTimeline,
   debtServiceForPeriod,
+  elapsedPaymentsAt,
   monthlyDebtServiceAt,
   nextDebtEvent,
   outstandingBalanceAt,
@@ -65,9 +68,9 @@ describe("addMonths", () => {
   });
 });
 
-describe("buildLoanSchedule", () => {
+describe("buildContractualSchedule", () => {
   it("date chaque échéance à partir de la première échéance", () => {
-    const schedule = buildLoanSchedule(studentLoan);
+    const schedule = buildContractualSchedule(studentLoan);
     expect(schedule.kind).toBe("DERIVED");
     expect(schedule.firstDueDate).toBe("2026-12-05");
     expect(schedule.entries[0].totalCashOut).toBeCloseTo(284.72, 2);
@@ -76,13 +79,13 @@ describe("buildLoanSchedule", () => {
   });
 
   it("signale le résidu contractuel d’un prêt à 0 %", () => {
-    const schedule = buildLoanSchedule(studentLoan);
-    expect(schedule.contractualGap).toBeCloseTo(338.2, 2);
-    expect(schedule.flags.some((flag) => flag.code === "RECONCILIATION_REQUIRED")).toBe(true);
+    const timeline = buildLoanTimeline(studentLoan, "2026-08-19");
+    expect(timeline.contractualGap).toBeCloseTo(338.2, 2);
+    expect(timeline.flags.some((flag) => flag.code === "RECONCILIATION_REQUIRED")).toBe(true);
   });
 
   it("reproduit CASE 9, échéancier amortissable à taux fixe", () => {
-    const schedule = buildLoanSchedule(case9);
+    const schedule = buildContractualSchedule(case9);
     expect(schedule.entries).toHaveLength(240);
     expect(schedule.entries[0].interest).toBeCloseTo(250, 2);
     expect(schedule.entries[0].principal).toBeCloseTo(304.6, 1);
@@ -97,7 +100,7 @@ describe("buildLoanSchedule", () => {
   });
 
   it("ne plante pas et ne date rien sans échéance exploitable", () => {
-    const empty = buildLoanSchedule({ ...studentLoan, paymentCount: 0 });
+    const empty = buildContractualSchedule({ ...studentLoan, paymentCount: 0 });
     expect(empty.entries).toHaveLength(0);
     expect(empty.kind).toBe("MISSING");
   });
@@ -140,10 +143,9 @@ describe("debtService", () => {
       maturityDate: "2030-12-05",
     };
     expect(monthlyDebtServiceAt([studentLoan, auto], "2026-12-19")).toBeCloseTo(484.72, 2);
-    expect(debtServiceForPeriod([studentLoan, auto], "2026-08-01", "2026-08-31")).toBeCloseTo(
-      200,
-      2,
-    );
+    expect(
+      debtServiceForPeriod([studentLoan, auto], "2026-08-19", "2026-08-01", "2026-08-31"),
+    ).toBeCloseTo(200, 2);
   });
 
   it("expose le prochain événement daté et son montant", () => {
@@ -161,12 +163,108 @@ describe("debtService", () => {
 });
 
 describe("outstandingBalanceAt", () => {
-  it("laisse l’encours intact avant la première échéance", () => {
+  it("rend l’encours observé pour la date d’observation elle-même", () => {
     expect(outstandingBalanceAt(studentLoan, "2026-08-19")).toBeCloseTo(16745, 2);
   });
 
-  it("déduit les échéances déjà exigibles", () => {
-    expect(outstandingBalanceAt(case8, "2028-05-01")).toBeCloseTo(9000, 2);
-    expect(outstandingBalanceAt(case8, "2031-06-01")).toBeCloseTo(0, 2);
+  it("projette l’encours futur depuis l’encours observé", () => {
+    // 12 échéances de 250 € après le 2027-06-01 : 12 000 − 3 000 = 9 000.
+    expect(outstandingBalanceAt(case8, "2027-05-31", "2028-05-01")).toBeCloseTo(9000, 2);
+    expect(outstandingBalanceAt(case8, "2027-05-31", "2031-06-01")).toBeCloseTo(0, 2);
+  });
+
+  it("ne redéduit jamais une échéance déjà incorporée dans l’encours observé", () => {
+    // Encours observé APRÈS 12 échéances : la fonction ne doit pas les retrancher encore.
+    const partlyRepaid = { ...case8, currentBalance: 9000 };
+    expect(outstandingBalanceAt(partlyRepaid, "2028-05-15")).toBeCloseTo(9000, 2);
+    expect(outstandingBalanceAt(partlyRepaid, "2028-05-15", "2028-06-01")).toBeCloseTo(8750, 2);
+  });
+});
+
+describe("ancrage temporel de l’encours observé", () => {
+  /** Prêt de 100 000 € à 3 %, 240 échéances, dont 12 déjà payées à la date d'observation. */
+  const contractual = buildContractualSchedule(case9);
+  const balanceAfter12 = contractual.entries[11].closingBalance;
+  const partlyRepaid = { ...case9, currentBalance: balanceAfter12 };
+  const asOf = "2028-02-15"; // après la 12e échéance (2028-01-01), avant la 13e (2028-02-01)… voir ci-dessous
+
+  it("compte exactement les échéances déjà exigibles", () => {
+    // Première échéance 2027-02-01, donc la 12e tombe le 2028-01-01.
+    expect(contractual.entries[11].dueDate).toBe("2028-01-01");
+    expect(elapsedPaymentsAt(case9, "2028-01-15")).toBe(12);
+    expect(elapsedPaymentsAt(case9, "2027-01-31")).toBe(0);
+  });
+
+  it("démarre la projection à la 13e échéance, depuis l’encours observé", () => {
+    const forward = buildForwardSchedule(partlyRepaid, "2028-01-15");
+    expect(forward.entries[0].paymentNumber).toBe(13);
+    expect(forward.entries[0].dueDate).toBe("2028-02-01");
+    expect(forward.entries[0].openingBalance).toBeCloseTo(balanceAfter12, 6);
+    expect(forward.entries).toHaveLength(228);
+  });
+
+  it("n’amortit jamais deux fois le capital déjà remboursé", () => {
+    const forward = buildForwardSchedule(partlyRepaid, "2028-01-15");
+    const principalRepaidForward = forward.entries.reduce((sum, entry) => sum + entry.principal, 0);
+    // L'encours observé s'amortit intégralement, ni plus ni moins.
+    expect(principalRepaidForward).toBeCloseTo(balanceAfter12, 4);
+    // La somme des deux jambes reste le capital emprunté : aucun euro compté deux fois.
+    const principalRepaidPast = contractual.entries
+      .slice(0, 12)
+      .reduce((sum, entry) => sum + entry.principal, 0);
+    expect(principalRepaidPast + principalRepaidForward).toBeCloseTo(case9.principal, 3);
+    expect(forward.entries.at(-1)?.closingBalance).toBeCloseTo(0, 6);
+  });
+
+  it("reste aligné sur le contrat quand rien n’a encore été payé", () => {
+    const forward = buildForwardSchedule(case9, "2027-01-31");
+    expect(forward.entries).toHaveLength(contractual.entries.length);
+    expect(forward.entries[0].paymentNumber).toBe(1);
+    expect(forward.totalInterest).toBeCloseTo(contractual.totalInterest, 6);
+    expect(
+      buildLoanTimeline(case9, "2027-01-31").flags.some((flag) => flag.code === "BALANCE_MISMATCH"),
+    ).toBe(false);
+  });
+
+  it("signale un encours qui ne correspond pas au contrat sans le corriger", () => {
+    // Encours resté au capital initial alors que 12 échéances sont passées.
+    const stale = buildLoanTimeline(case9, "2028-01-15");
+    expect(stale.elapsedPayments).toBe(12);
+    expect(stale.observedBalance).toBe(100000);
+    expect(stale.contractualBalanceAtAsOf).toBeCloseTo(balanceAfter12, 2);
+    expect(stale.flags.some((flag) => flag.code === "BALANCE_MISMATCH")).toBe(true);
+    // L'encours observé fait foi : la projection part bien de 100 000, pas de l'attendu.
+    expect(stale.forward.entries[0].openingBalance).toBeCloseTo(100000, 2);
+  });
+
+  it("garde le service de dette exact des deux côtés de la date d’observation", () => {
+    // Mois d'une échéance passée : le montant vient du contrat.
+    expect(monthlyDebtServiceAt([partlyRepaid], "2027-06-15")).toBeCloseTo(
+      contractual.entries[4].totalCashOut,
+      2,
+    );
+    // Mois d'une échéance future : le montant vient de la projection.
+    expect(monthlyDebtServiceAt([partlyRepaid], "2028-02-15")).toBeCloseTo(
+      buildForwardSchedule(partlyRepaid, "2028-02-15").entries[0].totalCashOut,
+      2,
+    );
+    void asOf;
+  });
+});
+
+describe("mensualité contractuelle stable", () => {
+  it("ne recalcule pas la mensualité depuis un encours entamé", () => {
+    const contractual = buildContractualSchedule(case9);
+    const pmt = contractual.entries[0].totalCashOut;
+    const partlyRepaid = { ...case9, currentBalance: contractual.entries[11].closingBalance };
+    const forward = buildForwardSchedule(partlyRepaid, "2028-01-15");
+    // La mensualité d'un prêt à taux fixe est un terme du contrat, pas une variable.
+    expect(forward.entries[0].totalCashOut).toBeCloseTo(pmt, 2);
+    expect(pmt).toBeCloseTo(554.6, 2);
+  });
+
+  it("signale un encours que les échéances restantes ne soldent pas", () => {
+    const underfunded = buildLoanTimeline({ ...case9, currentBalance: 150000 }, "2028-01-15");
+    expect(underfunded.flags.some((flag) => flag.code === "RECONCILIATION_REQUIRED")).toBe(true);
   });
 });

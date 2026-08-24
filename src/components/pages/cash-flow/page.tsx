@@ -21,6 +21,10 @@ import {
   inputNumber,
 } from "@/components/pages/shared";
 import { addMonths, monthBounds, upcomingDebtEvents } from "@/lib/engine/debt";
+import { aggregateFlows, shouldDeriveBalance } from "@/lib/data/shared";
+
+/** Lignes rendues dans la table. Les agrégats, eux, portent sur toute la fenêtre lue. */
+const LEDGER_TABLE_ROWS = 50;
 
 function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const [modal, setModal] = useState(false);
@@ -34,22 +38,20 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   });
   // Agrégats mensuels construits depuis le ledger, jamais depuis les métriques courantes :
   // un mois sans transaction reste distinct d'un mois sans donnée.
+  // Les flux sont classés par nature via leur catégorie, jamais par leur signe : un
+  // versement vers le PEA sort du compte sans être une dépense de consommation.
   const months = Array.from({ length: 6 }, (_, index) => {
     const anchor = addMonths(state.asOfDate, index - 5);
     const { start, end } = monthBounds(anchor);
-    const inMonth = state.transactions.filter(
-      (transaction) => transaction.date >= start && transaction.date <= end,
-    );
-    return {
-      month: formatDate(start, { month: "short", year: "2-digit" }),
-      income: inMonth.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0),
-      expense: inMonth
-        .filter((item) => item.amount < 0)
-        .reduce((sum, item) => sum + Math.abs(item.amount), 0),
-      count: inMonth.length,
-    };
+    const flows = aggregateFlows(state.transactions, state.expenseCategories, start, end);
+    return { month: formatDate(start, { month: "short", year: "2-digit" }), ...flows };
   });
   const ledgerMonths = months.filter((month) => month.count > 0).length;
+  const savingExcluded = months.reduce((sum, month) => sum + month.saving, 0);
+  const latestBalanceDate =
+    state.accounts.find((account) => account.id === form.accountId)?.balanceDate ?? state.asOfDate;
+  // Un snapshot de solde postérieur contient déjà la transaction : le solde ne bouge pas.
+  const canUpdateBalance = shouldDeriveBalance(form.date, latestBalanceDate);
   const futureEvents = upcomingDebtEvents(state.liabilities, state.asOfDate, 365);
   const undatedIncomes = state.incomes.filter((income) => !income.active);
   async function addTransaction(event: React.FormEvent) {
@@ -61,7 +63,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       date: form.date,
       label: form.label,
       amount: inputNumber(form.amount),
-      updateBalance: form.updateBalance,
+      updateBalance: canUpdateBalance && form.updateBalance,
     });
     if (ok) {
       setModal(false);
@@ -147,6 +149,13 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <p className="muted-copy">
                 {ledgerMonths} mois sur 6 portent au moins une transaction. Les autres sont vides
                 parce que le ledger ne contient rien, pas parce que le montant serait nul.
+                {savingExcluded > 0 ? (
+                  <>
+                    {" "}
+                    <Currency value={savingExcluded} /> d’épargne et d’investissement sont exclus
+                    des dépenses de consommation.
+                  </>
+                ) : null}
               </p>
             </>
           ) : (
@@ -270,6 +279,12 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
             <span className="eyebrow">Ledger</span>
             <h2>Transactions récentes</h2>
           </div>
+          <span className="panel-note">
+            {state.transactions.length} sur la fenêtre de 6 mois
+            {state.transactions.length > LEDGER_TABLE_ROWS
+              ? ` · ${LEDGER_TABLE_ROWS} affichées`
+              : ""}
+          </span>
         </div>
         {state.transactions.length ? (
           <div className="simple-table">
@@ -280,7 +295,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <span>Compte</span>
               <span>Montant</span>
             </div>
-            {state.transactions.map((transaction) => (
+            {state.transactions.slice(0, LEDGER_TABLE_ROWS).map((transaction) => (
               <div className="table-row" key={transaction.id}>
                 <span>{new Date(transaction.date).toLocaleDateString("fr-FR")}</span>
                 <strong>{transaction.label}</strong>
@@ -373,11 +388,19 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           <label className="checkbox-row full">
             <input
               type="checkbox"
-              checked={form.updateBalance}
+              checked={canUpdateBalance && form.updateBalance}
+              disabled={!canUpdateBalance}
               onChange={(event) => setForm({ ...form, updateBalance: event.target.checked })}
             />
             Répercuter ce mouvement sur le solde du compte
           </label>
+          {!canUpdateBalance ? (
+            <p className="muted-copy full">
+              Un solde plus récent existe déjà (au {formatDate(latestBalanceDate)} ) ; cette
+              transaction sera ajoutée à l’historique sans modifier le solde actuel. Pour corriger
+              le solde, utilisez la mise à jour de compte depuis Net Worth.
+            </p>
+          ) : null}
           <div className="form-actions">
             <button type="button" className="button secondary" onClick={() => setModal(false)}>
               Annuler
