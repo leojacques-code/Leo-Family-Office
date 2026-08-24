@@ -12,6 +12,7 @@ import {
   deriveMetrics,
   ledgerWindowStart,
   readLedgerCoverage,
+  readLoanTerms,
   shouldDeriveBalance,
 } from "@/lib/data/shared";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
@@ -78,6 +79,36 @@ function ensureLedgerCoverageColumns(databaseInstance: DatabaseSync) {
     databaseInstance.exec(
       "ALTER TABLE users ADD COLUMN ledger_coverage_source TEXT NOT NULL DEFAULT 'MANUAL'",
     );
+  }
+  ensureColumns(databaseInstance, "liabilities", {
+    monthly_insurance: "REAL",
+    recurring_fees: "REAL",
+    payment_includes_insurance: "INTEGER",
+    deferral_kind: "TEXT NOT NULL DEFAULT 'NONE'",
+    deferral_months: "INTEGER NOT NULL DEFAULT 0",
+    deferral_interest_treatment: "TEXT NOT NULL DEFAULT 'UNKNOWN'",
+  });
+  ensureColumns(databaseInstance, "loan_schedules", {
+    insurance: "REAL NOT NULL DEFAULT 0",
+    fees: "REAL NOT NULL DEFAULT 0",
+  });
+}
+
+/** Ajout idempotent de colonnes sur une base locale déjà créée. */
+function ensureColumns(
+  databaseInstance: DatabaseSync,
+  table: string,
+  columns: Record<string, string>,
+) {
+  const existing = new Set(
+    (databaseInstance.prepare(`PRAGMA table_info(${table})`).all() as SqlRow[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  for (const [name, definition] of Object.entries(columns)) {
+    if (!existing.has(name)) {
+      databaseInstance.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+    }
   }
 }
 
@@ -867,8 +898,12 @@ function getPositions(): Position[] {
 }
 
 function getLiabilities(): Liability[] {
+  const schedules = db().prepare("SELECT * FROM loan_schedules").all() as SqlRow[];
+  const earlyRepayments = db().prepare("SELECT * FROM loan_early_repayments").all() as SqlRow[];
+  const charges = db().prepare("SELECT * FROM loan_charges").all() as SqlRow[];
   return (db().prepare("SELECT * FROM liabilities WHERE user_id=?").all(USER_ID) as SqlRow[]).map(
     (row) => ({
+      ...readLoanTerms(row, { schedules, earlyRepayments, charges }),
       id: String(row.id),
       name: String(row.name),
       lender: String(row.lender),

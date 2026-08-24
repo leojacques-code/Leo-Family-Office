@@ -4,11 +4,18 @@ import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
 import { LEDGER_COVERAGE_SOURCES } from "@/lib/types";
 import type {
   DashboardMetrics,
+  DeferralKind,
+  DeferredInterestTreatment,
+  EarlyRepayment,
+  EarlyRepaymentOutcome,
   LedgerCoverageSource,
+  Liability,
+  LoanCharge,
+  LoanDeferral,
+  ProvidedScheduleEntry,
   ExpenseCategory,
   FinancialAccount,
   IncomeSource,
-  Liability,
   Position,
   Transaction,
 } from "@/lib/types";
@@ -44,6 +51,102 @@ export function readLedgerCoverage(row: Record<string, unknown> | null | undefin
   return {
     start: rawStart === null || rawStart === undefined ? null : String(rawStart),
     source: source ?? "MANUAL",
+  };
+}
+
+type Row = Record<string, unknown>;
+
+const numberOrNull = (value: unknown): number | null =>
+  value === null || value === undefined ? null : Number(value);
+
+const boolOrNull = (value: unknown): boolean | null =>
+  value === null || value === undefined ? null : Boolean(value);
+
+/**
+ * Normalisation unique des termes optionnels d'un prêt, partagée par les deux adaptateurs.
+ *
+ * Tout ce qui n'est pas renseigné vaut `null` ou tableau vide, jamais zéro : c'est cette
+ * distinction qui permet au moteur de signaler « assurance inconnue » plutôt que de
+ * calculer un coût du crédit faussement précis. Centraliser la conversion évite qu'un
+ * adaptateur lise `0` là où l'autre lit `null`, ce qui rendrait un même prêt calculable
+ * d'un côté et pas de l'autre.
+ *
+ * Seules les lignes d'échéancier marquées ACTUAL constituent un échéancier bancaire réel.
+ * Une reconstruction DERIVED stockée en base reste une reconstruction : lui donner
+ * priorité reviendrait à figer nos propres hypothèses en faits.
+ */
+export function readLoanTerms(
+  row: Row,
+  related: { schedules?: Row[]; earlyRepayments?: Row[]; charges?: Row[] } = {},
+): Pick<
+  Liability,
+  | "monthlyInsurance"
+  | "recurringFees"
+  | "paymentIncludesInsurance"
+  | "deferral"
+  | "earlyRepayments"
+  | "oneOffCharges"
+  | "providedSchedule"
+> {
+  const liabilityId = String(row.id);
+  const deferralKind = (row.deferral_kind ?? "NONE") as DeferralKind;
+  const deferralMonths = Number(row.deferral_months ?? 0);
+  const deferral: LoanDeferral | null =
+    deferralKind === "NONE" || deferralMonths <= 0
+      ? null
+      : {
+          kind: deferralKind,
+          months: deferralMonths,
+          interestTreatment: (row.deferral_interest_treatment ??
+            "UNKNOWN") as DeferredInterestTreatment,
+        };
+
+  const providedSchedule: ProvidedScheduleEntry[] = (related.schedules ?? [])
+    .filter((line) => String(line.liability_id) === liabilityId)
+    .filter((line) => String(line.data_kind ?? line.kind) === "ACTUAL")
+    .map((line) => ({
+      paymentNumber: Number(line.payment_number),
+      dueDate: String(line.due_date),
+      openingBalance: Number(line.opening_balance),
+      interest: Number(line.interest),
+      principal: Number(line.principal),
+      insurance: Number(line.insurance ?? 0),
+      fees: Number(line.fees ?? 0),
+      closingBalance: Number(line.closing_balance),
+    }))
+    .sort((a, b) => a.paymentNumber - b.paymentNumber);
+
+  const earlyRepayments: EarlyRepayment[] = (related.earlyRepayments ?? [])
+    .filter((line) => String(line.liability_id) === liabilityId)
+    .map((line) => ({
+      id: String(line.id),
+      liabilityId,
+      date: String(line.repayment_date),
+      amount: Number(line.amount),
+      penalty: numberOrNull(line.penalty),
+      outcome: (line.outcome ?? "UNKNOWN") as EarlyRepaymentOutcome,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const oneOffCharges: LoanCharge[] = (related.charges ?? [])
+    .filter((line) => String(line.liability_id) === liabilityId)
+    .map((line) => ({
+      id: String(line.id),
+      liabilityId,
+      date: String(line.charge_date),
+      amount: Number(line.amount),
+      label: String(line.label),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return {
+    monthlyInsurance: numberOrNull(row.monthly_insurance),
+    recurringFees: numberOrNull(row.recurring_fees),
+    paymentIncludesInsurance: boolOrNull(row.payment_includes_insurance),
+    deferral,
+    earlyRepayments,
+    oneOffCharges,
+    providedSchedule,
   };
 }
 

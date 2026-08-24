@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { UNDECLARED_LOAN_TERMS } from "@/lib/engine/debt";
 import {
   computeFlowRates,
   deriveMetrics,
@@ -55,6 +56,7 @@ const liabilities: Liability[] = [
     paymentCount: 60,
     firstPaymentDate: "2026-12-05",
     maturityDate: "2031-11-05",
+    ...UNDECLARED_LOAN_TERMS,
     provenance,
   },
 ];
@@ -183,6 +185,7 @@ describe("deriveMetrics", () => {
       paymentCount: 60,
       firstPaymentDate: "2026-01-05",
       maturityDate: "2030-12-05",
+      ...UNDECLARED_LOAN_TERMS,
     };
     const both = deriveMetrics(
       accounts,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { UNDECLARED_LOAN_TERMS } from "@/lib/engine/debt";
 import {
   cashRunwayDays,
   compareBudgets,
@@ -288,6 +289,7 @@ const studentLoan: Liability = {
   paymentCount: 60,
   firstPaymentDate: "2026-12-05",
   maturityDate: "2031-11-05",
+  ...UNDECLARED_LOAN_TERMS,
   provenance,
 };
 

@@ -11,6 +11,7 @@ import {
   deriveMetrics,
   ledgerWindowStart,
   readLedgerCoverage,
+  readLoanTerms,
   shouldDeriveBalance,
 } from "@/lib/data/shared";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
@@ -182,6 +183,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       documentRows,
       assumptionRows,
       profileRows,
+      loanScheduleRows,
+      earlyRepaymentRows,
+      loanChargeRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -204,6 +208,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("documents"),
       mine("economic_assumptions"),
       db.from("profiles").select("*").eq("user_id", user),
+      mine("loan_schedules"),
+      mine("loan_early_repayments"),
+      mine("loan_charges"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -257,6 +264,11 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       .sort((a, b) => b.value - a.value);
 
     const liabilities: Liability[] = liabilityRows.map((row) => ({
+      ...readLoanTerms(row, {
+        schedules: loanScheduleRows,
+        earlyRepayments: earlyRepaymentRows,
+        charges: loanChargeRows,
+      }),
       id: str(row.id),
       name: str(row.name),
       lender: str(row.lender),

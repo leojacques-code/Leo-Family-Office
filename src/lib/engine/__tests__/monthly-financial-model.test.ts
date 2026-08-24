@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { UNDECLARED_LOAN_TERMS } from "@/lib/engine/debt";
 import {
   advanceMonth,
   buildDebtCalendar,
@@ -233,6 +234,7 @@ describe("CASE J — attribution mensuelle", () => {
       paymentCount: 240,
       firstPaymentDate: "2026-10-01",
       maturityDate: "2046-09-01",
+      ...UNDECLARED_LOAN_TERMS,
       provenance,
     };
     const result = runDeterministicModel(
@@ -289,6 +291,7 @@ describe("CASE K — déterministe et Monte-Carlo décrivent la même réalité"
       paymentCount: 60,
       firstPaymentDate: "2026-12-05",
       maturityDate: "2031-11-05",
+      ...UNDECLARED_LOAN_TERMS,
       provenance,
     };
     const flat = scenario({
@@ -351,6 +354,7 @@ describe("CASE M — dette arrivée à maturité", () => {
       paymentCount: 12,
       firstPaymentDate: "2026-09-05",
       maturityDate: "2027-08-05",
+      ...UNDECLARED_LOAN_TERMS,
       provenance,
     };
     const calendar = buildDebtCalendar([liability], "2026-08-19", 24);
@@ -381,6 +385,7 @@ describe("CASE N — plusieurs dettes", () => {
       paymentCount: 12,
       firstPaymentDate: "2026-09-05",
       maturityDate: "2027-08-05",
+      ...UNDECLARED_LOAN_TERMS,
       provenance,
     };
     const second: Liability = {
@@ -394,6 +399,7 @@ describe("CASE N — plusieurs dettes", () => {
       paymentCount: 12,
       firstPaymentDate: "2026-09-10",
       maturityDate: "2027-08-10",
+      ...UNDECLARED_LOAN_TERMS,
       provenance,
     };
     const calendar = buildDebtCalendar([first, second], "2026-08-19", 12);
@@ -475,6 +481,7 @@ describe("CASE Q — la dette n’est jamais absorbée par l’hypothèse de sur
       paymentCount: 60,
       firstPaymentDate: "2026-09-05",
       maturityDate: "2031-08-05",
+      ...UNDECLARED_LOAN_TERMS,
       provenance,
     };
     const heavy: Liability = {
@@ -482,6 +489,7 @@ describe("CASE Q — la dette n’est jamais absorbée par l’hypothèse de sur
       monthlyPayment: 700,
       paymentCount: 26,
       maturityDate: "2028-10-05",
+      ...UNDECLARED_LOAN_TERMS,
     };
     const assume = assumptions({
       operatingSurplus: 1000,
@@ -621,6 +629,7 @@ describe("bilan d’ouverture", () => {
           paymentCount: 60,
           firstPaymentDate: "2026-12-05",
           maturityDate: "2031-11-05",
+          ...UNDECLARED_LOAN_TERMS,
           provenance,
         },
       ],
@@ -740,6 +749,7 @@ describe("invariants du besoin de financement", () => {
     paymentCount: 60,
     firstPaymentDate: "2026-12-05",
     maturityDate: "2031-11-05",
+    ...UNDECLARED_LOAN_TERMS,
     provenance,
   };
   const central = assumptions({
@@ -797,6 +807,7 @@ describe("CASE U — scénario Central réel", () => {
     paymentCount: 60,
     firstPaymentDate: "2026-12-05",
     maturityDate: "2031-11-05",
+    ...UNDECLARED_LOAN_TERMS,
     provenance,
   };
   const start = opening({
@@ -851,6 +862,7 @@ function zeroRateLoan(monthlyPayment: number, paymentCount: number): Liability {
     paymentCount,
     firstPaymentDate: "2026-09-05",
     maturityDate: "2036-08-05",
+    ...UNDECLARED_LOAN_TERMS,
     provenance,
   };
 }

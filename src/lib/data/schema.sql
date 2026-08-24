@@ -138,12 +138,44 @@ CREATE TABLE IF NOT EXISTS liabilities (
   first_payment_date TEXT NOT NULL,
   maturity_date TEXT NOT NULL,
   rate_type TEXT NOT NULL DEFAULT 'FIXED',
+  -- Termes optionnels du contrat. NULL signifie « non renseigné », jamais « zéro » :
+  -- c'est cette distinction qui permet au moteur de signaler une ambiguïté.
+  monthly_insurance REAL,
+  recurring_fees REAL,
+  payment_includes_insurance INTEGER,
+  deferral_kind TEXT NOT NULL DEFAULT 'NONE'
+    CHECK (deferral_kind IN ('NONE', 'PRINCIPAL_ONLY', 'TOTAL')),
+  deferral_months INTEGER NOT NULL DEFAULT 0,
+  deferral_interest_treatment TEXT NOT NULL DEFAULT 'UNKNOWN'
+    CHECK (deferral_interest_treatment IN ('PAID', 'CAPITALISED', 'UNKNOWN')),
   kind TEXT NOT NULL,
   confidence TEXT NOT NULL,
   source TEXT,
   notes TEXT
 );
 
+-- Remboursements anticipés. `penalty` NULL = indemnité inconnue, jamais nulle par défaut.
+CREATE TABLE IF NOT EXISTS loan_early_repayments (
+  id TEXT PRIMARY KEY,
+  liability_id TEXT NOT NULL REFERENCES liabilities(id),
+  repayment_date TEXT NOT NULL,
+  amount REAL NOT NULL,
+  penalty REAL,
+  outcome TEXT NOT NULL DEFAULT 'UNKNOWN'
+    CHECK (outcome IN ('SHORTEN_TERM', 'REDUCE_PAYMENT', 'UNKNOWN'))
+);
+
+-- Frais ponctuels datés, hors échéancier : dossier, garantie, avenant.
+CREATE TABLE IF NOT EXISTS loan_charges (
+  id TEXT PRIMARY KEY,
+  liability_id TEXT NOT NULL REFERENCES liabilities(id),
+  charge_date TEXT NOT NULL,
+  amount REAL NOT NULL,
+  label TEXT NOT NULL
+);
+
+-- Échéancier stocké. Seules les lignes kind='ACTUAL' constituent un échéancier bancaire
+-- réel et priment sur toute reconstruction : une ligne DERIVED reste une hypothèse.
 CREATE TABLE IF NOT EXISTS loan_schedules (
   id TEXT PRIMARY KEY,
   liability_id TEXT NOT NULL REFERENCES liabilities(id) ON DELETE CASCADE,
@@ -153,6 +185,8 @@ CREATE TABLE IF NOT EXISTS loan_schedules (
   payment REAL NOT NULL,
   interest REAL NOT NULL,
   principal REAL NOT NULL,
+  insurance REAL NOT NULL DEFAULT 0,
+  fees REAL NOT NULL DEFAULT 0,
   closing_balance REAL NOT NULL,
   kind TEXT NOT NULL,
   UNIQUE(liability_id, payment_number)

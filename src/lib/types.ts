@@ -38,6 +38,66 @@ export interface Position {
   provenance: Provenance;
 }
 
+/** Nature d'un différé de remboursement. */
+export type DeferralKind = "NONE" | "PRINCIPAL_ONLY" | "TOTAL";
+
+/**
+ * Sort des intérêts pendant un différé TOTAL. `UNKNOWN` est une vraie valeur : un contrat
+ * peut capitaliser les intérêts, les faire payer à part, ou plus rarement les remettre.
+ * Le moteur ne tranche pas à la place du contrat, il signale.
+ */
+export type DeferredInterestTreatment = "PAID" | "CAPITALISED" | "UNKNOWN";
+
+export interface LoanDeferral {
+  kind: DeferralKind;
+  /** Nombre d'échéances en différé, à compter de la première. */
+  months: number;
+  interestTreatment: DeferredInterestTreatment;
+}
+
+/**
+ * Convention appliquée après un remboursement anticipé. `UNKNOWN` interdit au moteur de
+ * choisir seul entre réduction de durée et réduction de mensualité : les deux produisent
+ * des coûts d'intérêt très différents.
+ */
+export type EarlyRepaymentOutcome = "SHORTEN_TERM" | "REDUCE_PAYMENT" | "UNKNOWN";
+
+export interface EarlyRepayment {
+  id: string;
+  liabilityId: string;
+  date: string;
+  /** Capital remboursé par anticipation. */
+  amount: number;
+  /** Indemnité de remboursement anticipé. `null` = inconnue, jamais supposée nulle. */
+  penalty: number | null;
+  outcome: EarlyRepaymentOutcome;
+}
+
+/** Frais ponctuel daté, hors échéancier : frais de dossier, garantie, avenant. */
+export interface LoanCharge {
+  id: string;
+  liabilityId: string;
+  date: string;
+  amount: number;
+  label: string;
+}
+
+/**
+ * Ligne d'un échéancier bancaire réellement fourni. Quand il existe, il prime sur toute
+ * reconstruction théorique : c'est ce que la banque prélèvera, quelles que soient les
+ * hypothèses du moteur.
+ */
+export interface ProvidedScheduleEntry {
+  paymentNumber: number;
+  dueDate: string;
+  openingBalance: number;
+  interest: number;
+  principal: number;
+  insurance: number;
+  fees: number;
+  closingBalance: number;
+}
+
 export interface Liability {
   id: string;
   name: string;
@@ -45,25 +105,61 @@ export interface Liability {
   principal: number;
   currentBalance: number;
   annualRate: number;
+  /**
+   * Mensualité déclarée au contrat. Voir `paymentIncludesInsurance` : selon la convention
+   * du prêteur, elle inclut ou non l'assurance emprunteur, ce qui change entièrement la
+   * vitesse d'amortissement.
+   */
   monthlyPayment: number;
   paymentCount: number;
   firstPaymentDate: string;
   maturityDate: string;
+  /** Assurance emprunteur par échéance. `null` = non renseignée, jamais supposée nulle. */
+  monthlyInsurance: number | null;
+  /** Frais récurrents par échéance. `null` = non renseignés. */
+  recurringFees: number | null;
+  /**
+   * `true` : `monthlyPayment` couvre déjà l'assurance, qui est donc retranchée de la part
+   * amortissante. `false` : l'assurance s'ajoute par-dessus. `null` : convention inconnue,
+   * le moteur applique l'hypothèse la moins déformante et le signale.
+   */
+  paymentIncludesInsurance: boolean | null;
+  deferral: LoanDeferral | null;
+  earlyRepayments: EarlyRepayment[];
+  oneOffCharges: LoanCharge[];
+  /** Échéancier bancaire réel. Vide tant qu'aucun n'a été importé. */
+  providedSchedule: ProvidedScheduleEntry[];
   provenance: Provenance;
 }
+
+/**
+ * Nature d'une ligne d'échéancier. Un frais ponctuel et un remboursement anticipé sont de
+ * vraies sorties de trésorerie, mais ce ne sont pas des échéances : les confondre fausse
+ * autant le comptage des échéances que leur omission fausserait la trésorerie.
+ */
+export type ScheduleEntryKind = "PAYMENT" | "CHARGE" | "EARLY_REPAYMENT";
 
 export interface LoanScheduleEntry {
   liabilityId: string;
   paymentNumber: number;
+  entryKind: ScheduleEntryKind;
   /** Date d'exigibilité réelle de l'échéance. */
   dueDate: string;
   openingBalance: number;
+  /** Intérêt réellement décaissé sur cette échéance. */
   interest: number;
+  /**
+   * Intérêt couru mais non décaissé, ajouté au capital restant dû : différé total à
+   * intérêts capitalisés, ou mensualité insuffisante à couvrir l'intérêt. Il ne sort pas
+   * de la trésorerie mais appauvrit bien le patrimoine, d'où sa comptabilisation séparée.
+   */
+  capitalisedInterest: number;
   principal: number;
   insurance: number;
   fees: number;
-  /** Ce qui sort réellement du compte : interest + principal + insurance + fees. */
+  /** Ce qui sort réellement du compte : principal + interest + insurance + fees. */
   totalCashOut: number;
+  /** closingBalance = openingBalance − principal + capitalisedInterest. */
   closingBalance: number;
   kind: DataKind;
 }

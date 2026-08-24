@@ -13,7 +13,13 @@ import {
   YAxis,
 } from "recharts";
 import { compareDebtVsInvest } from "@/lib/engine/decision";
-import { buildLoanTimeline, monthlyDebtServiceAt, nextDebtEvent } from "@/lib/engine/debt";
+import {
+  buildLoanTimeline,
+  debtServiceBreakdownForPeriod,
+  monthBounds,
+  monthlyDebtServiceAt,
+  nextDebtEvent,
+} from "@/lib/engine/debt";
 import {
   Callout,
   Currency,
@@ -81,8 +87,19 @@ function DebtPage({ state, setExplanation }: SectionProps) {
 
   const { contractual, forward } = timeline;
   const currentDebtService = monthlyDebtServiceAt([loan], state.asOfDate);
+  const monthWindow = monthBounds(state.asOfDate);
+  const monthBreakdown = debtServiceBreakdownForPeriod(
+    [loan],
+    state.asOfDate,
+    monthWindow.start,
+    monthWindow.end,
+  );
   const upcoming = nextDebtEvent([loan], state.asOfDate);
   const contractualTotal = loan.monthlyPayment * loan.paymentCount;
+  // Un échéancier bancaire utilisé est une bonne nouvelle, pas une anomalie : le mélanger
+  // aux écarts de réconciliation ferait passer une information pour un problème.
+  const providedNotice = timeline.flags.find((flag) => flag.code === "PROVIDED_SCHEDULE_USED");
+  const anomalies = timeline.flags.filter((flag) => flag.code !== "PROVIDED_SCHEDULE_USED");
 
   return (
     <div className="page-stack">
@@ -148,7 +165,7 @@ function DebtPage({ state, setExplanation }: SectionProps) {
                   date: state.asOfDate,
                 },
               ],
-              note: "Avant la première échéance et après la dernière, aucune ligne n’est exigible : le service de dette vaut 0 sans cas particulier. Assurance et frais ne sont pas portés par le contrat saisi et valent 0.",
+              note: `Avant la première échéance et après la dernière, aucune ligne n’est exigible : le service de dette vaut 0 sans cas particulier. Décomposition du mois : ${formatEur(monthBreakdown.principal)} de capital, ${formatEur(monthBreakdown.interest)} d’intérêts, ${formatEur(monthBreakdown.insurance)} d’assurance, ${formatEur(monthBreakdown.fees)} de frais. Seuls ${formatEur(monthBreakdown.economicCost)} appauvrissent : le capital remboursé éteint un passif, il ne détruit pas de patrimoine.`,
             })
           }
         />
@@ -186,10 +203,15 @@ function DebtPage({ state, setExplanation }: SectionProps) {
           }
         />
       </section>
-      {timeline.flags.length ? (
-        <Callout tone="warning" title="Échéancier non réconcilié">
-          {timeline.flags.map((flag) => flag.detail).join(" ")} Le tableau arrête le principal à
-          zéro ; seul le document bancaire pourra expliquer le reliquat contractuel.
+      {providedNotice ? (
+        <Callout tone="info" title="Échéancier bancaire">
+          {providedNotice.detail}
+        </Callout>
+      ) : null}
+      {anomalies.length ? (
+        <Callout tone="warning" title="Points à réconcilier">
+          {anomalies.map((flag) => flag.detail).join(" ")} L’encours observé fait foi : rien n’est
+          corrigé en silence pour faire coller le modèle à la donnée.
         </Callout>
       ) : null}
       <section className="two-column wide-left">
