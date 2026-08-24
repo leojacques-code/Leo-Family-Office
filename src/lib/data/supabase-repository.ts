@@ -14,7 +14,7 @@ import {
   readLoanTerms,
 } from "@/lib/data/shared";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
-import { monthBounds } from "@/lib/engine/debt";
+import { debtCashOut, monthBounds } from "@/lib/engine/debt";
 import {
   enumValue,
   finiteNumber,
@@ -305,32 +305,37 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       })
       .sort((a, b) => b.value - a.value);
 
-    const liabilities: Liability[] = liabilityRows.map((row) => ({
-      ...readLoanTerms(row, {
-        schedules: loanScheduleRows,
-        earlyRepayments: earlyRepaymentRows,
-        charges: loanChargeRows,
-        rateChanges: rateChangeRows,
-        paymentChanges: paymentChangeRows,
-      }),
-      id: str(row.id),
-      name: str(row.name),
-      lender: str(row.lender),
-      principal: finiteNumber(row.principal, `liabilities[id=${str(row.id)}].principal`),
-      currentBalance: finiteNumber(
-        row.current_balance,
-        `liabilities[id=${str(row.id)}].current_balance`,
-      ),
-      annualRate: finiteNumber(row.annual_rate, `liabilities[id=${str(row.id)}].annual_rate`),
-      monthlyPayment: finiteNumber(
-        row.monthly_payment,
-        `liabilities[id=${str(row.id)}].monthly_payment`,
-      ),
-      paymentCount: finiteNumber(row.payment_count, `liabilities[id=${str(row.id)}].payment_count`),
-      firstPaymentDate: str(row.first_payment_date),
-      maturityDate: str(row.maturity_date),
-      provenance: provenance(row),
-    }));
+    const liabilities: Liability[] = liabilityRows
+      .filter((row) => row.archived !== true)
+      .map((row) => ({
+        ...readLoanTerms(row, {
+          schedules: loanScheduleRows,
+          earlyRepayments: earlyRepaymentRows,
+          charges: loanChargeRows,
+          rateChanges: rateChangeRows,
+          paymentChanges: paymentChangeRows,
+        }),
+        id: str(row.id),
+        name: str(row.name),
+        lender: str(row.lender),
+        principal: finiteNumber(row.principal, `liabilities[id=${str(row.id)}].principal`),
+        currentBalance: finiteNumber(
+          row.current_balance,
+          `liabilities[id=${str(row.id)}].current_balance`,
+        ),
+        annualRate: finiteNumber(row.annual_rate, `liabilities[id=${str(row.id)}].annual_rate`),
+        monthlyPayment: finiteNumber(
+          row.monthly_payment,
+          `liabilities[id=${str(row.id)}].monthly_payment`,
+        ),
+        paymentCount: finiteNumber(
+          row.payment_count,
+          `liabilities[id=${str(row.id)}].payment_count`,
+        ),
+        firstPaymentDate: str(row.first_payment_date),
+        maturityDate: str(row.maturity_date),
+        provenance: provenance(row),
+      }));
 
     const incomes: IncomeSource[] = incomeRows
       .map((row) => ({
@@ -596,6 +601,92 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
   async function mutateState(mutation: Mutation): Promise<DashboardState> {
     const now = new Date().toISOString();
     switch (mutation.action) {
+      case "save_debt_contract": {
+        const contract = mutation.contract;
+        unwrap(
+          await db.rpc("lfo_save_debt_contract", {
+            p_user_id: user,
+            p_payload: {
+              liability_id: contract.liabilityId,
+              name: contract.name,
+              lender: contract.lender,
+              principal: contract.principal,
+              initial_balance: contract.initialBalance,
+              balance_date: contract.balanceDate,
+              annual_rate: contract.annualRate,
+              payment_amount: contract.paymentAmount,
+              payment_count: contract.paymentCount,
+              first_payment_date: contract.firstPaymentDate,
+              maturity_date: contract.maturityDate,
+              amortisation_profile: contract.amortisationProfile,
+              balloon_amount: contract.balloonAmount,
+              payment_frequency: contract.paymentFrequency,
+              interest_convention: contract.interestConvention,
+              rate_type: contract.rateType,
+              insurance_amount: contract.insuranceAmount,
+              recurring_fees: contract.recurringFees,
+              payment_includes_insurance: contract.paymentIncludesInsurance,
+              deferral: contract.deferral
+                ? {
+                    kind: contract.deferral.kind,
+                    months: contract.deferral.months,
+                    interest_treatment: contract.deferral.interestTreatment,
+                  }
+                : null,
+              facility_id: contract.facilityId,
+              notes: contract.notes,
+              rate_schedule: contract.rateSchedule.map((change) => ({
+                effective_from: change.effectiveFrom,
+                annual_rate: change.annualRate,
+                kind: change.kind,
+              })),
+              payment_schedule: contract.paymentSchedule.map((change) => ({
+                effective_from: change.effectiveFrom,
+                amount: change.amount,
+                kind: change.kind,
+              })),
+              early_repayments: contract.earlyRepayments,
+              charges: contract.charges,
+              provided_schedule: contract.providedSchedule.map((row) => ({
+                payment_number: row.paymentNumber,
+                due_date: row.dueDate,
+                opening_balance: row.openingBalance,
+                payment: debtCashOut(row),
+                interest: row.interest,
+                principal: row.principal,
+                insurance: row.insurance,
+                fees: row.fees,
+                closing_balance: row.closingBalance,
+              })),
+            },
+          }),
+          "enregistrement atomique du contrat de dette",
+        );
+        break;
+      }
+      case "record_debt_balance": {
+        unwrap(
+          await db.rpc("lfo_record_debt_balance", {
+            p_user_id: user,
+            p_liability_id: mutation.liabilityId,
+            p_observed_at: mutation.observedAt,
+            p_balance: mutation.balance,
+            p_notes: mutation.notes,
+          }),
+          "enregistrement atomique de l’encours observé",
+        );
+        break;
+      }
+      case "archive_debt": {
+        unwrap(
+          await db.rpc("lfo_archive_debt", {
+            p_user_id: user,
+            p_liability_id: mutation.liabilityId,
+          }),
+          "archivage de dette éteinte",
+        );
+        break;
+      }
       case "update_account": {
         unwrap(
           await db

@@ -17,6 +17,9 @@ const canonicalMigrations = [
   "202608240003",
   "202608240004",
   "202608240005",
+  "20260824230233",
+  "20260824231522",
+  "20260825012954",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -44,12 +47,21 @@ const requiredColumns: Record<string, string[]> = {
     "interest_convention",
     "rate_type",
     "facility_id",
+    "archived",
   ],
   loan_schedules: ["id", "insurance", "fees"],
   loan_early_repayments: ["id", "liability_id", "amount", "penalty", "outcome"],
   loan_charges: ["id", "liability_id", "amount", "financed"],
   loan_rate_changes: ["id", "liability_id", "annual_rate", "term_kind"],
   loan_payment_changes: ["id", "liability_id", "amount", "term_kind"],
+  liability_balance_observations: [
+    "id",
+    "liability_id",
+    "observed_at",
+    "balance",
+    "data_kind",
+    "confidence",
+  ],
   recurring_cash_flow_rules: ["id", "cash_flow_kind", "frequency"],
   cash_flow_monthly_closes: ["id", "month", "version", "post_debt_surplus"],
   simulation_runs: ["id", "scenario_id", "seed", "simulations", "years", "methodology"],
@@ -102,6 +114,7 @@ const userOwnedTables = [
   "loan_charges",
   "loan_rate_changes",
   "loan_payment_changes",
+  "liability_balance_observations",
 ] as const;
 
 const requiredConstraints = [
@@ -143,6 +156,10 @@ const requiredRpcs: Record<string, string> = {
     "p_user_id uuid, p_month text, p_income numeric, p_consumer_expenses numeric, p_essential_expenses numeric, p_taxes_paid numeric, p_debt_service_paid numeric, p_investment_flows numeric, p_internal_transfers numeric, p_operating_surplus_before_debt numeric, p_post_debt_surplus numeric, p_unclassified_transaction_count integer",
   lfo_save_simulation:
     "p_user_id uuid, p_scenario_id uuid, p_seed integer, p_simulations integer, p_years integer, p_methodology text, p_points jsonb",
+  lfo_save_debt_contract: "p_user_id uuid, p_payload jsonb",
+  lfo_record_debt_balance:
+    "p_user_id uuid, p_liability_id uuid, p_observed_at date, p_balance numeric, p_notes text",
+  lfo_archive_debt: "p_user_id uuid, p_liability_id uuid",
 };
 
 const storagePolicies = [

@@ -269,7 +269,8 @@ function ScenariosPage({
               <Currency value={horizon?.debt ?? 0} compact />
             </strong>
             <small>
-              Intérêts cumulés <Currency value={horizon?.cumulativeInterestPaid ?? 0} compact />
+              Coûts de dette cumulés{" "}
+              <Currency value={horizon?.cumulativeEconomicDebtCosts ?? 0} compact />
             </small>
           </div>
         </div>

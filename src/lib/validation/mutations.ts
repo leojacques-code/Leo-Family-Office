@@ -30,7 +30,125 @@ const cashFlowKind = z.enum([
 const essentiality = z.enum(["ESSENTIAL", "NON_ESSENTIAL", "UNKNOWN"]);
 const expenseBehavior = z.enum(["FIXED", "VARIABLE", "DISCRETIONARY", "UNKNOWN"]);
 
+const realDate = date.refine(isRealCalendarDate, "Date inexistante au calendrier");
+const nullableMoney = finite.nonnegative().nullable();
+const datedTermKind = z.enum(["CONTRACTUAL", "ASSUMPTION"]);
+const debtContractSchema = z
+  .object({
+    liabilityId: z.uuid().nullable(),
+    name: z.string().trim().min(1).max(160),
+    lender: z.string().trim().min(1).max(160),
+    principal: finite.nonnegative(),
+    initialBalance: nullableMoney,
+    balanceDate: realDate.nullable(),
+    annualRate: finite.min(0).max(10),
+    paymentAmount: finite.nonnegative(),
+    paymentCount: z.number().int().positive().max(1200),
+    firstPaymentDate: realDate,
+    maturityDate: realDate,
+    amortisationProfile: z.enum(["AMORTIZING", "INTEREST_ONLY", "BULLET", "BALLOON"]),
+    balloonAmount: nullableMoney,
+    paymentFrequency: z.enum(["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL"]),
+    interestConvention: z.enum(["PROPORTIONAL", "ACTUAL_365"]),
+    rateType: z.enum(["FIXED", "VARIABLE"]),
+    insuranceAmount: nullableMoney,
+    recurringFees: nullableMoney,
+    paymentIncludesInsurance: z.boolean().nullable(),
+    deferral: z
+      .object({
+        kind: z.enum(["PRINCIPAL_ONLY", "TOTAL"]),
+        months: z.number().int().positive().max(1200),
+        interestTreatment: z.enum(["PAID", "CAPITALISED", "UNKNOWN"]),
+      })
+      .strict()
+      .nullable(),
+    facilityId: z.string().trim().min(1).max(120).nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+    rateSchedule: z.array(
+      z
+        .object({ effectiveFrom: realDate, annualRate: finite.min(0).max(10), kind: datedTermKind })
+        .strict(),
+    ),
+    paymentSchedule: z.array(
+      z
+        .object({ effectiveFrom: realDate, amount: finite.nonnegative(), kind: datedTermKind })
+        .strict(),
+    ),
+    earlyRepayments: z.array(
+      z
+        .object({
+          id: z.uuid(),
+          date: realDate,
+          amount: finite.positive(),
+          penalty: nullableMoney,
+          outcome: z.enum(["SHORTEN_TERM", "REDUCE_PAYMENT", "UNKNOWN"]),
+        })
+        .strict(),
+    ),
+    charges: z.array(
+      z
+        .object({
+          id: z.uuid(),
+          date: realDate,
+          amount: finite.positive(),
+          label: z.string().trim().min(1).max(160),
+          financed: z.boolean(),
+        })
+        .strict(),
+    ),
+    providedSchedule: z.array(
+      z
+        .object({
+          paymentNumber: z.number().int().positive(),
+          dueDate: realDate,
+          openingBalance: finite.nonnegative(),
+          interest: finite.nonnegative(),
+          principal: finite.nonnegative(),
+          insurance: finite.nonnegative(),
+          fees: finite.nonnegative(),
+          closingBalance: finite.nonnegative(),
+        })
+        .strict(),
+    ),
+  })
+  .strict()
+  .superRefine((contract, context) => {
+    if (
+      contract.liabilityId === null &&
+      (contract.initialBalance === null || contract.balanceDate === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "L’encours initial et sa date sont requis à la création",
+        path: ["initialBalance"],
+      });
+    }
+    if (contract.amortisationProfile === "BALLOON" && contract.balloonAmount === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Le solde balloon est requis pour ce profil",
+        path: ["balloonAmount"],
+      });
+    }
+    if (contract.maturityDate < contract.firstPaymentDate) {
+      context.addIssue({
+        code: "custom",
+        message: "La maturité doit être postérieure à la première échéance",
+        path: ["maturityDate"],
+      });
+    }
+  });
+
 export const mutationSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("save_debt_contract"), contract: debtContractSchema }),
+  z.object({
+    action: z.literal("record_debt_balance"),
+    liabilityId: z.uuid(),
+    observedAt: realDate,
+    balance: finite.nonnegative(),
+    notes: z.string().trim().max(500).nullable(),
+  }),
+  z.object({ action: z.literal("archive_debt"), liabilityId: z.uuid() }),
   z.object({
     action: z.literal("update_account"),
     accountId: z.string().min(1),

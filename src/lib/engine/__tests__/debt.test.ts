@@ -794,6 +794,11 @@ describe("CASE D14 — service de dette agrégé", () => {
     expect(breakdown.insurance).toBeCloseTo(20, 9);
     expect(breakdown.principal).toBeCloseTo(703.25 - (120000 * 0.036) / 12 + 500, 6);
     expect(breakdown.totalCashOut).toBeCloseTo(703.25 + 20 + 500, 6);
+    expect(breakdown.cashImpact).toBeCloseTo(-(703.25 + 20 + 500), 6);
+    expect(breakdown.liabilityDelta).toBeCloseTo(-breakdown.principal, 6);
+    expect(breakdown.principalMovement).toBeCloseTo(-breakdown.principal, 6);
+    expect(breakdown.kind).toBe("DERIVED");
+    expect(breakdown.sourceLiabilityIds).toEqual(["l1", "l2"]);
   });
 });
 
@@ -1120,6 +1125,13 @@ describe("CASE E-B — interest-only", () => {
     expect(schedule.totalInterest).toBeCloseTo(24 * 360, 4);
     expectEntryInvariants(schedule);
   });
+
+  it("conserve explicitement le capital après la dernière échéance d’intérêts", () => {
+    const liability = loan({ amortisationProfile: "INTEREST_ONLY", paymentCount: 24 });
+    const afterMaturity = addMonths(dueDateOf(liability, 24), 1);
+    expect(outstandingBalanceAt(liability, "2026-08-19", afterMaturity)).toBeCloseTo(120000, 6);
+    expect(monthlyDebtServiceAt([liability], afterMaturity)).toBeCloseTo(0, 9);
+  });
 });
 
 describe("CASE E-C — in fine / bullet", () => {
@@ -1149,6 +1161,13 @@ describe("CASE E-C — in fine / bullet", () => {
     expect(b.principal).toBeCloseTo(120000, 6);
     // Seuls 360 € appauvrissent : les 120 000 € éteignent un passif.
     expect(b.economicCost).toBeCloseTo(360, 6);
+  });
+
+  it("éteint explicitement l’encours à maturité et ne le conserve pas ensuite", () => {
+    const liability = loan({ amortisationProfile: "BULLET", paymentCount: 24 });
+    const maturity = dueDateOf(liability, 24);
+    expect(outstandingBalanceAt(liability, "2026-08-19", maturity)).toBeCloseTo(0, 6);
+    expect(outstandingBalanceAt(liability, "2026-08-19", addMonths(maturity, 1))).toBeCloseTo(0, 6);
   });
 });
 
@@ -1334,6 +1353,27 @@ describe("CASE E-I / E-J — frais payés cash contre frais financés", () => {
     );
     expect(apres!.openingBalance - avant!.closingBalance).toBeCloseTo(900, 6);
     expectEntryInvariants(forward);
+  });
+
+  it("intègre un frais financé dans chaque lecture projetée de l’encours", () => {
+    const liability = loan({
+      currentBalance: 100000,
+      firstPaymentDate: "2027-09-05",
+      maturityDate: "2047-08-05",
+      oneOffCharges: [charge(true)],
+    });
+
+    const breakdown = debtServiceBreakdownForPeriod(
+      [liability],
+      "2026-08-19",
+      "2026-09-01",
+      "2026-09-30",
+    );
+    expect(breakdown.totalCashOut).toBeCloseTo(0, 9);
+    expect(breakdown.capitalisedCharges).toBeCloseTo(900, 9);
+    expect(breakdown.economicCost).toBeCloseTo(900, 9);
+    expect(projectedBalanceAt(liability, "2026-08-19", "2026-09-20")).toBeCloseTo(100900, 9);
+    expect(outstandingBalanceAt(liability, "2026-08-19", "2026-09-20")).toBeCloseTo(100900, 9);
   });
 });
 

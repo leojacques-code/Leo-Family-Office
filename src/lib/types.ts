@@ -547,7 +547,12 @@ export interface AnnualBalanceSheetPoint {
   marketInvestedAssets: number;
   cumulativeOperatingSurplus: number;
   cumulativeMarketPnL: number;
-  cumulativeInterestPaid: number;
+  cumulativeCashInterestPaid: number;
+  cumulativeCapitalisedInterest: number;
+  cumulativeInsurancePaid: number;
+  cumulativeCashFeesPaid: number;
+  cumulativeCapitalisedCharges: number;
+  cumulativeEconomicDebtCosts: number;
   cumulativePrincipalPaid: number;
   /** Vrai dès qu'un besoin de financement est apparu : la trajectoire est partielle. */
   financingCostMissing: boolean;
