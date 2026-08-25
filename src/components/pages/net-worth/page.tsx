@@ -114,13 +114,19 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
         <MetricCard
           label="Patrimoine net identifié"
           value={<Currency value={state.metrics.netWorth} />}
-          tone={state.metrics.netWorth < 0 ? "negative" : "positive"}
+          tone={
+            state.metrics.netWorth !== null && state.metrics.netWorth < 0 ? "negative" : "positive"
+          }
           onExplain={() => setExplanation(netWorthExplanation(state))}
         />
         <MetricCard
           label="Liquid net worth"
           value={<Currency value={state.metrics.liquidNetWorth} />}
-          tone={state.metrics.liquidNetWorth < 0 ? "negative" : "positive"}
+          tone={
+            state.metrics.liquidNetWorth !== null && state.metrics.liquidNetWorth < 0
+              ? "negative"
+              : "positive"
+          }
           detail={
             <>
               Actifs mobilisables <Currency value={state.metrics.liquidAssets} /> − dettes

@@ -11,6 +11,7 @@ import type {
   Liability,
   LoanScheduleEntry,
 } from "@/lib/types";
+import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
 
 /**
  * PERSONAL MONTHLY FINANCIAL MODEL
@@ -60,7 +61,7 @@ import type {
 /** Bilan financier d'ouverture, dérivé de l'état du dossier à la date d'observation. */
 export interface OpeningBalanceSheet {
   date: string;
-  /** Comptes bancaires et livrets. Peut être négatif si un compte est à découvert. */
+  /** Cash bancaire positif disponible immédiatement. Un découvert est un passif séparé. */
   bankCash: number;
   /** Positions non-cash logées dans les enveloppes d'investissement. */
   marketInvestedAssets: number;
@@ -70,6 +71,8 @@ export interface OpeningBalanceSheet {
   otherFinancialAssets: number;
   grossFinancialAssets: number;
   loanBalance: number;
+  /** Découverts et autres passifs sans échéancier ; constants faute de termes projetables. */
+  otherLiabilityBalance: number;
   fundingGap: number;
   netWorth: number;
   flags: string[];
@@ -101,6 +104,7 @@ export interface MonthlyFinancialState {
   openingOtherFinancialAssets: number;
   openingGrossFinancialAssets: number;
   openingLoanBalance: number;
+  openingOtherLiabilityBalance: number;
   openingFundingGap: number;
   openingNetWorth: number;
 
@@ -132,6 +136,7 @@ export interface MonthlyFinancialState {
   otherFinancialAssets: number;
   grossFinancialAssets: number;
   loanBalance: number;
+  otherLiabilityBalance: number;
   fundingGap: number;
   netWorth: number;
 
@@ -176,54 +181,40 @@ const TOLERANCE = 0.01;
  * = Σ soldes de comptes = grossAssets. Les positions ne créent jamais de valeur.
  */
 export function buildOpeningBalanceSheet(state: DashboardState): OpeningBalanceSheet {
-  const flags: string[] = [];
-  const isBankLike = (type: string) => type === "BANK" || type === "SAVINGS";
-  const bankAccounts = state.accounts.filter((account) => isBankLike(account.type));
-  const envelopeAccounts = state.accounts.filter((account) => !isBankLike(account.type));
-  const envelopeIds = new Set(envelopeAccounts.map((account) => account.id));
-
-  const bankCash = bankAccounts.reduce((sum, account) => sum + account.balance, 0);
-  const envelopeTotal = envelopeAccounts.reduce((sum, account) => sum + account.balance, 0);
-
-  const envelopePositions = state.positions.filter((position) =>
-    envelopeIds.has(position.accountId),
-  );
-  const marketInvestedAssets = envelopePositions
-    .filter((position) => !position.isCash)
-    .reduce((sum, position) => sum + position.value, 0);
-  const investmentCash = envelopePositions
-    .filter((position) => position.isCash)
-    .reduce((sum, position) => sum + position.value, 0);
-  // Reliquat du solde d'enveloppe que les positions n'expliquent pas. Aucune exposition
-  // de marché ne lui est prêtée : il reste constant nominalement.
-  const otherFinancialAssets = envelopeTotal - marketInvestedAssets - investmentCash;
-
-  const orphanPositions = state.positions.filter(
-    (position) => !envelopeIds.has(position.accountId),
-  );
-  if (orphanPositions.length) {
-    flags.push(
-      `${orphanPositions.length} position(s) rattachée(s) à un compte non-enveloppe : exposition non répartie.`,
+  const canonical =
+    state.balanceSheet ??
+    buildCanonicalBalanceSheet({
+      asOfDate: state.asOfDate,
+      reportingCurrency: state.reportingCurrency,
+      accounts: state.accounts,
+      positions: state.positions,
+      liabilities: state.liabilities,
+      currencyRates: state.currencyRates ?? [],
+    });
+  if (
+    canonical.financialAssets.value === null ||
+    canonical.totalLiabilities.value === null ||
+    canonical.netWorth.value === null
+  ) {
+    throw new Error(
+      `Projection impossible : bilan canonique ${canonical.netWorth.status} (${canonical.netWorth.blockers.join(", ")})`,
     );
   }
-  if (otherFinancialAssets < -TOLERANCE) {
-    flags.push(
-      `Les positions dépassent le solde déclaré des enveloppes de ${Math.abs(otherFinancialAssets).toFixed(2)} € : réconciliation ouverte.`,
-    );
-  }
-
-  const grossFinancialAssets =
-    bankCash + marketInvestedAssets + investmentCash + otherFinancialAssets;
-  const loanBalance = state.liabilities.reduce(
-    (sum, liability) => sum + liability.currentBalance,
-    0,
+  const flags = [...canonical.quality.flags];
+  const bankCash = canonical.immediateCash.value ?? 0;
+  const overExplained = canonical.positionReconciliations.some(
+    (item) => item.state === "OVER_EXPLAINED",
   );
-  const difference = grossFinancialAssets - state.metrics.grossAssets;
-  if (Math.abs(difference) > TOLERANCE) {
-    flags.push(
-      `Réconciliation du bilan d'ouverture : ${difference.toFixed(2)} € d'écart avec les actifs bruts du cockpit.`,
-    );
-  }
+  // Une composition qui dépasse son enveloppe n'est pas projetée au prorata : ce serait
+  // inventer une exposition. La valeur comptable reste entière dans la poche non exposée.
+  const marketInvestedAssets = overExplained ? 0 : (canonical.marketInvestedAssets.value ?? 0);
+  const investmentCash = overExplained ? 0 : (canonical.investmentEnvelopeCash.value ?? 0);
+  const grossFinancialAssets = canonical.financialAssets.value;
+  const otherFinancialAssets =
+    grossFinancialAssets - bankCash - marketInvestedAssets - investmentCash;
+  const loanBalance = canonical.contractualDebt.value ?? 0;
+  const otherLiabilityBalance = canonical.totalLiabilities.value - loanBalance;
+  if (otherLiabilityBalance > TOLERANCE) flags.push("LIABILITY_PROJECTION_TERMS_MISSING");
 
   return {
     date: state.asOfDate,
@@ -233,8 +224,9 @@ export function buildOpeningBalanceSheet(state: DashboardState): OpeningBalanceS
     otherFinancialAssets,
     grossFinancialAssets,
     loanBalance,
+    otherLiabilityBalance,
     fundingGap: 0,
-    netWorth: grossFinancialAssets - loanBalance,
+    netWorth: canonical.netWorth.value,
     flags,
   };
 }
@@ -304,6 +296,7 @@ function openingState(opening: OpeningBalanceSheet): MonthlyFinancialState {
     openingOtherFinancialAssets: opening.otherFinancialAssets,
     openingGrossFinancialAssets: opening.grossFinancialAssets,
     openingLoanBalance: opening.loanBalance,
+    openingOtherLiabilityBalance: opening.otherLiabilityBalance,
     openingFundingGap: opening.fundingGap,
     openingNetWorth: opening.netWorth,
     operatingSurplus: 0,
@@ -329,6 +322,7 @@ function openingState(opening: OpeningBalanceSheet): MonthlyFinancialState {
     otherFinancialAssets: opening.otherFinancialAssets,
     grossFinancialAssets: opening.grossFinancialAssets,
     loanBalance: opening.loanBalance,
+    otherLiabilityBalance: opening.otherLiabilityBalance,
     fundingGap: opening.fundingGap,
     netWorth: opening.netWorth,
     economicDebtCosts: 0,
@@ -358,6 +352,7 @@ export function advanceMonth(
   const openingInvestmentCash = previous.investmentCash;
   const openingOther = previous.otherFinancialAssets;
   const openingLoan = previous.loanBalance;
+  const openingOtherLiability = previous.otherLiabilityBalance;
   const openingFundingGap = previous.fundingGap;
   const openingNetWorth = previous.netWorth;
 
@@ -433,7 +428,7 @@ export function advanceMonth(
   const loanBalance = Math.max(0, openingLoan + debt.liabilityDelta);
   const grossFinancialAssets =
     bankCash + marketInvestedAssets + openingInvestmentCash + openingOther;
-  const netWorth = grossFinancialAssets - loanBalance - fundingGap;
+  const netWorth = grossFinancialAssets - loanBalance - openingOtherLiability - fundingGap;
 
   const economicDebtCosts = debt.economicCost;
   const netWorthChange = netWorth - openingNetWorth;
@@ -449,6 +444,7 @@ export function advanceMonth(
     openingOtherFinancialAssets: openingOther,
     openingGrossFinancialAssets: previous.grossFinancialAssets,
     openingLoanBalance: openingLoan,
+    openingOtherLiabilityBalance: openingOtherLiability,
     openingFundingGap,
     openingNetWorth,
     operatingSurplus,
@@ -474,6 +470,7 @@ export function advanceMonth(
     otherFinancialAssets: openingOther,
     grossFinancialAssets,
     loanBalance,
+    otherLiabilityBalance: openingOtherLiability,
     fundingGap,
     netWorth,
     economicDebtCosts,
@@ -534,7 +531,7 @@ export function toAnnualPoints(result: MonthlyModelResult): AnnualBalanceSheetPo
       year: baseYear + state.monthIndex / 12,
       monthIndex: state.monthIndex,
       grossFinancialAssets: state.grossFinancialAssets,
-      debt: state.loanBalance,
+      debt: state.loanBalance + state.otherLiabilityBalance,
       fundingGap: state.fundingGap,
       netWorth: state.netWorth,
       bankCash: state.bankCash,

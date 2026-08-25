@@ -25,7 +25,7 @@ function DecisionLabPage({ state }: SectionProps) {
   const [scenarioId, setScenarioId] = useState(
     (state.scenarios.find((item) => item.name === "Central") ?? state.scenarios[0])?.id ?? "",
   );
-  const [cash, setCash] = useState(Math.round(state.metrics.bankCash));
+  const [cash, setCash] = useState(Math.round(state.metrics.bankCash ?? 0));
   const [returnRate, setReturnRate] = useState(5.5);
   const [volatility, setVolatility] = useState(15);
   const [years, setYears] = useState(5);
@@ -35,7 +35,7 @@ function DecisionLabPage({ state }: SectionProps) {
     state.liabilities.find((item) => item.id === liabilityId) ?? state.liabilities[0];
   const scenario = state.scenarios.find((item) => item.id === scenarioId) ?? state.scenarios[0];
   // Le capital arbitrable ne dépasse jamais la liquidité réellement disponible.
-  const cashCeiling = Math.max(0, Math.round(state.metrics.bankCash));
+  const cashCeiling = Math.max(0, Math.round(state.metrics.bankCash ?? 0));
   const boundedCash = Math.min(cash, cashCeiling);
   const result = liability
     ? compareDebtVsInvest({
@@ -350,11 +350,12 @@ function DecisionLabPage({ state }: SectionProps) {
         Aucune option n’est désignée comme préférable : les coefficients qui produiraient cette
         conclusion ne sont ni sourcés ni testés. Avec <Currency value={state.metrics.bankCash} /> de
         cash bancaire et une couverture de{" "}
-        {state.metrics.emergencyCoverageMonths.toLocaleString("fr-FR", {
-          maximumFractionDigits: 1,
-        })}{" "}
-        mois de dépenses essentielles connues, la question de la réserve de sécurité précède celle
-        de l’arbitrage.
+        {state.metrics.emergencyCoverageMonths === null
+          ? "non calculable (dépenses essentielles incomplètes)"
+          : `${state.metrics.emergencyCoverageMonths.toLocaleString("fr-FR", {
+              maximumFractionDigits: 1,
+            })} mois de dépenses essentielles connues`}
+        , la question de la réserve de sécurité précède celle de l’arbitrage.
       </Callout>
     </div>
   );

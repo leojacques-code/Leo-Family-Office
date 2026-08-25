@@ -44,7 +44,10 @@ function GoalsPage({ state, mutate, busy }: SectionProps) {
       />
       <section className="goals-grid">
         {state.goals.map((goal) => {
-          const progress = Math.max(0, state.metrics.netWorth) / goal.targetAmount;
+          const progress =
+            state.metrics.netWorth === null
+              ? null
+              : Math.max(0, state.metrics.netWorth) / goal.targetAmount;
           return (
             <article className="panel goal-card-large" key={goal.id}>
               <div className="goal-icon">
@@ -53,14 +56,26 @@ function GoalsPage({ state, mutate, busy }: SectionProps) {
               <DataBadge kind="USER_ASSUMPTION" />
               <h2>{goal.name}</h2>
               <div className="goal-big">
-                <Currency value={Math.max(0, state.metrics.netWorth)} />
+                <Currency
+                  value={
+                    state.metrics.netWorth === null ? null : Math.max(0, state.metrics.netWorth)
+                  }
+                />
                 <span>
                   / <Currency value={goal.targetAmount} />
                 </span>
               </div>
-              <ProgressBar value={progress} tone={goal.priority === 1 ? "teal" : "gold"} />
+              {progress === null ? (
+                <span className="warning-text">Progression non calculable</span>
+              ) : (
+                <ProgressBar value={progress} tone={goal.priority === 1 ? "teal" : "gold"} />
+              )}
               <div className="goal-foot">
-                <span>{Math.round(progress * 100)} % atteint</span>
+                <span>
+                  {progress === null
+                    ? "Historique incomplet"
+                    : `${Math.round(progress * 100)} % atteint`}
+                </span>
                 <span>
                   {goal.targetDate
                     ? `Cible ${new Date(goal.targetDate).getFullYear()}`
@@ -80,7 +95,14 @@ function GoalsPage({ state, mutate, busy }: SectionProps) {
         </div>
         <div className="milestone-line">
           {milestones.map((milestone) => (
-            <div key={milestone} className={state.metrics.netWorth >= milestone ? "achieved" : ""}>
+            <div
+              key={milestone}
+              className={
+                state.metrics.netWorth !== null && state.metrics.netWorth >= milestone
+                  ? "achieved"
+                  : ""
+              }
+            >
               <i />
               <strong>
                 <Currency value={milestone} compact />

@@ -9,28 +9,29 @@ const scenario: Scenario = {
   description: "Test",
   version: 1,
   color: "#000",
-  annualReturn: 0.055,
-  annualVolatility: 0.15,
-  annualInflation: 0.02,
-  monthlySavings: 250,
+  annualReturn: 0.06,
+  annualVolatility: 0.2,
+  annualInflation: 0.025,
+  monthlySavings: 100,
   investmentAllocationRate: 1,
-  salaryGrowth: 0.03,
-  stressProbability: 0.02,
+  salaryGrowth: 0.04,
+  stressProbability: 0.03,
   shockYear: null,
   shockMagnitude: null,
   provenance: { kind: "MODEL_ASSUMPTION", confidence: "MEDIUM" },
 };
 
 const opening: OpeningBalanceSheet = {
-  date: "2026-08-19",
-  bankCash: 354.08,
-  marketInvestedAssets: 8912.28,
-  investmentCash: 6304.57,
-  otherFinancialAssets: 0.56,
-  grossFinancialAssets: 15571.49,
+  date: "2030-01-15",
+  bankCash: 1000,
+  marketInvestedAssets: 6000,
+  investmentCash: 3000,
+  otherFinancialAssets: 0,
+  grossFinancialAssets: 10000,
   loanBalance: 0,
+  otherLiabilityBalance: 0,
   fundingGap: 0,
-  netWorth: 15571.49,
+  netWorth: 10000,
   flags: [],
 };
 
@@ -42,7 +43,7 @@ describe("Monte Carlo engine", () => {
       liabilities: [],
       years: 5,
       simulations: 500,
-      seed: 19082026,
+      seed: 12345,
     };
     expect(runMonteCarlo(input)).toEqual(runMonteCarlo(input));
   });
@@ -86,8 +87,14 @@ describe("Monte Carlo engine", () => {
       simulations: 200,
       seed: 3,
     });
-    expect(result.points[0].p10).toBeCloseTo(opening.netWorth, 6);
-    expect(result.points[0].p90).toBeCloseTo(opening.netWorth, 6);
+    const monthZero = result.points[0];
+    expect([monthZero.p10, monthZero.p25, monthZero.p50, monthZero.p75, monthZero.p90]).toEqual([
+      opening.netWorth,
+      opening.netWorth,
+      opening.netWorth,
+      opening.netWorth,
+      opening.netWorth,
+    ]);
   });
 
   it("applies a dated shock only to market-exposed assets", () => {
@@ -114,8 +121,8 @@ describe("Monte Carlo engine", () => {
       simulations: 100,
       seed: 1,
     });
-    // Seuls les 8 912,28 € exposés au marché encaissent le choc.
-    expect(base.points[1].p50 - stressed.points[1].p50).toBeCloseTo(8912.28 * 0.35, 4);
+    // Seuls les actifs de marché synthétiques encaissent le choc.
+    expect(base.points[1].p50 - stressed.points[1].p50).toBeCloseTo(6000 * 0.35, 4);
   });
 
   it("rejects an under-specified projection", () => {

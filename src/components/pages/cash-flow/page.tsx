@@ -136,7 +136,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       forecastCashFlow({
         asOfDate: state.asOfDate,
         horizonDays: horizon,
-        openingCash: state.metrics.bankCash,
+        openingCash: state.metrics.bankCash ?? 0,
         rules: state.recurringRules,
         liabilities: state.liabilities,
       }),

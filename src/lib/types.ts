@@ -34,6 +34,8 @@ export interface Position {
   costBasis?: number;
   value: number;
   currency: string;
+  /** Date de la valeur de marché observée, distincte du coût historique. */
+  valuationDate?: string;
   isCash: boolean;
   provenance: Provenance;
 }
@@ -167,6 +169,10 @@ export interface Liability {
   lender: string;
   principal: number;
   currentBalance: number;
+  /** Devise native de l'encours observé. */
+  currency?: string;
+  /** Date de l'observation d'encours qui porte la valeur de bilan. */
+  balanceDate?: string;
   annualRate: number;
   /**
    * Paiement contractuel PAR ÉCHÉANCE, pas nécessairement par mois : voir
@@ -435,6 +441,20 @@ export interface MonthlyClose {
   createdAt: string;
 }
 
+export interface NetWorthSnapshot {
+  id: string;
+  snapshotDate: string;
+  version: number;
+  grossAssets: number;
+  totalLiabilities: number;
+  netWorth: number;
+  liquidAssets: number | null;
+  reportingCurrency: string;
+  completenessStatus: "COMPLETE" | "PARTIAL" | "NOT_COMPUTABLE";
+  dataKind: DataKind;
+  createdAt: string;
+}
+
 export interface DocumentRecord {
   id: string;
   name: string;
@@ -445,16 +465,16 @@ export interface DocumentRecord {
 }
 
 export interface DashboardMetrics {
-  grossAssets: number;
-  debt: number;
-  netWorth: number;
-  bankCash: number;
+  grossAssets: number | null;
+  debt: number | null;
+  netWorth: number | null;
+  bankCash: number | null;
   /** Actifs mobilisables : comptes dont la liquidité n'est pas ILLIQUID. */
-  liquidAssets: number;
+  liquidAssets: number | null;
   /** LiquidAssets − dettes. Peut être négatif sans que le patrimoine net le soit. */
-  liquidNetWorth: number;
-  investedAssets: number;
-  productiveNetWorth: number;
+  liquidNetWorth: number | null;
+  investedAssets: number | null;
+  productiveNetWorth: number | null;
   monthlyIncome: number;
   monthlyExpenses: number;
   monthlyDebtService: number;
@@ -462,7 +482,8 @@ export interface DashboardMetrics {
   /** Flux constatés au ledger. `null` = non calculable faute de flux observés. */
   savingsRate: number | null;
   investmentRate: number | null;
-  emergencyCoverageMonths: number;
+  /** `null` signifie que les sorties incompressibles sont inconnues ou nulles. */
+  emergencyCoverageMonths: number | null;
   dataCompleteness: number;
 }
 
@@ -504,8 +525,13 @@ export interface DashboardState {
   goals: Goal[];
   alerts: Alert[];
   monthlyCloses: MonthlyClose[];
+  netWorthSnapshots?: NetWorthSnapshot[];
+  currencyRates?: import("@/lib/engine/fx").CurrencyRate[];
   documents: DocumentRecord[];
   metrics: DashboardMetrics;
+  /** Vérité patrimoniale canonique ; absente seulement dans les anciens fixtures/tests. */
+  balanceSheet?: import("@/lib/engine/balance-sheet").CanonicalBalanceSheet;
+  balanceSheetMetrics?: import("@/lib/engine/balance-sheet-metrics").CanonicalBalanceSheetMetrics;
   assumptions: Array<{
     id: string;
     name: string;

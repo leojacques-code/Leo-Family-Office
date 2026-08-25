@@ -17,7 +17,8 @@
     "check": "npm run lint && npm run test && npm run build",
     "seed:supabase": "node --env-file=.env.local --experimental-strip-types scripts/seed-supabase.ts",
     "db:verify": "node --env-file=.env.local --experimental-strip-types scripts/verify-supabase-schema.ts",
-    "smoke:debt-contract": "node --env-file=.env.local --experimental-strip-types scripts/smoke-debt-contract.ts"
+    "smoke:debt-contract": "node --env-file=.env.local --experimental-strip-types scripts/smoke-debt-contract.ts",
+    "smoke:balance-sheet": "node --env-file=.env.local --experimental-strip-types scripts/smoke-balance-sheet-v2.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.7.0",

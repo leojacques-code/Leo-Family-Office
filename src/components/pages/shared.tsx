@@ -31,7 +31,8 @@ export interface SectionProps {
 
 export const chartCurrency = (value: number) => `${Math.round(value / 1000)} k€`;
 const eurFormatter = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
-export const formatEur = (value: number) => eurFormatter.format(value);
+export const formatEur = (value: number | null) =>
+  value === null ? NOT_COMPUTABLE : eurFormatter.format(value);
 /** Date ISO rendue en français long, dérivée de la donnée et jamais écrite en dur. */
 export function formatDate(
   iso: string,
@@ -193,7 +194,10 @@ export function liquidityExplanation(state: DashboardState): Explanation {
       },
       {
         label: "Résultat",
-        value: `${state.metrics.emergencyCoverageMonths.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} mois`,
+        value:
+          state.metrics.emergencyCoverageMonths === null
+            ? "Non calculable"
+            : `${state.metrics.emergencyCoverageMonths.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} mois`,
         kind: "DERIVED",
         date: state.asOfDate,
       },

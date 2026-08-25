@@ -18,6 +18,8 @@ import type { DashboardState, Liability, Provenance, Scenario } from "@/lib/type
 
 const provenance: Provenance = { kind: "ACTUAL", confidence: "HIGH" };
 
+// Toutes les valeurs de ce fichier sont des fixtures synthétiques sans lien avec un utilisateur.
+
 function opening(overrides: Partial<OpeningBalanceSheet> = {}): OpeningBalanceSheet {
   const base: OpeningBalanceSheet = {
     date: "2026-08-19",
@@ -27,6 +29,7 @@ function opening(overrides: Partial<OpeningBalanceSheet> = {}): OpeningBalanceSh
     otherFinancialAssets: 0,
     grossFinancialAssets: 0,
     loanBalance: 0,
+    otherLiabilityBalance: 0,
     fundingGap: 0,
     netWorth: 0,
     flags: [],
@@ -37,7 +40,11 @@ function opening(overrides: Partial<OpeningBalanceSheet> = {}): OpeningBalanceSh
     merged.marketInvestedAssets +
     merged.investmentCash +
     merged.otherFinancialAssets;
-  merged.netWorth = merged.grossFinancialAssets - merged.loanBalance - merged.fundingGap;
+  merged.netWorth =
+    merged.grossFinancialAssets -
+    merged.loanBalance -
+    merged.otherLiabilityBalance -
+    merged.fundingGap;
   return merged;
 }
 
@@ -189,14 +196,14 @@ describe("CASE F — intérêt de dette", () => {
 describe("CASE G — actifs sans exposition connue", () => {
   it("n’applique aucun rendement au cash d’enveloppe ni au solde non ventilé", () => {
     const result = runDeterministicModel(
-      opening({ investmentCash: 6304.57, otherFinancialAssets: 0.56, marketInvestedAssets: 1000 }),
+      opening({ investmentCash: 3000, otherFinancialAssets: 0, marketInvestedAssets: 1000 }),
       [],
       assumptions({ annualReturn: 0.08 }),
       36,
     );
     const final = result.states[36];
-    expect(final.investmentCash).toBeCloseTo(6304.57, 8);
-    expect(final.otherFinancialAssets).toBeCloseTo(0.56, 8);
+    expect(final.investmentCash).toBeCloseTo(3000, 8);
+    expect(final.otherFinancialAssets).toBeCloseTo(0, 8);
     expect(final.marketInvestedAssets).toBeGreaterThan(1000);
   });
 });
@@ -205,10 +212,10 @@ describe("CASE H — réconciliation du bilan", () => {
   it("fait toujours la somme des quatre poches", () => {
     const result = runDeterministicModel(
       opening({
-        bankCash: 354.08,
-        marketInvestedAssets: 8912.28,
-        investmentCash: 6304.57,
-        otherFinancialAssets: 0.56,
+        bankCash: 1000,
+        marketInvestedAssets: 6000,
+        investmentCash: 3000,
+        otherFinancialAssets: 0,
       }),
       [],
       assumptions({ operatingSurplus: 250, investmentAllocationRate: 0.6, annualReturn: 0.055 }),
@@ -296,19 +303,19 @@ function scenario(overrides: Partial<Scenario> = {}): Scenario {
 describe("CASE K — déterministe et Monte-Carlo décrivent la même réalité", () => {
   it("rend un P50 égal à la trajectoire déterministe quand le hasard est neutralisé", () => {
     const base = opening({
-      bankCash: 354.08,
-      marketInvestedAssets: 8912.28,
-      investmentCash: 6304.57,
-      loanBalance: 16745,
+      bankCash: 1000,
+      marketInvestedAssets: 6000,
+      investmentCash: 3000,
+      loanBalance: 12000,
     });
     const liability: Liability = {
       id: "lia",
-      name: "Prêt étudiant",
-      lender: "Bpifrance",
-      principal: 16745,
-      currentBalance: 16745,
+      name: "Dette test",
+      lender: "Prêteur Test",
+      principal: 12000,
+      currentBalance: 12000,
       annualRate: 0,
-      monthlyPayment: 284.72,
+      monthlyPayment: 300,
       paymentCount: 60,
       firstPaymentDate: "2026-12-05",
       maturityDate: "2031-11-05",
@@ -540,11 +547,11 @@ describe("bilan d’ouverture", () => {
       {
         id: "acc_bank",
         institutionId: "i",
-        institution: "Boursobank",
-        name: "Ultim",
+        institution: "Banque Test",
+        name: "Compte A",
         type: "BANK" as const,
         currency: "EUR",
-        balance: 355.48,
+        balance: 1000,
         balanceDate: "2026-08-19",
         liquidity: "IMMEDIATE" as const,
         provenance,
@@ -552,11 +559,11 @@ describe("bilan d’ouverture", () => {
       {
         id: "acc_cic",
         institutionId: "i",
-        institution: "CIC",
-        name: "Mastercard",
+        institution: "Banque Test 2",
+        name: "Compte B",
         type: "BANK" as const,
         currency: "EUR",
-        balance: -3.44,
+        balance: -100,
         balanceDate: "2026-08-19",
         liquidity: "IMMEDIATE" as const,
         provenance,
@@ -564,11 +571,11 @@ describe("bilan d’ouverture", () => {
       {
         id: "acc_savings",
         institutionId: "i",
-        institution: "Revolut",
-        name: "Saving",
+        institution: "Banque Test 3",
+        name: "Épargne test",
         type: "SAVINGS" as const,
         currency: "EUR",
-        balance: 2.04,
+        balance: 500,
         balanceDate: "2026-08-19",
         liquidity: "IMMEDIATE" as const,
         provenance,
@@ -576,11 +583,11 @@ describe("bilan d’ouverture", () => {
       {
         id: "acc_pea",
         institutionId: "i",
-        institution: "Boursobank",
-        name: "PEA",
+        institution: "Banque Test",
+        name: "Enveloppe test",
         type: "PEA" as const,
         currency: "EUR",
-        balance: 15003.13,
+        balance: 9000,
         balanceDate: "2026-08-19",
         liquidity: "LIQUID" as const,
         provenance,
@@ -588,11 +595,11 @@ describe("bilan d’ouverture", () => {
       {
         id: "acc_cto",
         institutionId: "i",
-        institution: "Trade Republic",
-        name: "CTO",
+        institution: "Courtier Test",
+        name: "Compte titres test",
         type: "CTO" as const,
         currency: "EUR",
-        balance: 214.28,
+        balance: 1000,
         balanceDate: "2026-08-19",
         liquidity: "LIQUID" as const,
         provenance,
@@ -602,9 +609,9 @@ describe("bilan d’ouverture", () => {
       {
         id: "p1",
         accountId: "acc_pea",
-        securityName: "ETF",
-        assetClass: "Actions monde",
-        value: 8698,
+        securityName: "Position cotée test",
+        assetClass: "Actifs cotés",
+        value: 6000,
         currency: "EUR",
         isCash: false,
         provenance,
@@ -612,9 +619,9 @@ describe("bilan d’ouverture", () => {
       {
         id: "p2",
         accountId: "acc_pea",
-        securityName: "Cash PEA",
+        securityName: "Cash interne test",
         assetClass: "Cash",
-        value: 6304.57,
+        value: 3000,
         currency: "EUR",
         isCash: true,
         provenance,
@@ -622,15 +629,15 @@ describe("bilan d’ouverture", () => {
       {
         id: "p3",
         accountId: "acc_cto",
-        securityName: "CTO à ventiler",
+        securityName: "Position test à ventiler",
         assetClass: "Actions",
-        value: 214.28,
+        value: 1000,
         currency: "EUR",
         isCash: false,
         provenance,
       },
     ];
-    const grossAssets = accounts.reduce((sum, account) => sum + account.balance, 0);
+    const grossAssets = accounts.reduce((sum, account) => sum + Math.max(account.balance, 0), 0);
     return {
       asOfDate: "2026-08-19",
       reportingCurrency: "EUR",
@@ -641,12 +648,12 @@ describe("bilan d’ouverture", () => {
       liabilities: [
         {
           id: "lia",
-          name: "Prêt étudiant",
-          lender: "Bpifrance",
-          principal: 16745,
-          currentBalance: 16745,
+          name: "Dette test",
+          lender: "Prêteur Test",
+          principal: 12000,
+          currentBalance: 12000,
           annualRate: 0,
-          monthlyPayment: 284.72,
+          monthlyPayment: 300,
           paymentCount: 60,
           firstPaymentDate: "2026-12-05",
           maturityDate: "2031-11-05",
@@ -667,12 +674,12 @@ describe("bilan d’ouverture", () => {
       assumptions: [],
       metrics: {
         grossAssets,
-        debt: 16745,
-        netWorth: grossAssets - 16745,
-        bankCash: 354.08,
+        debt: 12100,
+        netWorth: grossAssets - 12100,
+        bankCash: 1500,
         liquidAssets: grossAssets,
-        liquidNetWorth: grossAssets - 16745,
-        investedAssets: 8912.28,
+        liquidNetWorth: grossAssets - 12100,
+        investedAssets: 7000,
         productiveNetWorth: 0,
         monthlyIncome: 0,
         monthlyExpenses: 0,
@@ -689,12 +696,13 @@ describe("bilan d’ouverture", () => {
   it("réconcilie les quatre poches avec les actifs bruts du cockpit", () => {
     const state = stateFixture();
     const sheet = buildOpeningBalanceSheet(state);
-    expect(sheet.bankCash).toBeCloseTo(354.08, 6);
-    expect(sheet.marketInvestedAssets).toBeCloseTo(8912.28, 6);
-    expect(sheet.investmentCash).toBeCloseTo(6304.57, 6);
-    expect(sheet.otherFinancialAssets).toBeCloseTo(0.56, 6);
-    expect(sheet.grossFinancialAssets).toBeCloseTo(state.metrics.grossAssets, 6);
-    expect(sheet.flags).toHaveLength(0);
+    expect(sheet.bankCash).toBeCloseTo(1500, 6);
+    expect(sheet.marketInvestedAssets).toBeCloseTo(7000, 6);
+    expect(sheet.investmentCash).toBeCloseTo(3000, 6);
+    expect(sheet.otherFinancialAssets).toBeCloseTo(0, 6);
+    expect(sheet.grossFinancialAssets).toBeCloseTo(state.metrics.grossAssets!, 6);
+    expect(sheet.otherLiabilityBalance).toBeCloseTo(100, 6);
+    expect(sheet.flags).toContain("LIABILITY_PROJECTION_TERMS_MISSING");
   });
 
   it("fait du mois zéro le patrimoine net observé", () => {
@@ -706,9 +714,21 @@ describe("bilan d’ouverture", () => {
       assumptions({ operatingSurplus: 250 }),
       12,
     );
-    expect(result.states[0].netWorth).toBeCloseTo(state.metrics.netWorth, 6);
+    expect(result.states[0].netWorth).toBeCloseTo(state.metrics.netWorth!, 6);
     expect(result.states[0].monthIndex).toBe(0);
     expect(result.states[0].operatingSurplus).toBe(0);
+  });
+
+  it("conserve un découvert sans termes constants au lieu de le rembourser arbitrairement", () => {
+    const result = runDeterministicModel(
+      opening({ bankCash: 500, otherLiabilityBalance: 200 }),
+      [],
+      assumptions(),
+      12,
+    );
+    expect(result.states[0].netWorth).toBe(300);
+    expect(result.states[12].otherLiabilityBalance).toBe(200);
+    expect(result.states[12].netWorth).toBe(300);
   });
 });
 
@@ -761,12 +781,12 @@ describe("CASE T — surplus supérieur au gap, allocation 40 %", () => {
 describe("invariants du besoin de financement", () => {
   const liability: Liability = {
     id: "lia",
-    name: "Prêt étudiant",
-    lender: "Bpifrance",
-    principal: 16745,
-    currentBalance: 16745,
+    name: "Dette test",
+    lender: "Prêteur Test",
+    principal: 12000,
+    currentBalance: 12000,
     annualRate: 0,
-    monthlyPayment: 284.72,
+    monthlyPayment: 300,
     paymentCount: 60,
     firstPaymentDate: "2026-12-05",
     maturityDate: "2031-11-05",
@@ -779,11 +799,11 @@ describe("invariants du besoin de financement", () => {
     annualReturn: 0.055,
   });
   const start = opening({
-    bankCash: 354.08,
-    marketInvestedAssets: 8912.28,
-    investmentCash: 6304.57,
-    otherFinancialAssets: 0.56,
-    loanBalance: 16745,
+    bankCash: 1000,
+    marketInvestedAssets: 6000,
+    investmentCash: 3000,
+    otherFinancialAssets: 0,
+    loanBalance: 12000,
   });
   const result = runDeterministicModel(start, [liability], central, 30 * 12);
 
@@ -819,12 +839,12 @@ describe("invariants du besoin de financement", () => {
 describe("CASE U — scénario Central réel", () => {
   const liability: Liability = {
     id: "lia",
-    name: "Prêt étudiant",
-    lender: "Bpifrance",
-    principal: 16745,
-    currentBalance: 16745,
+    name: "Dette test",
+    lender: "Prêteur Test",
+    principal: 12000,
+    currentBalance: 12000,
     annualRate: 0,
-    monthlyPayment: 284.72,
+    monthlyPayment: 300,
     paymentCount: 60,
     firstPaymentDate: "2026-12-05",
     maturityDate: "2031-11-05",
@@ -832,11 +852,11 @@ describe("CASE U — scénario Central réel", () => {
     provenance,
   };
   const start = opening({
-    bankCash: 354.08,
-    marketInvestedAssets: 8912.28,
-    investmentCash: 6304.57,
-    otherFinancialAssets: 0.56,
-    loanBalance: 16745,
+    bankCash: 1000,
+    marketInvestedAssets: 6000,
+    investmentCash: 3000,
+    otherFinancialAssets: 0,
+    loanBalance: 12000,
   });
   const result = runDeterministicModel(
     start,

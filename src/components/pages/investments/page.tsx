@@ -114,7 +114,9 @@ function InvestmentsPage({ state, setExplanation }: SectionProps) {
             largestPosition ? `Concentration ${largestPosition.securityName}` : "Concentration"
           }
           value={
-            largestPosition && state.metrics.grossAssets > 0 ? (
+            largestPosition &&
+            state.metrics.grossAssets !== null &&
+            state.metrics.grossAssets > 0 ? (
               <Percent value={largestPosition.value / state.metrics.grossAssets} />
             ) : (
               "Non calculable"

@@ -9,7 +9,12 @@ export interface AmortizationRow {
   closingBalance: number;
 }
 
-export function compoundReturn(principal: number, annualRate: number, years: number, periodsPerYear = 1): number {
+export function compoundReturn(
+  principal: number,
+  annualRate: number,
+  years: number,
+  periodsPerYear = 1,
+): number {
   if (periodsPerYear <= 0) throw new Error("periodsPerYear must be positive");
   return principal * Math.pow(1 + annualRate / periodsPerYear, periodsPerYear * years);
 }
@@ -23,12 +28,18 @@ export function fxConvert(amount: number, eurPerUnit: number): number {
   return amount * eurPerUnit;
 }
 
-export function amortizeLoan(principal: number, annualRate: number, payments: number, contractualPayment?: number): AmortizationRow[] {
+export function amortizeLoan(
+  principal: number,
+  annualRate: number,
+  payments: number,
+  contractualPayment?: number,
+): AmortizationRow[] {
   if (principal < 0 || annualRate < 0 || payments <= 0) throw new Error("Invalid loan inputs");
   const monthlyRate = annualRate / 12;
-  const calculatedPayment = monthlyRate === 0
-    ? principal / payments
-    : (principal * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -payments));
+  const calculatedPayment =
+    monthlyRate === 0
+      ? principal / payments
+      : (principal * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -payments));
   const payment = contractualPayment ?? calculatedPayment;
   const rows: AmortizationRow[] = [];
   let balance = principal;
@@ -54,11 +65,19 @@ export function amortizeLoan(principal: number, annualRate: number, payments: nu
 
 export function npv(discountRate: number, cashFlows: number[]): number {
   if (discountRate <= -1) throw new Error("Discount rate must exceed -100%");
-  return cashFlows.reduce((sum, cashFlow, period) => sum + cashFlow / Math.pow(1 + discountRate, period), 0);
+  return cashFlows.reduce(
+    (sum, cashFlow, period) => sum + cashFlow / Math.pow(1 + discountRate, period),
+    0,
+  );
 }
 
 export function irr(cashFlows: number[], guess = 0.1): number | null {
-  if (cashFlows.length < 2 || !cashFlows.some((value) => value < 0) || !cashFlows.some((value) => value > 0)) return null;
+  if (
+    cashFlows.length < 2 ||
+    !cashFlows.some((value) => value < 0) ||
+    !cashFlows.some((value) => value > 0)
+  )
+    return null;
   let low = -0.9999;
   let high = Math.max(guess, 1);
   let lowNpv = npv(low, cashFlows);
@@ -90,15 +109,32 @@ export function moic(totalDistributions: number, investedCapital: number): numbe
   return totalDistributions / investedCapital;
 }
 
-export function calculateNetWorth(accounts: Pick<FinancialAccount, "balance">[], liabilities: Pick<Liability, "currentBalance">[]) {
-  const grossAssets = Number(accounts.reduce((sum, account) => sum + account.balance, 0).toFixed(2));
-  const debt = Number(liabilities.reduce((sum, liability) => sum + liability.currentBalance, 0).toFixed(2));
-  const netWorth = Number((grossAssets - debt).toFixed(2));
+export function calculateNetWorth(
+  accounts: Pick<FinancialAccount, "balance">[],
+  liabilities: Pick<Liability, "currentBalance">[],
+) {
+  const grossAssets = accounts.reduce((sum, account) => sum + Math.max(account.balance, 0), 0);
+  const accountLiabilities = accounts.reduce(
+    (sum, account) => sum + Math.max(-account.balance, 0),
+    0,
+  );
+  const contractualDebt = liabilities.reduce(
+    (sum, liability) => sum + Math.max(liability.currentBalance, 0),
+    0,
+  );
+  const debt = accountLiabilities + contractualDebt;
+  const netWorth = grossAssets - debt;
   return { grossAssets, debt, netWorth };
 }
 
-export function applyScenarioOverrides<T extends Record<string, unknown>>(base: T, overrides: Partial<T>): T {
-  return { ...base, ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined)) } as T;
+export function applyScenarioOverrides<T extends Record<string, unknown>>(
+  base: T,
+  overrides: Partial<T>,
+): T {
+  return {
+    ...base,
+    ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined)),
+  } as T;
 }
 
 /**
@@ -110,13 +146,17 @@ export function applyScenarioOverrides<T extends Record<string, unknown>>(base: 
 export function deterministicProjection(
   initialAssets: number,
   years: number,
-  scenario: Pick<Scenario, "annualReturn" | "monthlySavings" | "annualInflation" | "shockYear" | "shockMagnitude">,
+  scenario: Pick<
+    Scenario,
+    "annualReturn" | "monthlySavings" | "annualInflation" | "shockYear" | "shockMagnitude"
+  >,
 ) {
   const points = [{ year: 0, nominal: initialAssets, real: initialAssets }];
   let assets = initialAssets;
   for (let year = 1; year <= years; year += 1) {
     assets = assets * (1 + scenario.annualReturn) + scenario.monthlySavings * 12;
-    if (scenario.shockYear === year && scenario.shockMagnitude !== null) assets *= 1 + scenario.shockMagnitude;
+    if (scenario.shockYear === year && scenario.shockMagnitude !== null)
+      assets *= 1 + scenario.shockMagnitude;
     points.push({ year, nominal: assets, real: realValue(assets, scenario.annualInflation, year) });
   }
   return points;

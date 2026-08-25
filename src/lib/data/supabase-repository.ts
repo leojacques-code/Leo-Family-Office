@@ -15,6 +15,9 @@ import {
 } from "@/lib/data/shared";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
 import { debtCashOut, monthBounds } from "@/lib/engine/debt";
+import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
+import { deriveCanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
+import type { CurrencyRate } from "@/lib/engine/fx";
 import {
   enumValue,
   finiteNumber,
@@ -34,6 +37,7 @@ import type {
   IncomeSource,
   Liability,
   MonthlyClose,
+  NetWorthSnapshot,
   Position,
   Provenance,
   RecurringCashFlowRule,
@@ -210,6 +214,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       loanChargeRows,
       rateChangeRows,
       paymentChangeRows,
+      currencyRateRows,
+      netWorthSnapshotRows,
+      liabilityObservationRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -237,6 +244,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("loan_charges"),
       mine("loan_rate_changes"),
       mine("loan_payment_changes"),
+      mine("currency_rates"),
+      mine("net_worth_snapshots"),
+      mine("liability_balance_observations"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -260,7 +270,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           ),
           balanceDate: balance ? str(balance.balance_date) : AS_OF_DATE,
           liquidity: str(row.liquidity) as FinancialAccount["liquidity"],
-          provenance: provenance(row),
+          provenance: balance ? provenance(balance) : provenance(row),
         };
       })
       .sort(
@@ -299,43 +309,54 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             `position_snapshots[position_id=${str(row.id)}].market_value`,
           ),
           currency: snapshot ? str(snapshot.currency) : REPORTING_CURRENCY,
+          valuationDate: snapshot ? str(snapshot.snapshot_date) : AS_OF_DATE,
           isCash: bool(row.is_cash),
-          provenance: provenance(row),
+          provenance: snapshot ? provenance(snapshot) : provenance(row),
         };
       })
       .sort((a, b) => b.value - a.value);
 
+    const latestLiabilityObservations = latestBy(
+      liabilityObservationRows,
+      "liability_id",
+      "observed_at",
+    );
     const liabilities: Liability[] = liabilityRows
       .filter((row) => row.archived !== true)
-      .map((row) => ({
-        ...readLoanTerms(row, {
-          schedules: loanScheduleRows,
-          earlyRepayments: earlyRepaymentRows,
-          charges: loanChargeRows,
-          rateChanges: rateChangeRows,
-          paymentChanges: paymentChangeRows,
-        }),
-        id: str(row.id),
-        name: str(row.name),
-        lender: str(row.lender),
-        principal: finiteNumber(row.principal, `liabilities[id=${str(row.id)}].principal`),
-        currentBalance: finiteNumber(
-          row.current_balance,
-          `liabilities[id=${str(row.id)}].current_balance`,
-        ),
-        annualRate: finiteNumber(row.annual_rate, `liabilities[id=${str(row.id)}].annual_rate`),
-        monthlyPayment: finiteNumber(
-          row.monthly_payment,
-          `liabilities[id=${str(row.id)}].monthly_payment`,
-        ),
-        paymentCount: finiteNumber(
-          row.payment_count,
-          `liabilities[id=${str(row.id)}].payment_count`,
-        ),
-        firstPaymentDate: str(row.first_payment_date),
-        maturityDate: str(row.maturity_date),
-        provenance: provenance(row),
-      }));
+      .map((row) => {
+        const observation = latestLiabilityObservations.get(str(row.id));
+        return {
+          ...readLoanTerms(row, {
+            schedules: loanScheduleRows,
+            earlyRepayments: earlyRepaymentRows,
+            charges: loanChargeRows,
+            rateChanges: rateChangeRows,
+            paymentChanges: paymentChangeRows,
+          }),
+          id: str(row.id),
+          name: str(row.name),
+          lender: str(row.lender),
+          principal: finiteNumber(row.principal, `liabilities[id=${str(row.id)}].principal`),
+          currentBalance: finiteNumber(
+            observation?.balance ?? row.current_balance,
+            `liability_balance_observations[liability_id=${str(row.id)}].balance`,
+          ),
+          currency: str(row.currency || profileRows[0]?.reporting_currency || REPORTING_CURRENCY),
+          balanceDate: observation ? str(observation.observed_at) : AS_OF_DATE,
+          annualRate: finiteNumber(row.annual_rate, `liabilities[id=${str(row.id)}].annual_rate`),
+          monthlyPayment: finiteNumber(
+            row.monthly_payment,
+            `liabilities[id=${str(row.id)}].monthly_payment`,
+          ),
+          paymentCount: finiteNumber(
+            row.payment_count,
+            `liabilities[id=${str(row.id)}].payment_count`,
+          ),
+          firstPaymentDate: str(row.first_payment_date),
+          maturityDate: str(row.maturity_date),
+          provenance: observation ? provenance(observation) : provenance(row),
+        };
+      });
 
     const incomes: IncomeSource[] = incomeRows
       .map((row) => ({
@@ -566,10 +587,83 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
 
+    const currencyRates: CurrencyRate[] = currencyRateRows
+      .map((row) => ({
+        id: str(row.id),
+        baseCurrency: str(row.base_currency),
+        quoteCurrency: str(row.quote_currency),
+        rate: finiteNumber(row.rate, `currency_rates[id=${str(row.id)}].rate`),
+        rateDate: str(row.rate_date),
+        provenance: {
+          kind: str(row.data_kind) as Provenance["kind"],
+          confidence: "HIGH" as const,
+          source: optional(row.source),
+          effectiveDate: str(row.rate_date),
+        },
+      }))
+      .sort((a, b) => b.rateDate.localeCompare(a.rateDate));
+
+    const netWorthSnapshots: NetWorthSnapshot[] = netWorthSnapshotRows
+      .map((row) => ({
+        id: str(row.id),
+        snapshotDate: str(row.snapshot_date),
+        version:
+          row.version === undefined
+            ? 1
+            : finiteNumber(row.version, `net_worth_snapshots[id=${str(row.id)}].version`),
+        grossAssets: finiteNumber(
+          row.gross_assets,
+          `net_worth_snapshots[id=${str(row.id)}].gross_assets`,
+        ),
+        totalLiabilities: finiteNumber(
+          row.total_liabilities ?? row.debt,
+          `net_worth_snapshots[id=${str(row.id)}].total_liabilities`,
+        ),
+        netWorth: finiteNumber(row.net_worth, `net_worth_snapshots[id=${str(row.id)}].net_worth`),
+        liquidAssets: nullableFiniteNumber(
+          row.liquid_assets,
+          `net_worth_snapshots[id=${str(row.id)}].liquid_assets`,
+        ),
+        reportingCurrency: str(
+          row.reporting_currency || profileRows[0]?.reporting_currency || REPORTING_CURRENCY,
+        ),
+        completenessStatus: str(
+          row.completeness_status || "COMPLETE",
+        ) as NetWorthSnapshot["completenessStatus"],
+        dataKind: str(row.data_kind) as NetWorthSnapshot["dataKind"],
+        createdAt: str(row.created_at),
+      }))
+      .sort((a, b) => b.snapshotDate.localeCompare(a.snapshotDate) || b.version - a.version);
+
     const coverage = readLedgerCoverage(profileRows[0]);
+    const reportingCurrency = str(profileRows[0]?.reporting_currency || REPORTING_CURRENCY);
+    const balanceSheet = buildCanonicalBalanceSheet({
+      asOfDate: AS_OF_DATE,
+      reportingCurrency,
+      accounts,
+      positions,
+      liabilities,
+      currencyRates,
+    });
+    const balanceSheetMetrics = deriveCanonicalBalanceSheetMetrics({
+      balanceSheet,
+      liabilities,
+      expenses: expenseCategories,
+      positions,
+      snapshots: netWorthSnapshots,
+    });
+    const legacyMetrics = deriveMetrics(
+      accounts,
+      liabilities,
+      incomes,
+      expenseCategories,
+      positions,
+      transactions,
+      AS_OF_DATE,
+    );
     return {
       asOfDate: AS_OF_DATE,
-      reportingCurrency: REPORTING_CURRENCY,
+      reportingCurrency,
       ledgerCoverageStart: coverage.start,
       ledgerCoverageSource: coverage.source,
       accounts,
@@ -584,16 +678,22 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       goals,
       alerts,
       monthlyCloses,
+      netWorthSnapshots,
+      currencyRates,
       documents,
-      metrics: deriveMetrics(
-        accounts,
-        liabilities,
-        incomes,
-        expenseCategories,
-        positions,
-        transactions,
-        AS_OF_DATE,
-      ),
+      balanceSheet,
+      balanceSheetMetrics,
+      metrics: {
+        ...legacyMetrics,
+        grossAssets: balanceSheet.grossAssets.value,
+        debt: balanceSheet.totalLiabilities.value,
+        netWorth: balanceSheet.netWorth.value,
+        bankCash: balanceSheet.immediateCash.value,
+        liquidAssets: balanceSheet.liquidAssets.value,
+        liquidNetWorth: balanceSheet.liquidNetWorth.value,
+        investedAssets: balanceSheet.marketInvestedAssets.value,
+        productiveNetWorth: balanceSheet.productiveNetWorth.value,
+      },
       assumptions,
     };
   }
@@ -786,16 +886,78 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }
       case "create_monthly_close": {
         const state = await getDashboardState();
+        if (
+          state.metrics.grossAssets === null ||
+          state.metrics.debt === null ||
+          state.metrics.netWorth === null
+        ) {
+          throw new Error(
+            "Clôture impossible : le bilan canonique est incomplet (FX ou valorisation manquante)",
+          );
+        }
+        const sheet = state.balanceSheet;
+        if (
+          !sheet ||
+          sheet.financialAssets.value === null ||
+          sheet.liquidAssets.value === null ||
+          sheet.accountOverdraftLiabilities.value === null ||
+          sheet.contractualDebt.value === null ||
+          sheet.otherLiabilities.value === null ||
+          sheet.totalLiabilities.value === null
+        ) {
+          throw new Error("Clôture impossible : ventilation du bilan canonique incomplète");
+        }
         const prior = state.monthlyCloses[0];
         const forecast = prior?.netWorth ?? null;
         const variance = forecast === null ? null : state.metrics.netWorth - forecast;
         unwrap(
-          await db.rpc("lfo_create_monthly_close", {
+          await db.rpc("lfo_create_monthly_close_v2", {
             p_user_id: user,
             p_close_date: mutation.closeDate,
-            p_gross_assets: finiteNumber(state.metrics.grossAssets, "monthly_close.gross_assets"),
-            p_debt: finiteNumber(state.metrics.debt, "monthly_close.debt"),
-            p_net_worth: finiteNumber(state.metrics.netWorth, "monthly_close.net_worth"),
+            p_snapshot: {
+              gross_assets: finiteNumber(state.metrics.grossAssets, "monthly_close.gross_assets"),
+              financial_assets: sheet.financialAssets.value,
+              liquid_assets: sheet.liquidAssets.value,
+              account_overdrafts: sheet.accountOverdraftLiabilities.value,
+              contractual_debt: sheet.contractualDebt.value,
+              other_liabilities: sheet.otherLiabilities.value,
+              total_liabilities: sheet.totalLiabilities.value,
+              net_worth: finiteNumber(state.metrics.netWorth, "monthly_close.net_worth"),
+              reporting_currency: state.reportingCurrency,
+              completeness_status: sheet.quality.status,
+              data_completeness: Math.min(
+                sheet.grossAssets.coverage,
+                sheet.totalLiabilities.coverage,
+              ),
+              data_kind: "ACTUAL",
+              composition: {
+                immediate_cash: sheet.immediateCash.value,
+                market_invested_assets: sheet.marketInvestedAssets.value,
+                investment_envelope_cash: sheet.investmentEnvelopeCash.value,
+                illiquid_assets: sheet.illiquidAssets.value,
+              },
+              provenance: { engine: "CANONICAL_BALANCE_SHEET_V2", as_of_date: state.asOfDate },
+            },
+            p_items: sheet.contributions.map((line) => ({
+              domain: line.domain,
+              entity_id: line.entityId,
+              side: line.side,
+              category: line.category,
+              subcategory: line.subcategory ?? null,
+              native_amount: line.nativeValue,
+              currency: line.currency,
+              fx_rate: line.fx.rate,
+              fx_rate_date: line.fx.rateDate,
+              reporting_amount: line.reportingValue,
+              valuation_date: line.valuationDate,
+              valuation_method: line.valuationMethod,
+              valuation_status: line.valuationStatus,
+              data_kind: line.provenance.kind,
+              confidence: line.confidence,
+              quality_status: line.fx.status === "MISSING" ? "MISSING" : line.reconciliationState,
+              source: line.source ?? null,
+              flags: [...line.flags, ...line.fx.flags],
+            })),
             p_forecast_net_worth: forecast,
             p_variance: variance,
           }),

@@ -93,7 +93,7 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
         color: ALLOCATION_COLORS[index % ALLOCATION_COLORS.length],
       })),
     { name: "Solde non ventilé", value: unallocated, color: "#b1bcbd" },
-    { name: "Cash bancaire", value: state.metrics.bankCash, color: "#dce5e2" },
+    { name: "Cash bancaire", value: state.metrics.bankCash ?? 0, color: "#dce5e2" },
   ].filter((item) => item.value > 0);
   const allocationTotal = allocation.reduce((sum, item) => sum + item.value, 0);
   const upcomingDebt = nextDebtEvent(state.liabilities, state.asOfDate);
@@ -113,7 +113,7 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
     forecastCashFlow({
       asOfDate: state.asOfDate,
       horizonDays: 365,
-      openingCash: state.metrics.bankCash,
+      openingCash: state.metrics.bankCash ?? 0,
       rules: state.recurringRules,
       liabilities: state.liabilities,
     }),
@@ -158,10 +158,12 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
         <MetricCard
           label="Patrimoine net identifié"
           value={<Currency value={state.metrics.netWorth} />}
-          tone={state.metrics.netWorth < 0 ? "negative" : "positive"}
+          tone={
+            state.metrics.netWorth !== null && state.metrics.netWorth < 0 ? "negative" : "positive"
+          }
           detail={
             <>
-              {state.metrics.netWorth < 0 ? (
+              {state.metrics.netWorth !== null && state.metrics.netWorth < 0 ? (
                 <span className="negative-text">Sous zéro</span>
               ) : (
                 <span className="positive-text">Au-dessus de zéro</span>
@@ -184,10 +186,11 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           detail={
             <>
               <span className="warning-text">
-                {state.metrics.emergencyCoverageMonths.toLocaleString("fr-FR", {
-                  maximumFractionDigits: 1,
-                })}{" "}
-                mois
+                {state.metrics.emergencyCoverageMonths === null
+                  ? "Non calculable"
+                  : `${state.metrics.emergencyCoverageMonths.toLocaleString("fr-FR", {
+                      maximumFractionDigits: 1,
+                    })} mois`}
               </span>{" "}
               de dépenses essentielles connues
             </>
@@ -446,12 +449,20 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           {primaryGoal ? (
             <>
               <div className="goal-number">
-                <Currency value={Math.max(0, state.metrics.netWorth)} />
+                <Currency
+                  value={
+                    state.metrics.netWorth === null ? null : Math.max(0, state.metrics.netWorth)
+                  }
+                />
                 <span>
                   sur <Currency value={primaryGoal.targetAmount} />
                 </span>
               </div>
-              <ProgressBar value={Math.max(0, state.metrics.netWorth) / primaryGoal.targetAmount} />
+              {state.metrics.netWorth === null ? null : (
+                <ProgressBar
+                  value={Math.max(0, state.metrics.netWorth) / primaryGoal.targetAmount}
+                />
+              )}
               <p className="muted-copy">
                 Le patrimoine net est négatif ; le premier jalon est le retour à zéro.
               </p>
