@@ -5,7 +5,9 @@ import {
   PORTFOLIO_FLOW_DIRECTION,
   buildPortfolioLedger,
   envelopeLedgerOf,
+  isAcquisition,
 } from "@/lib/engine/portfolio";
+import { PORTFOLIO_EVENT_TYPES } from "@/lib/types";
 import type {
   ExpenseCategory,
   FinancialAccount,
@@ -531,6 +533,82 @@ describe("Portfolio ledger — ce qui n’est pas connu le reste", () => {
     expect(envelope.flags).toContain("LEDGER_OVERSOLD:sec_etf");
     expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(-3, 6);
     expect(envelope.disposals[0].matchedCost).toBeNull();
+  });
+});
+
+describe("Portfolio ledger — natures qui ouvrent un lot", () => {
+  it("fixe la liste des natures ouvrant un lot", () => {
+    // Cette liste est dupliquée dans la colonne générée `is_lot_opening` de la migration
+    // Portfolio Data Foundation, qui en fait une contrainte d'intégrité. Les deux doivent
+    // rester alignées : ce test rend toute divergence visible côté TypeScript.
+    const opening = PORTFOLIO_EVENT_TYPES.filter((type) =>
+      isAcquisition(event({ id: "x", type, securityId: "sec_etf" })),
+    );
+    expect(opening).toEqual(["OPENING_POSITION", "BUY", "TRANSFER_IN"]);
+  });
+
+  it("n’ouvre aucun lot sans instrument, même sur une nature ouvrante", () => {
+    expect(isAcquisition(event({ id: "x", type: "TRANSFER_IN", securityId: null }))).toBe(false);
+  });
+
+  it("refuse un lot désigné qui n’appartient pas à l’instrument cédé", () => {
+    // La base refuse déjà cette écriture ; le moteur ne doit pas non plus l'apparier s'il
+    // rencontre une donnée héritée d'avant la contrainte.
+    const specific: PortfolioEnvelopePolicy = {
+      ...declaredPolicy,
+      lotMatchingMethod: "SPECIFIC_LOT",
+    };
+    const envelope = envelopeLedgerOf(
+      build(
+        [
+          event({ id: "o", type: "OPENING_CASH", envelopeCashAmount: 5000 }),
+          event({
+            id: "buy_etf",
+            type: "BUY",
+            eventDate: "2026-02-01",
+            securityId: "sec_etf",
+            securityName: "ETF Monde",
+            quantity: 10,
+            grossAmount: 1000,
+            feeAmount: 0,
+            taxAmount: 0,
+            envelopeCashAmount: -1000,
+          }),
+          event({
+            id: "buy_bond",
+            type: "BUY",
+            eventDate: "2026-02-02",
+            securityId: "sec_bond",
+            securityName: "Obligation",
+            quantity: 5,
+            grossAmount: 500,
+            feeAmount: 0,
+            taxAmount: 0,
+            envelopeCashAmount: -500,
+          }),
+          event({
+            id: "sell_etf",
+            type: "SELL",
+            eventDate: "2026-03-01",
+            securityId: "sec_etf",
+            securityName: "ETF Monde",
+            quantity: 4,
+            grossAmount: 600,
+            feeAmount: 0,
+            taxAmount: 0,
+            envelopeCashAmount: 600,
+            // Lot d'un AUTRE instrument.
+            matchedAcquisitionEventId: "buy_bond",
+          }),
+        ],
+        [specific],
+      ),
+      "acc_pea",
+    )!;
+    expect(envelope.flags).toContain("SPECIFIC_LOT_NOT_OPEN:sell_etf");
+    // L'obligation garde ses cinq titres : la cession de l'ETF ne l'a pas entamée.
+    const bond = envelope.holdings.find((item) => item.securityId === "sec_bond")!;
+    expect(bond.ledgerQuantity).toBeCloseTo(5, 6);
   });
 });
 

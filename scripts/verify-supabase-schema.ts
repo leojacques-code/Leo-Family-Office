@@ -130,6 +130,8 @@ const requiredColumns: Record<string, string[]> = {
     "counterparty_account_id",
     "transaction_id",
     "matched_acquisition_event_id",
+    "is_lot_opening",
+    "matched_lot_is_opening",
     "data_kind",
     "confidence",
   ],

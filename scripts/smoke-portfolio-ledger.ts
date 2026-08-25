@@ -8,8 +8,10 @@
  * conventions d'enveloppe et refus de supprimer un lot encore désigné par une cession.
  *
  * Il prouve aussi les intégrités qui ne passent PAS par les RPC, en écrivant directement
- * dans la table : un lot désigné hors de son enveloppe est refusé par la base, et la
- * suppression d'une transaction bancaire détache le lien sans emporter `user_id`.
+ * dans la table : un lot désigné hors de son propriétaire, de son enveloppe, de son
+ * instrument ou d'une nature qui ouvre un lot est refusé par la base, une désignation
+ * légitime reste acceptée, et la suppression d'une transaction bancaire détache le lien
+ * sans emporter `user_id`.
  */
 import { randomUUID } from "node:crypto";
 import pg from "pg";
@@ -368,6 +370,79 @@ try {
     "portfolio_events_matched_lot_fk",
   );
 
+  // Un « lot spécifique » structurellement impossible doit être refusé par la BASE, sans
+  // compter sur le moteur pour le signaler après coup. Quatre frontières, une seule FK :
+  // propriétaire, enveloppe, instrument, et le fait d'ouvrir réellement un lot.
+  const otherSecurityBuyId = await record({
+    account_id: peaId,
+    event_type: "BUY",
+    event_date: "2026-02-10",
+    security: { name: "Smoke Obligation", ticker: null, isin: "FR0000000002", currency: "EUR" },
+    quantity: 5,
+    unit_price: 100,
+    gross_amount: 500,
+    fee_amount: 0,
+    tax_amount: 0,
+    envelope_cash_amount: -500,
+    currency: "EUR",
+  });
+  const dividendId = await record({
+    account_id: peaId,
+    event_type: "DIVIDEND",
+    event_date: "2026-03-10",
+    security: { name: "Smoke ETF", ticker: null, isin: "FR0000000001", currency: "EUR" },
+    envelope_cash_amount: 47,
+    currency: "EUR",
+  });
+
+  // a) un lot d'un AUTRE instrument.
+  await rejects(
+    `insert into public.portfolio_events
+       (user_id, account_id, security_id, event_type, event_date, quantity, currency,
+        matched_acquisition_event_id, data_kind, confidence)
+     select $1, $2, security_id, 'SELL', date '2026-05-05', 1, 'EUR', $4, 'ACTUAL', 'HIGH'
+       from public.portfolio_events where id = $3`,
+    [userId, peaId, otherSecurityBuyId, buyId],
+    "Une cession a pu désigner le lot d'un autre instrument",
+    "portfolio_events_matched_lot_fk",
+  );
+
+  // b) un événement qui n'ouvre aucun lot : le dividende encaissé sur ce même titre.
+  await rejects(
+    `insert into public.portfolio_events
+       (user_id, account_id, security_id, event_type, event_date, quantity, currency,
+        matched_acquisition_event_id, data_kind, confidence)
+     select $1, $2, security_id, 'SELL', date '2026-05-05', 1, 'EUR', $3, 'ACTUAL', 'HIGH'
+       from public.portfolio_events where id = $3`,
+    [userId, peaId, dividendId],
+    "Une cession a pu désigner un dividende comme lot",
+    "portfolio_events_matched_lot_fk",
+  );
+
+  // c) une cession sans instrument : sous MATCH SIMPLE, un `security_id` nul désactiverait
+  //    la FK. C'est le CHECK qui referme cette porte.
+  await rejects(
+    `insert into public.portfolio_events
+       (user_id, account_id, event_type, event_date, currency, envelope_cash_amount,
+        matched_acquisition_event_id, data_kind, confidence)
+     values ($1, $2, 'TRANSFER_OUT', date '2026-05-05', 'EUR', -10, $3, 'ACTUAL', 'HIGH')`,
+    [userId, peaId, buyId],
+    "Une cession sans instrument a pu désigner un lot",
+    "portfolio_events_matched_lot_ck",
+  );
+
+  // d) contrôle négatif : la désignation légitime, elle, reste acceptée.
+  await client.query(
+    `insert into public.portfolio_events
+       (user_id, account_id, security_id, event_type, event_date, quantity, currency,
+        gross_amount, fee_amount, tax_amount, envelope_cash_amount,
+        matched_acquisition_event_id, data_kind, confidence)
+     select $1, $2, security_id, 'SELL', date '2026-05-06', 1, 'EUR', 120, 0, 0, 120, $3,
+            'ACTUAL', 'HIGH'
+       from public.portfolio_events where id = $3`,
+    [userId, peaId, buyId],
+  );
+
   // Une FK composite dont le SET NULL ne nomme pas sa colonne annulerait aussi `user_id`,
   // qui est NOT NULL : la suppression de la transaction échouerait au lieu de détacher.
   const txId = randomUUID();
@@ -435,7 +510,7 @@ try {
     `Le smoke a persisté des lignes : before=${JSON.stringify(before)} after=${JSON.stringify(after)}`,
   );
   console.log(
-    "Smoke Portfolio Ledger vert : conventions upsert et effaçables, instrument résolu sans doublon, ancrages uniques, formes refusées, lot cloisonné par enveloppe et par propriétaire, transaction détachée sans perte de propriétaire, lot protégé, rollback intégral.",
+    "Smoke Portfolio Ledger vert : conventions upsert et effaçables, instrument résolu sans doublon, ancrages uniques, formes refusées, lot désigné cloisonné par propriétaire, enveloppe, instrument et nature ouvrante, désignation légitime acceptée, transaction détachée sans perte de propriétaire, lot protégé, rollback intégral.",
   );
 } catch (error) {
   await client.query("rollback").catch(() => undefined);

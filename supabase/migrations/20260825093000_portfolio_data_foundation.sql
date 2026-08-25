@@ -124,7 +124,8 @@ create table if not exists public.portfolio_events (
   transaction_id uuid,
   -- Lot d'acquisition désigné, requis par la seule convention SPECIFIC_LOT. L'intégrité
   -- est portée par une FK composite (voir plus bas) : un lot désigné appartient
-  -- nécessairement au même propriétaire ET à la même enveloppe que la cession.
+  -- nécessairement au même propriétaire, à la même enveloppe et au même instrument que la
+  -- cession, et il ouvre réellement un lot.
   matched_acquisition_event_id uuid,
   external_reference text,
   data_kind text not null,
@@ -132,6 +133,19 @@ create table if not exists public.portfolio_events (
   source text,
   notes text,
   created_at timestamptz not null default now(),
+  -- Un événement OUVRE-T-IL un lot ? Propriété structurelle de sa nature, pas un calcul :
+  -- seules ces trois natures font entrer un instrument dans l'enveloppe. Colonne générée
+  -- pour servir de cible à la FK du lot désigné ; elle reflète `ACQUISITION_TYPES` de
+  -- `src/lib/engine/portfolio.ts` et doit évoluer avec lui.
+  is_lot_opening boolean generated always as (
+    event_type in ('OPENING_POSITION', 'BUY', 'TRANSFER_IN') and security_id is not null
+  ) stored,
+  -- Côté référençant : `true` dès qu'un lot est désigné, `null` sinon. C'est ce `true`
+  -- qui force la cible de la FK à être un événement ouvrant un lot ; le `null` laisse la
+  -- FK inopérante quand aucun lot n'est désigné, comme le veut MATCH SIMPLE.
+  matched_lot_is_opening boolean generated always as (
+    case when matched_acquisition_event_id is null then null else true end
+  ) stored,
   constraint portfolio_events_account_fk
     foreign key (account_id, user_id)
     references public.financial_accounts(id, user_id) on delete cascade,
@@ -149,19 +163,28 @@ create table if not exists public.portfolio_events (
     foreign key (transaction_id, user_id)
     references public.transactions(id, user_id)
     on delete set null (transaction_id),
-  -- Cible de la FK du lot désigné : identité, propriétaire et enveloppe ensemble.
-  constraint portfolio_events_lot_target_uk unique (id, user_id, account_id),
-  -- Un lot désigné par une cession appartient au même propriétaire et à la même
-  -- enveloppe. Le contrôle vit ici, pas seulement dans la RPC : une écriture qui
-  -- contournerait la RPC ne doit pas pouvoir rattacher la cession d'un PEA au lot d'un
-  -- CTO, ni au lot d'un autre utilisateur.
+  -- Cible de la FK du lot désigné : identité, propriétaire, enveloppe, instrument, et le
+  -- fait d'ouvrir un lot. `id` étant la clé primaire, cette unicité est acquise ; elle
+  -- n'existe que pour donner à la FK les quatre colonnes de contrôle dont elle a besoin.
+  constraint portfolio_events_lot_target_uk
+    unique (id, user_id, account_id, security_id, is_lot_opening),
+  -- Un « lot spécifique » structurellement impossible est refusé par la BASE, pas
+  -- seulement signalé ensuite par le moteur. Une seule FK porte les quatre frontières :
+  -- même propriétaire, même enveloppe, même instrument, et un événement qui ouvre
+  -- réellement un lot. Une cession ne peut donc pas désigner le dividende qu'elle a
+  -- encaissé, ni une autre vente, ni la ligne d'un titre voisin, même par écriture
+  -- directe hors RPC.
   --
   -- Aucune action de suppression : annuler la désignation ferait perdre en silence la
   -- convention d'appariement d'une cession déjà enregistrée. La suppression d'un lot
   -- encore désigné est refusée, ici comme dans `lfo_delete_portfolio_event`.
   constraint portfolio_events_matched_lot_fk
-    foreign key (matched_acquisition_event_id, user_id, account_id)
-    references public.portfolio_events(id, user_id, account_id),
+    foreign key (
+      matched_acquisition_event_id, user_id, account_id, security_id, matched_lot_is_opening
+    )
+    references public.portfolio_events(
+      id, user_id, account_id, security_id, is_lot_opening
+    ),
   constraint portfolio_events_type_ck check (
     event_type in (
       'OPENING_POSITION', 'OPENING_CASH',
@@ -196,9 +219,12 @@ create table if not exists public.portfolio_events (
   constraint portfolio_events_gross_sign_ck check (gross_amount is null or gross_amount >= 0),
   constraint portfolio_events_fee_sign_ck check (fee_amount is null or fee_amount >= 0),
   constraint portfolio_events_tax_sign_ck check (tax_amount is null or tax_amount >= 0),
-  -- Un lot ne se désigne qu'à la cession.
+  -- Un lot ne se désigne qu'à la cession d'un instrument. L'exigence d'instrument n'est
+  -- pas cosmétique : sous MATCH SIMPLE, un `security_id` nul désactiverait toute la FK
+  -- ci-dessus et rouvrirait la porte qu'elle ferme.
   constraint portfolio_events_matched_lot_ck check (
-    matched_acquisition_event_id is null or event_type in ('SELL', 'TRANSFER_OUT')
+    matched_acquisition_event_id is null
+    or (event_type in ('SELL', 'TRANSFER_OUT') and security_id is not null)
   ),
   -- Une contrepartie bancaire n'a de sens que sur un flux externe à l'enveloppe.
   constraint portfolio_events_counterparty_ck check (
@@ -369,13 +395,18 @@ begin
     raise exception 'Transaction bancaire introuvable';
   end if;
 
+  -- La base refuserait déjà une désignation impossible ; cette vérification n'ajoute
+  -- aucune règle, elle rend seulement le refus lisible côté produit.
   if nullif(p_payload ->> 'matched_acquisition_event_id', '') is not null
      and not exists (
        select 1 from public.portfolio_events
         where id = (p_payload ->> 'matched_acquisition_event_id')::uuid
           and user_id = p_user_id and account_id = v_account_id
+          and security_id is not distinct from v_security_id
+          and is_lot_opening
      ) then
-    raise exception 'Lot d''acquisition désigné introuvable dans cette enveloppe';
+    raise exception
+      'Lot désigné invalide : il doit ouvrir un lot du même instrument dans cette enveloppe';
   end if;
 
   v_event_id := gen_random_uuid();

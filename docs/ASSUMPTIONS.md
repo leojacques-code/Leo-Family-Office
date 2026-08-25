@@ -153,6 +153,18 @@ Trois cas rendent la dérivation impossible plutôt qu'approximative :
   inconnu (`LEDGER_QUANTITY_NOT_ANCHORED`) ;
 - ancrage de cash absent alors qu'une couverture est déclarée (`LEDGER_CASH_ANCHOR_MISSING`).
 
+### Lot désigné (convention `SPECIFIC_LOT`)
+
+Une cession ne peut désigner qu'un événement qui ouvre réellement un lot du même instrument,
+dans la même enveloppe et pour le même propriétaire. Les quatre conditions sont portées par une
+clé étrangère composite, donc opposables à toute écriture, y compris hors RPC. Désigner le
+dividende encaissé sur la ligne, une autre vente ou le lot d'un titre voisin est refusé par la
+base : le moteur n'a pas à rattraper une donnée structurellement impossible.
+
+Sans désignation alors que la convention l'exige, le coût cédé reste `NOT_COMPUTABLE`
+(`SPECIFIC_LOT_REFERENCE_MISSING`) ; désigner un lot déjà épuisé donne
+`SPECIFIC_LOT_NOT_OPEN`.
+
 ### Cash d'enveloppe dérivé
 
 `cash dérivé = ancrage OPENING_CASH + Σ mouvements de cash`. Il reste `null` sans ancrage, dès

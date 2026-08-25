@@ -84,9 +84,18 @@ Cinq règles fondent le moteur.
 Aucun lot, coût de revient ni PnL n'est persisté : les persister créerait une vérité qui se
 périmerait à la première correction d'événement. Seuls les faits et les déclarations le sont.
 
-Côté intégrité, la base ne délègue rien à la RPC : le lot désigné par une cession est contraint
-par une clé étrangère composite `(id, user_id, account_id)`, donc appartient nécessairement au
-même propriétaire et à la même enveloppe, y compris pour une écriture qui contournerait la RPC.
+Côté intégrité, la base ne délègue rien à la RPC. Une seule clé étrangère composite ferme les
+quatre frontières du lot désigné par une cession : même propriétaire, même enveloppe, même
+instrument, et un événement qui **ouvre réellement un lot**. Elle référence
+`(id, user_id, account_id, security_id, is_lot_opening)`, où `is_lot_opening` est une colonne
+générée valant vrai pour `OPENING_POSITION`, `BUY` et `TRANSFER_IN` porteurs d'un instrument ;
+côté référençant, `matched_lot_is_opening` vaut `true` dès qu'un lot est désigné et `null` sinon,
+ce qui neutralise la contrainte quand aucun lot ne l'est. Un « lot spécifique » structurellement
+impossible (le dividende encaissé sur la ligne, une autre vente, le lot d'un titre voisin) est
+donc refusé par la base, pas seulement signalé après coup par le moteur. Le `CHECK` associé exige
+un instrument sur la cession : sans lui, un `security_id` nul désactiverait la clé étrangère sous
+MATCH SIMPLE. `is_lot_opening` duplique `ACQUISITION_TYPES` du moteur ; un test épingle la liste
+côté TypeScript pour rendre toute divergence visible.
 Les liens sortants (`transaction_id`, `counterparty_account_id`) utilisent `on delete set null`
 avec **liste de colonnes** : sans elle, une FK composite annulerait aussi `user_id`, qui est
 `NOT NULL`, et la suppression de la transaction échouerait au lieu de détacher le lien.
