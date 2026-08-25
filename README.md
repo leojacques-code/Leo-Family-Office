@@ -67,7 +67,7 @@ npm run build
 npm run check
 ```
 
-`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les tables, colonnes, contraintes, huit RPC, permissions, RLS, policies, bucket Storage ou sept versions de migration divergent du code.
+`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 47 tables, colonnes, contraintes, 12 RPC, permissions, RLS, policies, bucket Storage ou 13 versions de migration divergent du code.
 
 ## Fonctionnalités
 
@@ -90,8 +90,15 @@ Les migrations sont appliquées dans cet ordre, sans modification rétroactive :
 5. `202608240003_debt_engine_v2.sql`
 6. `202608240004_debt_engine_v2_1.sql`
 7. `202608240005_supabase_only_runtime.sql`
+8. `20260824230233_debt_contract_input.sql`
+9. `20260824231522_debt_schedule_actual_priority.sql`
+10. `20260825012954_debt_observation_user_index.sql`
+11. `20260825020545_canonical_balance_sheet_v2.sql`
+12. `20260825021127_liability_currency_balance_sheet_v2.sql`
+13. `20260825021742_snapshot_item_owner_integrity.sql`
 
 La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persistance. Elle ne déplace aucune formule financière dans la base.
+Les migrations Canonical Balance Sheet V2 enrichissent et versionnent les snapshots, sans supprimer ni écraser les données historiques ; toutes les formules restent dans les engines TypeScript.
 
 ## Sécurité
 

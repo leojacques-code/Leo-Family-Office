@@ -64,7 +64,7 @@ npm run db:verify
 supabase db advisors
 ```
 
-`db:verify` ouvre une transaction PostgreSQL `READ ONLY` via `SUPABASE_DB_URL`. Il contrôle les tables et colonnes structurantes, contraintes, huit RPC et leurs permissions, RLS, policies `owner_all`, bucket et policies Storage, ainsi que les sept versions de migration.
+`db:verify` ouvre une transaction PostgreSQL `READ ONLY` via `SUPABASE_DB_URL`. Il contrôle les 47 tables et colonnes structurantes, contraintes, 12 RPC et leurs permissions, RLS, policies `owner_all`, bucket et policies Storage, ainsi que les 13 versions de migration.
 
 Contrôler aussi :
 

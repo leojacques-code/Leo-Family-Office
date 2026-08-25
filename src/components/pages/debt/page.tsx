@@ -78,7 +78,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
     state.scenarios.find((item) => item.name === "Central") ?? state.scenarios[0] ?? null;
   const comparison = loan
     ? compareDebtVsInvest({
-        availableCash: state.metrics.bankCash,
+        availableCash: state.metrics.bankCash ?? 0,
         debtBalance: loan.currentBalance,
         debtRate: loan.annualRate,
         investmentReturn: investmentReturn / 100,

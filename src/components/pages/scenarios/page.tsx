@@ -406,7 +406,7 @@ function ScenariosPage({
                       value: new Intl.NumberFormat("fr-FR", {
                         style: "currency",
                         currency: "EUR",
-                      }).format(state.metrics.grossAssets),
+                      }).format(state.metrics.grossAssets ?? 0),
                       kind: "DERIVED",
                       date: state.asOfDate,
                     },

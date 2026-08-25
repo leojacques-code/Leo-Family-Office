@@ -325,11 +325,11 @@ export function deriveMetrics(
   const { grossAssets, debt, netWorth } = calculateNetWorth(accounts, liabilities);
   const bankCash = accounts
     .filter((account) => account.type === "BANK" || account.type === "SAVINGS")
-    .reduce((sum, account) => sum + account.balance, 0);
+    .reduce((sum, account) => sum + Math.max(account.balance, 0), 0);
   // La liquidité est portée par le champ `liquidity`, jamais déduite du type de compte.
   const liquidAssets = accounts
     .filter((account) => account.liquidity !== "ILLIQUID")
-    .reduce((sum, account) => sum + account.balance, 0);
+    .reduce((sum, account) => sum + Math.max(account.balance, 0), 0);
   const investedAssets = positions
     .filter((position) => !position.isCash)
     .reduce((sum, position) => sum + position.value, 0);
@@ -365,14 +365,20 @@ export function deriveMetrics(
     liquidAssets,
     liquidNetWorth: liquidAssets - debt,
     investedAssets,
-    productiveNetWorth: investedAssets - debt,
+    // Conservé uniquement pour compatibilité UI : la vraie métrique V2 est explicitement
+    // NOT_COMPUTABLE tant que les passifs ne sont pas attribués aux actifs productifs.
+    productiveNetWorth: investedAssets,
     monthlyIncome,
     monthlyExpenses,
     monthlyDebtService,
     freeCashFlow,
     savingsRate,
     investmentRate,
-    emergencyCoverageMonths: incompressibleExpenses === 0 ? 0 : bankCash / incompressibleExpenses,
+    emergencyCoverageMonths:
+      expenses.some((expense) => expense.essential && expense.monthlyAmount === null) ||
+      incompressibleExpenses === 0
+        ? null
+        : bankCash / incompressibleExpenses,
     dataCompleteness: expenses.length === 0 ? 0 : completeFields / expenses.length,
   };
 }

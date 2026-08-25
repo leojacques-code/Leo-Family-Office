@@ -18,28 +18,29 @@ import type {
 
 const provenance: Provenance = { kind: "ACTUAL", confidence: "HIGH" };
 
+// Fixtures entièrement synthétiques : elles testent les invariants sans recopier de données utilisateur.
 const accounts: FinancialAccount[] = [
   {
     id: "a",
     institutionId: "i",
-    institution: "Boursobank",
-    name: "Ultim",
+    institution: "Banque Test",
+    name: "Compte courant test",
     type: "BANK",
     currency: "EUR",
-    balance: 355.48,
-    balanceDate: "2026-08-19",
+    balance: 1000,
+    balanceDate: "2030-01-15",
     liquidity: "IMMEDIATE",
     provenance,
   },
   {
     id: "b",
     institutionId: "i",
-    institution: "Boursobank",
-    name: "PEA",
-    type: "PEA",
+    institution: "Courtier Test",
+    name: "Compte investissement test",
+    type: "CTO",
     currency: "EUR",
-    balance: 15003.13,
-    balanceDate: "2026-08-19",
+    balance: 9000,
+    balanceDate: "2030-01-15",
     liquidity: "LIQUID",
     provenance,
   },
@@ -47,15 +48,15 @@ const accounts: FinancialAccount[] = [
 const liabilities: Liability[] = [
   {
     id: "l",
-    name: "Prêt étudiant",
-    lender: "Bpifrance",
-    principal: 16745,
-    currentBalance: 16745,
+    name: "Dette test",
+    lender: "Prêteur Test",
+    principal: 4000,
+    currentBalance: 4000,
     annualRate: 0,
-    monthlyPayment: 284.72,
-    paymentCount: 60,
-    firstPaymentDate: "2026-12-05",
-    maturityDate: "2031-11-05",
+    monthlyPayment: 100,
+    paymentCount: 48,
+    firstPaymentDate: "2030-05-05",
+    maturityDate: "2034-04-05",
     ...UNDECLARED_LOAN_TERMS,
     provenance,
   },
@@ -64,12 +65,19 @@ const incomes: IncomeSource[] = [
   {
     id: "i1",
     name: "Revenu net",
-    monthlyNet: 1282,
+    monthlyNet: 2000,
     active: true,
-    startDate: "2026-08-19",
+    startDate: "2030-01-15",
     provenance,
   },
-  { id: "i2", name: "Tennis", monthlyNet: 130, active: false, startDate: null, provenance },
+  {
+    id: "i2",
+    name: "Revenu inactif test",
+    monthlyNet: 500,
+    active: false,
+    startDate: null,
+    provenance,
+  },
 ];
 const expenses: ExpenseCategory[] = [
   {
@@ -79,7 +87,7 @@ const expenses: ExpenseCategory[] = [
     cashFlowKind: "EXPENSE",
     essentiality: "ESSENTIAL",
     behavior: "FIXED",
-    monthlyAmount: 1140,
+    monthlyAmount: 800,
     essential: true,
     archived: false,
     provenance,
@@ -101,9 +109,9 @@ const positions: Position[] = [
   {
     id: "p1",
     accountId: "b",
-    securityName: "ETF World",
-    assetClass: "Actions monde",
-    value: 8698,
+    securityName: "Position test",
+    assetClass: "Actif test",
+    value: 6000,
     currency: "EUR",
     isCash: false,
     provenance,
@@ -111,39 +119,39 @@ const positions: Position[] = [
   {
     id: "p2",
     accountId: "b",
-    securityName: "Cash PEA",
+    securityName: "Cash interne test",
     assetClass: "Cash",
-    value: 6304.57,
+    value: 3000,
     currency: "EUR",
     isCash: true,
     provenance,
   },
 ];
 
-const AS_OF = "2026-08-19";
+const AS_OF = "2030-01-15";
 
 describe("deriveMetrics", () => {
   const metrics = deriveMetrics(accounts, liabilities, incomes, expenses, positions, [], AS_OF);
 
   it("additionne les soldes de comptes sans double compter les positions", () => {
-    expect(metrics.grossAssets).toBeCloseTo(15358.61, 2);
-    expect(metrics.investedAssets).toBeCloseTo(8698, 2);
+    expect(metrics.grossAssets).toBeCloseTo(10000, 2);
+    expect(metrics.investedAssets).toBeCloseTo(6000, 2);
   });
 
   it("calcule le patrimoine net et la dette", () => {
-    expect(metrics.debt).toBeCloseTo(16745, 2);
-    expect(metrics.netWorth).toBeCloseTo(-1386.39, 2);
+    expect(metrics.debt).toBeCloseTo(4000, 2);
+    expect(metrics.netWorth).toBeCloseTo(6000, 2);
   });
 
   it("exclut les revenus inactifs et les dépenses inconnues", () => {
-    expect(metrics.monthlyIncome).toBeCloseTo(1282, 2);
-    expect(metrics.monthlyExpenses).toBeCloseTo(1140, 2);
+    expect(metrics.monthlyIncome).toBeCloseTo(2000, 2);
+    expect(metrics.monthlyExpenses).toBeCloseTo(800, 2);
   });
 
   it("n'exige aucun service de dette avant la première échéance", () => {
-    // Première échéance au 2026-12-05, observation au 2026-08-19 : aucune ligne exigible.
+    // Première échéance après la date d'observation : aucune ligne exigible.
     expect(metrics.monthlyDebtService).toBe(0);
-    expect(metrics.freeCashFlow).toBeCloseTo(142, 2);
+    expect(metrics.freeCashFlow).toBeCloseTo(1200, 2);
   });
 
   it("exige la mensualité pendant la période de remboursement", () => {
@@ -154,10 +162,10 @@ describe("deriveMetrics", () => {
       expenses,
       positions,
       [],
-      "2026-12-19",
+      "2030-05-15",
     );
-    expect(active.monthlyDebtService).toBeCloseTo(284.72, 2);
-    expect(active.freeCashFlow).toBeCloseTo(-142.72, 2);
+    expect(active.monthlyDebtService).toBeCloseTo(100, 2);
+    expect(active.freeCashFlow).toBeCloseTo(1100, 2);
   });
 
   it("n'exige plus rien après la dernière échéance", () => {
@@ -168,7 +176,7 @@ describe("deriveMetrics", () => {
       expenses,
       positions,
       [],
-      "2032-01-15",
+      "2035-01-15",
     );
     expect(after.monthlyDebtService).toBe(0);
   });
@@ -177,14 +185,14 @@ describe("deriveMetrics", () => {
     const second: Liability = {
       ...liabilities[0],
       id: "l2",
-      name: "Prêt auto",
+      name: "Seconde dette test",
       annualRate: 0.03,
-      monthlyPayment: 200,
-      principal: 10000,
-      currentBalance: 10000,
+      monthlyPayment: 50,
+      principal: 2000,
+      currentBalance: 2000,
       paymentCount: 60,
-      firstPaymentDate: "2026-01-05",
-      maturityDate: "2030-12-05",
+      firstPaymentDate: "2030-01-05",
+      maturityDate: "2034-12-05",
       ...UNDECLARED_LOAN_TERMS,
     };
     const both = deriveMetrics(
@@ -194,9 +202,9 @@ describe("deriveMetrics", () => {
       expenses,
       positions,
       [],
-      "2026-12-19",
+      "2030-05-15",
     );
-    expect(both.monthlyDebtService).toBeCloseTo(484.72, 2);
+    expect(both.monthlyDebtService).toBeCloseTo(150, 2);
   });
 
   it("ne compte comme liquide que ce que le champ liquidity qualifie", () => {
@@ -205,7 +213,7 @@ describe("deriveMetrics", () => {
       id: "c",
       name: "Livret bloqué",
       liquidity: "ILLIQUID",
-      balance: 5000,
+      balance: 3000,
     };
     const withBlocked = deriveMetrics(
       [...accounts, blocked],
@@ -216,9 +224,9 @@ describe("deriveMetrics", () => {
       [],
       AS_OF,
     );
-    expect(withBlocked.liquidAssets).toBeCloseTo(15358.61, 2);
-    expect(withBlocked.grossAssets).toBeCloseTo(20358.61, 2);
-    expect(withBlocked.liquidNetWorth).toBeCloseTo(15358.61 - 16745, 2);
+    expect(withBlocked.liquidAssets).toBeCloseTo(10000, 2);
+    expect(withBlocked.grossAssets).toBeCloseTo(13000, 2);
+    expect(withBlocked.liquidNetWorth).toBeCloseTo(6000, 2);
   });
 
   it("laisse les taux de flux non calculables sans ledger", () => {
@@ -234,7 +242,7 @@ describe("deriveMetrics", () => {
     const empty = deriveMetrics([], [], [], [], [], [], AS_OF);
     expect(empty.monthlyDebtService).toBe(0);
     expect(empty.savingsRate).toBeNull();
-    expect(empty.emergencyCoverageMonths).toBe(0);
+    expect(empty.emergencyCoverageMonths).toBeNull();
     expect(empty.dataCompleteness).toBe(0);
   });
 });
@@ -272,7 +280,7 @@ describe("computeFlowRates", () => {
       cashFlowKind: "EXPENSE",
       essentiality: "ESSENTIAL",
       behavior: "FIXED",
-      monthlyAmount: 1140,
+      monthlyAmount: 800,
       essential: true,
       archived: false,
       provenance,
@@ -281,7 +289,7 @@ describe("computeFlowRates", () => {
   const transaction = (categoryId: string, amount: number, date = "2026-08-05"): Transaction => ({
     id: `${categoryId}-${amount}`,
     accountId: "a",
-    accountName: "Ultim",
+    accountName: "Compte test",
     date,
     label: categoryId,
     categoryId,
@@ -296,7 +304,7 @@ describe("computeFlowRates", () => {
 
   it("reste non calculable sans revenu encaissé observé", () => {
     const rates = computeFlowRates(
-      [transaction("exp_rent", -1140)],
+      [transaction("exp_rent", -800)],
       categories,
       "2026-08-01",
       "2026-08-31",
@@ -338,13 +346,13 @@ describe("emergencyCoverageMonths", () => {
       accounts,
       liabilities,
       incomes,
-      expenses,
+      expenses.filter((expense) => expense.monthlyAmount !== null),
       positions,
       [],
-      "2026-08-19",
+      "2030-01-15",
     );
     expect(metrics.monthlyDebtService).toBe(0);
-    expect(metrics.emergencyCoverageMonths).toBeCloseTo(355.48 / 1140, 6);
+    expect(metrics.emergencyCoverageMonths).toBeCloseTo(1000 / 800, 6);
   });
 
   it("intègre le service de dette dans les dépenses incompressibles", () => {
@@ -352,14 +360,13 @@ describe("emergencyCoverageMonths", () => {
       accounts,
       liabilities,
       incomes,
-      expenses,
+      expenses.filter((expense) => expense.monthlyAmount !== null),
       positions,
       [],
-      "2026-12-19",
+      "2030-05-15",
     );
-    expect(metrics.monthlyDebtService).toBeCloseTo(284.72, 2);
-    // La réserve doit couvrir loyer ET échéance : le dénominateur est 1 140 + 284,72.
-    expect(metrics.emergencyCoverageMonths).toBeCloseTo(355.48 / (1140 + 284.72), 6);
+    expect(metrics.monthlyDebtService).toBeCloseTo(100, 2);
+    expect(metrics.emergencyCoverageMonths).toBeCloseTo(1000 / (800 + 100), 6);
   });
 });
 

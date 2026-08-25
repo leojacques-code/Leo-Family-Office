@@ -20,6 +20,9 @@ const canonicalMigrations = [
   "20260824230233",
   "20260824231522",
   "20260825012954",
+  "20260825020545",
+  "20260825021127",
+  "20260825021742",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -48,6 +51,7 @@ const requiredColumns: Record<string, string[]> = {
     "rate_type",
     "facility_id",
     "archived",
+    "currency",
   ],
   loan_schedules: ["id", "insurance", "fees"],
   loan_early_repayments: ["id", "liability_id", "amount", "penalty", "outcome"],
@@ -61,6 +65,45 @@ const requiredColumns: Record<string, string[]> = {
     "balance",
     "data_kind",
     "confidence",
+  ],
+  net_worth_snapshots: [
+    "id",
+    "version",
+    "financial_assets",
+    "liquid_assets",
+    "account_overdrafts",
+    "contractual_debt",
+    "other_liabilities",
+    "total_liabilities",
+    "reporting_currency",
+    "completeness_status",
+    "composition",
+    "provenance",
+  ],
+  net_worth_snapshot_items: [
+    "id",
+    "snapshot_id",
+    "domain",
+    "entity_id",
+    "side",
+    "native_amount",
+    "currency",
+    "fx_rate",
+    "reporting_amount",
+    "valuation_date",
+    "valuation_method",
+    "quality_status",
+  ],
+  monthly_closes: [
+    "id",
+    "version",
+    "account_overdrafts",
+    "contractual_debt",
+    "other_liabilities",
+    "total_liabilities",
+    "liquid_assets",
+    "reporting_currency",
+    "completeness_status",
   ],
   recurring_cash_flow_rules: ["id", "cash_flow_kind", "frequency"],
   cash_flow_monthly_closes: ["id", "month", "version", "post_debt_surplus"],
@@ -115,6 +158,7 @@ const userOwnedTables = [
   "loan_rate_changes",
   "loan_payment_changes",
   "liability_balance_observations",
+  "net_worth_snapshot_items",
 ] as const;
 
 const requiredConstraints = [
@@ -138,6 +182,9 @@ const requiredConstraints = [
   "loan_rate_changes_kind_ck",
   "loan_payment_changes_kind_ck",
   "loan_payment_changes_amount_ck",
+  "net_worth_snapshots_version_ck",
+  "net_worth_snapshots_completeness_ck",
+  "net_worth_snapshot_items_owner_fk",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
@@ -160,6 +207,8 @@ const requiredRpcs: Record<string, string> = {
   lfo_record_debt_balance:
     "p_user_id uuid, p_liability_id uuid, p_observed_at date, p_balance numeric, p_notes text",
   lfo_archive_debt: "p_user_id uuid, p_liability_id uuid",
+  lfo_create_monthly_close_v2:
+    "p_user_id uuid, p_close_date date, p_snapshot jsonb, p_items jsonb, p_forecast_net_worth numeric, p_variance numeric",
 };
 
 const storagePolicies = [

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { amortizeLoan, applyScenarioOverrides, calculateNetWorth, compoundReturn, fxConvert, irr, moic, npv, realValue } from "@/lib/engine/financial";
+import {
+  amortizeLoan,
+  applyScenarioOverrides,
+  calculateNetWorth,
+  compoundReturn,
+  fxConvert,
+  irr,
+  moic,
+  npv,
+  realValue,
+} from "@/lib/engine/financial";
 
 describe("financial primitives", () => {
   it("compounds returns with configurable periods", () => {
@@ -20,8 +30,8 @@ describe("financial primitives", () => {
   });
 
   it("caps the final contractual payment at the remaining balance", () => {
-    const schedule = amortizeLoan(16745, 0, 60, 284.72);
-    expect(schedule.reduce((sum, row) => sum + row.principal, 0)).toBeCloseTo(16745, 6);
+    const schedule = amortizeLoan(10000, 0, 60, 200);
+    expect(schedule.reduce((sum, row) => sum + row.principal, 0)).toBeCloseTo(10000, 6);
     expect(schedule.every((row) => row.closingBalance >= 0)).toBe(true);
   });
 
@@ -37,7 +47,20 @@ describe("financial primitives", () => {
   });
 
   it("calculates net worth from accounts rather than positions", () => {
-    expect(calculateNetWorth([{ balance: 15571.49 }], [{ currentBalance: 16745 }])).toEqual({ grossAssets: 15571.49, debt: 16745, netWorth: -1173.51 });
+    const result = calculateNetWorth([{ balance: 8000 }], [{ currentBalance: 3000 }]);
+    expect(result.grossAssets).toBe(8000);
+    expect(result.debt).toBe(3000);
+    expect(result.netWorth).toBeCloseTo(5000, 12);
+  });
+
+  it("separates negative balances from gross assets without internal rounding", () => {
+    const result = calculateNetWorth(
+      [{ balance: 4000.123456 }, { balance: -1000.111111 }],
+      [{ currentBalance: 500 }],
+    );
+    expect(result.grossAssets).toBe(4000.123456);
+    expect(result.debt).toBeCloseTo(1500.111111, 12);
+    expect(result.netWorth).toBeCloseTo(2500.012345, 12);
   });
 
   it("applies scenario overrides without mutating the base", () => {
