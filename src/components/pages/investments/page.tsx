@@ -1,12 +1,14 @@
 "use client";
 
-import { UploadCloud } from "lucide-react";
+import { useState } from "react";
+import { BookOpen, Plus, Settings2, Trash2, UploadCloud } from "lucide-react";
 import {
   Callout,
   Currency,
   DataBadge,
   EmptyState,
   MetricCard,
+  Modal,
   Percent,
   SectionHeader,
 } from "@/components/ui";
@@ -34,9 +36,27 @@ import type {
   ConvertedBalanceSheetLine,
   EnvelopeExposure,
 } from "@/lib/engine/balance-sheet";
+import {
+  buildPortfolioLedger,
+  envelopeLedgerOf,
+  type PortfolioEnvelopeLedger,
+} from "@/lib/engine/portfolio";
+import {
+  EVENT_TYPE_LABELS,
+  MATCHING_LABELS,
+  PortfolioEventForm,
+  PortfolioPolicyForm,
+} from "@/components/pages/investments/portfolio-ledger-form";
 import type { DashboardState, FinancialAccount } from "@/lib/types";
 
 const INVESTMENT_TYPES: FinancialAccount["type"][] = ["PEA", "CTO"];
+
+const COVERAGE_LABELS: Record<PortfolioEnvelopeLedger["coverageStatus"], string> = {
+  UNDECLARED: "Historique non déclaré",
+  DECLARED: "Historique déclaré exhaustif",
+  DECLARED_WITHOUT_CASH_ANCHOR: "Déclaré, sans ancrage de cash",
+  PARTIAL: "Événements antérieurs à la couverture",
+};
 
 const RECONCILIATION_LABELS: Record<string, string> = {
   RECONCILED: "Réconcilié",
@@ -80,8 +100,22 @@ function buildAccountViews(state: DashboardState, sheet: CanonicalBalanceSheet):
     });
 }
 
-function InvestmentsPage({ state, setExplanation }: SectionProps) {
+function InvestmentsPage({ state, mutate, busy, setExplanation }: SectionProps) {
+  const [eventEditor, setEventEditor] = useState<string | null>(null);
+  const [policyEditor, setPolicyEditor] = useState<string | null>(null);
   const sheet = canonicalBalanceSheetOf(state);
+  // Le ledger vient du repository ; il n'est redérivé que si l'état n'en porte pas encore.
+  const ledger =
+    state.portfolioLedger ??
+    buildPortfolioLedger({
+      asOfDate: state.asOfDate,
+      accounts: state.accounts,
+      positions: state.positions,
+      events: state.portfolioEvents,
+      policies: state.portfolioPolicies,
+      transactions: state.transactions,
+      expenseCategories: state.expenseCategories,
+    });
   const views = buildAccountViews(state, sheet);
   const allMarketLines = marketPositionLines(sheet);
   const largestPosition = [...allMarketLines].sort(
@@ -207,7 +241,19 @@ function InvestmentsPage({ state, setExplanation }: SectionProps) {
               <div className="account-stats">
                 <div>
                   <span>Versements cumulés</span>
-                  <strong className="warning-text">Données insuffisantes</strong>
+                  {(() => {
+                    // Apports EXTERNES seulement : un dividende encaissé dans l'enveloppe
+                    // n'est pas un versement, et un ancrage d'ouverture non plus.
+                    const contributions = envelopeLedgerOf(ledger, view.account.id)?.flows
+                      .externalIn;
+                    return contributions === null || contributions === undefined ? (
+                      <strong className="warning-text">Données insuffisantes</strong>
+                    ) : (
+                      <strong>
+                        <Currency value={contributions} />
+                      </strong>
+                    );
+                  })()}
                 </div>
                 <div>
                   <span>Plus-value latente</span>
@@ -298,6 +344,287 @@ function InvestmentsPage({ state, setExplanation }: SectionProps) {
           versements est également absent du modèle, donc les versements cumulés ne sont pas
           dérivables.
         </Callout>
+      ) : null}
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <span className="eyebrow">Portfolio ledger</span>
+            <h2>Comment les positions se sont constituées</h2>
+          </div>
+          <button
+            className="link-button"
+            onClick={() =>
+              setExplanation({
+                title: "Ledger portefeuille",
+                formula:
+                  "Cash dérivé = ancrage d’ouverture + Σ mouvements de cash de l’enveloppe ; quantité dérivée = Σ entrées − Σ sorties",
+                inputs: ledger.envelopes.map((envelope) => ({
+                  label: `${envelope.accountName} · ${COVERAGE_LABELS[envelope.coverageStatus]}`,
+                  value:
+                    envelope.ledgerCash === null
+                      ? `${NOT_COMPUTABLE} · ${envelope.eventCount} événement(s)`
+                      : `${formatNative(envelope.ledgerCash, envelope.currency)} dérivé · ${envelope.eventCount} événement(s)`,
+                  kind: envelope.eventCount === 0 ? ("MISSING" as const) : ("ACTUAL" as const),
+                  date: envelope.lastEventDate ?? state.asOfDate,
+                })),
+                note: "Le ledger n’entre dans aucun total patrimonial : le Canonical Balance Sheet reste la vérité des montants. Une enveloppe sans historique déclaré conserve son état observé et n’en dérive rien : aucun achat n’est reconstitué pour faire boucler une position.",
+              })
+            }
+          >
+            Explain calculation
+          </button>
+        </div>
+        {ledger.envelopes.length ? (
+          <div className="two-column">
+            {ledger.envelopes.map((envelope) => {
+              const account = state.accounts.find((item) => item.id === envelope.accountId);
+              return (
+                <article className="panel account-summary" key={envelope.accountId}>
+                  <div className="account-hero">
+                    <span className="account-logo large">
+                      <BookOpen size={15} />
+                    </span>
+                    <div>
+                      <span className="eyebrow">{COVERAGE_LABELS[envelope.coverageStatus]}</span>
+                      <h2>{envelope.accountName}</h2>
+                    </div>
+                    <strong>{envelope.eventCount} évt</strong>
+                  </div>
+                  <div className="account-stats">
+                    <div>
+                      <span>Cash dérivé du ledger</span>
+                      <strong className={envelope.ledgerCash === null ? "warning-text" : undefined}>
+                        {envelope.ledgerCash === null
+                          ? NOT_COMPUTABLE
+                          : formatNative(envelope.ledgerCash, envelope.currency)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Cash observé</span>
+                      <strong
+                        className={envelope.observedCash === null ? "warning-text" : undefined}
+                      >
+                        {envelope.observedCash === null
+                          ? NOT_COMPUTABLE
+                          : formatNative(envelope.observedCash, envelope.currency)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Écart de cash</span>
+                      <strong
+                        className={
+                          envelope.cashState === "RECONCILED" ? "positive-text" : "warning-text"
+                        }
+                      >
+                        {envelope.cashGap === null
+                          ? RECONCILIATION_LABELS[envelope.cashState]
+                          : formatNative(envelope.cashGap, envelope.currency)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Coût de revient du stock</span>
+                      <strong
+                        className={envelope.openCostBasis === null ? "warning-text" : undefined}
+                      >
+                        {envelope.openCostBasis === null
+                          ? NOT_COMPUTABLE
+                          : formatNative(envelope.openCostBasis, envelope.currency)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>PnL réalisé</span>
+                      <strong
+                        className={envelope.realisedPnL === null ? "warning-text" : undefined}
+                      >
+                        {envelope.realisedPnL === null
+                          ? NOT_COMPUTABLE
+                          : formatNative(envelope.realisedPnL, envelope.currency)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Convention de lots</span>
+                      <strong
+                        className={envelope.lotMatchingMethod === null ? "warning-text" : undefined}
+                      >
+                        {envelope.lotMatchingMethod === null
+                          ? "Non déclarée"
+                          : MATCHING_LABELS[envelope.lotMatchingMethod]}
+                      </strong>
+                    </div>
+                  </div>
+                  {envelope.holdings.length ? (
+                    <div className="ledger-holdings">
+                      {envelope.holdings.map((holding) => (
+                        <div key={holding.securityId}>
+                          <span>
+                            <strong>{holding.securityName || holding.securityId}</strong>
+                            <small>
+                              {holding.lots.length} lot(s) ·{" "}
+                              {RECONCILIATION_LABELS[holding.quantityState]}
+                            </small>
+                          </span>
+                          <span>
+                            {holding.ledgerQuantity === null
+                              ? NOT_COMPUTABLE
+                              : `${holding.ledgerQuantity} au ledger`}
+                            {holding.observedQuantity === null
+                              ? " · quantité observée inconnue"
+                              : ` · ${holding.observedQuantity} observé(s)`}
+                          </span>
+                          <span
+                            className={
+                              holding.ledgerCostBasis === null ? "warning-text" : undefined
+                            }
+                          >
+                            {holding.ledgerCostBasis === null
+                              ? "Coût de revient non calculable"
+                              : formatNative(holding.ledgerCostBasis, envelope.currency)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="form-actions">
+                    <button
+                      className="button secondary compact"
+                      onClick={() => setPolicyEditor(envelope.accountId)}
+                    >
+                      <Settings2 size={13} /> Conventions
+                    </button>
+                    <button
+                      className="button primary compact"
+                      disabled={!account}
+                      onClick={() => setEventEditor(envelope.accountId)}
+                    >
+                      <Plus size={13} /> Événement
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <EmptyState
+            title="Aucune enveloppe d’investissement"
+            detail="Le ledger portefeuille ne se loge que dans une enveloppe : aucun compte éligible n’est enregistré."
+          />
+        )}
+        {ledger.envelopes.some((envelope) => envelope.coverageStatus === "UNDECLARED") ? (
+          <Callout tone="warning" title="Historique incomplet">
+            {ledger.envelopes
+              .filter((envelope) => envelope.coverageStatus === "UNDECLARED")
+              .map((envelope) => envelope.accountName)
+              .join(", ")}{" "}
+            n’a aucune profondeur d’historique déclarée. L’état observé reste la vérité de ces
+            enveloppes, et aucun achat n’est reconstitué pour l’expliquer : coût de revient
+            détaillé, lots et PnL réalisé restent non calculables tant que l’historique n’est pas
+            saisi et déclaré.
+          </Callout>
+        ) : null}
+        {ledger.quality.flags.length ? (
+          <p className="panel-note">
+            Contrôles ouverts : {ledger.quality.flags.slice(0, 8).join(", ")}
+            {ledger.quality.flags.length > 8
+              ? ` et ${ledger.quality.flags.length - 8} autre(s)`
+              : ""}
+            .
+          </p>
+        ) : null}
+      </section>
+      {state.portfolioEvents.length ? (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Ledger</span>
+              <h2>Événements enregistrés</h2>
+            </div>
+          </div>
+          <div className="ledger-table">
+            <div className="table-head">
+              <span>Date</span>
+              <span>Nature</span>
+              <span>Enveloppe</span>
+              <span>Instrument</span>
+              <span>Quantité</span>
+              <span>Cash d’enveloppe</span>
+              <span />
+            </div>
+            {[...state.portfolioEvents]
+              .sort((left, right) => right.eventDate.localeCompare(left.eventDate))
+              .map((event) => (
+                <div className="table-row" key={event.id}>
+                  <span>
+                    <strong>{event.eventDate}</strong>
+                    <small>
+                      <DataBadge kind={event.provenance.kind} />
+                    </small>
+                  </span>
+                  <span>{EVENT_TYPE_LABELS[event.type]}</span>
+                  <span>
+                    {state.accounts.find((account) => account.id === event.accountId)?.name ??
+                      "Enveloppe inconnue"}
+                  </span>
+                  <span>{event.securityName ?? "—"}</span>
+                  <span>{event.quantity ?? "—"}</span>
+                  <strong>
+                    {event.envelopeCashAmount === null
+                      ? NOT_COMPUTABLE
+                      : formatNative(event.envelopeCashAmount, event.currency)}
+                  </strong>
+                  <span>
+                    <button
+                      className="icon-button"
+                      aria-label="Supprimer l’événement"
+                      disabled={busy}
+                      onClick={() =>
+                        mutate({ action: "delete_portfolio_event", eventId: event.id })
+                      }
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </span>
+                </div>
+              ))}
+          </div>
+        </section>
+      ) : null}
+      {eventEditor ? (
+        <Modal
+          open
+          wide
+          title="Nouvel événement de portefeuille"
+          subtitle="Un fait daté, jamais une hypothèse. Un champ vide reste inconnu."
+          onClose={() => setEventEditor(null)}
+        >
+          <PortfolioEventForm
+            envelope={state.accounts.find((account) => account.id === eventEditor)!}
+            accounts={state.accounts}
+            events={state.portfolioEvents.filter((event) => event.accountId === eventEditor)}
+            transactions={state.transactions}
+            asOfDate={state.asOfDate}
+            busy={busy}
+            onSave={(event) => mutate({ action: "record_portfolio_event", event })}
+            onCancel={() => setEventEditor(null)}
+          />
+        </Modal>
+      ) : null}
+      {policyEditor ? (
+        <Modal
+          open
+          title="Conventions de l’enveloppe"
+          subtitle="Ce qui n’est pas déclaré n’est pas supposé."
+          onClose={() => setPolicyEditor(null)}
+        >
+          <PortfolioPolicyForm
+            envelope={state.accounts.find((account) => account.id === policyEditor)!}
+            policy={
+              state.portfolioPolicies.find((policy) => policy.accountId === policyEditor) ?? null
+            }
+            busy={busy}
+            onSave={(policy) => mutate({ action: "set_portfolio_envelope_policy", policy })}
+            onCancel={() => setPolicyEditor(null)}
+          />
+        </Modal>
       ) : null}
       <section className="panel">
         <div className="panel-header">

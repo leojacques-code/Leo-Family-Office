@@ -58,6 +58,8 @@ Corollaires appliqués dans le code existant, à préserver :
   bruts ;
 - les positions expliquent la composition d'une enveloppe, elles ne s'y ajoutent pas :
   un PEA observé à 20 000 € composé de 15 000 € d'ETF et 5 000 € de cash reste 20 000 € ;
+- le ledger portefeuille explique comment une position s'est constituée ; il ne produit
+  aucune ligne de bilan et une observation sans historique déclaré n'en dérive rien ;
 - un taux de change n'est jamais postérieur à la date de valorisation ; un taux ancien
   reste utilisable mais signalé ; un taux absent rend le total non calculable ;
 - le remboursement de capital est neutre sur le patrimoine net ;
@@ -96,8 +98,11 @@ réservées à `service_role`, qui persistent des résultats déjà calculés.
 Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.md`, elle
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`. La divergence des deux index de
-`net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026, dépôt et production à
-15 versions.
+`net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026, dépôt et production
+alignés à 15 versions. Le dépôt en porte 16 depuis Portfolio Data Foundation : la
+seizième est prouvée par le gate local et reste à pousser. Ce n'est pas une divergence,
+c'est une migration en attente ; `db:verify` distant échouera tant qu'elle ne sera pas
+appliquée.
 
 ## 6. Tests et gates
 
@@ -124,9 +129,9 @@ smokes écrivent en transaction et annulent.
 Correctness → données → intégration → calculs → tests → produit → interface.
 
 ```text
-faits          Debt · Cash Flow · Canonical Balance Sheet
+faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données)
 en cours       vérité de schéma · vérité des consommateurs
-suivant        Portfolio (données) → Portfolio (analytics)
+suivant        Portfolio (analytics)
 ensuite        Real Estate → Business Equity → Career + Tax
 puis           Event Engine → Scenarios V2 → Goals → Decision Lab
 enfin          imports et connecteurs → expérience globale → orchestration IA
@@ -137,7 +142,10 @@ Debt Engine et ne recalcule aucun échéancier : le moteur immobilier actuel, qu
 lui-même, ne doit pas entrer dans le patrimoine réel avant sa refonte.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
-performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`.
+performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger
+portefeuille existe depuis Portfolio Data Foundation : il porte les faits, jamais les lots
+ni le coût de revient, qui en sont dérivés. TWR, XIRR et attribution restent hors de lui et
+ne doivent démarrer que sur une enveloppe dont la couverture est déclarée.
 
 ## 8. Ce qu'un agent ne doit jamais inventer
 

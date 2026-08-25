@@ -39,6 +39,42 @@ Trois interdits en découlent, vérifiés par les tests :
 bilan canonique (`composeDashboardMetrics`), les flux déclarés viennent de `deriveFlowMetrics`,
 qui ne lit plus ni compte ni position.
 
+## Portfolio Data Foundation
+
+Le portefeuille a désormais deux vérités distinctes, qui ne se recouvrent jamais.
+
+**L'état observé** (`positions`, `position_snapshots`) dit ce qu'une ligne VAUT aujourd'hui.
+Il alimente seul le Canonical Balance Sheet, exactement comme avant.
+
+**Le ledger** (`portfolio_events`) dit comment elle s'est CONSTITUÉE : ancrages d'ouverture,
+apports, retraits, achats, ventes, dividendes, coupons, frais, taxes et transferts. Il ne
+produit aucune ligne de bilan et n'entre dans aucun total patrimonial. `buildPortfolioLedger()`
+en dérive les lots, le coût de revient, le cash d'enveloppe théorique et les écarts de
+réconciliation ; le bilan reste bit pour bit identique avec ou sans ledger, ce qu'un test
+vérifie.
+
+Quatre règles fondent le moteur.
+
+1. **Une observation n'est pas un historique.** Une enveloppe dont la profondeur d'historique
+   n'est pas déclarée (`portfolio_envelope_policies.ledger_coverage_start` à `null`) conserve son
+   état observé intact ; le ledger dit simplement qu'il ne l'explique pas. Aucun achat n'est
+   reconstitué pour faire boucler une position.
+2. **La convention d'appariement ne se devine pas.** Sans `lot_matching_method` déclarée, et dès
+   qu'il existe plus d'un lot ouvert, le coût de revient cédé est `NOT_COMPUTABLE`. Avec un seul
+   lot ouvert, l'appariement est mécaniquement univoque et reste calculé. La quantité, elle, ne
+   dépend d'aucune convention et reste toujours connue.
+3. **Aucune conversion de change.** Le FX Engine reste l'unique moteur de change. Convertir un
+   flux historique à un taux non observé inventerait une opération de change : une enveloppe dont
+   le ledger mélange les devises est déclarée non réconciliable, pas convertie.
+4. **Aucune seconde vérité Cash Flow.** Un événement externe à l'enveloppe (apport, retrait,
+   transfert) POINTE la jambe bancaire déjà classée dans `transactions` ; il n'en crée ni n'en
+   reclasse aucune. Le moteur signale une jambe manquante, un écart de montant, un virement vers
+   l'enveloppe classé en `EXPENSE`, ou une opération interne indûment rattachée à un compte
+   bancaire. Corriger reste le travail du Cash Flow Engine.
+
+Aucun lot, coût de revient ni PnL n'est persisté : les persister créerait une vérité qui se
+périmerait à la première correction d'événement. Seuls les faits et les déclarations le sont.
+
 ## Transactions
 
 La migration `202608240005_supabase_only_runtime.sql` regroupe en fonctions PostgreSQL les écritures composées : compte + solde, transaction + solde dérivé, scénario + version, duplication + version, clôture + snapshot, catégorie + budget, clôture Cash Flow versionnée et simulation + percentiles.

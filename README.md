@@ -67,7 +67,7 @@ npm run build
 npm run check
 ```
 
-`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 47 tables, colonnes, contraintes, 12 RPC, permissions, RLS, policies, bucket Storage ou l'historique de migration divergent du code. Le contrôle des migrations est symétrique : une version attendue absente échoue, et une version appliquée hors du dépôt échoue aussi.
+`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 49 tables, colonnes, contraintes, 15 RPC, permissions, RLS, policies, bucket Storage ou l'historique de migration divergent du code. Le contrôle des migrations est symétrique : une version attendue absente échoue, et une version appliquée hors du dépôt échoue aussi.
 
 Le même contrôle s'exécute sans aucun credential, sur un PostgreSQL local jetable reconstruit depuis les seules migrations du dépôt :
 
@@ -76,7 +76,7 @@ npm run db:local:up
 npm run gate:local
 ```
 
-Le dépôt déclare 15 migrations, égales à celles de la production. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
+Le dépôt déclare 16 migrations. Les 15 premières sont égales à celles de la production ; la seizième, `20260825093000_portfolio_data_foundation`, est vérifiée par le gate local et reste à pousser. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
 
 ## Fonctionnalités
 
@@ -107,9 +107,11 @@ Les migrations sont appliquées dans cet ordre, sans modification rétroactive :
 13. `20260825021742_snapshot_item_owner_integrity.sql`
 14. `20260825063626_snapshot_item_owner_fk_index.sql`
 15. `20260825063831_snapshot_item_fk_covering_index.sql`
+16. `20260825093000_portfolio_data_foundation.sql`
 
 La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persistance. Elle ne déplace aucune formule financière dans la base.
 Les migrations Canonical Balance Sheet V2 enrichissent et versionnent les snapshots, sans supprimer ni écraser les données historiques ; toutes les formules restent dans les engines TypeScript.
+La migration 16 ajoute le ledger portefeuille (`portfolio_events`, `portfolio_envelope_policies`) et ses RPC. Aucun lot ni coût de revient n'y est persisté : ces grandeurs sont dérivées par `src/lib/engine/portfolio.ts`.
 Les migrations 14 et 15 ne portent que des index de `net_worth_snapshot_items` : la 15 remplace l'index de la 14, l'état final couvrant la FK composite `(snapshot_id, user_id)`.
 
 ## Sécurité

@@ -26,6 +26,7 @@ const canonicalMigrations = [
   "20260825021742",
   "20260825063626",
   "20260825063831",
+  "20260825093000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -112,6 +113,33 @@ const requiredColumns: Record<string, string[]> = {
   cash_flow_monthly_closes: ["id", "month", "version", "post_debt_surplus"],
   simulation_runs: ["id", "scenario_id", "seed", "simulations", "years", "methodology"],
   simulation_results: ["id", "run_id", "year", "p10", "p25", "p50", "p75", "p90"],
+  portfolio_events: [
+    "id",
+    "account_id",
+    "security_id",
+    "event_type",
+    "event_date",
+    "settlement_date",
+    "quantity",
+    "unit_price",
+    "gross_amount",
+    "fee_amount",
+    "tax_amount",
+    "envelope_cash_amount",
+    "currency",
+    "counterparty_account_id",
+    "transaction_id",
+    "matched_acquisition_event_id",
+    "data_kind",
+    "confidence",
+  ],
+  portfolio_envelope_policies: [
+    "id",
+    "account_id",
+    "lot_matching_method",
+    "ledger_coverage_start",
+    "ledger_coverage_source",
+  ],
 };
 
 const userOwnedTables = [
@@ -162,6 +190,8 @@ const userOwnedTables = [
   "loan_payment_changes",
   "liability_balance_observations",
   "net_worth_snapshot_items",
+  "portfolio_events",
+  "portfolio_envelope_policies",
 ] as const;
 
 /**
@@ -172,7 +202,18 @@ const userOwnedTables = [
  * encore n'a donc appliqué que la première des deux, quelles que soient les versions
  * inscrites dans l'historique.
  */
-const requiredIndexes = ["net_worth_snapshot_items_snapshot_owner_idx"] as const;
+const requiredIndexes = [
+  "net_worth_snapshot_items_snapshot_owner_idx",
+  // Cibles composites des FK de propriété du ledger portefeuille : sans elles, un
+  // événement pourrait référencer le compte, le titre ou la transaction d'un autre
+  // utilisateur.
+  "financial_accounts_id_user_uidx",
+  "securities_id_user_uidx",
+  "transactions_id_user_uidx",
+  // Unicité des ancrages : une enveloppe n'a qu'un point de départ par série.
+  "portfolio_events_opening_cash_uk",
+  "portfolio_events_opening_position_uk",
+] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx"] as const;
 
 const requiredConstraints = [
@@ -199,6 +240,22 @@ const requiredConstraints = [
   "net_worth_snapshots_version_ck",
   "net_worth_snapshots_completeness_ck",
   "net_worth_snapshot_items_owner_fk",
+  "portfolio_events_type_ck",
+  "portfolio_events_security_shape_ck",
+  "portfolio_events_quantity_shape_ck",
+  "portfolio_events_matched_lot_ck",
+  "portfolio_events_counterparty_ck",
+  "portfolio_events_data_kind_ck",
+  "portfolio_events_settlement_ck",
+  "portfolio_events_account_fk",
+  "portfolio_events_security_fk",
+  "portfolio_events_counterparty_fk",
+  "portfolio_events_transaction_fk",
+  "portfolio_envelope_policies_method_ck",
+  "portfolio_envelope_policies_coverage_source_ck",
+  "portfolio_envelope_policies_coverage_pair_ck",
+  "portfolio_envelope_policies_account_fk",
+  "portfolio_envelope_policies_account_uk",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
@@ -223,6 +280,9 @@ const requiredRpcs: Record<string, string> = {
   lfo_archive_debt: "p_user_id uuid, p_liability_id uuid",
   lfo_create_monthly_close_v2:
     "p_user_id uuid, p_close_date date, p_snapshot jsonb, p_items jsonb, p_forecast_net_worth numeric, p_variance numeric",
+  lfo_record_portfolio_event: "p_user_id uuid, p_payload jsonb",
+  lfo_delete_portfolio_event: "p_user_id uuid, p_event_id uuid",
+  lfo_set_portfolio_envelope_policy: "p_user_id uuid, p_payload jsonb",
 };
 
 const storagePolicies = [

@@ -3,6 +3,8 @@
 import type {
   CashFlowKind,
   DocumentRecord,
+  LotMatchingMethod,
+  PortfolioEventType,
   Essentiality,
   ExpenseBehavior,
   FinancialAccount,
@@ -67,6 +69,51 @@ export interface DebtContractInput {
     fees: number;
     closingBalance: number;
   }>;
+}
+
+/**
+ * Saisie d'un événement de ledger portefeuille.
+ *
+ * `securityId` désigne un instrument déjà connu ; à défaut, `security` en décrit un que
+ * la RPC résout par identifiant réel (ISIN, ticker, nom) avant d'en créer un. Aucun
+ * champ monétaire ne porte de valeur par défaut : `null` signifie inconnu, et le moteur
+ * refusera d'en dériver un coût de revient plutôt que de le supposer nul.
+ */
+export interface PortfolioEventInput {
+  accountId: string;
+  type: PortfolioEventType;
+  eventDate: string;
+  settlementDate: string | null;
+  securityId: string | null;
+  security: {
+    name: string;
+    ticker: string | null;
+    isin: string | null;
+    currency: string | null;
+    /** Rattachée seulement si une classe du même nom existe déjà. Jamais créée. */
+    assetClass: string | null;
+  } | null;
+  quantity: number | null;
+  unitPrice: number | null;
+  grossAmount: number | null;
+  feeAmount: number | null;
+  taxAmount: number | null;
+  /** Effet signé sur le cash d'enveloppe ; niveau d'ancrage sur les types d'ouverture. */
+  envelopeCashAmount: number | null;
+  currency: string;
+  counterpartyAccountId: string | null;
+  transactionId: string | null;
+  matchedAcquisitionEventId: string | null;
+  externalReference: string | null;
+  notes: string | null;
+}
+
+export interface PortfolioEnvelopePolicyInput {
+  accountId: string;
+  lotMatchingMethod: LotMatchingMethod | null;
+  ledgerCoverageStart: string | null;
+  ledgerCoverageSource: LedgerCoverageSource | null;
+  notes: string | null;
 }
 
 export type Mutation =
@@ -166,6 +213,9 @@ export type Mutation =
     }
   | { action: "delete_recurring_rule"; ruleId: string }
   | { action: "close_cash_flow_month"; month: string }
+  | { action: "record_portfolio_event"; event: PortfolioEventInput }
+  | { action: "delete_portfolio_event"; eventId: string }
+  | { action: "set_portfolio_envelope_policy"; policy: PortfolioEnvelopePolicyInput }
   | {
       /**
        * Déclare, corrige ou efface la profondeur d'historique du ledger LFO.
