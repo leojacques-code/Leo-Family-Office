@@ -1,0 +1,151 @@
+# Léo Family Office : constitution technique
+
+Mémoire courte et stable du dépôt. Tout agent la lit avant d'écrire du code. Elle ne
+décrit pas un sprint : elle décrit ce qui reste vrai entre les sprints. Un prompt de
+mission n'a donc plus à réénoncer ces règles, seulement son objectif, ses frontières et
+ses critères d'acceptation.
+
+## 1. Ce que le produit est
+
+Un Personal Capital Operating System : profondeur maximale dans les moteurs, simplicité
+maximale dans l'interface. La complexité interne ne doit jamais obliger l'utilisateur à
+faire lui-même le travail du moteur.
+
+Le succès ne se mesure pas au nombre d'écrans, mais à la possibilité de confier au
+système une décision financière importante. Cinq exigences : fidélité, automatisation,
+explicabilité, adaptabilité, intelligence de décision.
+
+## 2. Architecture en couches
+
+```text
+SOURCE → NORMALISATION → DONNÉE CANONIQUE → MOTEURS DE DOMAINE
+       → CONSÉQUENCES ÉCONOMIQUES CANONIQUES → BILAN / CASH FLOW
+       → MODÈLE MENSUEL → ÉVÉNEMENTS → SCÉNARIOS → OBJECTIFS / DÉCISION → REPORTING
+```
+
+Règle unique et non négociable : **une couche aval ne recalcule jamais la logique d'une
+couche amont**. Un domaine possède sa vérité, les autres la consomment.
+
+- `src/lib/engine/` : fonctions TypeScript pures, sans React ni accès base.
+- `src/lib/data/` : `FamilyOfficeRepository`, unique implémentation `supabase-repository.ts`.
+- `supabase/migrations/` : source de vérité du schéma PostgreSQL.
+- `src/components/` : affichage. Aucune formule financière dans un composant. Si un
+  chiffre manque, il vient d'un moteur ou il n'est pas affiché.
+
+Une seule vérité par domaine. `deriveMetrics()` (legacy) coexiste encore avec le bilan
+canonique dans `supabase-repository.ts` : c'est une dette connue, à réduire à chaque PR
+qui touche un périmètre concerné, jamais à étendre.
+
+## 3. Invariants financiers
+
+Ces distinctions sont la constitution du logiciel. Les violer est un bug, même si les
+tests passent.
+
+```text
+NULL ≠ ZERO                          ACTUAL ≠ USER_ASSUMPTION ≠ MODEL_ASSUMPTION
+OBSERVED ≠ CONTRACTUAL ≠ PROJECTED   ASSET ≠ LIABILITY
+CASH FLOW ≠ COÛT ÉCONOMIQUE          PRINCIPAL ≠ CHARGE
+TRANSFERT ≠ DÉPENSE                  CONTRIBUTION ≠ PERFORMANCE
+PnL RÉALISÉ ≠ PnL LATENT             PnL MARCHÉ ≠ PnL DE CHANGE
+DIVIDENDE ≠ CONTRIBUTION             VARIATION DE PRIX ≠ FLUX DE TRÉSORERIE
+LIQUIDITÉ ≠ PATRIMOINE NET           COÛT DE REVIENT ≠ VALEUR DE MARCHÉ
+VALORISATION ≠ CASH                  FX ABSENT ≠ FX ÉGAL À 1
+```
+
+Corollaires appliqués dans le code existant, à préserver :
+
+- un compte bancaire négatif devient un passif de découvert, il ne réduit pas les actifs
+  bruts ;
+- les positions expliquent la composition d'une enveloppe, elles ne s'y ajoutent pas :
+  un PEA observé à 20 000 € composé de 15 000 € d'ETF et 5 000 € de cash reste 20 000 € ;
+- un taux de change n'est jamais postérieur à la date de valorisation ; un taux ancien
+  reste utilisable mais signalé ; un taux absent rend le total non calculable ;
+- le remboursement de capital est neutre sur le patrimoine net ;
+- une première transaction observée ne prouve pas la couverture de l'historique, et une
+  absence d'historique n'est pas un mois à zéro.
+
+## 4. Provenance, qualité, honnêteté
+
+Toute valeur significative porte : nature de la donnée, provenance, date, confiance et,
+si pertinent, réconciliation. Une information inconnue devient `null`, `MISSING`,
+`PARTIAL`, `NOT_COMPUTABLE` ou un flag explicite. Jamais une valeur plausible.
+
+Pas de fausse précision : un calcul techniquement possible mais économiquement non fondé
+ne doit pas être affiché. Le nombre de simulations n'est pas un indicateur de qualité si
+le modèle est trop simplifié.
+
+Un garde-fou se pose au niveau où l'information manque. Une incohérence sur un compte ne
+doit pas effacer l'information certaine des autres comptes.
+
+## 5. Supabase et migrations
+
+Supabase PostgreSQL est la persistance unique. PostgreSQL persiste, TypeScript calcule :
+aucune formule financière en SQL. Les écritures composées passent par les RPC `lfo_*`,
+réservées à `service_role`, qui persistent des résultats déjà calculés.
+
+- migrations additives uniquement, jamais de modification rétroactive d'un fichier
+  appliqué ;
+- `supabase/migrations/` doit reproduire la base à l'identique : l'historique local et
+  l'historique distant sont égaux, ou le gate échoue dans les deux sens ;
+- écritures multi-tables importantes atomiques ;
+- ne jamais pointer un développement vers la production par défaut, ne jamais placer un
+  secret de production dans un environnement d'agent ;
+- `supabase/local/shim.sql` double les schémas gérés par la plateforme pour le gate
+  local. Ce n'est pas une migration et il ne décrit aucun objet applicatif.
+
+Divergence connue au 25 août 2026 : la production porte deux versions absentes du dépôt
+(`20260825063626`, `20260825063831`). Voir `docs/SUPABASE_SETUP.md`, section « Registre
+des divergences de schéma ». Tant que leur SQL réel n'est pas récupéré, il ne doit pas
+être reconstitué de mémoire.
+
+## 6. Tests et gates
+
+```bash
+npm run lint
+npm run test          # unitaires, moteurs purs, golden cases
+npm run build
+npm run db:local:up   # PostgreSQL local jetable (une fois par machine ou par session)
+npm run gate:local    # reset depuis les migrations + db:verify:local + smokes
+```
+
+Le gate local prouve, sans aucun credential, que les migrations du dépôt reconstruisent
+un schéma conforme depuis zéro. Il ne prouve pas l'état réel de la production : le push
+distant et `npm run db:verify` restent des étapes humaines. Ne jamais déclarer vert un
+gate distant non exécuté.
+
+Un moteur financier se livre avec ses cas limites, pas seulement son cas nominal :
+valeur manquante, devise étrangère, taux absent, historique insuffisant, division par
+zéro, incohérence de réconciliation. Aucune donnée synthétique ne reste persistée : les
+smokes écrivent en transaction et annulent.
+
+## 7. Ordre des moteurs
+
+Correctness → données → intégration → calculs → tests → produit → interface.
+
+```text
+faits          Debt · Cash Flow · Canonical Balance Sheet
+en cours       vérité de schéma · vérité des consommateurs
+suivant        Portfolio (données) → Portfolio (analytics)
+ensuite        Real Estate → Business Equity → Career + Tax
+puis           Event Engine → Scenarios V2 → Goals → Decision Lab
+enfin          imports et connecteurs → expérience globale → orchestration IA
+```
+
+Un moteur aval ne démarre pas avant que son amont soit fiable. Real Estate consomme le
+Debt Engine et ne recalcule aucun échéancier : le moteur immobilier actuel, qui amortit
+lui-même, ne doit pas entrer dans le patrimoine réel avant sa refonte.
+
+Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
+performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`.
+
+## 8. Ce qu'un agent ne doit jamais inventer
+
+- du SQL reconstitué depuis le nom d'une migration ou d'un index ;
+- une allocation cible, un rendement, une convention fiscale ou un taux non fournis ;
+- un chiffre sans source rattachable ;
+- un gate déclaré vert sans avoir été exécuté ;
+- une convention existante modifiée silencieusement ;
+- une valeur par défaut à la place d'une donnée manquante.
+
+En cas de doute : livrer l'information partielle avec son état explicite, et dire ce qui
+manque.

@@ -1,5 +1,6 @@
 /** Vérification PostgreSQL centrale, exhaustive et strictement read-only du schéma Supabase. */
 import pg from "pg";
+import { diffExactInventory, missingFrom } from "./schema-diff.ts";
 
 const { Client } = pg;
 
@@ -218,15 +219,34 @@ const storagePolicies = [
   "documents_owner_delete",
 ] as const;
 
+/**
+ * Contrôle d'inclusion : la base doit contenir au moins ce que le code attend. Reste le
+ * bon contrôle pour les inventaires dont le repo n'est pas la liste exhaustive (une base
+ * peut légitimement porter des objets d'infrastructure inconnus du code applicatif).
+ */
 function addMissing(
   failures: string[],
   label: string,
   expected: readonly string[],
   actual: Iterable<string>,
 ): void {
-  const found = new Set(actual);
-  const missing = expected.filter((item) => !found.has(item));
+  const missing = missingFrom(expected, actual);
   if (missing.length > 0) failures.push(`${label} manquant(s) : ${missing.join(", ")}`);
+}
+
+/**
+ * Contrôle d'égalité, dans les deux sens. Réservé aux inventaires dont le repo EST la
+ * vérité exhaustive. L'historique de migrations en est le seul cas certain : une version
+ * appliquée hors du repo signifie que `supabase/migrations/` ne reproduit plus la base,
+ * donc que le code a cessé d'être la source de vérité du schéma.
+ */
+function addExactInventory(
+  failures: string[],
+  label: string,
+  expected: readonly string[],
+  actual: Iterable<string>,
+): void {
+  failures.push(...diffExactInventory(label, expected, actual));
 }
 
 const connectionString = required("SUPABASE_DB_URL");
@@ -407,7 +427,7 @@ try {
       from supabase_migrations.schema_migrations
      order by version
   `);
-  addMissing(
+  addExactInventory(
     failures,
     "Migration(s) distante(s)",
     canonicalMigrations,

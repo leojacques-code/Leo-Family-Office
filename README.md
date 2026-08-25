@@ -67,7 +67,16 @@ npm run build
 npm run check
 ```
 
-`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 47 tables, colonnes, contraintes, 12 RPC, permissions, RLS, policies, bucket Storage ou 13 versions de migration divergent du code.
+`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 47 tables, colonnes, contraintes, 12 RPC, permissions, RLS, policies, bucket Storage ou l'historique de migration divergent du code. Le contrôle des migrations est symétrique : une version attendue absente échoue, et une version appliquée hors du dépôt échoue aussi.
+
+Le même contrôle s'exécute sans aucun credential, sur un PostgreSQL local jetable reconstruit depuis les seules migrations du dépôt :
+
+```bash
+npm run db:local:up
+npm run gate:local
+```
+
+Le dépôt déclare 13 migrations. La production en porte deux de plus, dont le SQL réel n'a pas encore été récupéré : voir le registre des divergences dans `docs/SUPABASE_SETUP.md`. Jusqu'à sa clôture, `db:verify` contre la production échoue volontairement.
 
 ## Fonctionnalités
 
