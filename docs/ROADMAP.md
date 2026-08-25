@@ -6,7 +6,7 @@
 - imports CSV mappés pour banques et courtiers ;
 - connecteurs Open Banking / PSD2 en lecture seule ;
 - market data, FX et inflation externes avec fallback manuel ;
-- ventilation réelle du CTO et performance time-weighted ;
+- ventilation réelle du CTO, allocation cible datée et benchmark de marché ;
 - règles fiscales françaises 2026 vérifiées et simulateur brut-net complet ;
 - persistance des études immobilières et export Excel détaillé ;
 - portefeuille multi-poches et optimiseur d’allocation cible ;

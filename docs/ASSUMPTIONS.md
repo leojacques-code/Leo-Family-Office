@@ -107,14 +107,14 @@ montants, et les positions observées continuent d'expliquer les enveloppes sans
 
 ### Nature des événements
 
-| Nature | Direction | Effet |
-| --- | --- | --- |
-| `OPENING_POSITION`, `OPENING_CASH` | `OPENING` | ancrage observé au début de la couverture déclarée ; ni apport, ni opération interne |
-| `CONTRIBUTION`, `TRANSFER_IN` | `EXTERNAL_IN` | argent ou titres neufs entrant dans l'enveloppe |
-| `WITHDRAWAL`, `TRANSFER_OUT` | `EXTERNAL_OUT` | sortie hors de l'enveloppe |
-| `BUY`, `SELL` | `INTERNAL` | arbitrage : cash d'enveloppe contre titres, et réciproquement |
-| `DIVIDEND`, `INTEREST` | `INTERNAL` | rendement du capital déjà investi, jamais un apport |
-| `FEE`, `TAX` | `INTERNAL` | coût économique supporté par l'enveloppe |
+| Nature                             | Direction      | Effet                                                                                |
+| ---------------------------------- | -------------- | ------------------------------------------------------------------------------------ |
+| `OPENING_POSITION`, `OPENING_CASH` | `OPENING`      | ancrage observé au début de la couverture déclarée ; ni apport, ni opération interne |
+| `CONTRIBUTION`, `TRANSFER_IN`      | `EXTERNAL_IN`  | argent ou titres neufs entrant dans l'enveloppe                                      |
+| `WITHDRAWAL`, `TRANSFER_OUT`       | `EXTERNAL_OUT` | sortie hors de l'enveloppe                                                           |
+| `BUY`, `SELL`                      | `INTERNAL`     | arbitrage : cash d'enveloppe contre titres, et réciproquement                        |
+| `DIVIDEND`, `INTEREST`             | `INTERNAL`     | rendement du capital déjà investi, jamais un apport                                  |
+| `FEE`, `TAX`                       | `INTERNAL`     | coût économique supporté par l'enveloppe                                             |
 
 La direction est DÉRIVÉE de la nature ; elle n'est ni saisie ni persistée. Un utilisateur ne
 peut pas décréter qu'un achat est un apport. Compter un ancrage d'ouverture comme un apport
@@ -180,3 +180,42 @@ le bilan affiche 15 000 €, le ledger affiche zéro événement, `Historique no
 reconstitué. Dès que l'utilisateur saisit l'ancrage, un apport de 5 000 €, un achat de 20 ETF,
 5 € de frais, un dividende de 47 € et une vente partielle, le ledger explique la position et le
 cash correspondants, et l'écart avec l'observation devient mesurable.
+
+## Contrat Portfolio Analytics
+
+Les analytics ne commencent que sur une enveloppe dont la couverture est `DECLARED`. L'absence
+d'un type d'événement vaut alors zéro dans cette fenêtre exhaustive ; sans couverture déclarée,
+elle reste inconnue. Les ancrages d'ouverture ne sont jamais des contributions.
+
+### Performance et flux
+
+- **Gain économique** = valeur de clôture − valeur d'ouverture − contributions + retraits.
+- **TWR** : les valorisations comptables exactes doivent exister aux deux bornes et à chaque date
+  de flux externe. Le flux est traité en fin de journée :
+  `r = (valeur de fin − flux externe net entrant) / valeur de début − 1`. Les sous-périodes sont
+  chaînées géométriquement. Un flux à la date d'ouverture ou sans valorisation datée bloque le
+  calcul ; aucun Modified Dietz silencieux ne le remplace.
+- **XIRR** : valeur d'ouverture et contributions sont des cash-flows négatifs pour l'investisseur,
+  retraits et valeur finale sont positifs. La base annuelle est Actual/365. Le solveur explore le
+  domaine `r > -100 %` et refuse un résultat lorsqu'il ne trouve aucune racine ou en trouve
+  plusieurs.
+
+Le PnL réalisé vient exclusivement des cessions appariées par le ledger. Le PnL non réalisé exige
+des quantités réconciliées et un coût ouvert complet pour chaque position ; sa valeur de marché
+est convertie par le FX Engine à la date de valorisation. L'effet de change sur le capital investi
+n'est pas isolé et reste signalé. Frais et taxes des achats/ventes sont déjà incorporés aux coûts
+et produits nets ; l'attribution ne les soustrait pas une seconde fois.
+
+### Risque, allocation et attribution
+
+Le drawdown est un **drawdown observé** sur l'indice de richesse TWR, pas une estimation quotidienne
+entre deux observations. La volatilité annualisée exige au moins douze rendements mensuels avec
+des intervalles de 25 à 35 jours. Sharpe reste non calculable sans taux sans risque daté ; bêta et
+corrélations restent non calculables sans benchmark et historique de prix aligné.
+
+L'allocation boucle sur la valeur comptable des enveloppes. Toute valeur non expliquée forme une
+poche `UNEXPOSED`. Top 1, top 5, HHI et nombre effectif de positions ne sont calculés que si toute
+l'exposition est connue ; le cash d'enveloppe est exclu de leur dénominateur. L'attribution par
+titre n'est admise que depuis une ouverture de valeur nulle, faute de valorisations par titre à la
+borne initiale. Elle doit réconcilier le gain économique au centime. Une allocation cible absente
+rend le drift `TARGET_ALLOCATION_MISSING`, jamais zéro.
