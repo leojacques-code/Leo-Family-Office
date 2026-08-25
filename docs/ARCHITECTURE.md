@@ -100,6 +100,26 @@ Les liens sortants (`transaction_id`, `counterparty_account_id`) utilisent `on d
 avec **liste de colonnes** : sans elle, une FK composite annulerait aussi `user_id`, qui est
 `NOT NULL`, et la suppression de la transaction échouerait au lieu de détacher le lien.
 
+## Portfolio Analytics
+
+`buildPortfolioAnalytics()` est une couche pure en aval de trois vérités existantes :
+
+- `account_balances` fournit les valorisations comptables datées de chaque enveloppe ;
+- `PortfolioLedger` fournit les flux, lots, coûts et PnL réalisés ;
+- le Canonical Balance Sheet fournit la valeur et l'exposition courantes, avec le FX Engine comme
+  unique convertisseur.
+
+Le moteur ne persiste aucun rendement. Il produit, enveloppe par enveloppe, gain économique, TWR,
+XIRR, PnL réalisé et non réalisé, revenus, frais, taxes, drawdown observé, volatilité annualisée et
+attribution lorsque leur preuve est complète. Chaque métrique porte son propre statut et ses
+blocages : une allocation actuelle peut donc rester exploitable alors que le TWR ne l'est pas.
+
+L'allocation et la concentration globales consomment exclusivement les expositions du bilan. Une
+poche non exposée est affichée comme telle ; elle n'est ni répartie entre les classes connues ni
+supposée diversifiée. Le drift reste `NOT_COMPUTABLE` tant qu'une allocation cible datée n'existe
+pas. Les composants React ne contiennent aucune formule : ils rendent le résultat et les motifs
+produits par le moteur.
+
 ## Lecture paginée des ledgers
 
 `readAllPages` (`src/lib/data/pagination.ts`) lit une source page par page et **refuse** de

@@ -128,10 +128,9 @@ smokes écrivent en transaction et annulent.
 Correctness → données → intégration → calculs → tests → produit → interface.
 
 ```text
-faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données)
+faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données + analytics)
 en cours       vérité de schéma · vérité des consommateurs
-suivant        Portfolio (analytics)
-ensuite        Real Estate → Business Equity → Career + Tax
+suivant        Real Estate → Business Equity → Career + Tax
 puis           Event Engine → Scenarios V2 → Goals → Decision Lab
 enfin          imports et connecteurs → expérience globale → orchestration IA
 ```
@@ -142,9 +141,9 @@ lui-même, ne doit pas entrer dans le patrimoine réel avant sa refonte.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger
-portefeuille existe depuis Portfolio Data Foundation : il porte les faits, jamais les lots
-ni le coût de revient, qui en sont dérivés. TWR, XIRR et attribution restent hors de lui et
-ne doivent démarrer que sur une enveloppe dont la couverture est déclarée.
+portefeuille porte les faits, jamais les lots ni le coût de revient, qui en sont dérivés.
+Portfolio Analytics reste une couche pure distincte : TWR, XIRR et attribution ne démarrent que
+sur une enveloppe dont la couverture est déclarée et dont les valorisations nécessaires existent.
 
 ## 8. Ce qu'un agent ne doit jamais inventer
 

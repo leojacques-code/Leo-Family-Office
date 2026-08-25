@@ -24,6 +24,22 @@ export interface FinancialAccount {
   provenance: Provenance;
 }
 
+/**
+ * Observation historique de la valeur comptable d'un compte.
+ *
+ * Ce n'est ni un prix de marché ni une reconstitution depuis les positions : la table
+ * `account_balances` est la vérité historique de l'enveloppe, comme le solde le plus
+ * récent l'est déjà pour le Balance Sheet.
+ */
+export interface AccountBalanceObservation {
+  id: string;
+  accountId: string;
+  balance: number;
+  balanceDate: string;
+  createdAt: string;
+  provenance: Provenance;
+}
+
 export interface Position {
   id: string;
   accountId: string;
@@ -636,6 +652,8 @@ export interface DashboardState {
   /** Origine de la déclaration ci-dessus. Ce n'est pas un niveau de confiance. */
   ledgerCoverageSource: LedgerCoverageSource;
   accounts: FinancialAccount[];
+  /** Historique comptable daté ; absent seulement dans les anciens fixtures/tests. */
+  accountBalanceHistory?: AccountBalanceObservation[];
   positions: Position[];
   /** Ledger portefeuille : faits datés. Vide tant qu'aucun événement n'a été saisi. */
   portfolioEvents: PortfolioEvent[];
@@ -660,6 +678,8 @@ export interface DashboardState {
   balanceSheetMetrics?: import("@/lib/engine/balance-sheet-metrics").CanonicalBalanceSheetMetrics;
   /** Lecture dérivée du ledger portefeuille ; absente seulement dans d'anciens fixtures. */
   portfolioLedger?: import("@/lib/engine/portfolio").PortfolioLedger;
+  /** Analytics dérivées, jamais une seconde source de faits. */
+  portfolioAnalytics?: import("@/lib/engine/portfolio-analytics").PortfolioAnalytics;
   assumptions: Array<{
     id: string;
     name: string;

@@ -18,6 +18,7 @@ import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
 import { debtCashOut, monthBounds } from "@/lib/engine/debt";
 import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
 import { buildPortfolioLedger } from "@/lib/engine/portfolio";
+import { buildPortfolioAnalytics } from "@/lib/engine/portfolio-analytics";
 import { deriveCanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
 import type { CurrencyRate } from "@/lib/engine/fx";
 import {
@@ -31,6 +32,7 @@ import type { FamilyOfficeRepository } from "@/lib/data/repository";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type {
   Alert,
+  AccountBalanceObservation,
   CashFlowMonthlyClose,
   DashboardState,
   DocumentRecord,
@@ -238,11 +240,11 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
-      mine("account_balances"),
+      fetchAllPages("account_balances", "balance_date"),
       mine("asset_classes"),
       mine("securities"),
       mine("positions"),
-      mine("position_snapshots"),
+      fetchAllPages("position_snapshots", "snapshot_date"),
       mine("liabilities"),
       mine("income_sources"),
       mine("expense_categories"),
@@ -262,7 +264,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("loan_charges"),
       mine("loan_rate_changes"),
       mine("loan_payment_changes"),
-      mine("currency_rates"),
+      fetchAllPages("currency_rates", "rate_date"),
       mine("net_worth_snapshots"),
       mine("liability_balance_observations"),
       fetchAllPages("portfolio_events", "event_date"),
@@ -273,6 +275,23 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
 
     const institutionNames = new Map(institutionRows.map((row) => [str(row.id), str(row.name)]));
     const latestBalances = latestBy(balanceRows, "account_id", "balance_date");
+    const accountBalanceHistory: AccountBalanceObservation[] = balanceRows
+      .map((row) => {
+        const context = `account_balances[id=${str(row.id)}]`;
+        return {
+          id: str(row.id),
+          accountId: str(row.account_id),
+          balance: finiteNumber(row.balance, `${context}.balance`),
+          balanceDate: str(row.balance_date),
+          createdAt: str(row.created_at),
+          provenance: provenance(row),
+        };
+      })
+      .sort(
+        (left, right) =>
+          left.balanceDate.localeCompare(right.balanceDate) ||
+          left.createdAt.localeCompare(right.createdAt),
+      );
     const accounts: FinancialAccount[] = accountRows
       .filter((row) => str(row.status) === "ACTIVE")
       .map((row) => {
@@ -749,6 +768,17 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       transactions,
       expenseCategories,
     });
+    const portfolioAnalytics = buildPortfolioAnalytics({
+      asOfDate: AS_OF_DATE,
+      reportingCurrency,
+      accounts,
+      positions,
+      events: portfolioEvents,
+      balanceHistory: accountBalanceHistory,
+      ledger: portfolioLedger,
+      balanceSheet,
+      currencyRates,
+    });
     const balanceSheetMetrics = deriveCanonicalBalanceSheetMetrics({
       balanceSheet,
       liabilities,
@@ -769,6 +799,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       ledgerCoverageStart: coverage.start,
       ledgerCoverageSource: coverage.source,
       accounts,
+      accountBalanceHistory,
       positions,
       portfolioEvents,
       portfolioPolicies,
@@ -788,6 +819,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       balanceSheet,
       balanceSheetMetrics,
       portfolioLedger,
+      portfolioAnalytics,
       metrics: composeDashboardMetrics({ balanceSheet, balanceSheetMetrics, flow: flowMetrics }),
       assumptions,
     };

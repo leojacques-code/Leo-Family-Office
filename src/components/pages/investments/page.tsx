@@ -27,7 +27,6 @@ import {
   canonicalBalanceSheetOf,
   envelopeExposureOf,
   envelopeMarketLines,
-  marketPositionLines,
   unrealisedPnL,
   type EnvelopePnL,
 } from "@/lib/engine/balance-sheet-view";
@@ -36,11 +35,8 @@ import type {
   ConvertedBalanceSheetLine,
   EnvelopeExposure,
 } from "@/lib/engine/balance-sheet";
-import {
-  buildPortfolioLedger,
-  envelopeLedgerOf,
-  type PortfolioEnvelopeLedger,
-} from "@/lib/engine/portfolio";
+import { buildPortfolioLedger, type PortfolioEnvelopeLedger } from "@/lib/engine/portfolio";
+import { buildPortfolioAnalytics, type AnalyticsMetric } from "@/lib/engine/portfolio-analytics";
 import {
   EVENT_TYPE_LABELS,
   MATCHING_LABELS,
@@ -65,6 +61,26 @@ const RECONCILIATION_LABELS: Record<string, string> = {
   MISSING: "Réconciliation impossible",
   NOT_APPLICABLE: "Sans objet",
 };
+
+const ANALYTICS_BLOCKERS: Record<string, string> = {
+  LEDGER_COVERAGE_UNDECLARED: "historique du ledger non déclaré exhaustif",
+  LEDGER_COVERAGE_DECLARED_WITHOUT_CASH_ANCHOR: "ancrage de cash manquant",
+  LEDGER_COVERAGE_PARTIAL: "événements hors de la fenêtre déclarée",
+  OPENING_VALUATION_MISSING: "valorisation d’ouverture manquante",
+  ENDING_VALUATION_MISSING: "valorisation de clôture manquante",
+  VALUATION_HISTORY_TOO_SHORT: "historique de valorisation insuffisant",
+  FLOW_DATE_VALUATION_MISSING: "valorisation absente à la date d’un flux externe",
+  RISK_HISTORY_TOO_SHORT: "moins de douze rendements périodiques observés",
+  RISK_INTERVALS_NOT_MONTHLY: "observations non mensuelles ou irrégulières",
+  PORTFOLIO_EXPOSURE_INCOMPLETE: "exposition du portefeuille incomplète",
+  TARGET_ALLOCATION_MISSING: "allocation cible datée non renseignée",
+};
+
+function metricReason(metric: AnalyticsMetric): string {
+  if (metric.value !== null) return "Calculé sur les faits disponibles";
+  const blocker = metric.blockers[0] ?? "données insuffisantes";
+  return ANALYTICS_BLOCKERS[blocker] ?? blocker.replaceAll("_", " ").toLowerCase();
+}
 
 interface AccountView {
   account: FinancialAccount;
@@ -116,12 +132,21 @@ function InvestmentsPage({ state, mutate, busy, setExplanation }: SectionProps) 
       transactions: state.transactions,
       expenseCategories: state.expenseCategories,
     });
+  const analytics =
+    state.portfolioAnalytics ??
+    buildPortfolioAnalytics({
+      asOfDate: state.asOfDate,
+      reportingCurrency: state.reportingCurrency,
+      accounts: state.accounts,
+      positions: state.positions,
+      events: state.portfolioEvents,
+      balanceHistory: state.accountBalanceHistory ?? [],
+      ledger,
+      balanceSheet: sheet,
+      currencyRates: state.currencyRates,
+    });
   const views = buildAccountViews(state, sheet);
-  const allMarketLines = marketPositionLines(sheet);
-  const largestPosition = [...allMarketLines].sort(
-    (left, right) => (right.reportingValue ?? 0) - (left.reportingValue ?? 0),
-  )[0];
-  const totalPnL = unrealisedPnL(allMarketLines);
+  const largestConcentration = analytics.concentration.holdings[0];
   const unreliable = views.filter((view) => view.exposure && !view.exposure.exposureKnown);
   const positionLines = sheet.contributions.filter(
     (line) => line.category === "MARKET_POSITION" || line.category === "INVESTMENT_ENVELOPE_CASH",
@@ -156,69 +181,33 @@ function InvestmentsPage({ state, mutate, busy, setExplanation }: SectionProps) 
           detail="Position interne à une enveloppe · jamais ajoutée au cash bancaire"
         />
         <MetricCard
-          label="Plus-value latente"
-          value={
-            totalPnL.unrealised === null ? (
-              NOT_COMPUTABLE
-            ) : (
-              <Currency value={totalPnL.unrealised} sign />
-            )
+          label="TWR portefeuille"
+          value={<Percent value={analytics.performance.twr.value} sign />}
+          tone={
+            analytics.performance.twr.value === null
+              ? "warning"
+              : analytics.performance.twr.value >= 0
+                ? "positive"
+                : "negative"
           }
-          tone={totalPnL.unrealised !== null && totalPnL.unrealised >= 0 ? "positive" : "neutral"}
-          detail={
-            totalPnL.unrealised === null
-              ? "Au moins une position sans coût d’acquisition exploitable"
-              : totalPnL.fxEffectNotIsolated
-                ? "Valeur − coût, convertis au même taux : l’effet de change n’est pas isolé"
-                : "Valeur de marché − coût d’acquisition connu"
-          }
-          onExplain={() =>
-            setExplanation({
-              title: "Plus-value latente",
-              formula:
-                "Σ valeur convertie des positions − Σ coût d’acquisition converti au même taux",
-              inputs: allMarketLines.map((line) => ({
-                label: canonicalLineLabel(state, line),
-                value:
-                  line.reportingCostBasis === null || line.reportingCostBasis === undefined
-                    ? `${formatEur(line.reportingValue)} · coût inconnu`
-                    : `${formatEur(line.reportingValue)} − ${formatEur(line.reportingCostBasis)}${
-                        line.currency === state.reportingCurrency
-                          ? ""
-                          : ` (natif ${formatNative(line.nativeValue, line.currency)})`
-                      }`,
-                kind:
-                  line.reportingCostBasis === null || line.reportingCostBasis === undefined
-                    ? "MISSING"
-                    : line.provenance.kind,
-                date: line.valuationDate,
-                source: line.source,
-              })),
-              note: `Une plus-value latente n’est pas une performance : elle ignore les versements et les retraits. Sans historique de flux, ni TWR ni XIRR ne sont calculables.${
-                totalPnL.fxEffectNotIsolated
-                  ? " Valeur et coût sont convertis au même taux daté : le résultat est une plus-value en devise locale convertie, l’effet de change sur le capital investi n’en est pas séparé."
-                  : ""
-              }${totalPnL.blockers.length ? ` Points ouverts : ${totalPnL.blockers.join(", ")}.` : ""}`,
-            })
-          }
+          detail={metricReason(analytics.performance.twr)}
         />
         <MetricCard
           label={
-            largestPosition
-              ? `Concentration ${canonicalLineLabel(state, largestPosition)}`
-              : "Concentration"
+            largestConcentration ? `Concentration ${largestConcentration.label}` : "Concentration"
           }
           value={
-            largestPosition &&
-            largestPosition.reportingValue !== null &&
-            sheet.grossAssets.value !== null &&
-            sheet.grossAssets.value > 0 ? (
-              <Percent value={largestPosition.reportingValue / sheet.grossAssets.value} />
-            ) : (
+            analytics.concentration.top1Weight === null ? (
               NOT_COMPUTABLE
+            ) : (
+              <Percent value={analytics.concentration.top1Weight} />
             )
           }
-          detail="Part des actifs bruts identifiés portée par la première position, après conversion"
+          detail={
+            analytics.concentration.top1Weight === null
+              ? "Exposition complète requise : le reliquat inconnu n’est pas supposé diversifié"
+              : "Part de la première ligne dans les titres de marché, hors cash d’enveloppe"
+          }
         />
       </section>
       <ConversionNotice state={state} sheet={sheet} />
@@ -244,8 +233,9 @@ function InvestmentsPage({ state, mutate, busy, setExplanation }: SectionProps) 
                   {(() => {
                     // Apports EXTERNES seulement : un dividende encaissé dans l'enveloppe
                     // n'est pas un versement, et un ancrage d'ouverture non plus.
-                    const contributions = envelopeLedgerOf(ledger, view.account.id)?.flows
-                      .externalIn;
+                    const contributions = analytics.envelopes.find(
+                      (item) => item.accountId === view.account.id,
+                    )?.contributions.value;
                     return contributions === null || contributions === undefined ? (
                       <strong className="warning-text">Données insuffisantes</strong>
                     ) : (
@@ -257,13 +247,23 @@ function InvestmentsPage({ state, mutate, busy, setExplanation }: SectionProps) 
                 </div>
                 <div>
                   <span>Plus-value latente</span>
-                  {view.pnl.unrealised === null ? (
+                  {(analytics.envelopes.find((item) => item.accountId === view.account.id)
+                    ?.unrealisedPnL.value ?? null) === null ? (
                     <strong className="warning-text">{NOT_COMPUTABLE}</strong>
                   ) : (
                     <strong
-                      className={view.pnl.unrealised >= 0 ? "positive-text" : "negative-text"}
+                      className={
+                        (analytics.envelopes.find((item) => item.accountId === view.account.id)
+                          ?.unrealisedPnL.value ?? 0) >= 0
+                          ? "positive-text"
+                          : "negative-text"
+                      }
                     >
-                      <Currency value={view.pnl.unrealised} sign />
+                      {formatNative(
+                        analytics.envelopes.find((item) => item.accountId === view.account.id)
+                          ?.unrealisedPnL.value ?? 0,
+                        view.account.currency,
+                      )}
                     </strong>
                   )}
                 </div>
@@ -334,17 +334,207 @@ function InvestmentsPage({ state, mutate, busy, setExplanation }: SectionProps) 
           );
         })}
       {views.some((view) => view.pnl.unrealised === null && view.marketLines.length > 0) ? (
-        <Callout tone="warning" title="Performance non calculable">
+        <Callout tone="warning" title="Coût observé incomplet">
           {views
             .filter((view) => view.pnl.unrealised === null && view.marketLines.length > 0)
             .map((view) => view.account.name)
             .join(", ")}{" "}
-          ne porte aucun coût d’acquisition exploitable. Aucun pourcentage de performance n’est
-          affiché : un taux sans base de calcul serait une donnée inventée. L’historique des
-          versements est également absent du modèle, donc les versements cumulés ne sont pas
-          dérivables.
+          ne porte aucun coût d’acquisition exploitable dans la photographie courante. Le PnL du
+          ledger reste indépendant et ne devient calculable que si les lots et leur coût sont
+          exhaustifs.
         </Callout>
       ) : null}
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <span className="eyebrow">Portfolio analytics</span>
+            <h2>Performance, PnL et risque observé</h2>
+          </div>
+          <DataBadge kind="DERIVED" />
+        </div>
+        {analytics.envelopes.length ? (
+          <div className="page-stack compact-stack">
+            {analytics.envelopes.map((envelope) => (
+              <article key={envelope.accountId}>
+                <div className="panel-header">
+                  <div>
+                    <h3>{envelope.accountName}</h3>
+                    <p>
+                      {envelope.coverageStart
+                        ? `Fenêtre déclarée depuis le ${envelope.coverageStart}`
+                        : "Fenêtre analytique non déclarée"}
+                    </p>
+                  </div>
+                </div>
+                <div className="metrics-grid four">
+                  <MetricCard
+                    label="TWR"
+                    value={<Percent value={envelope.twr.value} sign />}
+                    detail={metricReason(envelope.twr)}
+                    tone={
+                      envelope.twr.value === null
+                        ? "warning"
+                        : envelope.twr.value >= 0
+                          ? "positive"
+                          : "negative"
+                    }
+                  />
+                  <MetricCard
+                    label="XIRR"
+                    value={<Percent value={envelope.xirr.value} sign />}
+                    detail={metricReason(envelope.xirr)}
+                    tone={
+                      envelope.xirr.value === null
+                        ? "warning"
+                        : envelope.xirr.value >= 0
+                          ? "positive"
+                          : "negative"
+                    }
+                  />
+                  <MetricCard
+                    label="Gain économique"
+                    value={
+                      envelope.economicGain.value === null
+                        ? NOT_COMPUTABLE
+                        : formatNative(envelope.economicGain.value, envelope.currency)
+                    }
+                    detail="Clôture − ouverture − apports + retraits"
+                  />
+                  <MetricCard
+                    label="PnL réalisé"
+                    value={
+                      envelope.realisedPnL.value === null
+                        ? NOT_COMPUTABLE
+                        : formatNative(envelope.realisedPnL.value, envelope.currency)
+                    }
+                    detail={metricReason(envelope.realisedPnL)}
+                  />
+                  <MetricCard
+                    label="PnL non réalisé"
+                    value={
+                      envelope.unrealisedPnL.value === null
+                        ? NOT_COMPUTABLE
+                        : formatNative(envelope.unrealisedPnL.value, envelope.currency)
+                    }
+                    detail={metricReason(envelope.unrealisedPnL)}
+                  />
+                  <MetricCard
+                    label="Revenus"
+                    value={
+                      envelope.income.value === null
+                        ? NOT_COMPUTABLE
+                        : formatNative(envelope.income.value, envelope.currency)
+                    }
+                    detail="Dividendes et intérêts internes à l’enveloppe"
+                  />
+                  <MetricCard
+                    label="Frais + taxes"
+                    value={
+                      envelope.fees.value === null || envelope.taxes.value === null
+                        ? NOT_COMPUTABLE
+                        : formatNative(
+                            envelope.fees.value + envelope.taxes.value,
+                            envelope.currency,
+                          )
+                    }
+                    detail="Affichés séparément des apports et retraits"
+                  />
+                  <MetricCard
+                    label="Drawdown observé"
+                    value={<Percent value={envelope.observedMaxDrawdown.value} />}
+                    detail={metricReason(envelope.observedMaxDrawdown)}
+                  />
+                  <MetricCard
+                    label="Volatilité annualisée"
+                    value={<Percent value={envelope.annualisedVolatility.value} />}
+                    detail={metricReason(envelope.annualisedVolatility)}
+                  />
+                  <MetricCard
+                    label="Attribution"
+                    value={
+                      envelope.attribution.explainedPerformance === null
+                        ? NOT_COMPUTABLE
+                        : formatNative(envelope.attribution.explainedPerformance, envelope.currency)
+                    }
+                    detail={
+                      envelope.attribution.status === "COMPLETE"
+                        ? `${envelope.attribution.components.length} contribution(s) réconciliée(s)`
+                        : (ANALYTICS_BLOCKERS[envelope.attribution.blockers[0]] ??
+                          envelope.attribution.blockers[0]?.replaceAll("_", " ").toLowerCase() ??
+                          "données insuffisantes")
+                    }
+                  />
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="Aucune enveloppe analysable"
+            detail="Les analytics apparaissent compte par compte dès qu’une enveloppe existe."
+          />
+        )}
+      </section>
+      <section className="two-column">
+        <article className="panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Allocation canonique</span>
+              <h2>Exposition par classe</h2>
+            </div>
+            <strong>{analytics.allocation.status}</strong>
+          </div>
+          {analytics.allocation.buckets.length ? (
+            <div className="allocation-legend">
+              {analytics.allocation.buckets.map((bucket) => (
+                <div key={bucket.key}>
+                  <span>{bucket.label}</span>
+                  <strong>
+                    {formatEur(bucket.value)} · <Percent value={bucket.weight} />
+                  </strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              title="Allocation non calculable"
+              detail={analytics.allocation.blockers.join(", ") || "Exposition absente"}
+            />
+          )}
+        </article>
+        <article className="panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Concentration</span>
+              <h2>Risque de concentration</h2>
+            </div>
+          </div>
+          <div className="account-stats">
+            <div>
+              <span>Top 1</span>
+              <strong>
+                <Percent value={analytics.concentration.top1Weight} />
+              </strong>
+            </div>
+            <div>
+              <span>Top 5</span>
+              <strong>
+                <Percent value={analytics.concentration.top5Weight} />
+              </strong>
+            </div>
+            <div>
+              <span>Nombre effectif</span>
+              <strong>
+                {analytics.concentration.effectivePositions?.toFixed(2) ?? NOT_COMPUTABLE}
+              </strong>
+            </div>
+          </div>
+          <Callout tone="info" title="Drift non calculable">
+            Aucune allocation cible datée n’existe dans le modèle. Le moteur montre l’allocation
+            actuelle, mais ne fabrique ni cible ni écart à une cible implicite.
+          </Callout>
+        </article>
+      </section>
       <section className="panel">
         <div className="panel-header">
           <div>
@@ -722,9 +912,10 @@ function InvestmentsPage({ state, mutate, busy, setExplanation }: SectionProps) 
           />
         )}
       </section>
-      <Callout title="Limite des métriques de risque">
-        Volatilité, drawdown, Sharpe et corrélations ne sont pas affichés sans historique de prix
-        fiable. Ils ne préjugeront jamais des performances futures.
+      <Callout title="Périmètre des métriques de risque">
+        Le drawdown et la volatilité ne sont calculés que depuis des valorisations comptables
+        réconciliées avec les flux externes. Sharpe, bêta et corrélations restent non calculables
+        sans taux sans risque, benchmark et historique de prix fiables.
       </Callout>
     </div>
   );
