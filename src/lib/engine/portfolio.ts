@@ -30,6 +30,12 @@ import type {
  * MESURER UN ÉCART, jamais pour recomposer une valeur. Le Canonical Balance Sheet est
  * strictement identique selon qu'un ledger existe ou non.
  *
+ * RÈGLE 1 bis — Une lecture est DATÉE. Les événements postérieurs à `asOfDate` sont
+ * conservés comme faits mais n'entrent dans aucune grandeur dérivée à cette date : un
+ * achat saisi pour la semaine prochaine ne détient rien aujourd'hui. Symétriquement, un
+ * ancrage d'ouverture est un NIVEAU qui contient déjà tout ce qui l'a précédé : rejouer
+ * par-dessus des événements antérieurs compterait deux fois les mêmes opérations.
+ *
  * RÈGLE 2 — Une observation n'est pas un historique. Une enveloppe sans couverture
  * déclarée garde son état observé intact et le ledger dit simplement qu'il ne l'explique
  * pas. Aucun achat n'est jamais reconstitué pour faire boucler une position.
@@ -188,7 +194,12 @@ export interface PortfolioEnvelopeLedger {
   lotMatchingMethod: LotMatchingMethod | null;
   coverageStart: string | null;
   coverageStatus: PortfolioCoverageStatus;
+  /** Événements retenus à la date d'analyse. Les événements postérieurs en sont exclus. */
   eventCount: number;
+  /** Événements datés après la date d'analyse : conservés comme faits, jamais dérivés. */
+  futureEventCount: number;
+  /** Événements antérieurs à un ancrage : le niveau d'ancrage les contient déjà. */
+  supersededEventCount: number;
   /** Descriptif seulement : trouver un événement ne prouve pas qu'il n'y en a pas avant. */
   firstEventDate: string | null;
   lastEventDate: string | null;
@@ -506,11 +517,21 @@ function buildEnvelope(
   policy: PortfolioEnvelopePolicy | null,
   transactions: Map<string, Transaction>,
   categories: Map<string, ExpenseCategory>,
+  asOfDate: string,
 ): PortfolioEnvelopeLedger {
   const flags: string[] = [];
-  const ordered = [...events].sort(chronological);
   const method = policy?.lotMatchingMethod ?? null;
   const coverageStart = policy?.ledgerCoverageStart ?? null;
+
+  // ------- Périmètre temporel -------
+  // Une lecture est datée. Un achat saisi pour la semaine prochaine ne détient rien
+  // aujourd'hui, et un dividende à venir n'a encore rien crédité : les événements
+  // postérieurs à la date d'analyse sont conservés comme faits mais n'entrent dans aucune
+  // grandeur dérivée à cette date.
+  const dated = [...events].sort(chronological);
+  const future = dated.filter((event) => event.eventDate > asOfDate);
+  const ordered = dated.filter((event) => event.eventDate <= asOfDate);
+  flags.push(...future.map((event) => `LEDGER_EVENT_AFTER_AS_OF:${event.id}`));
 
   const foreign = ordered.filter(
     (event) => event.currency.toUpperCase() !== account.currency.toUpperCase(),
@@ -525,17 +546,37 @@ function buildEnvelope(
   }
 
   // ------- Cash d'enveloppe -------
+  //
+  // Un ancrage est un NIVEAU observé, pas un mouvement : il contient déjà tout ce qui
+  // s'est passé avant lui. Rejouer par-dessus des événements antérieurs compterait deux
+  // fois les mêmes opérations. Ils sont donc écartés de la série et signalés, jamais
+  // silencieusement additionnés.
   const anchors = ordered.filter((event) => event.type === "OPENING_CASH");
   if (anchors.length > 1) flags.push(`MULTIPLE_CASH_ANCHORS:${account.id}`);
   const anchor = anchors[0] ?? null;
-  const afterAnchor = ordered.filter(
-    (event) => event.type !== "OPENING_CASH" && event.type !== "OPENING_POSITION",
-  );
-  const deltas = afterAnchor.map((event) => event.envelopeCashAmount);
-  const anchorLevel = anchor?.envelopeCashAmount ?? null;
+  const supersededCash = anchor
+    ? ordered.filter((event) => event.id !== anchor.id && event.eventDate < anchor.eventDate)
+    : [];
+  flags.push(...supersededCash.map((event) => `LEDGER_EVENT_BEFORE_ANCHOR:${event.id}`));
+  // Un ancrage antérieur à la couverture déclarée laisse entre les deux dates une période
+  // dont rien ne garantit l'exhaustivité : la série ne peut pas la traverser.
+  const anchorBeforeCoverage =
+    anchor !== null && coverageStart !== null && anchor.eventDate < coverageStart;
+  if (anchorBeforeCoverage) flags.push(`LEDGER_ANCHOR_BEFORE_COVERAGE:${account.id}`);
+  const cashMovements = anchor
+    ? ordered.filter(
+        (event) =>
+          PORTFOLIO_FLOW_DIRECTION[event.type] !== "OPENING" && event.eventDate >= anchor.eventDate,
+      )
+    : [];
   const ledgerCash =
-    anchor === null || foreign.length > 0 ? null : strictSum([anchorLevel, ...deltas]);
-  if (anchor !== null && ledgerCash === null && foreign.length === 0) {
+    anchor === null || foreign.length > 0 || anchorBeforeCoverage
+      ? null
+      : strictSum([
+          anchor.envelopeCashAmount,
+          ...cashMovements.map((event) => event.envelopeCashAmount),
+        ]);
+  if (anchor !== null && ledgerCash === null && foreign.length === 0 && !anchorBeforeCoverage) {
     flags.push(`LEDGER_CASH_INCOMPLETE:${account.id}`);
   }
 
@@ -550,58 +591,112 @@ function buildEnvelope(
   const cash = reconcileState(ledgerCash, observedCash, PORTFOLIO_TOLERANCE);
 
   // ------- Lots, quantités, cessions -------
+  //
+  // Chaque instrument a son propre point de départ : son ancrage de position s'il existe,
+  // la couverture déclarée sinon. Les mêmes règles que pour le cash s'appliquent, mais
+  // instrument par instrument : un ETF ancré ne dit rien de l'obligation d'à côté.
+  const securityIds = [
+    ...new Set(
+      ordered
+        .filter((event) => event.securityId !== null)
+        .map((event) => event.securityId as string),
+    ),
+  ];
   const lotsBySecurity = new Map<string, PortfolioLot[]>();
   const quantityBySecurity = new Map<string, number | null>();
   const disposals: PortfolioDisposal[] = [];
-  const securityIds = new Set<string>();
+  let supersededCount = supersededCash.length;
 
-  for (const event of ordered) {
-    if (event.securityId === null) continue;
-    securityIds.add(event.securityId);
-    const lots = lotsBySecurity.get(event.securityId) ?? [];
-    if (!lotsBySecurity.has(event.securityId)) lotsBySecurity.set(event.securityId, lots);
-    const current = quantityBySecurity.get(event.securityId) ?? 0;
+  for (const securityId of securityIds) {
+    const securityEvents = ordered.filter((event) => event.securityId === securityId);
+    const positionAnchors = securityEvents.filter((event) => event.type === "OPENING_POSITION");
+    if (positionAnchors.length > 1) flags.push(`MULTIPLE_POSITION_ANCHORS:${securityId}`);
+    const positionAnchor = positionAnchors[0] ?? null;
 
-    if (isAcquisition(event)) {
-      const lot = makeLot(event);
-      lots.push(lot);
-      flags.push(...lot.flags);
-      quantityBySecurity.set(
-        event.securityId,
-        current === null || event.quantity === null ? null : current + event.quantity,
-      );
-      continue;
+    const superseded = positionAnchor
+      ? securityEvents.filter(
+          (event) => event.id !== positionAnchor.id && event.eventDate < positionAnchor.eventDate,
+        )
+      : [];
+    supersededCount += superseded.length;
+    flags.push(...superseded.map((event) => `LEDGER_EVENT_BEFORE_ANCHOR:${event.id}`));
+
+    const anchoredBeforeCoverage =
+      positionAnchor !== null && coverageStart !== null && positionAnchor.eventDate < coverageStart;
+    if (anchoredBeforeCoverage) flags.push(`LEDGER_ANCHOR_BEFORE_COVERAGE:${securityId}`);
+    // Sans ancrage, des opérations antérieures à la couverture laissent un stock de
+    // départ inconnu : ni les écarter, ni les additionner ne dirait la vérité.
+    const unanchoredBeforeCoverage =
+      positionAnchor === null &&
+      coverageStart !== null &&
+      securityEvents.some((event) => event.eventDate < coverageStart);
+    if (unanchoredBeforeCoverage) flags.push(`LEDGER_QUANTITY_NOT_ANCHORED:${securityId}`);
+
+    const derivable = !anchoredBeforeCoverage && !unanchoredBeforeCoverage;
+    const lots: PortfolioLot[] = [];
+    lotsBySecurity.set(securityId, lots);
+    if (!derivable) {
+      quantityBySecurity.set(securityId, null);
     }
-    if (isDisposal(event)) {
-      const outcome = matchDisposal(lots, event, method);
-      const { proceeds, flags: proceedFlags } = disposalProceeds(event);
-      const realised = proceeds === null || outcome.cost === null ? null : proceeds - outcome.cost;
-      disposals.push({
-        eventId: event.id,
-        accountId: account.id,
-        securityId: event.securityId,
-        date: event.eventDate,
-        quantity: event.quantity ?? 0,
-        netProceeds: proceeds,
-        matchedCost: outcome.cost,
-        realisedPnL: realised,
-        method,
-        matches: outcome.matches,
-        flags: [...outcome.flags, ...proceedFlags],
-      });
-      flags.push(...outcome.flags, ...proceedFlags);
-      quantityBySecurity.set(
-        event.securityId,
-        current === null || event.quantity === null ? null : current - event.quantity,
-      );
-      continue;
+
+    const used = positionAnchor
+      ? securityEvents.filter((event) => event.eventDate >= positionAnchor.eventDate)
+      : securityEvents;
+
+    for (const event of used) {
+      const current = quantityBySecurity.get(securityId) ?? 0;
+      if (isAcquisition(event)) {
+        if (derivable) {
+          const lot = makeLot(event);
+          lots.push(lot);
+          flags.push(...lot.flags);
+          quantityBySecurity.set(
+            securityId,
+            current === null || event.quantity === null ? null : current + event.quantity,
+          );
+        }
+        continue;
+      }
+      if (isDisposal(event)) {
+        const outcome = derivable
+          ? matchDisposal(lots, event, method)
+          : { matches: [], cost: null, flags: [`COST_BASIS_UNKNOWN:${event.id}`] };
+        const { proceeds, flags: proceedFlags } = disposalProceeds(event);
+        const realised =
+          proceeds === null || outcome.cost === null ? null : proceeds - outcome.cost;
+        disposals.push({
+          eventId: event.id,
+          accountId: account.id,
+          securityId,
+          date: event.eventDate,
+          quantity: event.quantity ?? 0,
+          netProceeds: proceeds,
+          matchedCost: outcome.cost,
+          realisedPnL: realised,
+          method,
+          matches: outcome.matches,
+          flags: [...outcome.flags, ...proceedFlags],
+        });
+        flags.push(...outcome.flags, ...proceedFlags);
+        if (derivable) {
+          quantityBySecurity.set(
+            securityId,
+            current === null || event.quantity === null ? null : current - event.quantity,
+          );
+        }
+        continue;
+      }
+      // Dividende, coupon, frais ou taxe rattachés à un instrument : aucun effet sur la
+      // quantité détenue. Un dividende n'est pas une part de plus.
+      if (!quantityBySecurity.has(securityId)) quantityBySecurity.set(securityId, 0);
     }
-    // Dividende, coupon, frais ou taxe rattachés à un instrument : aucun effet sur la
-    // quantité détenue. Un dividende n'est pas une part de plus.
-    if (!quantityBySecurity.has(event.securityId)) quantityBySecurity.set(event.securityId, 0);
   }
+  disposals.sort(
+    (left, right) =>
+      left.date.localeCompare(right.date) || left.eventId.localeCompare(right.eventId),
+  );
 
-  const holdings: PortfolioHolding[] = [...securityIds].map((securityId) => {
+  const holdings: PortfolioHolding[] = securityIds.map((securityId) => {
     const lots = lotsBySecurity.get(securityId) ?? [];
     const sample =
       ordered.find((event) => event.securityId === securityId && event.securityName !== null) ??
@@ -609,7 +704,10 @@ function buildEnvelope(
       null;
     const ledgerQuantity = quantityBySecurity.get(securityId) ?? null;
     const openLots = lots.filter((lot) => lot.openQuantity > QUANTITY_TOLERANCE);
-    const ledgerCostBasis = strictSum(openLots.map((lot) => lot.openCost));
+    // Une quantité non dérivable n'a pas de coût de revient dérivable : le stock de
+    // départ manque, donc le coût du stock aussi.
+    const ledgerCostBasis =
+      ledgerQuantity === null ? null : strictSum(openLots.map((lot) => lot.openCost));
     // Rapprochement par instrument, jamais par libellé quand l'identifiant est connu :
     // un renommage de titre ne doit pas casser une réconciliation.
     const matched = positions.filter((position) => {
@@ -746,6 +844,8 @@ function buildEnvelope(
     coverageStart,
     coverageStatus,
     eventCount: ordered.length,
+    futureEventCount: future.length,
+    supersededEventCount: supersededCount,
     firstEventDate: ordered[0]?.eventDate ?? null,
     lastEventDate: ordered[ordered.length - 1]?.eventDate ?? null,
     ledgerCash,
@@ -794,6 +894,7 @@ export function buildPortfolioLedger(input: BuildPortfolioLedgerInput): Portfoli
       policies.get(account.id) ?? null,
       transactions,
       categories,
+      input.asOfDate,
     ),
   );
 

@@ -111,10 +111,11 @@ function build(
     transactions?: Transaction[];
     expenseCategories?: ExpenseCategory[];
     accounts?: FinancialAccount[];
+    asOfDate?: string;
   } = {},
 ) {
   return buildPortfolioLedger({
-    asOfDate: "2026-08-19",
+    asOfDate: extra.asOfDate ?? "2026-08-19",
     accounts: extra.accounts ?? [pea, bank],
     positions: extra.positions ?? observedPositions,
     events,
@@ -530,6 +531,257 @@ describe("Portfolio ledger — ce qui n’est pas connu le reste", () => {
     expect(envelope.flags).toContain("LEDGER_OVERSOLD:sec_etf");
     expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(-3, 6);
     expect(envelope.disposals[0].matchedCost).toBeNull();
+  });
+});
+
+describe("Portfolio ledger — la lecture est datée", () => {
+  const timeline = [
+    event({ id: "o", type: "OPENING_CASH", eventDate: "2026-01-01", envelopeCashAmount: 1000 }),
+    event({
+      id: "b",
+      type: "BUY",
+      eventDate: "2026-02-01",
+      securityId: "sec_etf",
+      securityName: "ETF Monde",
+      quantity: 10,
+      grossAmount: 500,
+      feeAmount: 0,
+      taxAmount: 0,
+      envelopeCashAmount: -500,
+    }),
+    event({
+      id: "later",
+      type: "BUY",
+      eventDate: "2026-06-01",
+      securityId: "sec_etf",
+      securityName: "ETF Monde",
+      quantity: 20,
+      grossAmount: 900,
+      feeAmount: 0,
+      taxAmount: 0,
+      envelopeCashAmount: -900,
+    }),
+  ];
+
+  it("ignore un événement postérieur à la date d’analyse", () => {
+    const envelope = envelopeLedgerOf(
+      build(timeline, [declaredPolicy], { asOfDate: "2026-03-01" }),
+      "acc_pea",
+    )!;
+    // Un achat de juin ne détient rien en mars, et n'a rien débité.
+    expect(envelope.ledgerCash).toBeCloseTo(500, 6);
+    expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(10, 6);
+    expect(envelope.holdings[0].ledgerCostBasis).toBeCloseTo(500, 6);
+    expect(envelope.eventCount).toBe(2);
+    expect(envelope.futureEventCount).toBe(1);
+    expect(envelope.flags).toContain("LEDGER_EVENT_AFTER_AS_OF:later");
+    expect(envelope.lastEventDate).toBe("2026-02-01");
+  });
+
+  it("intègre le même événement une fois la date d’analyse atteinte", () => {
+    const envelope = envelopeLedgerOf(
+      build(timeline, [declaredPolicy], { asOfDate: "2026-08-19" }),
+      "acc_pea",
+    )!;
+    expect(envelope.ledgerCash).toBeCloseTo(-400, 6);
+    expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(30, 6);
+    expect(envelope.futureEventCount).toBe(0);
+  });
+
+  it("retient un événement daté du jour même de l’analyse", () => {
+    const envelope = envelopeLedgerOf(
+      build(timeline, [declaredPolicy], { asOfDate: "2026-06-01" }),
+      "acc_pea",
+    )!;
+    expect(envelope.futureEventCount).toBe(0);
+    expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(30, 6);
+  });
+
+  it("ne laisse pas une cession future annuler un PnL réalisé passé", () => {
+    const withSale = [
+      ...timeline.slice(0, 2),
+      event({
+        id: "s",
+        type: "SELL",
+        eventDate: "2026-07-01",
+        securityId: "sec_etf",
+        securityName: "ETF Monde",
+        quantity: 10,
+        grossAmount: 800,
+        feeAmount: 0,
+        taxAmount: 0,
+        envelopeCashAmount: 800,
+      }),
+    ];
+    const before = envelopeLedgerOf(
+      build(withSale, [declaredPolicy], { asOfDate: "2026-03-01" }),
+      "acc_pea",
+    )!;
+    expect(before.disposals).toHaveLength(0);
+    expect(before.realisedPnL).toBeNull();
+    const after = envelopeLedgerOf(
+      build(withSale, [declaredPolicy], { asOfDate: "2026-08-19" }),
+      "acc_pea",
+    )!;
+    expect(after.realisedPnL).toBeCloseTo(300, 6);
+  });
+});
+
+describe("Portfolio ledger — sémantique des ancrages", () => {
+  it("un ancrage de cash absorbe ce qui le précède au lieu de s’y ajouter", () => {
+    const envelope = envelopeLedgerOf(
+      build(
+        [
+          event({
+            id: "old",
+            type: "CONTRIBUTION",
+            eventDate: "2025-06-01",
+            envelopeCashAmount: 900,
+          }),
+          event({
+            id: "o",
+            type: "OPENING_CASH",
+            eventDate: "2026-01-01",
+            envelopeCashAmount: 1000,
+          }),
+          event({
+            id: "c",
+            type: "CONTRIBUTION",
+            eventDate: "2026-02-01",
+            envelopeCashAmount: 200,
+          }),
+        ],
+        [{ ...declaredPolicy, ledgerCoverageStart: "2026-01-01" }],
+      ),
+      "acc_pea",
+    )!;
+    // 1 000 + 200, et surtout pas 1 000 + 900 + 200 : l'ancrage contient déjà les 900 €.
+    expect(envelope.ledgerCash).toBeCloseTo(1200, 6);
+    expect(envelope.supersededEventCount).toBe(1);
+    expect(envelope.flags).toContain("LEDGER_EVENT_BEFORE_ANCHOR:old");
+  });
+
+  it("un ancrage de position est un point de départ, pas une acquisition de plus", () => {
+    const envelope = envelopeLedgerOf(
+      build(
+        [
+          event({
+            id: "oldbuy",
+            type: "BUY",
+            eventDate: "2025-09-01",
+            securityId: "sec_etf",
+            securityName: "ETF Monde",
+            quantity: 30,
+            grossAmount: 3000,
+            feeAmount: 0,
+            taxAmount: 0,
+            envelopeCashAmount: -3000,
+          }),
+          event({ id: "oc", type: "OPENING_CASH", eventDate: "2026-01-01", envelopeCashAmount: 0 }),
+          event({
+            id: "op",
+            type: "OPENING_POSITION",
+            eventDate: "2026-01-01",
+            securityId: "sec_etf",
+            securityName: "ETF Monde",
+            quantity: 30,
+            grossAmount: 3000,
+            feeAmount: 0,
+            taxAmount: 0,
+            envelopeCashAmount: -3000,
+          }),
+        ],
+        [{ ...declaredPolicy, ledgerCoverageStart: "2026-01-01" }],
+      ),
+      "acc_pea",
+    )!;
+    // 30 titres au départ, pas 60 : l'achat antérieur EST le contenu de l'ancrage.
+    expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(30, 6);
+    expect(envelope.holdings[0].lots).toHaveLength(1);
+    expect(envelope.holdings[0].ledgerCostBasis).toBeCloseTo(3000, 6);
+    expect(envelope.flags).toContain("LEDGER_EVENT_BEFORE_ANCHOR:oldbuy");
+  });
+
+  it("refuse de dériver quand l’ancrage précède la couverture déclarée", () => {
+    const envelope = envelopeLedgerOf(
+      build(
+        [
+          event({
+            id: "o",
+            type: "OPENING_CASH",
+            eventDate: "2025-12-01",
+            envelopeCashAmount: 500,
+          }),
+          event({
+            id: "c",
+            type: "CONTRIBUTION",
+            eventDate: "2026-02-01",
+            envelopeCashAmount: 100,
+          }),
+        ],
+        [{ ...declaredPolicy, ledgerCoverageStart: "2026-01-01" }],
+      ),
+      "acc_pea",
+    )!;
+    // Entre l'ancrage et le début de couverture, rien ne garantit l'exhaustivité : la
+    // série ne peut pas traverser cette zone.
+    expect(envelope.ledgerCash).toBeNull();
+    expect(envelope.flags).toContain("LEDGER_ANCHOR_BEFORE_COVERAGE:acc_pea");
+  });
+
+  it("rend la quantité non calculable quand un instrument sans ancrage précède la couverture", () => {
+    const envelope = envelopeLedgerOf(
+      build(
+        [
+          event({ id: "o", type: "OPENING_CASH", eventDate: "2026-01-01", envelopeCashAmount: 0 }),
+          event({
+            id: "pre",
+            type: "BUY",
+            eventDate: "2025-11-01",
+            securityId: "sec_etf",
+            securityName: "ETF Monde",
+            quantity: 10,
+            grossAmount: 1000,
+            feeAmount: 0,
+            taxAmount: 0,
+            envelopeCashAmount: -1000,
+          }),
+        ],
+        [{ ...declaredPolicy, ledgerCoverageStart: "2026-01-01" }],
+      ),
+      "acc_pea",
+    )!;
+    // Sans ancrage de position, le stock de départ est inconnu : ni l'écarter ni
+    // l'additionner ne dirait la vérité.
+    expect(envelope.holdings[0].ledgerQuantity).toBeNull();
+    expect(envelope.holdings[0].ledgerCostBasis).toBeNull();
+    expect(envelope.flags).toContain("LEDGER_QUANTITY_NOT_ANCHORED:sec_etf");
+  });
+
+  it("garde l’ordre : sur une même date, l’ancrage précède les opérations", () => {
+    const envelope = envelopeLedgerOf(
+      build(
+        [
+          event({
+            id: "c",
+            type: "CONTRIBUTION",
+            eventDate: "2026-01-01",
+            envelopeCashAmount: 300,
+          }),
+          event({
+            id: "o",
+            type: "OPENING_CASH",
+            eventDate: "2026-01-01",
+            envelopeCashAmount: 100,
+          }),
+        ],
+        [{ ...declaredPolicy, ledgerCoverageStart: "2026-01-01" }],
+      ),
+      "acc_pea",
+    )!;
+    // L'ancrage est le niveau au début du jour : l'apport du même jour s'y ajoute.
+    expect(envelope.ledgerCash).toBeCloseTo(400, 6);
+    expect(envelope.supersededEventCount).toBe(0);
   });
 });
 

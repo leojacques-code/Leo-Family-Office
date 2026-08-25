@@ -26,6 +26,7 @@ import {
   nullableFiniteNumber,
   requiredField,
 } from "@/lib/data/row-validation";
+import { readAllPages } from "@/lib/data/pagination";
 import type { FamilyOfficeRepository } from "@/lib/data/repository";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type {
@@ -54,9 +55,6 @@ import {
   LOT_MATCHING_METHODS,
   PORTFOLIO_EVENT_TYPES,
 } from "@/lib/types";
-
-/** Garde-fou de pagination du ledger : 20 000 lignes sur la fenêtre lue. */
-const LEDGER_MAX_PAGES = 20;
 
 type Row = Record<string, unknown>;
 
@@ -167,32 +165,21 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
    * et les taux de flux constatés dès que le ledger la dépassait. Le bornage est donc
    * temporel, et la pagination garantit que la fenêtre est lue en entier.
    */
-  /**
-   * Lit une table entière page par page. La limite implicite de PostgREST tronquerait
-   * sinon un ledger long en silence, ce qui ferait disparaître des faits sans que rien
-   * ne le signale.
-   */
-  async function fetchAllPages(
+  /** Lecture intégrale d'une table du propriétaire. Une troncature échoue, elle ne se tait pas. */
+  function fetchAllPages(
     table: string,
     orderColumn: string,
   ): Promise<{ data: Row[] | null; error: PostgrestError | null }> {
-    const pageSize = 1000;
-    const rows: Row[] = [];
-    for (let page = 0; page < LEDGER_MAX_PAGES; page += 1) {
+    return readAllPages<Row, PostgrestError>(table, async (from, to) => {
       const result = await db
         .from(table)
         .select("*")
         .eq("user_id", user)
         .order(orderColumn, { ascending: true })
         .order("created_at", { ascending: true })
-        .range(page * pageSize, page * pageSize + pageSize - 1);
-      if (result.error) return { data: null, error: result.error };
-      const batch = (result.data ?? []) as Row[];
-      rows.push(...batch);
-      if (batch.length < pageSize) return { data: rows, error: null };
-    }
-    console.warn(`Table ${table} tronquée : plus de ${LEDGER_MAX_PAGES * pageSize} lignes.`);
-    return { data: rows, error: null };
+        .range(from, to);
+      return { data: (result.data ?? null) as Row[] | null, error: result.error };
+    });
   }
 
   async function fetchLedgerWindow(): Promise<{
@@ -200,9 +187,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     error: PostgrestError | null;
   }> {
     const since = ledgerWindowStart(AS_OF_DATE);
-    const pageSize = 1000;
-    const rows: Row[] = [];
-    for (let page = 0; page < LEDGER_MAX_PAGES; page += 1) {
+    // Même règle que pour le ledger portefeuille : une fenêtre tronquée produirait des
+    // agrégats de flux calculés sur un historique amputé, sans que rien ne le signale.
+    return readAllPages<Row, PostgrestError>(`transactions depuis ${since}`, async (from, to) => {
       const result = await db
         .from("transactions")
         .select("*")
@@ -210,17 +197,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         .gte("transaction_date", since)
         .order("transaction_date", { ascending: false })
         .order("created_at", { ascending: false })
-        .range(page * pageSize, page * pageSize + pageSize - 1);
-      if (result.error) return { data: null, error: result.error };
-      const batch = (result.data ?? []) as Row[];
-      rows.push(...batch);
-      if (batch.length < pageSize) return { data: rows, error: null };
-    }
-    // Garde-fou : au-delà, la fenêtre est signalée plutôt que tronquée en silence.
-    console.warn(
-      `Ledger tronqué : plus de ${LEDGER_MAX_PAGES * pageSize} transactions depuis ${since}.`,
-    );
-    return { data: rows, error: null };
+        .range(from, to);
+      return { data: (result.data ?? null) as Row[] | null, error: result.error };
+    });
   }
 
   async function getDashboardState(): Promise<DashboardState> {

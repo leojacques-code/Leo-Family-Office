@@ -53,8 +53,17 @@ en dérive les lots, le coût de revient, le cash d'enveloppe théorique et les 
 réconciliation ; le bilan reste bit pour bit identique avec ou sans ledger, ce qu'un test
 vérifie.
 
-Quatre règles fondent le moteur.
+Cinq règles fondent le moteur.
 
+0. **La lecture est datée.** Les événements postérieurs à `asOfDate` sont conservés comme faits
+   mais n'entrent dans aucune grandeur dérivée à cette date : un achat saisi pour la semaine
+   prochaine ne détient rien aujourd'hui et n'a rien débité. Symétriquement, un ancrage
+   d'ouverture est un NIVEAU qui contient déjà tout ce qui l'a précédé : les événements
+   antérieurs sont écartés de la série et signalés (`LEDGER_EVENT_BEFORE_ANCHOR`), jamais
+   rejoués par-dessus. Un ancrage antérieur à la couverture déclarée laisse entre les deux
+   dates une période dont rien ne garantit l'exhaustivité : la série ne la traverse pas. Un
+   instrument sans ancrage dont des opérations précèdent la couverture a un stock de départ
+   inconnu, donc une quantité et un coût `NOT_COMPUTABLE`.
 1. **Une observation n'est pas un historique.** Une enveloppe dont la profondeur d'historique
    n'est pas déclarée (`portfolio_envelope_policies.ledger_coverage_start` à `null`) conserve son
    état observé intact ; le ledger dit simplement qu'il ne l'explique pas. Aucun achat n'est
@@ -74,6 +83,22 @@ Quatre règles fondent le moteur.
 
 Aucun lot, coût de revient ni PnL n'est persisté : les persister créerait une vérité qui se
 périmerait à la première correction d'événement. Seuls les faits et les déclarations le sont.
+
+Côté intégrité, la base ne délègue rien à la RPC : le lot désigné par une cession est contraint
+par une clé étrangère composite `(id, user_id, account_id)`, donc appartient nécessairement au
+même propriétaire et à la même enveloppe, y compris pour une écriture qui contournerait la RPC.
+Les liens sortants (`transaction_id`, `counterparty_account_id`) utilisent `on delete set null`
+avec **liste de colonnes** : sans elle, une FK composite annulerait aussi `user_id`, qui est
+`NOT NULL`, et la suppression de la transaction échouerait au lieu de détacher le lien.
+
+## Lecture paginée des ledgers
+
+`readAllPages` (`src/lib/data/pagination.ts`) lit une source page par page et **refuse** de
+rendre un résultat tronqué. Un ledger amputé de ses dernières pages produirait des quantités, un
+cash et un coût de revient parfaitement calculés sur des faits incomplets, donc faux sans que
+rien ne le dise. C'est une défaillance de la couche données, pas une incertitude financière :
+elle remonte comme `LedgerTruncationError`, au même titre qu'une erreur PostgREST. Le ledger
+portefeuille et la fenêtre de transactions passent tous deux par ce chemin.
 
 ## Transactions
 

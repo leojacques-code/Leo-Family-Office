@@ -251,6 +251,8 @@ const requiredConstraints = [
   "portfolio_events_security_fk",
   "portfolio_events_counterparty_fk",
   "portfolio_events_transaction_fk",
+  "portfolio_events_lot_target_uk",
+  "portfolio_events_matched_lot_fk",
   "portfolio_envelope_policies_method_ck",
   "portfolio_envelope_policies_coverage_source_ck",
   "portfolio_envelope_policies_coverage_pair_ck",

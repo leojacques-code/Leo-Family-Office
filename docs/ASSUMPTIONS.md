@@ -134,6 +134,25 @@ Un transfert de titres entrant n'apporte aucun prix : son coût de revient est c
 d'origine, que LFO ne connaît pas (`TRANSFER_IN_COST_UNKNOWN`). Le déclarer nul fabriquerait une
 plus-value à la première vente.
 
+### Date d'analyse et ancrages
+
+Toute grandeur dérivée est datée. Un événement postérieur à la date d'analyse est conservé comme
+fait et compté dans `futureEventCount`, mais n'affecte ni le cash, ni les lots, ni les quantités,
+ni le PnL à cette date. Un événement daté du jour même de l'analyse est retenu.
+
+Un ancrage (`OPENING_CASH`, `OPENING_POSITION`) est un NIVEAU observé au début de la couverture,
+jamais un mouvement. Il contient déjà tout ce qui l'a précédé : les événements antérieurs sont
+écartés de la série dérivée et comptés dans `supersededEventCount`. Sur une même date, l'ancrage
+précède les opérations du jour, qui s'y ajoutent normalement.
+
+Trois cas rendent la dérivation impossible plutôt qu'approximative :
+
+- ancrage antérieur à la couverture déclarée : entre les deux dates, rien ne garantit
+  l'exhaustivité (`LEDGER_ANCHOR_BEFORE_COVERAGE`) ;
+- instrument sans ancrage dont des opérations précèdent la couverture : le stock de départ est
+  inconnu (`LEDGER_QUANTITY_NOT_ANCHORED`) ;
+- ancrage de cash absent alors qu'une couverture est déclarée (`LEDGER_CASH_ANCHOR_MISSING`).
+
 ### Cash d'enveloppe dérivé
 
 `cash dérivé = ancrage OPENING_CASH + Σ mouvements de cash`. Il reste `null` sans ancrage, dès

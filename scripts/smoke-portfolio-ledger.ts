@@ -6,6 +6,10 @@
  * désigne, résolution d'un instrument existant plutôt que duplication, refus d'un compte
  * non-enveloppe, unicité des ancrages, respect des contraintes de forme, upsert des
  * conventions d'enveloppe et refus de supprimer un lot encore désigné par une cession.
+ *
+ * Il prouve aussi les intégrités qui ne passent PAS par les RPC, en écrivant directement
+ * dans la table : un lot désigné hors de son enveloppe est refusé par la base, et la
+ * suppression d'une transaction bancaire détache le lien sans emporter `user_id`.
  */
 import { randomUUID } from "node:crypto";
 import pg from "pg";
@@ -22,7 +26,18 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-async function rejects(sql: string, params: unknown[], message: string): Promise<void> {
+/**
+ * Vérifie qu'une écriture est refusée, et par le BON contrôle.
+ *
+ * Accepter n'importe quelle erreur laisserait un smoke vert sur une faute de frappe : le
+ * test prouverait alors que la requête est cassée, pas que la contrainte protège.
+ */
+async function rejects(
+  sql: string,
+  params: unknown[],
+  message: string,
+  expected?: string,
+): Promise<void> {
   await client.query("savepoint smoke_guard");
   try {
     await client.query(sql, params);
@@ -31,6 +46,10 @@ async function rejects(sql: string, params: unknown[], message: string): Promise
   } catch (error) {
     if (error instanceof Error && error.message === message) throw error;
     await client.query("rollback to savepoint smoke_guard");
+    const reason = error instanceof Error ? error.message : String(error);
+    if (expected && !reason.includes(expected)) {
+      throw new Error(`${message} : refus obtenu pour une autre raison (${reason})`);
+    }
   }
 }
 
@@ -76,6 +95,33 @@ try {
       [id, userId, institutionId, name, type],
     );
   }
+
+  // Second propriétaire et seconde enveloppe : ils servent à prouver le cloisonnement des
+  // lots. Créés avant le passage en `service_role`, qui n'écrit pas dans le schéma `auth`.
+  const ctoId = randomUUID();
+  await client.query(
+    `insert into public.financial_accounts
+       (id, user_id, institution_id, name, account_type, currency, liquidity, status, data_kind, confidence)
+     values ($1, $2, $3, 'Smoke CTO', 'CTO', 'EUR', 'LIQUID', 'ACTIVE', 'ACTUAL', 'HIGH')`,
+    [ctoId, userId, institutionId],
+  );
+  const foreignUser = randomUUID();
+  const foreignAccountId = randomUUID();
+  await client.query("insert into auth.users (id, email) values ($1, $2)", [
+    foreignUser,
+    `smoke-${foreignUser}@invalid`,
+  ]);
+  await client.query(
+    `insert into public.financial_accounts
+       (id, user_id, name, account_type, currency, liquidity, status, data_kind, confidence)
+     values ($1, $2, 'Smoke PEA voisin', 'PEA', 'EUR', 'LIQUID', 'ACTIVE', 'ACTUAL', 'HIGH')`,
+    [foreignAccountId, foreignUser],
+  );
+  const foreignSecurityId = randomUUID();
+  await client.query(
+    "insert into public.securities (id, user_id, name, currency) values ($1, $2, 'ETF voisin', 'EUR')",
+    [foreignSecurityId, foreignUser],
+  );
 
   await client.query("set local role service_role");
 
@@ -223,6 +269,7 @@ try {
       }),
     ],
     "Un second ancrage de cash a été accepté",
+    "portfolio_events_opening_cash_uk",
   );
   await rejects(
     "select public.lfo_record_portfolio_event($1::uuid, $2::jsonb)",
@@ -238,6 +285,7 @@ try {
       }),
     ],
     "Un achat de quantité nulle a été accepté",
+    "portfolio_events_quantity_shape_ck",
   );
   await rejects(
     "select public.lfo_record_portfolio_event($1::uuid, $2::jsonb)",
@@ -253,6 +301,7 @@ try {
       }),
     ],
     "Un apport de cash portant un instrument a été accepté",
+    "portfolio_events_security_shape_ck",
   );
   await rejects(
     "select public.lfo_record_portfolio_event($1::uuid, $2::jsonb)",
@@ -268,6 +317,92 @@ try {
       }),
     ],
     "Une contrepartie bancaire a été acceptée sur une opération interne",
+    "portfolio_events_counterparty_ck",
+  );
+
+  // 4 bis. Intégrités portées par la base, hors RPC.
+  //
+  // Une écriture directe qui contournerait la RPC ne doit pas pouvoir rattacher la
+  // cession d'une enveloppe au lot d'une autre, ni au lot d'un autre utilisateur.
+  await rejects(
+    `insert into public.portfolio_events
+       (user_id, account_id, security_id, event_type, event_date, quantity, currency,
+        matched_acquisition_event_id, data_kind, confidence)
+     select $1, $2, security_id, 'SELL', date '2026-05-05', 1, 'EUR', $3, 'ACTUAL', 'HIGH'
+       from public.portfolio_events where id = $3`,
+    [userId, ctoId, buyId],
+    "Une cession a pu désigner le lot d'une autre enveloppe",
+    "portfolio_events_matched_lot_fk",
+  );
+
+  // Un autre utilisateur ne peut pas loger un événement dans une enveloppe qui n'est pas
+  // la sienne : la FK composite (account_id, user_id) l'arrête avant tout le reste.
+  await rejects(
+    `insert into public.portfolio_events
+       (user_id, account_id, event_type, event_date, currency, envelope_cash_amount,
+        data_kind, confidence)
+     values ($1, $2, 'CONTRIBUTION', date '2026-05-05', 'EUR', 10, 'ACTUAL', 'HIGH')`,
+    [foreignUser, peaId],
+    "Un autre utilisateur a pu écrire dans cette enveloppe",
+    "portfolio_events_account_fk",
+  );
+  // Ni référencer un instrument qui ne lui appartient pas, même depuis son enveloppe.
+  await rejects(
+    `insert into public.portfolio_events
+       (user_id, account_id, security_id, event_type, event_date, quantity, currency,
+        data_kind, confidence)
+     select $1, $2, security_id, 'SELL', date '2026-05-05', 1, 'EUR', 'ACTUAL', 'HIGH'
+       from public.portfolio_events where id = $3`,
+    [foreignUser, foreignAccountId, buyId],
+    "Un autre utilisateur a pu référencer cet instrument",
+    "portfolio_events_security_fk",
+  );
+  // Et avec SES PROPRES enveloppe et instrument, il ne peut toujours pas désigner notre lot.
+  await rejects(
+    `insert into public.portfolio_events
+       (user_id, account_id, security_id, event_type, event_date, quantity, currency,
+        matched_acquisition_event_id, data_kind, confidence)
+     values ($1, $2, $3, 'SELL', date '2026-05-05', 1, 'EUR', $4, 'ACTUAL', 'HIGH')`,
+    [foreignUser, foreignAccountId, foreignSecurityId, buyId],
+    "Un événement d'un autre utilisateur a pu désigner ce lot",
+    "portfolio_events_matched_lot_fk",
+  );
+
+  // Une FK composite dont le SET NULL ne nomme pas sa colonne annulerait aussi `user_id`,
+  // qui est NOT NULL : la suppression de la transaction échouerait au lieu de détacher.
+  const txId = randomUUID();
+  const categoryRow = await client.query<{ id: string }>(
+    "select id from public.expense_categories where user_id = $1 limit 1",
+    [userId],
+  );
+  await client.query(
+    `insert into public.transactions
+       (id, user_id, account_id, category_id, transaction_date, label, amount, currency,
+        data_kind, confidence)
+     values ($1, $2, $3, $4, date '2026-02-01', 'Smoke virement', -5000, 'EUR', 'ACTUAL', 'HIGH')`,
+    [txId, userId, bankId, categoryRow.rows[0]?.id ?? null],
+  );
+  const linkedEventId = await record({
+    account_id: peaId,
+    event_type: "CONTRIBUTION",
+    event_date: "2026-02-01",
+    currency: "EUR",
+    envelope_cash_amount: 5000,
+    counterparty_account_id: bankId,
+    transaction_id: txId,
+  });
+  await client.query("delete from public.transactions where id = $1", [txId]);
+  const detached = await client.query<{ user_id: string; transaction_id: string | null }>(
+    "select user_id, transaction_id from public.portfolio_events where id = $1",
+    [linkedEventId],
+  );
+  assert(
+    detached.rows[0]?.transaction_id === null,
+    "Le lien vers la transaction supprimée n'a pas été détaché",
+  );
+  assert(
+    detached.rows[0]?.user_id === userId,
+    "La suppression de la transaction a emporté le propriétaire de l'événement",
   );
 
   // 5. Suppression : refusée tant qu'une cession désigne le lot, acceptée ensuite.
@@ -300,7 +435,7 @@ try {
     `Le smoke a persisté des lignes : before=${JSON.stringify(before)} after=${JSON.stringify(after)}`,
   );
   console.log(
-    "Smoke Portfolio Ledger vert : conventions upsert et effaçables, instrument résolu sans doublon, ancrages uniques, formes refusées, lot protégé, rollback intégral.",
+    "Smoke Portfolio Ledger vert : conventions upsert et effaçables, instrument résolu sans doublon, ancrages uniques, formes refusées, lot cloisonné par enveloppe et par propriétaire, transaction détachée sans perte de propriétaire, lot protégé, rollback intégral.",
   );
 } catch (error) {
   await client.query("rollback").catch(() => undefined);

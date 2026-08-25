@@ -122,8 +122,10 @@ create table if not exists public.portfolio_events (
   -- Jambe Cash Flow correspondante. Le portefeuille ne reclasse jamais un flux bancaire
   -- et n'en crée aucun : il se contente de pointer celui qui existe déjà.
   transaction_id uuid,
-  -- Lot d'acquisition désigné, requis par la seule convention SPECIFIC_LOT.
-  matched_acquisition_event_id uuid references public.portfolio_events(id) on delete set null,
+  -- Lot d'acquisition désigné, requis par la seule convention SPECIFIC_LOT. L'intégrité
+  -- est portée par une FK composite (voir plus bas) : un lot désigné appartient
+  -- nécessairement au même propriétaire ET à la même enveloppe que la cession.
+  matched_acquisition_event_id uuid,
   external_reference text,
   data_kind text not null,
   confidence text not null,
@@ -136,12 +138,30 @@ create table if not exists public.portfolio_events (
   constraint portfolio_events_security_fk
     foreign key (security_id, user_id)
     references public.securities(id, user_id),
+  -- `on delete set null` DOIT nommer sa colonne : sur une FK composite, la forme sans
+  -- liste annulerait aussi `user_id`, qui est NOT NULL, et la suppression du compte ou de
+  -- la transaction échouerait au lieu de détacher le lien.
   constraint portfolio_events_counterparty_fk
     foreign key (counterparty_account_id, user_id)
-    references public.financial_accounts(id, user_id),
+    references public.financial_accounts(id, user_id)
+    on delete set null (counterparty_account_id),
   constraint portfolio_events_transaction_fk
     foreign key (transaction_id, user_id)
-    references public.transactions(id, user_id) on delete set null,
+    references public.transactions(id, user_id)
+    on delete set null (transaction_id),
+  -- Cible de la FK du lot désigné : identité, propriétaire et enveloppe ensemble.
+  constraint portfolio_events_lot_target_uk unique (id, user_id, account_id),
+  -- Un lot désigné par une cession appartient au même propriétaire et à la même
+  -- enveloppe. Le contrôle vit ici, pas seulement dans la RPC : une écriture qui
+  -- contournerait la RPC ne doit pas pouvoir rattacher la cession d'un PEA au lot d'un
+  -- CTO, ni au lot d'un autre utilisateur.
+  --
+  -- Aucune action de suppression : annuler la désignation ferait perdre en silence la
+  -- convention d'appariement d'une cession déjà enregistrée. La suppression d'un lot
+  -- encore désigné est refusée, ici comme dans `lfo_delete_portfolio_event`.
+  constraint portfolio_events_matched_lot_fk
+    foreign key (matched_acquisition_event_id, user_id, account_id)
+    references public.portfolio_events(id, user_id, account_id),
   constraint portfolio_events_type_ck check (
     event_type in (
       'OPENING_POSITION', 'OPENING_CASH',
