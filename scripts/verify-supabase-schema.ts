@@ -24,6 +24,8 @@ const canonicalMigrations = [
   "20260825020545",
   "20260825021127",
   "20260825021742",
+  "20260825063626",
+  "20260825063831",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -162,6 +164,17 @@ const userOwnedTables = [
   "net_worth_snapshot_items",
 ] as const;
 
+/**
+ * Index dont le nom est un état de schéma, pas un détail de performance. Ce n'est PAS un
+ * inventaire exhaustif des index : seuls figurent ici ceux dont la présence ou l'absence
+ * distingue deux versions du schéma. `net_worth_snapshot_items_owner_snapshot_idx` est
+ * créé par `20260825063626` puis remplacé par `20260825063831` ; une base qui le porte
+ * encore n'a donc appliqué que la première des deux, quelles que soient les versions
+ * inscrites dans l'historique.
+ */
+const requiredIndexes = ["net_worth_snapshot_items_snapshot_owner_idx"] as const;
+const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx"] as const;
+
 const requiredConstraints = [
   "scenarios_investment_allocation_rate_ck",
   "expense_categories_cash_flow_kind_ck",
@@ -298,6 +311,17 @@ try {
     requiredConstraints,
     constraints.rows.map((row) => row.conname),
   );
+
+  const indexes = await client.query<{ indexname: string }>(`
+    select indexname
+      from pg_catalog.pg_indexes
+     where schemaname = 'public'
+  `);
+  const indexNames = new Set(indexes.rows.map((row) => row.indexname));
+  addMissing(failures, "Index", requiredIndexes, indexNames);
+  for (const index of forbiddenIndexes) {
+    if (indexNames.has(index)) failures.push(`Index remplacé toujours présent : public.${index}`);
+  }
 
   const rls = await client.query<{ relname: string; relrowsecurity: boolean }>(`
     select rel.relname, rel.relrowsecurity
@@ -453,5 +477,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Schéma Supabase vérifié en lecture seule : ${userOwnedTables.length} tables, ${requiredConstraints.length} contraintes, ${Object.keys(requiredRpcs).length} RPC, RLS/policies, Storage et ${canonicalMigrations.length} migrations conformes.`,
+  `Schéma Supabase vérifié en lecture seule : ${userOwnedTables.length} tables, ${requiredConstraints.length} contraintes, ${Object.keys(requiredRpcs).length} RPC, RLS/policies, Storage, index de snapshot et ${canonicalMigrations.length} migrations conformes.`,
 );

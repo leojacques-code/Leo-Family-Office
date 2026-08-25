@@ -54,15 +54,11 @@ La migration 005 ajoute des RPC transactionnelles réservées au rôle serveur. 
 
 Une divergence se documente, elle ne se comble pas par une hypothèse. Reconstituer du SQL depuis le nom d'une migration produirait une fausse vérité de schéma : toute reconstruction ultérieure de la base divergerait silencieusement de la production.
 
-| Constaté le | Dépôt       | Production  | Divergence                                                                                      | État                 |
-| ----------- | ----------- | ----------- | ----------------------------------------------------------------------------------------------- | -------------------- |
-| 2026-08-25  | 13 versions | 15 versions | `20260825063626_snapshot_item_owner_fk_index`, `20260825063831_snapshot_item_fk_covering_index` | SQL réel à récupérer |
+| Constaté le | Divergence                                                                                                                                    | État                                                                                                                                     |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-25  | `20260825063626_snapshot_item_owner_fk_index` et `20260825063831_snapshot_item_fk_covering_index` appliquées en production, absentes du dépôt | Clôturée le 2026-08-25 : SQL réel extrait de la production en lecture seule, committé verbatim, historique canonique porté à 15 versions |
 
-Ce que l'on sait : les deux versions ont été appliquées à la production après le merge de la PR #13 et portent, d'après leur nom, sur des index de `net_worth_snapshot_items`. Ce que l'on ne sait pas : leur DDL exact.
-
-Conséquence assumée : depuis le contrôle symétrique, `npm run db:verify` contre la production **échoue** avec « Migration(s) distante(s) inattendu(s) » jusqu'à la clôture de cette divergence. C'est le comportement voulu. Un gate qui reste vert sur une divergence connue ne sert à rien.
-
-Clôture, dans cet ordre :
+Procédure appliquée, à reprendre telle quelle en cas de nouvelle divergence :
 
 ```sql
 select version, name, statements
@@ -71,13 +67,15 @@ select version, name, statements
  order by version;
 ```
 
-1. exécuter cette requête sur la production et récupérer les `statements` réels ;
-2. créer les deux fichiers de migration avec ce contenu verbatim, sans le reformuler ;
-3. ajouter les deux versions à `canonicalMigrations` du verifier et au README ;
+1. extraire les `statements` réels sur la production, en lecture seule ;
+2. créer les fichiers de migration avec ce contenu verbatim, sans le reformuler ;
+3. ajouter les versions à `canonicalMigrations` du verifier, au README et à la doc ;
 4. `npm run gate:local` puis `npm run db:verify` contre la production, les deux verts ;
-5. supprimer la ligne du registre en la datant dans le message de commit.
+5. datter la clôture dans le registre et dans le message de commit.
 
-Tant que l'étape 1 n'est pas faite, ne créer aucun fichier de migration : le dépôt doit dire 13 versions et une divergence connue, plutôt que 15 versions dont deux inventées.
+Tant que l'étape 1 n'est pas faite, ne créer aucun fichier de migration : le dépôt doit déclarer une divergence connue plutôt qu'une migration inventée.
+
+Ces deux migrations ne portent que des index. La seconde remplace l'index de la première : l'état final ne contient que `net_worth_snapshot_items_snapshot_owner_idx`, sur `(snapshot_id, user_id)`, qui couvre la FK composite posée par `20260825021742`. Le verifier contrôle désormais cet état final, et refuse une base qui porterait encore l'index intermédiaire : une base peut inscrire les deux versions dans son historique sans avoir appliqué la seconde.
 
 ## 4. Vérifications
 

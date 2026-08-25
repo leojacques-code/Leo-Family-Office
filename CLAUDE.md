@@ -93,10 +93,11 @@ réservées à `service_role`, qui persistent des résultats déjà calculés.
 - `supabase/local/shim.sql` double les schémas gérés par la plateforme pour le gate
   local. Ce n'est pas une migration et il ne décrit aucun objet applicatif.
 
-Divergence connue au 25 août 2026 : la production porte deux versions absentes du dépôt
-(`20260825063626`, `20260825063831`). Voir `docs/SUPABASE_SETUP.md`, section « Registre
-des divergences de schéma ». Tant que leur SQL réel n'est pas récupéré, il ne doit pas
-être reconstitué de mémoire.
+Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.md`, elle
+ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
+`supabase_migrations.schema_migrations`. La divergence des deux index de
+`net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026, dépôt et production à
+15 versions.
 
 ## 6. Tests et gates
 
