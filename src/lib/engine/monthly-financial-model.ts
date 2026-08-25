@@ -11,7 +11,11 @@ import type {
   Liability,
   LoanScheduleEntry,
 } from "@/lib/types";
-import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
+import {
+  canonicalBalanceSheetOf,
+  knownEnvelopeCash,
+  knownMarketExposure,
+} from "@/lib/engine/balance-sheet-view";
 
 /**
  * PERSONAL MONTHLY FINANCIAL MODEL
@@ -179,18 +183,14 @@ const TOLERANCE = 0.01;
  *
  * Par construction bankCash + marketInvestedAssets + investmentCash + otherFinancialAssets
  * = Σ soldes de comptes = grossAssets. Les positions ne créent jamais de valeur.
+ *
+ * La qualité de composition est lue ENVELOPPE PAR ENVELOPPE : une enveloppe incohérente
+ * verse sa valeur comptable dans `otherFinancialAssets` sans exposition, les enveloppes
+ * réconciliées conservent la leur. Aucun portefeuille n'est ramené à zéro parce qu'une
+ * seule enveloppe est en défaut.
  */
 export function buildOpeningBalanceSheet(state: DashboardState): OpeningBalanceSheet {
-  const canonical =
-    state.balanceSheet ??
-    buildCanonicalBalanceSheet({
-      asOfDate: state.asOfDate,
-      reportingCurrency: state.reportingCurrency,
-      accounts: state.accounts,
-      positions: state.positions,
-      liabilities: state.liabilities,
-      currencyRates: state.currencyRates ?? [],
-    });
+  const canonical = canonicalBalanceSheetOf(state);
   if (
     canonical.financialAssets.value === null ||
     canonical.totalLiabilities.value === null ||
@@ -202,13 +202,13 @@ export function buildOpeningBalanceSheet(state: DashboardState): OpeningBalanceS
   }
   const flags = [...canonical.quality.flags];
   const bankCash = canonical.immediateCash.value ?? 0;
-  const overExplained = canonical.positionReconciliations.some(
-    (item) => item.state === "OVER_EXPLAINED",
-  );
-  // Une composition qui dépasse son enveloppe n'est pas projetée au prorata : ce serait
-  // inventer une exposition. La valeur comptable reste entière dans la poche non exposée.
-  const marketInvestedAssets = overExplained ? 0 : (canonical.marketInvestedAssets.value ?? 0);
-  const investmentCash = overExplained ? 0 : (canonical.investmentEnvelopeCash.value ?? 0);
+  // L'exposition est retenue ENVELOPPE PAR ENVELOPPE. Une enveloppe dont la composition
+  // dépasse la valeur comptable, ou dont une conversion manque, n'est pas projetée au
+  // prorata — ce serait inventer une exposition — mais elle n'annule pas pour autant
+  // l'exposition connue des autres : sa valeur comptable reste entière dans la poche non
+  // exposée, et le portefeuille projeté conserve tout ce qui est réellement réconcilié.
+  const marketInvestedAssets = knownMarketExposure(canonical).knownValue;
+  const investmentCash = knownEnvelopeCash(canonical).knownValue;
   const grossFinancialAssets = canonical.financialAssets.value;
   const otherFinancialAssets =
     grossFinancialAssets - bankCash - marketInvestedAssets - investmentCash;

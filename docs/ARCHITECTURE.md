@@ -20,6 +20,25 @@
 
 Les pages, routes et composants continuent d’appeler `getRepository()`. Aucun composant UI n’accède directement à Supabase.
 
+## Vérité financière des consommateurs
+
+Un écran ne construit aucune vérité financière. Il lit le Canonical Balance Sheet déjà calculé
+par le repository, via les sélecteurs de `src/lib/engine/balance-sheet-view.ts` : ces fonctions
+groupent, sélectionnent et soustraient des montants **déjà convertis**, elles ne résolvent aucun
+taux de change et ne resomment aucun solde natif.
+
+Trois interdits en découlent, vérifiés par les tests :
+
+1. **Aucune addition de devises différentes.** Un total de groupe passe par `accountGroupTotal`,
+   qui rend le total non calculable si une ligne n’est pas convertible.
+2. **Aucune allocation reconstruite localement.** `buildCanonicalAllocation` produit la
+   ventilation et doit boucler exactement sur `financialAssets` ; un résiduel non nul est un bug.
+3. **Aucune valeur manquante rendue en zéro.** Un agrégat `null` s’affiche « Non calculable ».
+
+`DashboardMetrics` sépare explicitement les deux origines : la structure patrimoniale vient du
+bilan canonique (`composeDashboardMetrics`), les flux déclarés viennent de `deriveFlowMetrics`,
+qui ne lit plus ni compte ni position.
+
 ## Transactions
 
 La migration `202608240005_supabase_only_runtime.sql` regroupe en fonctions PostgreSQL les écritures composées : compte + solde, transaction + solde dérivé, scénario + version, duplication + version, clôture + snapshot, catégorie + budget, clôture Cash Flow versionnée et simulation + percentiles.

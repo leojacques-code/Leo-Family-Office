@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { UNDECLARED_LOAN_TERMS } from "@/lib/engine/debt";
 import {
+  composeDashboardMetrics,
   computeFlowRates,
-  deriveMetrics,
+  deriveFlowMetrics,
   ledgerWindowStart,
   shouldDeriveBalance,
 } from "@/lib/data/shared";
+import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
+import { deriveCanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
 import type {
   ExpenseCategory,
   FinancialAccount,
@@ -130,22 +133,26 @@ const positions: Position[] = [
 
 const AS_OF = "2030-01-15";
 
-describe("deriveMetrics", () => {
-  const metrics = deriveMetrics(accounts, liabilities, incomes, expenses, positions, [], AS_OF);
-
-  it("additionne les soldes de comptes sans double compter les positions", () => {
-    expect(metrics.grossAssets).toBeCloseTo(10000, 2);
-    expect(metrics.investedAssets).toBeCloseTo(6000, 2);
-  });
-
-  it("calcule le patrimoine net et la dette", () => {
-    expect(metrics.debt).toBeCloseTo(4000, 2);
-    expect(metrics.netWorth).toBeCloseTo(6000, 2);
-  });
+describe("deriveFlowMetrics", () => {
+  const metrics = deriveFlowMetrics(liabilities, incomes, expenses, [], AS_OF);
 
   it("exclut les revenus inactifs et les dépenses inconnues", () => {
     expect(metrics.monthlyIncome).toBeCloseTo(2000, 2);
     expect(metrics.monthlyExpenses).toBeCloseTo(800, 2);
+  });
+
+  it("n'expose aucune grandeur de bilan : elles appartiennent au bilan canonique", () => {
+    // Aucune somme de soldes natifs ne subsiste dans cette dérivation : c'est la seule
+    // garantie qu'il ne reste pas une seconde vérité patrimoniale à côté du bilan.
+    expect(Object.keys(metrics).sort()).toEqual([
+      "dataCompleteness",
+      "freeCashFlow",
+      "investmentRate",
+      "monthlyDebtService",
+      "monthlyExpenses",
+      "monthlyIncome",
+      "savingsRate",
+    ]);
   });
 
   it("n'exige aucun service de dette avant la première échéance", () => {
@@ -155,29 +162,13 @@ describe("deriveMetrics", () => {
   });
 
   it("exige la mensualité pendant la période de remboursement", () => {
-    const active = deriveMetrics(
-      accounts,
-      liabilities,
-      incomes,
-      expenses,
-      positions,
-      [],
-      "2030-05-15",
-    );
+    const active = deriveFlowMetrics(liabilities, incomes, expenses, [], "2030-05-15");
     expect(active.monthlyDebtService).toBeCloseTo(100, 2);
     expect(active.freeCashFlow).toBeCloseTo(1100, 2);
   });
 
   it("n'exige plus rien après la dernière échéance", () => {
-    const after = deriveMetrics(
-      accounts,
-      liabilities,
-      incomes,
-      expenses,
-      positions,
-      [],
-      "2035-01-15",
-    );
+    const after = deriveFlowMetrics(liabilities, incomes, expenses, [], "2035-01-15");
     expect(after.monthlyDebtService).toBe(0);
   });
 
@@ -195,38 +186,8 @@ describe("deriveMetrics", () => {
       maturityDate: "2034-12-05",
       ...UNDECLARED_LOAN_TERMS,
     };
-    const both = deriveMetrics(
-      accounts,
-      [liabilities[0], second],
-      incomes,
-      expenses,
-      positions,
-      [],
-      "2030-05-15",
-    );
+    const both = deriveFlowMetrics([liabilities[0], second], incomes, expenses, [], "2030-05-15");
     expect(both.monthlyDebtService).toBeCloseTo(150, 2);
-  });
-
-  it("ne compte comme liquide que ce que le champ liquidity qualifie", () => {
-    const blocked: FinancialAccount = {
-      ...accounts[0],
-      id: "c",
-      name: "Livret bloqué",
-      liquidity: "ILLIQUID",
-      balance: 3000,
-    };
-    const withBlocked = deriveMetrics(
-      [...accounts, blocked],
-      liabilities,
-      incomes,
-      expenses,
-      positions,
-      [],
-      AS_OF,
-    );
-    expect(withBlocked.liquidAssets).toBeCloseTo(10000, 2);
-    expect(withBlocked.grossAssets).toBeCloseTo(13000, 2);
-    expect(withBlocked.liquidNetWorth).toBeCloseTo(6000, 2);
   });
 
   it("laisse les taux de flux non calculables sans ledger", () => {
@@ -239,11 +200,131 @@ describe("deriveMetrics", () => {
   });
 
   it("ne divise pas par zéro sans revenu ni dépense essentielle", () => {
-    const empty = deriveMetrics([], [], [], [], [], [], AS_OF);
+    const empty = deriveFlowMetrics([], [], [], [], AS_OF);
     expect(empty.monthlyDebtService).toBe(0);
     expect(empty.savingsRate).toBeNull();
-    expect(empty.emergencyCoverageMonths).toBeNull();
     expect(empty.dataCompleteness).toBe(0);
+  });
+});
+
+/**
+ * Composition des métriques du cockpit. Le point à garder est qu'aucune valeur de bilan
+ * n'est recalculée ici : elles sont recopiées du bilan canonique, `null` compris.
+ */
+describe("composeDashboardMetrics", () => {
+  const rate = (rateDate: string, value: number) => ({
+    baseCurrency: "USD",
+    quoteCurrency: "EUR",
+    rate: value,
+    rateDate,
+    provenance,
+  });
+
+  function compose(input: {
+    accounts: FinancialAccount[];
+    positions?: Position[];
+    liabilities?: Liability[];
+    expenses?: ExpenseCategory[];
+    currencyRates?: Array<ReturnType<typeof rate>>;
+  }) {
+    const balanceSheet = buildCanonicalBalanceSheet({
+      asOfDate: AS_OF,
+      reportingCurrency: "EUR",
+      accounts: input.accounts,
+      positions: input.positions ?? [],
+      liabilities: input.liabilities ?? [],
+      currencyRates: input.currencyRates ?? [],
+    });
+    const balanceSheetMetrics = deriveCanonicalBalanceSheetMetrics({
+      balanceSheet,
+      liabilities: input.liabilities ?? [],
+      expenses: input.expenses ?? [],
+      positions: input.positions ?? [],
+    });
+    return composeDashboardMetrics({
+      balanceSheet,
+      balanceSheetMetrics,
+      flow: deriveFlowMetrics(input.liabilities ?? [], incomes, input.expenses ?? [], [], AS_OF),
+    });
+  }
+
+  it("reprend la structure canonique sans la recalculer", () => {
+    const metrics = compose({ accounts, positions, liabilities });
+    expect(metrics.grossAssets).toBeCloseTo(10_000, 6);
+    expect(metrics.debt).toBeCloseTo(4000, 6);
+    expect(metrics.netWorth).toBeCloseTo(6000, 6);
+    expect(metrics.bankCash).toBeCloseTo(1000, 6);
+    expect(metrics.investedAssets).toBeCloseTo(6000, 6);
+    // Métrique V2 explicitement non calculable tant que les passifs ne sont pas attribués.
+    expect(metrics.productiveNetWorth).toBeNull();
+  });
+
+  it("convertit un compte en devise étrangère au taux daté", () => {
+    const foreign: FinancialAccount = {
+      ...accounts[0],
+      id: "usd",
+      name: "Compte USD test",
+      currency: "USD",
+      balance: 2000,
+    };
+    const metrics = compose({
+      accounts: [accounts[0], foreign],
+      currencyRates: [rate("2030-01-15", 0.9)],
+    });
+    expect(metrics.grossAssets).toBeCloseTo(1000 + 1800, 6);
+    expect(metrics.bankCash).toBeCloseTo(1000 + 1800, 6);
+  });
+
+  it("laisse le patrimoine non calculable quand un taux manque au lieu de compter zéro", () => {
+    const foreign: FinancialAccount = {
+      ...accounts[0],
+      id: "usd",
+      name: "Compte USD test",
+      currency: "USD",
+      balance: 2000,
+    };
+    const metrics = compose({ accounts: [accounts[0], foreign] });
+    expect(metrics.grossAssets).toBeNull();
+    expect(metrics.netWorth).toBeNull();
+    expect(metrics.bankCash).toBeNull();
+  });
+
+  it("dérive la couverture de liquidité du cash immédiat canonique", () => {
+    const known = expenses.filter((expense) => expense.monthlyAmount !== null);
+    const metrics = compose({ accounts, positions, liabilities, expenses: known });
+    // 1 000 € de cash immédiat pour 800 € de dépenses essentielles connues, sans échéance
+    // exigible dans les 30 jours suivant la date d'observation.
+    expect(metrics.monthlyDebtService).toBe(0);
+    expect(metrics.emergencyCoverageMonths).toBeCloseTo(1000 / 800, 6);
+  });
+
+  it("intègre le service de dette exigible au dénominateur de la couverture", () => {
+    const known = expenses.filter((expense) => expense.monthlyAmount !== null);
+    const due: Liability = { ...liabilities[0], firstPaymentDate: "2030-02-05" };
+    const balanceSheet = buildCanonicalBalanceSheet({
+      asOfDate: AS_OF,
+      reportingCurrency: "EUR",
+      accounts,
+      positions,
+      liabilities: [due],
+    });
+    const balanceSheetMetrics = deriveCanonicalBalanceSheetMetrics({
+      balanceSheet,
+      liabilities: [due],
+      expenses: known,
+      positions,
+    });
+    const metrics = composeDashboardMetrics({
+      balanceSheet,
+      balanceSheetMetrics,
+      flow: deriveFlowMetrics([due], incomes, known, [], AS_OF),
+    });
+    expect(metrics.emergencyCoverageMonths).toBeCloseTo(1000 / (800 + 100), 6);
+  });
+
+  it("rend la couverture non calculable quand une dépense essentielle manque", () => {
+    const metrics = compose({ accounts, positions, liabilities, expenses });
+    expect(metrics.emergencyCoverageMonths).toBeNull();
   });
 });
 
@@ -337,36 +418,6 @@ describe("computeFlowRates", () => {
       "2026-08-31",
     );
     expect(rates.savingsRate).toBe(0);
-  });
-});
-
-describe("emergencyCoverageMonths", () => {
-  it("ignore le service de dette quand aucune échéance n’est exigible", () => {
-    const metrics = deriveMetrics(
-      accounts,
-      liabilities,
-      incomes,
-      expenses.filter((expense) => expense.monthlyAmount !== null),
-      positions,
-      [],
-      "2030-01-15",
-    );
-    expect(metrics.monthlyDebtService).toBe(0);
-    expect(metrics.emergencyCoverageMonths).toBeCloseTo(1000 / 800, 6);
-  });
-
-  it("intègre le service de dette dans les dépenses incompressibles", () => {
-    const metrics = deriveMetrics(
-      accounts,
-      liabilities,
-      incomes,
-      expenses.filter((expense) => expense.monthlyAmount !== null),
-      positions,
-      [],
-      "2030-05-15",
-    );
-    expect(metrics.monthlyDebtService).toBeCloseTo(100, 2);
-    expect(metrics.emergencyCoverageMonths).toBeCloseTo(1000 / (800 + 100), 6);
   });
 });
 

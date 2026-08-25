@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   amortizeLoan,
   applyScenarioOverrides,
-  calculateNetWorth,
   compoundReturn,
-  fxConvert,
   irr,
   moic,
   npv,
@@ -39,28 +37,6 @@ describe("financial primitives", () => {
     expect(npv(0.1, [-100, 110])).toBeCloseTo(0, 8);
     expect(irr([-100, 0, 121])).toBeCloseTo(0.1, 6);
     expect(moic(250, 100)).toBe(2.5);
-  });
-
-  it("converts FX and rejects invalid rates", () => {
-    expect(fxConvert(100, 0.92)).toBe(92);
-    expect(() => fxConvert(100, 0)).toThrow();
-  });
-
-  it("calculates net worth from accounts rather than positions", () => {
-    const result = calculateNetWorth([{ balance: 8000 }], [{ currentBalance: 3000 }]);
-    expect(result.grossAssets).toBe(8000);
-    expect(result.debt).toBe(3000);
-    expect(result.netWorth).toBeCloseTo(5000, 12);
-  });
-
-  it("separates negative balances from gross assets without internal rounding", () => {
-    const result = calculateNetWorth(
-      [{ balance: 4000.123456 }, { balance: -1000.111111 }],
-      [{ currentBalance: 500 }],
-    );
-    expect(result.grossAssets).toBe(4000.123456);
-    expect(result.debt).toBeCloseTo(1500.111111, 12);
-    expect(result.netWorth).toBeCloseTo(2500.012345, 12);
   });
 
   it("applies scenario overrides without mutating the base", () => {

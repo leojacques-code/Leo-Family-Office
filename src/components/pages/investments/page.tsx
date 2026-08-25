@@ -10,56 +10,87 @@ import {
   Percent,
   SectionHeader,
 } from "@/components/ui";
-import { type SectionProps, formatEur } from "@/components/pages/shared";
-import type { DashboardState, FinancialAccount, Position } from "@/lib/types";
+import {
+  AggregateValue,
+  ConversionNotice,
+  NOT_COMPUTABLE,
+  OptionalCurrency,
+  canonicalLineLabel,
+  formatEur,
+  formatNative,
+  type SectionProps,
+} from "@/components/pages/shared";
+import {
+  accountLine,
+  canonicalBalanceSheetOf,
+  envelopeExposureOf,
+  envelopeMarketLines,
+  marketPositionLines,
+  unrealisedPnL,
+  type EnvelopePnL,
+} from "@/lib/engine/balance-sheet-view";
+import type {
+  CanonicalBalanceSheet,
+  ConvertedBalanceSheetLine,
+  EnvelopeExposure,
+} from "@/lib/engine/balance-sheet";
+import type { DashboardState, FinancialAccount } from "@/lib/types";
 
 const INVESTMENT_TYPES: FinancialAccount["type"][] = ["PEA", "CTO"];
 
+const RECONCILIATION_LABELS: Record<string, string> = {
+  RECONCILED: "Réconcilié",
+  UNDER_EXPLAINED: "Partiellement expliqué",
+  OVER_EXPLAINED: "Composition supérieure au solde",
+  MISSING: "Réconciliation impossible",
+  NOT_APPLICABLE: "Sans objet",
+};
+
 interface AccountView {
   account: FinancialAccount;
-  positions: Position[];
-  positionsValue: number;
-  gap: number;
-  /** Somme des coûts d'acquisition connus. `null` dès qu'une position n'en porte pas. */
-  costBasis: number | null;
-  unrealisedPnL: number | null;
+  /** Ligne comptable canonique de l'enveloppe, convertie. */
+  line: ConvertedBalanceSheetLine | null;
+  /** Positions non-cash de l'enveloppe, converties. */
+  marketLines: ConvertedBalanceSheetLine[];
+  exposure: EnvelopeExposure | null;
+  pnl: EnvelopePnL;
 }
 
-function buildAccountViews(state: DashboardState): AccountView[] {
+/**
+ * Vues d'enveloppe construites SUR le bilan canonique.
+ *
+ * Aucune somme de `position.value` natif : deux positions libellées dans deux devises ne
+ * s'additionnent pas. L'écart de réconciliation, lui, se lit dans la devise comptable de
+ * l'enveloppe, seule devise où l'égalité solde = Σ positions a un sens.
+ */
+function buildAccountViews(state: DashboardState, sheet: CanonicalBalanceSheet): AccountView[] {
   return state.accounts
     .filter((account) => INVESTMENT_TYPES.includes(account.type))
     .map((account) => {
-      const positions = state.positions.filter((position) => position.accountId === account.id);
-      const positionsValue = positions.reduce((sum, position) => sum + position.value, 0);
-      // Un seul coût manquant rend la plus-value du compte non calculable : aucune
-      // performance n'est affichée sur une base incomplète.
-      const complete =
-        positions.length > 0 && positions.every((position) => position.costBasis !== undefined);
-      const costBasis = complete
-        ? positions.reduce((sum, position) => sum + (position.costBasis ?? 0), 0)
-        : null;
+      const marketLines = envelopeMarketLines(sheet, account.id);
       return {
         account,
-        positions,
-        positionsValue,
-        gap: account.balance - positionsValue,
-        costBasis,
-        unrealisedPnL: costBasis === null ? null : positionsValue - costBasis,
+        line: accountLine(sheet, account.id),
+        marketLines,
+        exposure: envelopeExposureOf(sheet, account.id),
+        // Un seul coût d'acquisition manquant rend la plus-value non calculable : aucune
+        // performance n'est affichée sur une base incomplète.
+        pnl: unrealisedPnL(marketLines),
       };
     });
 }
 
 function InvestmentsPage({ state, setExplanation }: SectionProps) {
-  const views = buildAccountViews(state);
-  const cashInEnvelopes = state.positions
-    .filter((position) => position.isCash)
-    .reduce((sum, position) => sum + position.value, 0);
-  const largestPosition = state.positions
-    .filter((position) => !position.isCash)
-    .sort((a, b) => b.value - a.value)[0];
-  const totalPnL = views.reduce<number | null>(
-    (sum, view) => (sum === null || view.unrealisedPnL === null ? null : sum + view.unrealisedPnL),
-    0,
+  const sheet = canonicalBalanceSheetOf(state);
+  const views = buildAccountViews(state, sheet);
+  const allMarketLines = marketPositionLines(sheet);
+  const largestPosition = [...allMarketLines].sort(
+    (left, right) => (right.reportingValue ?? 0) - (left.reportingValue ?? 0),
+  )[0];
+  const totalPnL = unrealisedPnL(allMarketLines);
+  const unreliable = views.filter((view) => view.exposure && !view.exposure.exposureKnown);
+  const positionLines = sheet.contributions.filter(
+    (line) => line.category === "MARKET_POSITION" || line.category === "INVESTMENT_ENVELOPE_CASH",
   );
 
   return (
@@ -78,53 +109,85 @@ function InvestmentsPage({ state, setExplanation }: SectionProps) {
       <section className="metrics-grid four">
         <MetricCard
           label="Actifs investis"
-          value={<Currency value={state.metrics.investedAssets} />}
-          detail={`${views.length} comptes d’investissement`}
+          value={<AggregateValue aggregate={sheet.marketInvestedAssets} />}
+          detail={
+            unreliable.length
+              ? `${views.length} comptes d’investissement · ${unreliable.length} enveloppe(s) dont l’exposition n’est pas fiable`
+              : `${views.length} comptes d’investissement · positions converties en ${sheet.reportingCurrency}`
+          }
         />
-        <MetricCard label="Cash d’enveloppe" value={<Currency value={cashInEnvelopes} />} />
+        <MetricCard
+          label="Cash d’enveloppe"
+          value={<AggregateValue aggregate={sheet.investmentEnvelopeCash} />}
+          detail="Position interne à une enveloppe · jamais ajoutée au cash bancaire"
+        />
         <MetricCard
           label="Plus-value latente"
-          value={totalPnL === null ? "Non calculable" : <Currency value={totalPnL} sign />}
-          tone={totalPnL !== null && totalPnL >= 0 ? "positive" : "neutral"}
+          value={
+            totalPnL.unrealised === null ? (
+              NOT_COMPUTABLE
+            ) : (
+              <Currency value={totalPnL.unrealised} sign />
+            )
+          }
+          tone={totalPnL.unrealised !== null && totalPnL.unrealised >= 0 ? "positive" : "neutral"}
           detail={
-            totalPnL === null
-              ? "Au moins une position sans coût d’acquisition"
-              : "Valeur de marché − coût d’acquisition connu"
+            totalPnL.unrealised === null
+              ? "Au moins une position sans coût d’acquisition exploitable"
+              : totalPnL.fxEffectNotIsolated
+                ? "Valeur − coût, convertis au même taux : l’effet de change n’est pas isolé"
+                : "Valeur de marché − coût d’acquisition connu"
           }
           onExplain={() =>
             setExplanation({
               title: "Plus-value latente",
-              formula: "Σ valeur des positions − Σ coût d’acquisition connu",
-              inputs: state.positions.map((position) => ({
-                label: position.securityName,
+              formula:
+                "Σ valeur convertie des positions − Σ coût d’acquisition converti au même taux",
+              inputs: allMarketLines.map((line) => ({
+                label: canonicalLineLabel(state, line),
                 value:
-                  position.costBasis === undefined
-                    ? `${formatEur(position.value)} · coût inconnu`
-                    : `${formatEur(position.value)} − ${formatEur(position.costBasis)}`,
-                kind: position.costBasis === undefined ? "MISSING" : position.provenance.kind,
-                date: state.asOfDate,
-                source: position.provenance.source,
+                  line.reportingCostBasis === null || line.reportingCostBasis === undefined
+                    ? `${formatEur(line.reportingValue)} · coût inconnu`
+                    : `${formatEur(line.reportingValue)} − ${formatEur(line.reportingCostBasis)}${
+                        line.currency === state.reportingCurrency
+                          ? ""
+                          : ` (natif ${formatNative(line.nativeValue, line.currency)})`
+                      }`,
+                kind:
+                  line.reportingCostBasis === null || line.reportingCostBasis === undefined
+                    ? "MISSING"
+                    : line.provenance.kind,
+                date: line.valuationDate,
+                source: line.source,
               })),
-              note: "Une plus-value latente n’est pas une performance : elle ignore les versements et les retraits. Sans historique de flux, ni TWR ni XIRR ne sont calculables.",
+              note: `Une plus-value latente n’est pas une performance : elle ignore les versements et les retraits. Sans historique de flux, ni TWR ni XIRR ne sont calculables.${
+                totalPnL.fxEffectNotIsolated
+                  ? " Valeur et coût sont convertis au même taux daté : le résultat est une plus-value en devise locale convertie, l’effet de change sur le capital investi n’en est pas séparé."
+                  : ""
+              }${totalPnL.blockers.length ? ` Points ouverts : ${totalPnL.blockers.join(", ")}.` : ""}`,
             })
           }
         />
         <MetricCard
           label={
-            largestPosition ? `Concentration ${largestPosition.securityName}` : "Concentration"
+            largestPosition
+              ? `Concentration ${canonicalLineLabel(state, largestPosition)}`
+              : "Concentration"
           }
           value={
             largestPosition &&
-            state.metrics.grossAssets !== null &&
-            state.metrics.grossAssets > 0 ? (
-              <Percent value={largestPosition.value / state.metrics.grossAssets} />
+            largestPosition.reportingValue !== null &&
+            sheet.grossAssets.value !== null &&
+            sheet.grossAssets.value > 0 ? (
+              <Percent value={largestPosition.reportingValue / sheet.grossAssets.value} />
             ) : (
-              "Non calculable"
+              NOT_COMPUTABLE
             )
           }
-          detail="Part des actifs bruts identifiés portée par la première position"
+          detail="Part des actifs bruts identifiés portée par la première position, après conversion"
         />
       </section>
+      <ConversionNotice state={state} sheet={sheet} />
       {views.length ? (
         <section className="two-column">
           {views.map((view) => (
@@ -138,7 +201,7 @@ function InvestmentsPage({ state, setExplanation }: SectionProps) {
                   <h2>{view.account.name}</h2>
                 </div>
                 <strong>
-                  <Currency value={view.account.balance} />
+                  <OptionalCurrency value={view.line?.reportingValue ?? null} />
                 </strong>
               </div>
               <div className="account-stats">
@@ -148,22 +211,44 @@ function InvestmentsPage({ state, setExplanation }: SectionProps) {
                 </div>
                 <div>
                   <span>Plus-value latente</span>
-                  {view.unrealisedPnL === null ? (
-                    <strong className="warning-text">Non calculable</strong>
+                  {view.pnl.unrealised === null ? (
+                    <strong className="warning-text">{NOT_COMPUTABLE}</strong>
                   ) : (
-                    <strong className={view.unrealisedPnL >= 0 ? "positive-text" : "negative-text"}>
-                      <Currency value={view.unrealisedPnL} sign />
+                    <strong
+                      className={view.pnl.unrealised >= 0 ? "positive-text" : "negative-text"}
+                    >
+                      <Currency value={view.pnl.unrealised} sign />
                     </strong>
                   )}
                 </div>
                 <div>
-                  <span>Composantes</span>
+                  <span>Exposition de marché</span>
                   <strong>
-                    {view.positions.length ? (
-                      <Currency value={view.positionsValue} />
+                    {view.marketLines.length ? (
+                      <AggregateValue
+                        aggregate={
+                          view.exposure?.marketExposure ?? {
+                            value: null,
+                            knownValue: 0,
+                            status: "NOT_COMPUTABLE",
+                            coverage: 0,
+                            blockers: [],
+                          }
+                        }
+                      />
                     ) : (
                       "Ventilation manquante"
                     )}
+                  </strong>
+                </div>
+                <div>
+                  <span>Réconciliation</span>
+                  <strong
+                    className={
+                      view.exposure?.state === "RECONCILED" ? "positive-text" : "warning-text"
+                    }
+                  >
+                    {RECONCILIATION_LABELS[view.exposure?.state ?? "MISSING"]}
                   </strong>
                 </div>
               </div>
@@ -177,21 +262,35 @@ function InvestmentsPage({ state, setExplanation }: SectionProps) {
         />
       )}
       {views
-        .filter((view) => view.positions.length > 0 && Math.abs(view.gap) > 0.01)
-        .map((view) => (
-          <Callout
-            key={view.account.id}
-            tone="warning"
-            title={`Réconciliation ouverte · ${view.account.name}`}
-          >
-            Le total du compte dépasse les positions de <Currency value={view.gap} />. Le total
-            déclaré reste la valeur comptable, sans créer de position fictive.
-          </Callout>
-        ))}
-      {views.some((view) => view.unrealisedPnL === null) ? (
+        .filter(
+          (view) =>
+            view.exposure &&
+            view.exposure.state !== "RECONCILED" &&
+            view.exposure.state !== "NOT_APPLICABLE",
+        )
+        .map((view) => {
+          const exposure = view.exposure!;
+          const gap = exposure.gapNativeValue;
+          return (
+            <Callout
+              key={view.account.id}
+              tone="warning"
+              title={`Réconciliation ouverte · ${view.account.name} · ${RECONCILIATION_LABELS[exposure.state]}`}
+            >
+              {exposure.state === "MISSING"
+                ? "Au moins une position de cette enveloppe n’est pas convertible dans la devise du compte : l’écart n’est pas chiffrable et n’est pas supposé nul."
+                : gap === null
+                  ? "Écart non chiffrable."
+                  : gap > 0
+                    ? `Le solde du compte dépasse ses positions de ${formatNative(gap, view.account.currency)}. Le total déclaré reste la valeur comptable, sans créer de position fictive : ce reliquat est porté sans exposition de marché connue.`
+                    : `Les positions dépassent le solde du compte de ${formatNative(-gap, view.account.currency)}. Aucune exposition n’est déduite de cette enveloppe tant que l’écart n’est pas expliqué ; sa valeur comptable reste entière et les autres enveloppes conservent la leur.`}
+            </Callout>
+          );
+        })}
+      {views.some((view) => view.pnl.unrealised === null && view.marketLines.length > 0) ? (
         <Callout tone="warning" title="Performance non calculable">
           {views
-            .filter((view) => view.unrealisedPnL === null)
+            .filter((view) => view.pnl.unrealised === null && view.marketLines.length > 0)
             .map((view) => view.account.name)
             .join(", ")}{" "}
           ne porte aucun coût d’acquisition exploitable. Aucun pourcentage de performance n’est
@@ -211,37 +310,42 @@ function InvestmentsPage({ state, setExplanation }: SectionProps) {
             onClick={() =>
               setExplanation({
                 title: "Réconciliation des investissements",
-                formula: "Total du compte − Σ valeur des positions",
+                formula:
+                  "Solde du compte − Σ positions, dans la devise du compte (l’écart n’est jamais mesuré entre deux devises)",
                 inputs: views.flatMap((view) => [
                   {
                     label: `Total ${view.account.name}`,
-                    value: formatEur(view.account.balance),
+                    value: formatNative(view.account.balance, view.account.currency),
                     kind: view.account.provenance.kind,
                     date: view.account.balanceDate,
                     source: view.account.provenance.source,
                   },
-                  ...view.positions.map((position) => ({
-                    label: position.securityName,
-                    value: formatEur(position.value),
-                    kind: position.provenance.kind,
-                    date: state.asOfDate,
-                    source: position.provenance.source,
+                  ...envelopeMarketLines(sheet, view.account.id).map((line) => ({
+                    label: canonicalLineLabel(state, line),
+                    value: formatNative(line.nativeValue, line.currency),
+                    kind: line.provenance.kind,
+                    date: line.valuationDate,
+                    source: line.source,
                   })),
                   {
                     label: `Écart ${view.account.name}`,
-                    value: formatEur(view.gap),
+                    value:
+                      view.exposure?.gapNativeValue === null ||
+                      view.exposure?.gapNativeValue === undefined
+                        ? NOT_COMPUTABLE
+                        : formatNative(view.exposure.gapNativeValue, view.account.currency),
                     kind: "DERIVED" as const,
                     date: state.asOfDate,
                   },
                 ]),
-                note: "Le cash d’enveloppe est une position interne au compte et n’est jamais ajouté au cash bancaire.",
+                note: "Le cash d’enveloppe est une position interne au compte et n’est jamais ajouté au cash bancaire. Une enveloppe dont la composition dépasse le solde ne se voit attribuer aucune exposition, et n’annule pas celle des autres enveloppes.",
               })
             }
           >
             Explain calculation
           </button>
         </div>
-        {state.positions.length ? (
+        {positionLines.length ? (
           <div className="holdings-table">
             <div className="table-head">
               <span>Position</span>
@@ -251,28 +355,38 @@ function InvestmentsPage({ state, setExplanation }: SectionProps) {
               <span>Valeur</span>
               <span>Statut</span>
             </div>
-            {state.positions.map((position) => (
-              <div className="table-row" key={position.id}>
-                <span className="holding-name">
-                  <i>{position.securityName.slice(0, 2).toUpperCase()}</i>
-                  <span>
-                    <strong>{position.securityName}</strong>
-                    <small>{position.ticker ?? position.currency}</small>
+            {positionLines.map((line) => {
+              const position = state.positions.find((item) => item.id === line.entityId);
+              const isForeign = line.currency !== state.reportingCurrency;
+              return (
+                <div className="table-row" key={line.id}>
+                  <span className="holding-name">
+                    <i>{canonicalLineLabel(state, line).slice(0, 2).toUpperCase()}</i>
+                    <span>
+                      <strong>{canonicalLineLabel(state, line)}</strong>
+                      <small>{position?.ticker ?? line.currency}</small>
+                    </span>
                   </span>
-                </span>
-                <span>
-                  {state.accounts.find((account) => account.id === position.accountId)?.name}
-                </span>
-                <span>{position.assetClass}</span>
-                <span>
-                  {position.costBasis === undefined ? "—" : <Currency value={position.costBasis} />}
-                </span>
-                <strong>
-                  <Currency value={position.value} />
-                </strong>
-                <DataBadge kind={position.provenance.kind} />
-              </div>
-            ))}
+                  <span>
+                    {state.accounts.find((account) => account.id === line.envelopeAccountId)
+                      ?.name ?? "Compte inconnu"}
+                  </span>
+                  <span>{line.subcategory ?? "—"}</span>
+                  <span>
+                    {line.reportingCostBasis === null || line.reportingCostBasis === undefined
+                      ? "—"
+                      : formatEur(line.reportingCostBasis)}
+                  </span>
+                  <strong>
+                    <OptionalCurrency value={line.reportingValue} />
+                    {isForeign ? (
+                      <small> · {formatNative(line.nativeValue, line.currency)}</small>
+                    ) : null}
+                  </strong>
+                  <DataBadge kind={line.provenance.kind} />
+                </div>
+              );
+            })}
           </div>
         ) : (
           <EmptyState

@@ -19,11 +19,55 @@ La convention est `rate(base, quote) = unités de quote pour une unité de base`
 
 Une contribution porte sa date, sa méthode (`OBSERVED_BALANCE`, `MARKET_VALUE`, `EXTERNAL_VALUATION`, `USER_ESTIMATE`, `MODEL_ESTIMATE`, `PURCHASE_PRICE`, `COST_BASIS`), sa provenance, sa confiance et son statut de réconciliation. Prix d'achat et coût de revient ne sont jamais assimilés automatiquement à une valeur courante.
 
+### Exposition par enveloppe
+
+L'exposition est établie **enveloppe par enveloppe**, jamais sur un portefeuille global. Chaque
+compte d'investissement porte sa propre qualité de réconciliation, et une enveloppe incohérente
+ne dit rien des autres :
+
+- composition ≤ valeur comptable et conversions disponibles → l'exposition de marché et le cash
+  d'enveloppe sont connus ; le reliquat éventuel est porté **sans exposition** ;
+- composition > valeur comptable (`OVER_EXPLAINED`), ou conversion manquante (`MISSING`) →
+  **aucune** exposition n'est attribuée à cette enveloppe, sa valeur comptable reste entière dans
+  la poche sans exposition connue, et les autres enveloppes conservent la leur.
+
+Exemple : un PEA de 50 000 € parfaitement réconcilié et un CTO de 2 000 € `OVER_EXPLAINED`
+donnent 50 000 € d'exposition connue et projetée, 2 000 € de valeur comptable sans exposition, et
+zéro euro inventé au CTO. Le portefeuille global n'est jamais ramené à zéro parce qu'une seule
+enveloppe est en défaut. Les écarts de réconciliation sont conservés et signalés
+(`POSITION_OVER_EXPLAINED`, `ENVELOPE_EXPOSURE_UNKNOWN`, `POSITION_OUTSIDE_ENVELOPE`).
+
+Une position logée hors enveloppe d'investissement (compte bancaire, compte à découvert) n'est
+réconciliée par rien : elle est signalée et n'apporte aucune exposition projetable.
+
+### Plus-value latente et change
+
+La plus-value latente convertit valeur de marché et coût d'acquisition **au même taux daté**.
+Le résultat est donc une plus-value en devise locale convertie : l'effet de change sur le capital
+investi n'en est pas séparé, et la ligne porte `FX_PNL_NOT_ISOLATED` pour le dire. Un seul coût
+d'acquisition manquant rend la grandeur non calculable ; aucune base de coût n'est reconstruite.
+
 ### Liquidité, historique et attribution
 
 Les couvertures cash/liquide utilisent les dépenses essentielles connues et les sorties Debt Engine réellement exigibles à 30 jours. Une dépense essentielle manquante rend la couverture non calculable; un dénominateur explicitement nul produit `NO_SHORT_TERM_OBLIGATIONS`, jamais `0 mois` ou `Infinity`. Les horizons dette 30j/90j/12m additionnent les lignes datées du Debt Engine, sans mensualiser une échéance trimestrielle. Une variation historique n'existe que si un snapshot complet au plus tard à la date de référence existe.
 
 L'attribution du Δ Net Worth additionne seulement les contributions observables et conserve `RECONCILIATION_UNEXPLAINED` pour le résiduel. Les transferts internes et le remboursement de principal sont neutres; intérêts, assurance et frais sont des coûts économiques.
+
+## Métriques legacy encore en place
+
+Les grandeurs patrimoniales du cockpit (actifs bruts, dettes, patrimoine net, cash immédiat,
+actifs liquides, liquid net worth, actifs investis, productive net worth, couverture de
+liquidité) proviennent **exclusivement** du bilan canonique. Les anciennes dérivations locales
+qui resommaient les soldes natifs ont été supprimées, ainsi que `calculateNetWorth` et
+`fxConvert` : elles constituaient une seconde vérité, non datée et sans devise.
+
+Restent volontairement legacy, dans `deriveFlowMetrics` : revenus mensuels actifs, dépenses
+renseignées, service de dette du mois, free cash flow connu, taux d'épargne et
+d'investissement constatés, complétude budgétaire. Ce sont des agrégats de flux **déclarés** ;
+les objets sous-jacents (revenus, catégories de dépenses) ne portent pas de devise et sont donc
+implicitement en devise de reporting. Les remplacer suppose de faire du Cash Flow Engine V2 la
+source unique des flux du cockpit, c'est-à-dire un chantier Cash Flow et Career, pas un simple
+alignement de consommateur.
 
 ## Hypothèses explicites
 

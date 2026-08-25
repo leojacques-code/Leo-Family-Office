@@ -403,10 +403,8 @@ function ScenariosPage({
                     { label: "Seed", value: String(projection.seed), kind: "MODEL_ASSUMPTION" },
                     {
                       label: "Capital initial simulé",
-                      value: new Intl.NumberFormat("fr-FR", {
-                        style: "currency",
-                        currency: "EUR",
-                      }).format(state.metrics.grossAssets ?? 0),
+                      // Un actif brut non calculable ne devient pas zéro dans une explication.
+                      value: formatEur(state.metrics.grossAssets),
                       kind: "DERIVED",
                       date: state.asOfDate,
                     },

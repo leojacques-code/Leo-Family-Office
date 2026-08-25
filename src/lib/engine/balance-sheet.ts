@@ -46,12 +46,28 @@ export interface CanonicalBalanceSheetContribution {
   source?: string;
   reconciliationState: ReconciliationState;
   isAccountingPrimary: boolean;
+  /**
+   * Enveloppe comptable qui porte cette ligne quand elle n'est pas elle-même comptable :
+   * une position explique le solde d'un compte d'investissement et n'existe pas hors de
+   * lui. C'est ce lien qui permet de raisonner enveloppe par enveloppe plutôt que sur un
+   * portefeuille global indifférencié.
+   */
+  envelopeAccountId?: string;
   flags: string[];
 }
 
 export interface ConvertedBalanceSheetLine extends CanonicalBalanceSheetContribution {
   reportingValue: number | null;
   reportingCurrency: string;
+  /** Coût d'acquisition en devise native. `null` quand il n'est pas renseigné. */
+  nativeCostBasis?: number | null;
+  /**
+   * Coût d'acquisition converti AU MÊME taux que la valeur de marché de la ligne. La
+   * plus-value qui en découle est donc une plus-value en devise native convertie au taux
+   * du jour : elle n'isole pas l'effet de change sur le capital investi, et le moteur le
+   * signale (`FX_PNL_NOT_ISOLATED`) plutôt que de laisser croire le contraire.
+   */
+  reportingCostBasis?: number | null;
   fx: FxResolution;
 }
 
@@ -71,11 +87,50 @@ export interface PositionReconciliation {
   state: ReconciliationState;
 }
 
+/**
+ * Exposition d'UNE enveloppe d'investissement, en devise de reporting.
+ *
+ * Le portefeuille n'est pas une masse indifférenciée : chaque enveloppe porte sa propre
+ * qualité de réconciliation. Une enveloppe incohérente ne dit rien des autres, et ne doit
+ * donc jamais neutraliser leur exposition connue. À l'inverse, une enveloppe dont la
+ * composition dépasse la valeur comptable ne se voit attribuer AUCUNE exposition : sa
+ * valeur comptable reste entière dans la poche sans exposition connue, ce qui n'invente
+ * ni ne supprime un euro.
+ */
+export interface EnvelopeExposure {
+  accountId: string;
+  /** Devise native de l'enveloppe, conservée pour tracer la conversion appliquée. */
+  currency: string;
+  /** Valeur comptable de l'enveloppe : la seule vérité de montant du bilan. */
+  accountValue: CanonicalAggregate;
+  /** Positions non-cash logées dans l'enveloppe, converties. */
+  marketExposure: CanonicalAggregate;
+  /** Positions `isCash` logées dans l'enveloppe, converties. */
+  cashExposure: CanonicalAggregate;
+  /**
+   * Part de la valeur comptable sans exposition connue. Elle vaut le reliquat non expliqué
+   * quand la composition est exploitable, et la valeur comptable ENTIÈRE quand elle ne
+   * l'est pas.
+   */
+  unexposedValue: CanonicalAggregate;
+  state: ReconciliationState;
+  /** Écart comptable en devise native. `null` si l'enveloppe n'est pas réconciliable. */
+  gapNativeValue: number | null;
+  /**
+   * `true` quand la composition explique l'enveloppe sans la dépasser et sans conversion
+   * manquante : l'exposition est alors utilisable pour projeter et pour ventiler.
+   */
+  exposureKnown: boolean;
+  flags: string[];
+}
+
 export interface CanonicalBalanceSheet {
   asOfDate: string;
   reportingCurrency: string;
   contributions: ConvertedBalanceSheetLine[];
   positionReconciliations: PositionReconciliation[];
+  /** Une entrée par enveloppe d'investissement, indépendante des autres. */
+  envelopeExposures: EnvelopeExposure[];
   financialAssets: CanonicalAggregate;
   grossAssets: CanonicalAggregate;
   immediateCash: CanonicalAggregate;
@@ -149,6 +204,20 @@ function difference(left: CanonicalAggregate, right: CanonicalAggregate): Canoni
     coverage: Math.min(left.coverage, right.coverage),
     blockers,
   };
+}
+
+/** Tolérance comptable unique du bilan, en devise de reporting. */
+export const BALANCE_SHEET_TOLERANCE = 0.01;
+
+function scalarAggregate(value: number | null, blockers: string[] = []): CanonicalAggregate {
+  if (value === null)
+    return { value: null, knownValue: 0, status: "NOT_COMPUTABLE", coverage: 0, blockers };
+  return { value, knownValue: value, status: "COMPLETE", coverage: 1, blockers: [] };
+}
+
+/** Prédicat unique de l'enveloppe d'investissement : une seule définition dans le moteur. */
+function isInvestmentEnvelope(account: FinancialAccount): boolean {
+  return account.type !== "BANK" && account.type !== "SAVINGS" && account.balance >= 0;
 }
 
 function accountContributions(accounts: FinancialAccount[]): CanonicalBalanceSheetContribution[] {
@@ -228,41 +297,88 @@ function reconcilePositions(
   positions: Position[],
   rates: CurrencyRate[],
 ): PositionReconciliation[] {
-  return accounts
-    .filter(
-      (account) => account.type !== "BANK" && account.type !== "SAVINGS" && account.balance >= 0,
-    )
-    .map((account) => {
-      const resolved = positions
-        .filter((position) => position.accountId === account.id)
-        .map((position) => {
-          const fx = resolveFxRate(
-            position.currency,
-            account.currency,
-            position.valuationDate ?? position.provenance.effectiveDate ?? account.balanceDate,
-            rates,
-          );
-          return convertWithFx(position.value, fx);
-        });
-      const explainedNativeValue = sumNative(
-        resolved.filter((value): value is number => value !== null),
-      );
-      const gapNativeValue = account.balance - explainedNativeValue;
-      const state: ReconciliationState = resolved.some((value) => value === null)
-        ? "MISSING"
-        : Math.abs(gapNativeValue) <= 0.01
-          ? "RECONCILED"
-          : gapNativeValue > 0
-            ? "UNDER_EXPLAINED"
-            : "OVER_EXPLAINED";
-      return {
-        accountId: account.id,
-        accountNativeValue: account.balance,
-        explainedNativeValue,
-        gapNativeValue,
-        state,
-      };
-    });
+  return accounts.filter(isInvestmentEnvelope).map((account) => {
+    const resolved = positions
+      .filter((position) => position.accountId === account.id)
+      .map((position) => {
+        const fx = resolveFxRate(
+          position.currency,
+          account.currency,
+          position.valuationDate ?? position.provenance.effectiveDate ?? account.balanceDate,
+          rates,
+        );
+        return convertWithFx(position.value, fx);
+      });
+    const explainedNativeValue = sumNative(
+      resolved.filter((value): value is number => value !== null),
+    );
+    const gapNativeValue = account.balance - explainedNativeValue;
+    const state: ReconciliationState = resolved.some((value) => value === null)
+      ? "MISSING"
+      : Math.abs(gapNativeValue) <= 0.01
+        ? "RECONCILED"
+        : gapNativeValue > 0
+          ? "UNDER_EXPLAINED"
+          : "OVER_EXPLAINED";
+    return {
+      accountId: account.id,
+      accountNativeValue: account.balance,
+      explainedNativeValue,
+      gapNativeValue,
+      state,
+    };
+  });
+}
+
+/**
+ * Exposition enveloppe par enveloppe. Aucune agrégation globale n'intervient ici : la
+ * qualité de réconciliation du CTO ne touche pas au PEA, et réciproquement.
+ */
+function buildEnvelopeExposures(
+  envelopeLines: ConvertedBalanceSheetLine[],
+  marketLines: ConvertedBalanceSheetLine[],
+  cashLines: ConvertedBalanceSheetLine[],
+  reconciliations: PositionReconciliation[],
+): EnvelopeExposure[] {
+  return envelopeLines.map((line): EnvelopeExposure => {
+    const accountId = line.entityId;
+    const marketExposure = aggregate(marketLines.filter((l) => l.envelopeAccountId === accountId));
+    const cashExposure = aggregate(cashLines.filter((l) => l.envelopeAccountId === accountId));
+    const reconciliation = reconciliations.find((item) => item.accountId === accountId) ?? null;
+    const state: ReconciliationState = reconciliation?.state ?? "MISSING";
+    const accountValue = line.reportingValue;
+    const flags: string[] = [];
+    // Une composition qui dépasse son enveloppe, ou dont une conversion manque, ne dit rien
+    // de l'exposition réelle : elle n'est pas répartie au prorata, ce serait l'inventer.
+    const composable = marketExposure.status === "COMPLETE" && cashExposure.status === "COMPLETE";
+    const structurallyExplained = state === "RECONCILED" || state === "UNDER_EXPLAINED";
+    const residual =
+      accountValue === null
+        ? null
+        : accountValue - (marketExposure.knownValue + cashExposure.knownValue);
+    let exposureKnown = composable && structurallyExplained && accountValue !== null;
+    if (exposureKnown && residual !== null && residual < -BALANCE_SHEET_TOLERANCE) {
+      // Réconciliation native satisfaite mais reliquat négatif après conversion : le
+      // triangle de change ne boucle pas. On refuse de projeter cette exposition.
+      exposureKnown = false;
+      flags.push(`ENVELOPE_FX_RESIDUAL_NEGATIVE:${accountId}`);
+    }
+    if (!exposureKnown) flags.push(`ENVELOPE_EXPOSURE_UNKNOWN:${accountId}`);
+    return {
+      accountId,
+      currency: line.currency,
+      accountValue: aggregate([line]),
+      marketExposure,
+      cashExposure,
+      unexposedValue: exposureKnown
+        ? scalarAggregate(Math.max(0, residual ?? 0))
+        : scalarAggregate(accountValue, line.fx.flags),
+      state,
+      gapNativeValue: reconciliation?.gapNativeValue ?? null,
+      exposureKnown,
+      flags,
+    };
+  });
 }
 
 /** Le moteur agrège des valeurs canoniques ; il ne calcule aucune dette ou valorisation de domaine. */
@@ -312,68 +428,47 @@ export function buildCanonicalBalanceSheet(
   const other = liabilities.filter(
     (line) => line.category !== "ACCOUNT_OVERDRAFT" && line.category !== "CONTRACTUAL_DEBT",
   );
-  const marketPositionLines: ConvertedBalanceSheetLine[] = positions
-    .filter((position) => !position.isCash)
-    .map((position) => {
-      const fx = resolveFxRate(
-        position.currency,
-        input.reportingCurrency,
-        position.valuationDate ?? position.provenance.effectiveDate ?? input.asOfDate,
-        rates,
-      );
-      return {
-        id: `position:${position.id}`,
-        entityId: position.id,
-        domain: "PORTFOLIO",
-        side: "ASSET",
-        category: "MARKET_POSITION",
-        nativeValue: position.value,
-        currency: position.currency,
-        reportingValue: convertWithFx(position.value, fx),
-        reportingCurrency: input.reportingCurrency,
-        valuationDate:
-          position.valuationDate ?? position.provenance.effectiveDate ?? input.asOfDate,
-        valuationMethod: "MARKET_VALUE",
-        valuationStatus: "CURRENT",
-        liquidity: "LIQUID",
-        provenance: position.provenance,
-        confidence: position.provenance.confidence,
-        source: position.provenance.source,
-        reconciliationState: "NOT_APPLICABLE",
-        isAccountingPrimary: false,
-        flags: [],
-        fx,
-      };
-    });
-  const investmentCashLines: ConvertedBalanceSheetLine[] = positions
-    .filter((position) => position.isCash)
-    .map((position) => {
-      const valuationDate =
-        position.valuationDate ?? position.provenance.effectiveDate ?? input.asOfDate;
-      const fx = resolveFxRate(position.currency, input.reportingCurrency, valuationDate, rates);
-      return {
-        id: `position:${position.id}`,
-        entityId: position.id,
-        domain: "PORTFOLIO",
-        side: "ASSET",
-        category: "INVESTMENT_ENVELOPE_CASH",
-        nativeValue: position.value,
-        currency: position.currency,
-        reportingValue: convertWithFx(position.value, fx),
-        reportingCurrency: input.reportingCurrency,
-        valuationDate,
-        valuationMethod: "MARKET_VALUE",
-        valuationStatus: "CURRENT",
-        liquidity: "LIQUID",
-        provenance: position.provenance,
-        confidence: position.provenance.confidence,
-        source: position.provenance.source,
-        reconciliationState: "NOT_APPLICABLE",
-        isAccountingPrimary: false,
-        flags: [],
-        fx,
-      };
-    });
+  const positionLine = (position: Position): ConvertedBalanceSheetLine => {
+    const valuationDate =
+      position.valuationDate ?? position.provenance.effectiveDate ?? input.asOfDate;
+    const fx = resolveFxRate(position.currency, input.reportingCurrency, valuationDate, rates);
+    const nativeCostBasis = position.costBasis ?? null;
+    return {
+      id: `position:${position.id}`,
+      entityId: position.id,
+      domain: "PORTFOLIO",
+      side: "ASSET",
+      category: position.isCash ? "INVESTMENT_ENVELOPE_CASH" : "MARKET_POSITION",
+      // La classe d'actif est portée par la ligne canonique : aucune ventilation n'a plus
+      // besoin de retourner lire les positions natives.
+      subcategory: position.assetClass,
+      nativeValue: position.value,
+      currency: position.currency,
+      reportingValue: convertWithFx(position.value, fx),
+      reportingCurrency: input.reportingCurrency,
+      nativeCostBasis,
+      reportingCostBasis: nativeCostBasis === null ? null : convertWithFx(nativeCostBasis, fx),
+      valuationDate,
+      valuationMethod: "MARKET_VALUE",
+      valuationStatus: "CURRENT",
+      liquidity: "LIQUID",
+      provenance: position.provenance,
+      confidence: position.provenance.confidence,
+      source: position.provenance.source,
+      reconciliationState: "NOT_APPLICABLE",
+      isAccountingPrimary: false,
+      envelopeAccountId: position.accountId,
+      flags:
+        !position.isCash &&
+        nativeCostBasis !== null &&
+        position.currency.toUpperCase() !== input.reportingCurrency.toUpperCase()
+          ? ["FX_PNL_NOT_ISOLATED"]
+          : [],
+      fx,
+    };
+  };
+  const marketPositionLines = positions.filter((position) => !position.isCash).map(positionLine);
+  const investmentCashLines = positions.filter((position) => position.isCash).map(positionLine);
   const immediateCash = aggregate(immediate);
   const investmentEnvelopeCash = aggregate(investmentCashLines);
   const cashLikeAssets = (() => {
@@ -413,16 +508,32 @@ export function buildCanonicalBalanceSheet(
   };
   const contributions = [...primaryContributions, ...marketPositionLines, ...investmentCashLines];
   const positionReconciliations = reconcilePositions(accounts, positions, rates);
+  const envelopeExposures = buildEnvelopeExposures(
+    assets.filter((line) => line.category === "INVESTMENT_ENVELOPE"),
+    marketPositionLines,
+    investmentCashLines,
+    positionReconciliations,
+  );
   const accountIds = new Set(accounts.map((account) => account.id));
+  const envelopeIds = new Set(accounts.filter(isInvestmentEnvelope).map((account) => account.id));
   const flags = [
     ...new Set([
       ...contributions.flatMap((line) => [...line.flags, ...line.fx.flags]),
       ...positionReconciliations
         .filter((item) => item.state !== "RECONCILED")
         .map((item) => `POSITION_${item.state}:${item.accountId}`),
+      ...envelopeExposures.flatMap((exposure) => exposure.flags),
       ...positions
         .filter((position) => !accountIds.has(position.accountId))
         .map((position) => `POSITION_ORPHAN:${position.id}`),
+      // Une position logée hors enveloppe d'investissement (compte bancaire, compte à
+      // découvert) n'est réconciliée par rien : elle serait un double comptage silencieux
+      // si on la traitait comme une exposition connue.
+      ...positions
+        .filter(
+          (position) => accountIds.has(position.accountId) && !envelopeIds.has(position.accountId),
+        )
+        .map((position) => `POSITION_OUTSIDE_ENVELOPE:${position.id}`),
     ]),
   ];
   const blockers = [...new Set([...grossAssets.blockers, ...totalLiabilities.blockers])];
@@ -431,6 +542,7 @@ export function buildCanonicalBalanceSheet(
     reportingCurrency: input.reportingCurrency,
     contributions,
     positionReconciliations,
+    envelopeExposures,
     financialAssets,
     grossAssets,
     immediateCash,

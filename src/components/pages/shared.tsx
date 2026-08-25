@@ -4,11 +4,25 @@ import type { Mutation } from "@/lib/data/contracts";
 import type { DashboardState, ProjectionEnvelope } from "@/lib/types";
 import { nextDebtEvent } from "@/lib/engine/debt";
 import type {
+  CanonicalAggregate,
+  CanonicalBalanceSheet,
+  ConvertedBalanceSheetLine,
+} from "@/lib/engine/balance-sheet";
+import {
+  accountGroupTotal,
+  accountLine,
+  canonicalBalanceSheetOf,
+  canonicalMetricsOf,
+  type CanonicalAllocation,
+  type CanonicalAllocationSlice,
+} from "@/lib/engine/balance-sheet-view";
+import type {
   AnnualBalanceSheetPoint,
   OpeningBalanceSheet,
 } from "@/lib/engine/monthly-financial-model";
 import type { Explanation } from "@/components/ui";
-import { Currency, DataBadge } from "@/components/ui";
+import { Callout, Currency, DataBadge } from "@/components/ui";
+import { ChevronRight } from "lucide-react";
 import type { FinancialAccount } from "@/lib/types";
 
 export type Mutate = (mutation: Mutation) => Promise<boolean>;
@@ -60,15 +74,129 @@ export function OptionalCurrency({
   return <Currency value={value} sign={sign} />;
 }
 
+const nativeFormatter = (currency: string) =>
+  new Intl.NumberFormat("fr-FR", { style: "currency", currency, maximumFractionDigits: 2 });
+
+/** Montant dans SA devise : un solde en USD n'est jamais rendu avec un symbole €. */
+export function formatNative(value: number, currency: string) {
+  try {
+    return nativeFormatter(currency).format(value);
+  } catch {
+    return `${value.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ${currency}`;
+  }
+}
+
+/** Libellé lisible d'une ligne canonique, résolu depuis l'état plutôt qu'inventé. */
+export function canonicalLineLabel(state: DashboardState, line: ConvertedBalanceSheetLine): string {
+  const account = state.accounts.find((item) => item.id === line.entityId);
+  if (account) return account.name;
+  const position = state.positions.find((item) => item.id === line.entityId);
+  if (position) return position.securityName;
+  const liability = state.liabilities.find((item) => item.id === line.entityId);
+  if (liability) return liability.name;
+  return line.entityId;
+}
+
+/** Agrégat canonique rendu tel quel : `null` reste « non calculable », jamais zéro. */
+export function AggregateValue({
+  aggregate,
+  compact = false,
+}: {
+  aggregate: CanonicalAggregate;
+  compact?: boolean;
+}) {
+  if (aggregate.value === null)
+    return (
+      <span className="warning-text" title={aggregate.blockers.join(" · ")}>
+        {NOT_COMPUTABLE}
+      </span>
+    );
+  return <Currency value={aggregate.value} compact={compact} />;
+}
+
+/**
+ * État réel de la conversion de change, lu sur le bilan canonique.
+ *
+ * Le FX Engine est branché : ce bloc dit ce qu'il a réellement fait, ligne par ligne, au
+ * lieu d'affirmer qu'aucune conversion n'existe. Un taux manquant rend le total non
+ * calculable, un taux périmé reste utilisable mais signalé.
+ */
+export function ConversionNotice({
+  state,
+  sheet,
+}: {
+  state: DashboardState;
+  sheet: CanonicalBalanceSheet;
+}) {
+  const foreign = sheet.contributions.filter((line) => line.fx.status !== "IDENTITY");
+  if (foreign.length === 0) return null;
+  const missing = foreign.filter((line) => line.fx.status === "MISSING");
+  const stale = foreign.filter((line) => line.fx.status === "STALE");
+  const current = foreign.filter((line) => line.fx.status === "CURRENT");
+  const describe = (line: ConvertedBalanceSheetLine) =>
+    `${canonicalLineLabel(state, line)} ${formatNative(line.nativeValue, line.currency)}`;
+  return (
+    <>
+      {current.length ? (
+        <Callout title="Conversion de change appliquée">
+          {current
+            .map(
+              (line) =>
+                `${describe(line)} → ${formatEur(line.reportingValue)} au taux du ${formatDate(
+                  line.fx.rateDate ?? line.valuationDate,
+                )}`,
+            )
+            .join(" · ")}
+          . Les totaux sont exprimés en {sheet.reportingCurrency} avec le taux le plus récent
+          antérieur ou égal à la date de valeur.
+        </Callout>
+      ) : null}
+      {stale.length ? (
+        <Callout tone="warning" title="Taux de change périmé">
+          {stale
+            .map(
+              (line) =>
+                `${describe(line)} converti avec un taux du ${formatDate(
+                  line.fx.rateDate ?? line.valuationDate,
+                )}`,
+            )
+            .join(" · ")}
+          . La conversion reste appliquée, mais elle vieillit : le montant converti n’est plus celui
+          du jour.
+        </Callout>
+      ) : null}
+      {missing.length ? (
+        <Callout tone="warning" title="Conversion de change impossible">
+          {missing.map(describe).join(" · ")} : aucun taux daté n’est disponible vers{" "}
+          {sheet.reportingCurrency}. Ces montants ne sont ni convertis à un pour un ni comptés pour
+          zéro ; les totaux qui les contiennent restent non calculables.
+        </Callout>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Table de comptes. Le total du groupe est le total CANONIQUE converti : additionner des
+ * soldes natifs de devises différentes comparerait des grandeurs non comparables.
+ */
 export function AccountTable({
   title,
   accounts,
+  sheet,
+  state,
   onEdit,
 }: {
   title: string;
   accounts: FinancialAccount[];
+  sheet: CanonicalBalanceSheet;
+  state: DashboardState;
   onEdit: (account: FinancialAccount) => void;
 }) {
+  const total = accountGroupTotal(
+    sheet,
+    accounts.map((account) => account.id),
+  );
   return (
     <article className="panel">
       <div className="panel-header">
@@ -77,75 +205,172 @@ export function AccountTable({
           <h2>{title}</h2>
         </div>
         <strong>
-          <Currency value={accounts.reduce((sum, item) => sum + item.balance, 0)} />
+          <AggregateValue aggregate={total} />
         </strong>
       </div>
       <div className="account-list">
-        {accounts.map((account) => (
-          <button
-            className="account-row account-button"
-            key={account.id}
-            onClick={() => onEdit(account)}
-          >
-            <span className="account-logo">{account.institution.slice(0, 2).toUpperCase()}</span>
-            <div className="account-main">
-              <strong>{account.name}</strong>
-              <span>
-                {account.institution} · {account.currency}
-              </span>
-            </div>
-            <DataBadge kind={account.provenance.kind} />
-            <strong className={`account-balance ${account.balance < 0 ? "negative-text" : ""}`}>
-              <Currency value={account.balance} />
-            </strong>
-          </button>
-        ))}
+        {accounts.map((account) => {
+          const line = accountLine(sheet, account.id);
+          const isOverdraft = line?.side === "LIABILITY";
+          const isForeign = account.currency !== state.reportingCurrency;
+          return (
+            <button
+              className="account-row account-button"
+              key={account.id}
+              onClick={() => onEdit(account)}
+            >
+              <span className="account-logo">{account.institution.slice(0, 2).toUpperCase()}</span>
+              <div className="account-main">
+                <strong>{account.name}</strong>
+                <span>
+                  {account.institution} ·{" "}
+                  {isForeign
+                    ? `${formatNative(account.balance, account.currency)} → ${sheet.reportingCurrency}`
+                    : account.currency}
+                </span>
+              </div>
+              <DataBadge kind={account.provenance.kind} />
+              <strong className={`account-balance ${isOverdraft ? "negative-text" : ""}`}>
+                {isOverdraft ? "−" : ""}
+                <OptionalCurrency value={line?.reportingValue ?? null} />
+              </strong>
+              <ChevronRight size={15} />
+            </button>
+          );
+        })}
       </div>
+      {accounts.some((account) => account.balance < 0) ? (
+        <p className="muted-copy">
+          Un compte à découvert figure au passif du bilan : le total ci-dessus est un total
+          d’actifs, il ne nette pas le découvert.
+        </p>
+      ) : null}
     </article>
   );
 }
 
-export function assetsExplanation(state: DashboardState): Explanation {
+/**
+ * Une ligne d'explication rendue depuis le bilan canonique : montant natif ET montant
+ * converti quand la devise diffère, jamais un montant étranger affiché avec un symbole €.
+ */
+export function canonicalLineInput(state: DashboardState, line: ConvertedBalanceSheetLine) {
+  const converted = formatEur(line.reportingValue);
   return {
-    title: "Actifs bruts identifiés",
-    formula: "Σ dernier solde de chaque compte actif",
+    label: canonicalLineLabel(state, line),
+    value:
+      line.currency === state.reportingCurrency
+        ? converted
+        : `${formatNative(line.nativeValue, line.currency)} → ${converted}${
+            line.fx.rateDate ? ` (taux du ${formatDate(line.fx.rateDate)})` : ""
+          }`,
+    kind: line.reportingValue === null ? ("MISSING" as const) : line.provenance.kind,
+    date: line.valuationDate,
+    source: line.source,
+  };
+}
+
+const ALLOCATION_SLICE_LABELS: Record<string, string> = {
+  BANK_CASH: "Cash bancaire",
+  ENVELOPE_CASH: "Cash d’enveloppe",
+  UNEXPOSED_ENVELOPE: "Solde sans exposition connue",
+};
+
+/** Libellé d'affichage d'une tranche canonique. Les clés réservées ne sont pas des classes. */
+export function allocationSliceLabel(slice: CanonicalAllocationSlice): string {
+  return ALLOCATION_SLICE_LABELS[slice.key] ?? slice.key;
+}
+
+/**
+ * Explication de la ventilation. Elle montre le bouclage sur les actifs financiers
+ * canoniques : une allocation qui ne boucle pas est une allocation inventée.
+ */
+export function allocationExplanation(
+  state: DashboardState,
+  allocation: CanonicalAllocation,
+): Explanation {
+  const unreliable = allocation.slices.filter((slice) => slice.unreliable);
+  return {
+    title: "Allocation identifiée",
+    formula:
+      "Σ tranches converties = actifs financiers canoniques (les positions expliquent une enveloppe, elles ne s’y ajoutent pas)",
     inputs: [
-      ...state.accounts.map((account) => ({
-        label: account.name,
-        value: formatEur(account.balance),
-        kind: account.provenance.kind,
-        date: account.balanceDate,
-        source: account.provenance.source,
+      ...allocation.slices.map((slice) => ({
+        label: `${allocationSliceLabel(slice)}${slice.unreliable ? " · exposition non fiable" : ""}`,
+        value: formatEur(slice.value),
+        kind: "DERIVED" as const,
+        date: state.asOfDate,
+        source: slice.accountIds.length
+          ? slice.accountIds
+              .map(
+                (accountId) =>
+                  state.accounts.find((account) => account.id === accountId)?.name ?? accountId,
+              )
+              .join(", ")
+          : undefined,
       })),
       {
-        label: `Total consolidé (${state.accounts.length} comptes)`,
-        value: formatEur(state.metrics.grossAssets),
+        label: "Actifs financiers canoniques",
+        value: formatEur(allocation.financialAssets.value ?? allocation.financialAssets.knownValue),
+        kind: "DERIVED" as const,
+        date: state.asOfDate,
+      },
+      {
+        label: "Écart de bouclage",
+        value: formatEur(allocation.residual),
         kind: "DERIVED" as const,
         date: state.asOfDate,
       },
     ],
-    note: "Les positions PEA et CTO ne sont pas ajoutées : elles expliquent le solde du compte et évitent le double comptage.",
+    note: `Chaque tranche est exprimée en ${allocation.reportingCurrency} après conversion datée.${
+      unreliable.length
+        ? " Une enveloppe dont la composition dépasse sa valeur comptable ne reçoit aucune exposition de marché : sa valeur comptable reste entière dans la tranche sans exposition connue, et les autres enveloppes conservent la leur."
+        : ""
+    }${allocation.blockers.length ? ` Points ouverts : ${allocation.blockers.join(", ")}.` : ""}`,
+  };
+}
+
+export function assetsExplanation(state: DashboardState): Explanation {
+  const sheet = canonicalBalanceSheetOf(state);
+  const lines = sheet.contributions.filter(
+    (line) =>
+      line.domain === "FINANCIAL_ACCOUNT" && line.side === "ASSET" && line.isAccountingPrimary,
+  );
+  return {
+    title: "Actifs bruts identifiés",
+    formula: "Σ dernier solde de chaque compte actif, converti en devise de reporting",
+    inputs: [
+      ...lines.map((line) => canonicalLineInput(state, line)),
+      {
+        label: `Total consolidé (${lines.length} comptes)`,
+        value: formatEur(sheet.grossAssets.value),
+        kind: "DERIVED" as const,
+        date: state.asOfDate,
+      },
+    ],
+    note: `Les positions PEA et CTO ne sont pas ajoutées : elles expliquent le solde du compte et évitent le double comptage.${
+      sheet.grossAssets.value === null
+        ? ` Le total reste non calculable : ${sheet.grossAssets.blockers.join(", ")}.`
+        : ""
+    }`,
   };
 }
 export function netWorthExplanation(state: DashboardState): Explanation {
+  const sheet = canonicalBalanceSheetOf(state);
+  const liabilityLines = sheet.contributions.filter(
+    (line) => line.side === "LIABILITY" && line.isAccountingPrimary,
+  );
   return {
     title: "Patrimoine net identifié",
-    formula: "Actifs bruts identifiés − dettes identifiées",
+    formula: "Actifs bruts identifiés − dettes identifiées, en devise de reporting",
     inputs: [
       {
         label: "Actifs bruts",
-        value: formatEur(state.metrics.grossAssets),
+        value: formatEur(sheet.grossAssets.value),
         kind: "DERIVED",
         date: state.asOfDate,
       },
-      ...(state.liabilities.length
-        ? state.liabilities.map((liability) => ({
-            label: liability.name,
-            value: formatEur(liability.currentBalance),
-            kind: liability.provenance.kind,
-            date: liability.provenance.effectiveDate ?? state.asOfDate,
-            source: liability.provenance.source,
-          }))
+      ...(liabilityLines.length
+        ? liabilityLines.map((line) => canonicalLineInput(state, line))
         : [
             {
               label: "Dettes identifiées",
@@ -155,10 +380,18 @@ export function netWorthExplanation(state: DashboardState): Explanation {
             },
           ]),
     ],
-    note: `Ce chiffre vaut ${formatEur(state.metrics.netWorth)} au ${formatDate(state.asOfDate)} et reste un patrimoine net identifié, non exhaustif.`,
+    note: `Ce chiffre vaut ${formatEur(sheet.netWorth.value)} au ${formatDate(state.asOfDate)} et reste un patrimoine net identifié, non exhaustif.`,
   };
 }
+/**
+ * Couverture de liquidité, telle que la calcule le bilan canonique : cash immédiat CONVERTI
+ * rapporté aux sorties incompressibles à 30 jours. Le dénominateur est la fenêtre exacte du
+ * Debt Engine, pas le mois civil : c'est la même grandeur que celle affichée, sans second
+ * calcul local.
+ */
 export function liquidityExplanation(state: DashboardState): Explanation {
+  const sheet = canonicalBalanceSheetOf(state);
+  const canonical = canonicalMetricsOf(state);
   const essential = state.expenseCategories.filter(
     (category) => category.essential && category.monthlyAmount !== null,
   );
@@ -169,14 +402,15 @@ export function liquidityExplanation(state: DashboardState): Explanation {
   const missingEssential = state.expenseCategories.filter(
     (category) => category.essential && category.monthlyAmount === null,
   ).length;
+  const coverage = canonical.liquidity.cashCoverageMonths;
   return {
     title: "Couverture de liquidité",
     formula:
-      "Cash bancaire immédiat ÷ (dépenses essentielles mensuelles connues + service de dette exigible)",
+      "Cash immédiat converti ÷ (dépenses essentielles mensuelles connues + décaissements de dette exigibles à 30 jours)",
     inputs: [
       {
-        label: "Cash bancaire",
-        value: formatEur(state.metrics.bankCash),
+        label: "Cash immédiat (bilan canonique)",
+        value: formatEur(sheet.immediateCash.value),
         kind: "DERIVED",
         date: state.asOfDate,
       },
@@ -187,22 +421,22 @@ export function liquidityExplanation(state: DashboardState): Explanation {
         date: state.asOfDate,
       },
       {
-        label: "Service de dette exigible du mois",
-        value: formatEur(state.metrics.monthlyDebtService),
+        label: "Décaissements de dette exigibles à 30 jours",
+        value: formatEur(canonical.debt.service30d.value),
         kind: "DERIVED",
         date: state.asOfDate,
       },
       {
         label: "Résultat",
         value:
-          state.metrics.emergencyCoverageMonths === null
-            ? "Non calculable"
-            : `${state.metrics.emergencyCoverageMonths.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} mois`,
+          coverage.value === null
+            ? `${NOT_COMPUTABLE}${coverage.blockers.length ? ` · ${coverage.blockers.join(", ")}` : ""}`
+            : `${coverage.value.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} mois`,
         kind: "DERIVED",
         date: state.asOfDate,
       },
     ],
-    note: `Le service de dette est incompressible et entre au dénominateur. ${missingEssential} catégories essentielles n’ont pas de montant : la couverture réelle est probablement inférieure. Le cash logé dans un PEA ou un CTO est exclu du cash bancaire disponible.`,
+    note: `Le service de dette est incompressible et entre au dénominateur. ${missingEssential} catégories essentielles n’ont pas de montant : la couverture réelle est probablement inférieure. Le cash logé dans un PEA ou un CTO est un cash d’enveloppe : il est exclu du cash immédiat.`,
   };
 }
 export function cashFlowExplanation(state: DashboardState): Explanation {
