@@ -99,10 +99,9 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`. La divergence des deux index de
 `net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026, dépôt et production
-alignés à 15 versions. Le dépôt en porte 16 depuis Portfolio Data Foundation : la
-seizième est prouvée par le gate local et reste à pousser. Ce n'est pas une divergence,
-c'est une migration en attente ; `db:verify` distant échouera tant qu'elle ne sera pas
-appliquée.
+ont ensuite été alignés sur 17 versions : Portfolio Data Foundation puis ses index
+couvrant les clés étrangères. Les deux dernières migrations ont été appliquées en
+production et contrôlées par assertions SQL transactionnelles et advisors Supabase.
 
 ## 6. Tests et gates
 
@@ -158,3 +157,13 @@ ne doivent démarrer que sur une enveloppe dont la couverture est déclarée.
 
 En cas de doute : livrer l'information partielle avec son état explicite, et dire ce qui
 manque.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

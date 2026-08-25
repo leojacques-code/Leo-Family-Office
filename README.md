@@ -76,7 +76,7 @@ npm run db:local:up
 npm run gate:local
 ```
 
-Le dépôt déclare 16 migrations. Les 15 premières sont égales à celles de la production ; la seizième, `20260825093000_portfolio_data_foundation`, est vérifiée par le gate local et reste à pousser. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
+Le dépôt et la production sont alignés sur 17 migrations. Les migrations 16 et 17 installent la fondation Portfolio puis les index couvrant ses clés étrangères. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
 
 ## Fonctionnalités
 
@@ -107,11 +107,12 @@ Les migrations sont appliquées dans cet ordre, sans modification rétroactive :
 13. `20260825021742_snapshot_item_owner_integrity.sql`
 14. `20260825063626_snapshot_item_owner_fk_index.sql`
 15. `20260825063831_snapshot_item_fk_covering_index.sql`
-16. `20260825093000_portfolio_data_foundation.sql`
+16. `20260825193427_portfolio_data_foundation.sql`
+17. `20260825193606_portfolio_fk_covering_indexes.sql`
 
 La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persistance. Elle ne déplace aucune formule financière dans la base.
 Les migrations Canonical Balance Sheet V2 enrichissent et versionnent les snapshots, sans supprimer ni écraser les données historiques ; toutes les formules restent dans les engines TypeScript.
-La migration 16 ajoute le ledger portefeuille (`portfolio_events`, `portfolio_envelope_policies`) et ses RPC. Aucun lot ni coût de revient n'y est persisté : ces grandeurs sont dérivées par `src/lib/engine/portfolio.ts`.
+La migration 16 ajoute le ledger portefeuille (`portfolio_events`, `portfolio_envelope_policies`) et ses RPC. Aucun lot ni coût de revient n'y est persisté : ces grandeurs sont dérivées par `src/lib/engine/portfolio.ts`. La migration 17 couvre les clés étrangères du ledger avec leurs index dédiés.
 Les migrations 14 et 15 ne portent que des index de `net_worth_snapshot_items` : la 15 remplace l'index de la 14, l'état final couvrant la FK composite `(snapshot_id, user_id)`.
 
 ## Sécurité

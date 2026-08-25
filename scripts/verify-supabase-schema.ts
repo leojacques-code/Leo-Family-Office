@@ -26,7 +26,8 @@ const canonicalMigrations = [
   "20260825021742",
   "20260825063626",
   "20260825063831",
-  "20260825093000",
+  "20260825193427",
+  "20260825193606",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -215,6 +216,10 @@ const requiredIndexes = [
   // Unicité des ancrages : une enveloppe n'a qu'un point de départ par série.
   "portfolio_events_opening_cash_uk",
   "portfolio_events_opening_position_uk",
+  // Index couvrants des FK : évitent les balayages complets lors des suppressions et
+  // mises à jour de comptes ou de lots désignés.
+  "portfolio_events_account_owner_idx",
+  "portfolio_events_matched_lot_covering_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx"] as const;
 

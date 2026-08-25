@@ -9,9 +9,9 @@
  *
  * Il prouve aussi les intégrités qui ne passent PAS par les RPC, en écrivant directement
  * dans la table : un lot désigné hors de son propriétaire, de son enveloppe, de son
- * instrument ou d'une nature qui ouvre un lot est refusé par la base, une désignation
- * légitime reste acceptée, et la suppression d'une transaction bancaire détache le lien
- * sans emporter `user_id`.
+ * instrument ou d'une nature qui ouvre un lot est refusé par la base, la RPC refuse une
+ * acquisition future, une désignation légitime reste acceptée, et la suppression d'une
+ * transaction bancaire détache le lien sans emporter `user_id`.
  */
 import { randomUUID } from "node:crypto";
 import pg from "pg";
@@ -242,6 +242,44 @@ try {
     [buyId],
   );
   assert(linked.rows[0]?.count === "1", "Lot désigné non persisté");
+
+  // Une acquisition déjà enregistrée mais économiquement future ne peut jamais porter le
+  // coût d'une cession antérieure. La FK garantit la structure ; cette règle temporelle
+  // appartient au point d'entrée RPC.
+  const futureBuyId = await record({
+    account_id: peaId,
+    event_type: "BUY",
+    event_date: "2027-01-05",
+    security: { name: "Smoke ETF", ticker: null, isin: "FR0000000001", currency: "EUR" },
+    quantity: 3,
+    unit_price: 130,
+    gross_amount: 390,
+    fee_amount: 0,
+    tax_amount: 0,
+    envelope_cash_amount: -390,
+    currency: "EUR",
+  });
+  await rejects(
+    "select public.lfo_record_portfolio_event($1::uuid, $2::jsonb)",
+    [
+      userId,
+      JSON.stringify({
+        account_id: peaId,
+        event_type: "SELL",
+        event_date: "2026-06-05",
+        security: { name: "Smoke ETF", ticker: null, isin: "FR0000000001", currency: "EUR" },
+        quantity: 1,
+        gross_amount: 140,
+        fee_amount: 0,
+        tax_amount: 0,
+        envelope_cash_amount: 140,
+        currency: "EUR",
+        matched_acquisition_event_id: futureBuyId,
+      }),
+    ],
+    "Une cession a pu désigner une acquisition future",
+    "Lot désigné invalide",
+  );
 
   // 4. Garde-fous de forme et de propriété.
   await rejects(
@@ -510,7 +548,7 @@ try {
     `Le smoke a persisté des lignes : before=${JSON.stringify(before)} after=${JSON.stringify(after)}`,
   );
   console.log(
-    "Smoke Portfolio Ledger vert : conventions upsert et effaçables, instrument résolu sans doublon, ancrages uniques, formes refusées, lot désigné cloisonné par propriétaire, enveloppe, instrument et nature ouvrante, désignation légitime acceptée, transaction détachée sans perte de propriétaire, lot protégé, rollback intégral.",
+    "Smoke Portfolio Ledger vert : conventions upsert et effaçables, instrument résolu sans doublon, ancrages uniques, formes refusées, lot désigné cloisonné par propriétaire, enveloppe, instrument, nature ouvrante et date, désignation légitime acceptée, transaction détachée sans perte de propriétaire, lot protégé, rollback intégral.",
   );
 } catch (error) {
   await client.query("rollback").catch(() => undefined);

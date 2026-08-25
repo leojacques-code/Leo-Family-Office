@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   AreaChart, BriefcaseBusiness, Building2, CalendarRange, ChevronDown, CircleDollarSign, Download,
@@ -34,6 +35,7 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 export function AppShell({ initialState, section }: { initialState: DashboardState; section: string }) {
+  const router = useRouter();
   const [state, setState] = useState(initialState);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -94,7 +96,8 @@ export function AppShell({ initialState, section }: { initialState: DashboardSta
 
   async function logout() {
     await fetch("/api/auth", { method: "DELETE" });
-    window.location.assign("/login");
+    router.replace("/login");
+    router.refresh();
   }
 
   const label = sectionLabel(section);

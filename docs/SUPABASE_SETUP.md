@@ -42,7 +42,7 @@ supabase db push
 ```
 
 Ordre attendu : celui du tri alphabétique de `supabase/migrations/`, soit à ce jour les
-16 fichiers listés dans le README. La liste canonique vit dans le dépôt et dans
+17 fichiers listés dans le README. La liste canonique vit dans le dépôt et dans
 `canonicalMigrations` du verifier ; ne pas la dupliquer ici pour éviter une troisième
 vérité qui se périme.
 
@@ -50,7 +50,7 @@ Ne jamais modifier une migration déjà appliquée. Toute évolution future reç
 
 La migration 005 ajoute des RPC transactionnelles réservées au rôle serveur. Elles regroupent les écritures, sans déplacer les formules financières en SQL.
 
-La migration `20260825093000_portfolio_data_foundation` ajoute le ledger portefeuille et ses trois RPC (`lfo_record_portfolio_event`, `lfo_delete_portfolio_event`, `lfo_set_portfolio_envelope_policy`). Elle crée aussi trois index uniques `(id, user_id)` sur `financial_accounts`, `securities` et `transactions` : ce sont les cibles des clés étrangères composites qui empêchent un événement de référencer l'objet d'un autre utilisateur. Cette migration est vérifiée par le gate local ; elle n'a pas encore été poussée en production.
+La migration `20260825193427_portfolio_data_foundation` ajoute le ledger portefeuille et ses trois RPC (`lfo_record_portfolio_event`, `lfo_delete_portfolio_event`, `lfo_set_portfolio_envelope_policy`). Elle crée aussi trois index uniques `(id, user_id)` sur `financial_accounts`, `securities` et `transactions` : ce sont les cibles des clés étrangères composites qui empêchent un événement de référencer l'objet d'un autre utilisateur. La migration `20260825193606_portfolio_fk_covering_indexes` couvre le côté référençant des deux clés étrangères signalées par l'advisor Postgres. Les deux sont appliquées en production et vérifiées par assertions SQL transactionnelles.
 
 ### Registre des divergences de schéma
 

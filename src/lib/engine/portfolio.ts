@@ -249,12 +249,25 @@ function isLedgerEnvelope(account: FinancialAccount): boolean {
   return account.type !== "BANK" && account.type !== "SAVINGS";
 }
 
-/** Ordre canonique du ledger : la date, puis l'ordre de saisie pour départager. */
+/**
+ * Ordre canonique du ledger : date, puis causalité économique minimale.
+ *
+ * Les identifiants ne portent aucun ordre de saisie fiable. À date égale, une acquisition
+ * doit donc précéder la cession qui peut la désigner ; les ancrages restent les premiers
+ * niveaux de la journée. Les événements d'une même classe restent départagés par leur id
+ * afin de conserver un résultat déterministe.
+ */
 function chronological(left: PortfolioEvent, right: PortfolioEvent): number {
   if (left.eventDate !== right.eventDate) return left.eventDate.localeCompare(right.eventDate);
-  const leftOpening = PORTFOLIO_FLOW_DIRECTION[left.type] === "OPENING" ? 0 : 1;
-  const rightOpening = PORTFOLIO_FLOW_DIRECTION[right.type] === "OPENING" ? 0 : 1;
-  if (leftOpening !== rightOpening) return leftOpening - rightOpening;
+  const rank = (event: PortfolioEvent): number => {
+    if (PORTFOLIO_FLOW_DIRECTION[event.type] === "OPENING") return 0;
+    if (isAcquisition(event)) return 1;
+    if (isDisposal(event)) return 3;
+    return 2;
+  };
+  const leftRank = rank(left);
+  const rightRank = rank(right);
+  if (leftRank !== rightRank) return leftRank - rightRank;
   return left.id.localeCompare(right.id);
 }
 
@@ -346,6 +359,27 @@ interface MatchOutcome {
   flags: string[];
 }
 
+const LOT_ALLOCATION_UNKNOWN_PREFIX = "LOT_ALLOCATION_UNKNOWN:";
+
+function hasUnknownLotAllocation(lot: PortfolioLot): boolean {
+  return lot.flags.some((flag) => flag.startsWith(LOT_ALLOCATION_UNKNOWN_PREFIX));
+}
+
+/**
+ * Une cession certaine dont l'allocation par lot est inconnue laisse une quantité globale
+ * certaine, mais rend les reliquats par lot non prouvables. On conserve les quantités
+ * précédemment observées pour l'explication, tout en invalidant leur coût ouvert et en
+ * empêchant tout appariement ultérieur qui les traiterait comme des reliquats certains.
+ */
+function invalidateLotAllocation(lots: PortfolioLot[], eventId: string): string {
+  const flag = `${LOT_ALLOCATION_UNKNOWN_PREFIX}${eventId}`;
+  for (const lot of lots) {
+    lot.openCost = null;
+    if (!lot.flags.includes(flag)) lot.flags.push(flag);
+  }
+  return flag;
+}
+
 /**
  * Consomme des lots pour une cession, selon la convention DÉCLARÉE.
  *
@@ -353,26 +387,94 @@ interface MatchOutcome {
  * univoque : un seul lot ouvert. Dès qu'il y en a deux, le coût cédé dépend d'un choix
  * comptable que le moteur n'a pas à faire ; il rend `null` et le dit.
  *
- * La quantité, elle, est toujours retirée des lots : elle ne dépend d'aucune convention,
- * et laisser les lots inchangés ferait réapparaître à la vente suivante des titres déjà
- * cédés.
+ * La quantité économique est toujours retirée du stock agrégé : elle ne dépend d'aucune
+ * convention. Le reliquat de chaque lot n'est, lui, ajusté que lorsque l'allocation est
+ * prouvée ; sinon il est explicitement invalidé au lieu d'inventer le lot consommé.
  */
 function matchDisposal(
   lots: PortfolioLot[],
   event: PortfolioEvent,
   method: LotMatchingMethod | null,
+  acquisitionEvents: PortfolioEvent[],
 ): MatchOutcome {
   const flags: string[] = [];
   const requested = event.quantity ?? 0;
   const open = lots.filter((lot) => lot.openQuantity > QUANTITY_TOLERANCE);
   const available = open.reduce((sum, lot) => sum + lot.openQuantity, 0);
-  if (requested - available > QUANTITY_TOLERANCE) {
-    flags.push(`LEDGER_OVERSOLD:${event.securityId}`);
-  }
 
   const effectiveMethod: LotMatchingMethod | null = method ?? (open.length <= 1 ? "FIFO" : null);
   if (method === null && open.length > 1) {
     flags.push(`LOT_MATCHING_UNDECLARED:${event.id}`);
+  }
+
+  if (effectiveMethod === null) {
+    flags.push(invalidateLotAllocation(open, event.id));
+    flags.push(`COST_BASIS_UNKNOWN:${event.id}`);
+    return { matches: [], cost: null, flags };
+  }
+
+  if (effectiveMethod === "SPECIFIC_LOT") {
+    const unknown = (): MatchOutcome => {
+      flags.push(invalidateLotAllocation(open, event.id));
+      flags.push(`COST_BASIS_UNKNOWN:${event.id}`);
+      return { matches: [], cost: null, flags };
+    };
+    const designated = event.matchedAcquisitionEventId;
+    if (!designated) {
+      flags.push(`SPECIFIC_LOT_REFERENCE_MISSING:${event.id}`);
+      return unknown();
+    }
+
+    const acquisition = acquisitionEvents.find((candidate) => candidate.id === designated);
+    if (acquisition && acquisition.eventDate > event.eventDate) {
+      flags.push(`SPECIFIC_LOT_ACQUISITION_AFTER_DISPOSAL:${event.id}`);
+      return unknown();
+    }
+
+    const target = lots.find((lot) => lot.eventId === designated);
+    if (!target || target.openQuantity <= QUANTITY_TOLERANCE) {
+      flags.push(`SPECIFIC_LOT_NOT_OPEN:${event.id}`);
+      return unknown();
+    }
+    if (hasUnknownLotAllocation(target)) {
+      flags.push(`SPECIFIC_LOT_OPEN_QUANTITY_UNKNOWN:${event.id}`);
+      return unknown();
+    }
+
+    const targetAvailable = target.openQuantity;
+    const taken = Math.min(targetAvailable, requested);
+    const share = target.unitCost === null ? null : target.unitCost * taken;
+    target.openQuantity -= taken;
+    target.openCost =
+      target.unitCost === null
+        ? null
+        : Math.max(0, (target.openCost ?? 0) - target.unitCost * taken);
+    const matches = [{ lotEventId: target.eventId, quantity: taken, cost: share }];
+
+    // Une désignation spécifique ne s'étend jamais à un deuxième lot. La fraction non
+    // couverte reste économiquement vendue dans la quantité agrégée, mais son allocation
+    // et son coût sont inconnus.
+    if (requested - targetAvailable > QUANTITY_TOLERANCE) {
+      flags.push(`SPECIFIC_LOT_INSUFFICIENT_QUANTITY:${event.id}`);
+      const otherOpen = open.filter(
+        (lot) => lot.eventId !== target.eventId && lot.openQuantity > QUANTITY_TOLERANCE,
+      );
+      if (otherOpen.length > 0) flags.push(invalidateLotAllocation(otherOpen, event.id));
+      flags.push(`COST_BASIS_UNKNOWN:${event.id}`);
+      return { matches, cost: null, flags };
+    }
+
+    if (share === null) flags.push(`COST_BASIS_UNKNOWN:${event.id}`);
+    return { matches, cost: share, flags };
+  }
+
+  // Une allocation déjà devenue inconnue ne peut plus être réparée en appliquant FIFO,
+  // LIFO ou un coût moyen sur des reliquats qui ne sont plus prouvés.
+  if (open.some(hasUnknownLotAllocation)) {
+    flags.push(invalidateLotAllocation(open, event.id));
+    flags.push(`LOT_ALLOCATION_PREVIOUSLY_UNKNOWN:${event.id}`);
+    flags.push(`COST_BASIS_UNKNOWN:${event.id}`);
+    return { matches: [], cost: null, flags };
   }
 
   if (effectiveMethod === "WEIGHTED_AVERAGE") {
@@ -386,12 +488,17 @@ function matchDisposal(
       const taken = Math.min(lot.openQuantity, remaining);
       remaining -= taken;
       lot.openQuantity -= taken;
-      lot.openCost = unit === null ? null : Math.max(0, (lot.openCost ?? 0) - unit * taken);
       matches.push({
         lotEventId: lot.eventId,
         quantity: taken,
         cost: unit === null ? null : unit * taken,
       });
+    }
+    // En coût moyen, le coût résiduel appartient au pool, pas au lot historique qui a
+    // fourni arbitrairement les premières quantités. Réallouer le même coût unitaire à
+    // tous les reliquats conserve exactement : coût d'ouverture - coût cédé.
+    for (const lot of open) {
+      lot.openCost = unit === null ? null : unit * lot.openQuantity;
     }
     const consumed = requested - remaining;
     // Un stock insuffisant rend le coût cédé inconnu, comme sur les autres conventions :
@@ -402,21 +509,7 @@ function matchDisposal(
   }
 
   let ordered: PortfolioLot[];
-  if (effectiveMethod === "SPECIFIC_LOT") {
-    const designated = event.matchedAcquisitionEventId;
-    if (!designated) {
-      flags.push(`SPECIFIC_LOT_REFERENCE_MISSING:${event.id}`);
-      ordered = [...open];
-    } else {
-      const target = open.find((lot) => lot.eventId === designated);
-      if (!target) {
-        flags.push(`SPECIFIC_LOT_NOT_OPEN:${event.id}`);
-        ordered = [...open];
-      } else {
-        ordered = [target, ...open.filter((lot) => lot.eventId !== designated)];
-      }
-    }
-  } else if (effectiveMethod === "LIFO") {
+  if (effectiveMethod === "LIFO") {
     ordered = [...open].reverse();
   } else {
     ordered = [...open];
@@ -642,6 +735,9 @@ function buildEnvelope(
     const used = positionAnchor
       ? securityEvents.filter((event) => event.eventDate >= positionAnchor.eventDate)
       : securityEvents;
+    const allAcquisitionEvents = events.filter(
+      (event) => event.securityId === securityId && isAcquisition(event),
+    );
 
     for (const event of used) {
       const current = quantityBySecurity.get(securityId) ?? 0;
@@ -659,8 +755,16 @@ function buildEnvelope(
       }
       if (isDisposal(event)) {
         const outcome = derivable
-          ? matchDisposal(lots, event, method)
+          ? matchDisposal(lots, event, method, allAcquisitionEvents)
           : { matches: [], cost: null, flags: [`COST_BASIS_UNKNOWN:${event.id}`] };
+        if (
+          derivable &&
+          current !== null &&
+          event.quantity !== null &&
+          event.quantity - current > QUANTITY_TOLERANCE
+        ) {
+          outcome.flags.unshift(`LEDGER_OVERSOLD:${event.securityId}`);
+        }
         const { proceeds, flags: proceedFlags } = disposalProceeds(event);
         const realised =
           proceeds === null || outcome.cost === null ? null : proceeds - outcome.cost;
@@ -707,7 +811,9 @@ function buildEnvelope(
     // Une quantité non dérivable n'a pas de coût de revient dérivable : le stock de
     // départ manque, donc le coût du stock aussi.
     const ledgerCostBasis =
-      ledgerQuantity === null ? null : strictSum(openLots.map((lot) => lot.openCost));
+      ledgerQuantity === null || ledgerQuantity < -QUANTITY_TOLERANCE
+        ? null
+        : strictSum(openLots.map((lot) => lot.openCost));
     // Rapprochement par instrument, jamais par libellé quand l'identifiant est connu :
     // un renommage de titre ne doit pas casser une réconciliation.
     const matched = positions.filter((position) => {

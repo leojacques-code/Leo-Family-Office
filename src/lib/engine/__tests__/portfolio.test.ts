@@ -346,8 +346,11 @@ describe("Portfolio ledger — convention d’appariement", () => {
     expect(sale.realisedPnL).toBeNull();
     expect(envelope.flags).toContain("LOT_MATCHING_UNDECLARED:s1");
     expect(envelope.flags).toContain("LOT_MATCHING_METHOD_UNDECLARED:acc_pea");
+    expect(sale.matches).toEqual([]);
     // La quantité, elle, ne dépend d'aucune convention.
     expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(10, 6);
+    // La répartition du reliquat entre a1 et a2 ne se devine pas non plus.
+    expect(envelope.holdings[0].ledgerCostBasis).toBeNull();
   });
 
   it("apparie sans convention quand un seul lot est ouvert : le choix est mécanique", () => {
@@ -371,19 +374,130 @@ describe("Portfolio ledger — convention d’appariement", () => {
     expect(cost("WEIGHTED_AVERAGE")).toBeCloseTo(1250, 6);
   });
 
-  it("exige la désignation du lot en convention SPECIFIC_LOT", () => {
-    const specific: PortfolioEnvelopePolicy = {
-      ...declaredPolicy,
-      lotMatchingMethod: "SPECIFIC_LOT",
-    };
-    const envelope = envelopeLedgerOf(build(twoLots, [specific]), "acc_pea")!;
-    expect(envelope.flags).toContain("SPECIFIC_LOT_REFERENCE_MISSING:s1");
+  it("conserve exactement le coût résiduel du pool en coût moyen pondéré", () => {
+    const envelope = envelopeLedgerOf(
+      build(twoLots, [{ ...declaredPolicy, lotMatchingMethod: "WEIGHTED_AVERAGE" }]),
+      "acc_pea",
+    )!;
+    // Coût initial 2 500 - coût cédé 1 250 = coût résiduel 1 250.
+    expect(envelope.disposals[0].matchedCost).toBeCloseTo(1250, 6);
+    expect(envelope.holdings[0].ledgerCostBasis).toBeCloseTo(1250, 6);
+    expect(
+      envelope.holdings[0].lots.reduce((sum, lot) => sum + (lot.openCost ?? 0), 0),
+    ).toBeCloseTo(1250, 6);
+  });
 
+  const specific: PortfolioEnvelopePolicy = {
+    ...declaredPolicy,
+    lotMatchingMethod: "SPECIFIC_LOT",
+  };
+
+  it("apparie exclusivement le lot spécifiquement désigné quand il est valide", () => {
     const designated = twoLots.map((item) =>
       item.id === "s1" ? { ...item, matchedAcquisitionEventId: "a2" } : item,
     );
-    const matched = envelopeLedgerOf(build(designated, [specific]), "acc_pea")!;
-    expect(matched.disposals[0].matchedCost).toBeCloseTo(1500, 6);
+    const envelope = envelopeLedgerOf(build(designated, [specific]), "acc_pea")!;
+    const sale = envelope.disposals[0];
+    expect(sale.matches).toEqual([{ lotEventId: "a2", quantity: 10, cost: 1500 }]);
+    expect(sale.matchedCost).toBeCloseTo(1500, 6);
+    expect(sale.realisedPnL).toBeCloseTo(300, 6);
+    expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(10, 6);
+    expect(envelope.holdings[0].ledgerCostBasis).toBeCloseTo(1000, 6);
+  });
+
+  it("rend coût et PnL non calculables quand la référence spécifique manque", () => {
+    const envelope = envelopeLedgerOf(build(twoLots, [specific]), "acc_pea")!;
+    const sale = envelope.disposals[0];
+    expect(sale.matches).toEqual([]);
+    expect(sale.matchedCost).toBeNull();
+    expect(sale.realisedPnL).toBeNull();
+    expect(envelope.flags).toContain("SPECIFIC_LOT_REFERENCE_MISSING:s1");
+    // La vente économique existe malgré l'absence de coût : 20 acquis - 10 cédés.
+    expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(10, 6);
+    expect(envelope.holdings[0].ledgerCostBasis).toBeNull();
+  });
+
+  it("refuse un lot spécifiquement désigné déjà épuisé", () => {
+    const exhausted = [
+      ...twoLots.filter((item) => item.id !== "s1"),
+      event({
+        id: "s0",
+        type: "SELL",
+        eventDate: "2026-03-15",
+        securityId: "sec_etf",
+        securityName: "ETF Monde",
+        quantity: 10,
+        grossAmount: 1200,
+        feeAmount: 0,
+        taxAmount: 0,
+        envelopeCashAmount: 1200,
+        matchedAcquisitionEventId: "a1",
+      }),
+      event({
+        id: "s1",
+        type: "SELL",
+        eventDate: "2026-04-01",
+        securityId: "sec_etf",
+        securityName: "ETF Monde",
+        quantity: 5,
+        grossAmount: 900,
+        feeAmount: 0,
+        taxAmount: 0,
+        envelopeCashAmount: 900,
+        matchedAcquisitionEventId: "a1",
+      }),
+    ];
+    const envelope = envelopeLedgerOf(build(exhausted, [specific]), "acc_pea")!;
+    const secondSale = envelope.disposals[1];
+    expect(secondSale.matches).toEqual([]);
+    expect(secondSale.matchedCost).toBeNull();
+    expect(secondSale.realisedPnL).toBeNull();
+    expect(envelope.flags).toContain("SPECIFIC_LOT_NOT_OPEN:s1");
+    expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(5, 6);
+  });
+
+  it("refuse une acquisition spécifiquement désignée postérieure à la cession", () => {
+    const futureLot = twoLots.map((item) => {
+      if (item.id === "a2") return { ...item, eventDate: "2026-05-01" };
+      if (item.id === "s1") return { ...item, matchedAcquisitionEventId: "a2" };
+      return item;
+    });
+    const envelope = envelopeLedgerOf(build(futureLot, [specific]), "acc_pea")!;
+    const sale = envelope.disposals[0];
+    expect(sale.matches).toEqual([]);
+    expect(sale.matchedCost).toBeNull();
+    expect(sale.realisedPnL).toBeNull();
+    expect(envelope.flags).toContain("SPECIFIC_LOT_ACQUISITION_AFTER_DISPOSAL:s1");
+    // 10 acquis avant, 10 vendus, puis 10 acquis après la vente.
+    expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(10, 6);
+  });
+
+  it("ne complète pas une quantité supérieure au lot désigné avec d’autres lots", () => {
+    const oversized = twoLots.map((item) =>
+      item.id === "s1" ? { ...item, quantity: 12, matchedAcquisitionEventId: "a2" } : item,
+    );
+    const envelope = envelopeLedgerOf(build(oversized, [specific]), "acc_pea")!;
+    const sale = envelope.disposals[0];
+    expect(sale.matches).toEqual([{ lotEventId: "a2", quantity: 10, cost: 1500 }]);
+    expect(sale.matches.some((match) => match.lotEventId === "a1")).toBe(false);
+    expect(sale.matchedCost).toBeNull();
+    expect(sale.realisedPnL).toBeNull();
+    expect(envelope.flags).toContain("SPECIFIC_LOT_INSUFFICIENT_QUANTITY:s1");
+    expect(envelope.holdings[0].ledgerQuantity).toBeCloseTo(8, 6);
+    expect(envelope.holdings[0].ledgerCostBasis).toBeNull();
+  });
+
+  it("ne produit aucun PnL à partir d’un lot non désigné", () => {
+    const invalid = twoLots.map((item) =>
+      item.id === "s1" ? { ...item, matchedAcquisitionEventId: "lot_absent" } : item,
+    );
+    const envelope = envelopeLedgerOf(build(invalid, [specific]), "acc_pea")!;
+    const sale = envelope.disposals[0];
+    expect(sale.matches).toEqual([]);
+    expect(sale.matchedCost).toBeNull();
+    expect(sale.realisedPnL).toBeNull();
+    expect(envelope.flags).toContain("SPECIFIC_LOT_NOT_OPEN:s1");
+    expect(envelope.flags).toContain("LOT_ALLOCATION_UNKNOWN:s1");
   });
 
   it("gère les ventes partielles successives sur plusieurs lots", () => {

@@ -395,8 +395,10 @@ begin
     raise exception 'Transaction bancaire introuvable';
   end if;
 
-  -- La base refuserait déjà une désignation impossible ; cette vérification n'ajoute
-  -- aucune règle, elle rend seulement le refus lisible côté produit.
+  -- La FK refuse les désignations structurellement impossibles. La RPC ferme en plus la
+  -- frontière temporelle : une acquisition postérieure ne peut pas justifier le coût
+  -- d'une cession déjà intervenue. Le moteur répète ce contrôle pour rester défensif face
+  -- aux données historiques ou aux écritures directes qui auraient contourné la RPC.
   if nullif(p_payload ->> 'matched_acquisition_event_id', '') is not null
      and not exists (
        select 1 from public.portfolio_events
@@ -404,9 +406,10 @@ begin
           and user_id = p_user_id and account_id = v_account_id
           and security_id is not distinct from v_security_id
           and is_lot_opening
+          and event_date <= (p_payload ->> 'event_date')::date
      ) then
     raise exception
-      'Lot désigné invalide : il doit ouvrir un lot du même instrument dans cette enveloppe';
+      'Lot désigné invalide : il doit ouvrir avant la cession un lot du même instrument dans cette enveloppe';
   end if;
 
   v_event_id := gen_random_uuid();
