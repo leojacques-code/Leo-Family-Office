@@ -39,6 +39,76 @@ Trois interdits en découlent, vérifiés par les tests :
 bilan canonique (`composeDashboardMetrics`), les flux déclarés viennent de `deriveFlowMetrics`,
 qui ne lit plus ni compte ni position.
 
+## Portfolio Data Foundation
+
+Le portefeuille a désormais deux vérités distinctes, qui ne se recouvrent jamais.
+
+**L'état observé** (`positions`, `position_snapshots`) dit ce qu'une ligne VAUT aujourd'hui.
+Il alimente seul le Canonical Balance Sheet, exactement comme avant.
+
+**Le ledger** (`portfolio_events`) dit comment elle s'est CONSTITUÉE : ancrages d'ouverture,
+apports, retraits, achats, ventes, dividendes, coupons, frais, taxes et transferts. Il ne
+produit aucune ligne de bilan et n'entre dans aucun total patrimonial. `buildPortfolioLedger()`
+en dérive les lots, le coût de revient, le cash d'enveloppe théorique et les écarts de
+réconciliation ; le bilan reste bit pour bit identique avec ou sans ledger, ce qu'un test
+vérifie.
+
+Cinq règles fondent le moteur.
+
+0. **La lecture est datée.** Les événements postérieurs à `asOfDate` sont conservés comme faits
+   mais n'entrent dans aucune grandeur dérivée à cette date : un achat saisi pour la semaine
+   prochaine ne détient rien aujourd'hui et n'a rien débité. Symétriquement, un ancrage
+   d'ouverture est un NIVEAU qui contient déjà tout ce qui l'a précédé : les événements
+   antérieurs sont écartés de la série et signalés (`LEDGER_EVENT_BEFORE_ANCHOR`), jamais
+   rejoués par-dessus. Un ancrage antérieur à la couverture déclarée laisse entre les deux
+   dates une période dont rien ne garantit l'exhaustivité : la série ne la traverse pas. Un
+   instrument sans ancrage dont des opérations précèdent la couverture a un stock de départ
+   inconnu, donc une quantité et un coût `NOT_COMPUTABLE`.
+1. **Une observation n'est pas un historique.** Une enveloppe dont la profondeur d'historique
+   n'est pas déclarée (`portfolio_envelope_policies.ledger_coverage_start` à `null`) conserve son
+   état observé intact ; le ledger dit simplement qu'il ne l'explique pas. Aucun achat n'est
+   reconstitué pour faire boucler une position.
+2. **La convention d'appariement ne se devine pas.** Sans `lot_matching_method` déclarée, et dès
+   qu'il existe plus d'un lot ouvert, le coût de revient cédé est `NOT_COMPUTABLE`. Avec un seul
+   lot ouvert, l'appariement est mécaniquement univoque et reste calculé. La quantité, elle, ne
+   dépend d'aucune convention et reste toujours connue.
+3. **Aucune conversion de change.** Le FX Engine reste l'unique moteur de change. Convertir un
+   flux historique à un taux non observé inventerait une opération de change : une enveloppe dont
+   le ledger mélange les devises est déclarée non réconciliable, pas convertie.
+4. **Aucune seconde vérité Cash Flow.** Un événement externe à l'enveloppe (apport, retrait,
+   transfert) POINTE la jambe bancaire déjà classée dans `transactions` ; il n'en crée ni n'en
+   reclasse aucune. Le moteur signale une jambe manquante, un écart de montant, un virement vers
+   l'enveloppe classé en `EXPENSE`, ou une opération interne indûment rattachée à un compte
+   bancaire. Corriger reste le travail du Cash Flow Engine.
+
+Aucun lot, coût de revient ni PnL n'est persisté : les persister créerait une vérité qui se
+périmerait à la première correction d'événement. Seuls les faits et les déclarations le sont.
+
+Côté intégrité, la base ne délègue rien à la RPC. Une seule clé étrangère composite ferme les
+quatre frontières du lot désigné par une cession : même propriétaire, même enveloppe, même
+instrument, et un événement qui **ouvre réellement un lot**. Elle référence
+`(id, user_id, account_id, security_id, is_lot_opening)`, où `is_lot_opening` est une colonne
+générée valant vrai pour `OPENING_POSITION`, `BUY` et `TRANSFER_IN` porteurs d'un instrument ;
+côté référençant, `matched_lot_is_opening` vaut `true` dès qu'un lot est désigné et `null` sinon,
+ce qui neutralise la contrainte quand aucun lot ne l'est. Un « lot spécifique » structurellement
+impossible (le dividende encaissé sur la ligne, une autre vente, le lot d'un titre voisin) est
+donc refusé par la base, pas seulement signalé après coup par le moteur. Le `CHECK` associé exige
+un instrument sur la cession : sans lui, un `security_id` nul désactiverait la clé étrangère sous
+MATCH SIMPLE. `is_lot_opening` duplique `ACQUISITION_TYPES` du moteur ; un test épingle la liste
+côté TypeScript pour rendre toute divergence visible.
+Les liens sortants (`transaction_id`, `counterparty_account_id`) utilisent `on delete set null`
+avec **liste de colonnes** : sans elle, une FK composite annulerait aussi `user_id`, qui est
+`NOT NULL`, et la suppression de la transaction échouerait au lieu de détacher le lien.
+
+## Lecture paginée des ledgers
+
+`readAllPages` (`src/lib/data/pagination.ts`) lit une source page par page et **refuse** de
+rendre un résultat tronqué. Un ledger amputé de ses dernières pages produirait des quantités, un
+cash et un coût de revient parfaitement calculés sur des faits incomplets, donc faux sans que
+rien ne le dise. C'est une défaillance de la couche données, pas une incertitude financière :
+elle remonte comme `LedgerTruncationError`, au même titre qu'une erreur PostgREST. Le ledger
+portefeuille et la fenêtre de transactions passent tous deux par ce chemin.
+
 ## Transactions
 
 La migration `202608240005_supabase_only_runtime.sql` regroupe en fonctions PostgreSQL les écritures composées : compte + solde, transaction + solde dérivé, scénario + version, duplication + version, clôture + snapshot, catégorie + budget, clôture Cash Flow versionnée et simulation + percentiles.

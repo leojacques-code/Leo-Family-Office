@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "engines": {
-    "node": ">=22"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "next dev",
@@ -20,16 +20,17 @@
     "db:local:up": "bash scripts/db-local-up.sh",
     "db:local:reset": "node --experimental-strip-types scripts/db-local-reset.ts",
     "db:verify:local": "SUPABASE_DB_URL=\"${LFO_LOCAL_DB_URL:-postgres://${LFO_LOCAL_DB_USER:-postgres}:${LFO_LOCAL_DB_PASSWORD:-lfo_local}@127.0.0.1:5432/${LFO_LOCAL_DB_NAME:-lfo_local}?sslmode=disable}\" node --experimental-strip-types scripts/verify-supabase-schema.ts",
-    "smoke:local": "SUPABASE_DB_URL=\"${LFO_LOCAL_DB_URL:-postgres://${LFO_LOCAL_DB_USER:-postgres}:${LFO_LOCAL_DB_PASSWORD:-lfo_local}@127.0.0.1:5432/${LFO_LOCAL_DB_NAME:-lfo_local}?sslmode=disable}\" node --experimental-strip-types scripts/smoke-balance-sheet-v2.ts && SUPABASE_DB_URL=\"${LFO_LOCAL_DB_URL:-postgres://${LFO_LOCAL_DB_USER:-postgres}:${LFO_LOCAL_DB_PASSWORD:-lfo_local}@127.0.0.1:5432/${LFO_LOCAL_DB_NAME:-lfo_local}?sslmode=disable}\" node --experimental-strip-types scripts/smoke-debt-contract.ts",
+    "smoke:local": "SUPABASE_DB_URL=\"${LFO_LOCAL_DB_URL:-postgres://${LFO_LOCAL_DB_USER:-postgres}:${LFO_LOCAL_DB_PASSWORD:-lfo_local}@127.0.0.1:5432/${LFO_LOCAL_DB_NAME:-lfo_local}?sslmode=disable}\" node --experimental-strip-types scripts/smoke-balance-sheet-v2.ts && SUPABASE_DB_URL=\"${LFO_LOCAL_DB_URL:-postgres://${LFO_LOCAL_DB_USER:-postgres}:${LFO_LOCAL_DB_PASSWORD:-lfo_local}@127.0.0.1:5432/${LFO_LOCAL_DB_NAME:-lfo_local}?sslmode=disable}\" node --experimental-strip-types scripts/smoke-debt-contract.ts && SUPABASE_DB_URL=\"${LFO_LOCAL_DB_URL:-postgres://${LFO_LOCAL_DB_USER:-postgres}:${LFO_LOCAL_DB_PASSWORD:-lfo_local}@127.0.0.1:5432/${LFO_LOCAL_DB_NAME:-lfo_local}?sslmode=disable}\" node --experimental-strip-types scripts/smoke-portfolio-ledger.ts",
     "gate:local": "npm run db:local:reset && npm run db:verify:local && npm run smoke:local",
     "smoke:debt-contract": "node --env-file=.env.local --experimental-strip-types scripts/smoke-debt-contract.ts",
-    "smoke:balance-sheet": "node --env-file=.env.local --experimental-strip-types scripts/smoke-balance-sheet-v2.ts"
+    "smoke:balance-sheet": "node --env-file=.env.local --experimental-strip-types scripts/smoke-balance-sheet-v2.ts",
+    "smoke:portfolio-ledger": "node --env-file=.env.local --experimental-strip-types scripts/smoke-portfolio-ledger.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.7.0",
     "@supabase/supabase-js": "2.56.1",
     "lucide-react": "1.9.0",
-    "next": "16.1.6",
+    "next": "16.3.3",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-is": "19.2.7",
@@ -42,7 +43,7 @@
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "eslint": "9.39.1",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "16.3.3",
     "pg": "8.23.0",
     "prettier": "^3.9.6",
     "typescript": "5.9.3",

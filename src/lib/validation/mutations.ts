@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { AS_OF_DATE } from "@/lib/data/shared";
+import { LEDGER_COVERAGE_SOURCES, LOT_MATCHING_METHODS, PORTFOLIO_EVENT_TYPES } from "@/lib/types";
 
 const finite = z.number().finite();
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -139,6 +140,135 @@ const debtContractSchema = z
     }
   });
 
+/**
+ * Saisie d'un événement de ledger portefeuille.
+ *
+ * Aucun montant ne reçoit de valeur par défaut : `null` traverse la validation tel quel
+ * et signifie « inconnu ». Les cohérences économiques (un achat sans titre, une cession
+ * sans quantité) sont contrôlées ici ET par la base : ce sont des non-sens, pas des
+ * approximations à corriger silencieusement.
+ */
+const portfolioEventSchema = z
+  .object({
+    accountId: z.uuid(),
+    type: z.enum(PORTFOLIO_EVENT_TYPES),
+    eventDate: realDate,
+    settlementDate: realDate.nullable(),
+    securityId: z.uuid().nullable(),
+    security: z
+      .object({
+        name: z.string().trim().min(1).max(160),
+        ticker: z.string().trim().min(1).max(24).nullable(),
+        isin: z.string().trim().length(12).nullable(),
+        currency: z.string().length(3).nullable(),
+        assetClass: z.string().trim().min(1).max(80).nullable(),
+      })
+      .strict()
+      .nullable(),
+    quantity: finite.positive().nullable(),
+    unitPrice: finite.nonnegative().nullable(),
+    grossAmount: finite.nonnegative().nullable(),
+    feeAmount: finite.nonnegative().nullable(),
+    taxAmount: finite.nonnegative().nullable(),
+    envelopeCashAmount: finite.nullable(),
+    currency: z.string().length(3),
+    counterpartyAccountId: z.uuid().nullable(),
+    transactionId: z.uuid().nullable(),
+    matchedAcquisitionEventId: z.uuid().nullable(),
+    externalReference: z.string().trim().min(1).max(160).nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((event, context) => {
+    const instrumentBound = ["OPENING_POSITION", "BUY", "SELL"].includes(event.type);
+    const cashOnly = ["OPENING_CASH", "CONTRIBUTION", "WITHDRAWAL"].includes(event.type);
+    const hasInstrument = event.securityId !== null || event.security !== null;
+    if (instrumentBound && !hasInstrument) {
+      context.addIssue({
+        code: "custom",
+        message: "Cet événement porte sur un instrument : il doit en désigner un",
+        path: ["security"],
+      });
+    }
+    if (cashOnly && hasInstrument) {
+      context.addIssue({
+        code: "custom",
+        message: "Un mouvement de cash d’enveloppe ne porte aucun instrument",
+        path: ["security"],
+      });
+    }
+    if (
+      (instrumentBound || (hasInstrument && event.type.startsWith("TRANSFER"))) &&
+      event.quantity === null
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "La quantité est obligatoire sur un mouvement d’instrument",
+        path: ["quantity"],
+      });
+    }
+    if (
+      event.matchedAcquisitionEventId !== null &&
+      !["SELL", "TRANSFER_OUT"].includes(event.type)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Un lot ne se désigne qu’à la cession",
+        path: ["matchedAcquisitionEventId"],
+      });
+    }
+    if (
+      event.counterpartyAccountId !== null &&
+      !["CONTRIBUTION", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT"].includes(event.type)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Une contrepartie bancaire n’a de sens que sur un flux externe",
+        path: ["counterpartyAccountId"],
+      });
+    }
+    // Un arbitrage interne ne traverse aucun compte bancaire : le rattacher à une
+    // transaction ferait compter le même euro deux fois dans le Cash Flow.
+    if (
+      event.transactionId !== null &&
+      !["CONTRIBUTION", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT"].includes(event.type)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Seul un flux externe à l’enveloppe se rattache à une transaction bancaire",
+        path: ["transactionId"],
+      });
+    }
+    if (event.settlementDate !== null && event.settlementDate < event.eventDate) {
+      context.addIssue({
+        code: "custom",
+        message: "Le règlement ne peut pas précéder l’opération",
+        path: ["settlementDate"],
+      });
+    }
+  });
+
+const portfolioPolicySchema = z
+  .object({
+    accountId: z.uuid(),
+    lotMatchingMethod: z.enum(LOT_MATCHING_METHODS).nullable(),
+    ledgerCoverageStart: realDate.nullable(),
+    ledgerCoverageSource: z.enum(LEDGER_COVERAGE_SOURCES).nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((policy, context) => {
+    // Une profondeur sans origine n'est pas traçable ; une origine sans profondeur ne
+    // déclare rien. Les deux vont ensemble ou aucune des deux n'existe.
+    if ((policy.ledgerCoverageStart === null) !== (policy.ledgerCoverageSource === null)) {
+      context.addIssue({
+        code: "custom",
+        message: "La profondeur d’historique et son origine se déclarent ensemble",
+        path: ["ledgerCoverageSource"],
+      });
+    }
+  });
+
 export const mutationSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("save_debt_contract"), contract: debtContractSchema }),
   z.object({
@@ -256,6 +386,9 @@ export const mutationSchema = z.discriminatedUnion("action", [
       .strict(),
   }),
   z.object({ action: z.literal("delete_recurring_rule"), ruleId: z.string().min(1) }),
+  z.object({ action: z.literal("record_portfolio_event"), event: portfolioEventSchema }),
+  z.object({ action: z.literal("delete_portfolio_event"), eventId: z.uuid() }),
+  z.object({ action: z.literal("set_portfolio_envelope_policy"), policy: portfolioPolicySchema }),
   z.object({
     action: z.literal("close_cash_flow_month"),
     month: z.string().regex(/^\d{4}-\d{2}$/, "Mois attendu au format AAAA-MM"),

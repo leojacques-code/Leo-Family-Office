@@ -17,6 +17,7 @@ import {
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
 import { debtCashOut, monthBounds } from "@/lib/engine/debt";
 import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
+import { buildPortfolioLedger } from "@/lib/engine/portfolio";
 import { deriveCanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
 import type { CurrencyRate } from "@/lib/engine/fx";
 import {
@@ -25,6 +26,7 @@ import {
   nullableFiniteNumber,
   requiredField,
 } from "@/lib/data/row-validation";
+import { readAllPages } from "@/lib/data/pagination";
 import type { FamilyOfficeRepository } from "@/lib/data/repository";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type {
@@ -39,16 +41,20 @@ import type {
   Liability,
   MonthlyClose,
   NetWorthSnapshot,
+  PortfolioEnvelopePolicy,
+  PortfolioEvent,
   Position,
   Provenance,
   RecurringCashFlowRule,
   Scenario,
   Transaction,
 } from "@/lib/types";
-import { CASH_FLOW_KINDS } from "@/lib/types";
-
-/** Garde-fou de pagination du ledger : 20 000 lignes sur la fenêtre lue. */
-const LEDGER_MAX_PAGES = 20;
+import {
+  CASH_FLOW_KINDS,
+  LEDGER_COVERAGE_SOURCES,
+  LOT_MATCHING_METHODS,
+  PORTFOLIO_EVENT_TYPES,
+} from "@/lib/types";
 
 type Row = Record<string, unknown>;
 
@@ -159,14 +165,31 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
    * et les taux de flux constatés dès que le ledger la dépassait. Le bornage est donc
    * temporel, et la pagination garantit que la fenêtre est lue en entier.
    */
+  /** Lecture intégrale d'une table du propriétaire. Une troncature échoue, elle ne se tait pas. */
+  function fetchAllPages(
+    table: string,
+    orderColumn: string,
+  ): Promise<{ data: Row[] | null; error: PostgrestError | null }> {
+    return readAllPages<Row, PostgrestError>(table, async (from, to) => {
+      const result = await db
+        .from(table)
+        .select("*")
+        .eq("user_id", user)
+        .order(orderColumn, { ascending: true })
+        .order("created_at", { ascending: true })
+        .range(from, to);
+      return { data: (result.data ?? null) as Row[] | null, error: result.error };
+    });
+  }
+
   async function fetchLedgerWindow(): Promise<{
     data: Row[] | null;
     error: PostgrestError | null;
   }> {
     const since = ledgerWindowStart(AS_OF_DATE);
-    const pageSize = 1000;
-    const rows: Row[] = [];
-    for (let page = 0; page < LEDGER_MAX_PAGES; page += 1) {
+    // Même règle que pour le ledger portefeuille : une fenêtre tronquée produirait des
+    // agrégats de flux calculés sur un historique amputé, sans que rien ne le signale.
+    return readAllPages<Row, PostgrestError>(`transactions depuis ${since}`, async (from, to) => {
       const result = await db
         .from("transactions")
         .select("*")
@@ -174,17 +197,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         .gte("transaction_date", since)
         .order("transaction_date", { ascending: false })
         .order("created_at", { ascending: false })
-        .range(page * pageSize, page * pageSize + pageSize - 1);
-      if (result.error) return { data: null, error: result.error };
-      const batch = (result.data ?? []) as Row[];
-      rows.push(...batch);
-      if (batch.length < pageSize) return { data: rows, error: null };
-    }
-    // Garde-fou : au-delà, la fenêtre est signalée plutôt que tronquée en silence.
-    console.warn(
-      `Ledger tronqué : plus de ${LEDGER_MAX_PAGES * pageSize} transactions depuis ${since}.`,
-    );
-    return { data: rows, error: null };
+        .range(from, to);
+      return { data: (result.data ?? null) as Row[] | null, error: result.error };
+    });
   }
 
   async function getDashboardState(): Promise<DashboardState> {
@@ -218,6 +233,8 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       currencyRateRows,
       netWorthSnapshotRows,
       liabilityObservationRows,
+      portfolioEventRows,
+      portfolioPolicyRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -248,6 +265,8 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("currency_rates"),
       mine("net_worth_snapshots"),
       mine("liability_balance_observations"),
+      fetchAllPages("portfolio_events", "event_date"),
+      mine("portfolio_envelope_policies"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -290,6 +309,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         return {
           id: str(row.id),
           accountId: str(row.account_id),
+          securityId: str(row.security_id),
           securityName: security ? str(security.name) : "",
           ticker: security ? optional(security.ticker) : undefined,
           assetClass: security ? (assetClassNames.get(str(security.asset_class_id)) ?? "") : "",
@@ -316,6 +336,78 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         };
       })
       .sort((a, b) => b.value - a.value);
+
+    const assetClassOfSecurity = (securityId: string): string | null => {
+      const security = securities.get(securityId);
+      if (!security) return null;
+      return assetClassNames.get(str(security.asset_class_id)) ?? null;
+    };
+    const portfolioEvents: PortfolioEvent[] = portfolioEventRows.map((row) => {
+      const context = `portfolio_events[id=${str(row.id)}]`;
+      const securityId = row.security_id ? str(row.security_id) : null;
+      const security = securityId ? securities.get(securityId) : undefined;
+      return {
+        id: str(row.id),
+        accountId: str(row.account_id),
+        securityId,
+        securityName: security ? str(security.name) : null,
+        ticker: security ? (optional(security.ticker) ?? null) : null,
+        assetClass: securityId ? assetClassOfSecurity(securityId) : null,
+        type: enumValue(
+          requiredField(row, "event_type", context),
+          PORTFOLIO_EVENT_TYPES,
+          `${context}.event_type`,
+        ) as PortfolioEvent["type"],
+        eventDate: str(row.event_date),
+        settlementDate: row.settlement_date ? str(row.settlement_date) : null,
+        quantity: nullableFiniteNumber(row.quantity, `${context}.quantity`),
+        unitPrice: nullableFiniteNumber(row.unit_price, `${context}.unit_price`),
+        grossAmount: nullableFiniteNumber(row.gross_amount, `${context}.gross_amount`),
+        feeAmount: nullableFiniteNumber(row.fee_amount, `${context}.fee_amount`),
+        taxAmount: nullableFiniteNumber(row.tax_amount, `${context}.tax_amount`),
+        envelopeCashAmount: nullableFiniteNumber(
+          row.envelope_cash_amount,
+          `${context}.envelope_cash_amount`,
+        ),
+        currency: str(row.currency),
+        counterpartyAccountId: row.counterparty_account_id
+          ? str(row.counterparty_account_id)
+          : null,
+        transactionId: row.transaction_id ? str(row.transaction_id) : null,
+        matchedAcquisitionEventId: row.matched_acquisition_event_id
+          ? str(row.matched_acquisition_event_id)
+          : null,
+        externalReference: row.external_reference ? str(row.external_reference) : null,
+        provenance: provenance(row),
+      };
+    });
+
+    const portfolioPolicies: PortfolioEnvelopePolicy[] = portfolioPolicyRows.map((row) => {
+      const context = `portfolio_envelope_policies[id=${str(row.id)}]`;
+      return {
+        id: str(row.id),
+        accountId: str(row.account_id),
+        // `null` reste `null` : une convention non déclarée n'est pas une convention par
+        // défaut, et une profondeur non déclarée n'est pas « depuis toujours ».
+        lotMatchingMethod: row.lot_matching_method
+          ? (enumValue(
+              str(row.lot_matching_method),
+              LOT_MATCHING_METHODS,
+              `${context}.lot_matching_method`,
+            ) as PortfolioEnvelopePolicy["lotMatchingMethod"])
+          : null,
+        ledgerCoverageStart: row.ledger_coverage_start ? str(row.ledger_coverage_start) : null,
+        ledgerCoverageSource: row.ledger_coverage_source
+          ? (enumValue(
+              str(row.ledger_coverage_source),
+              LEDGER_COVERAGE_SOURCES,
+              `${context}.ledger_coverage_source`,
+            ) as PortfolioEnvelopePolicy["ledgerCoverageSource"])
+          : null,
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
+      };
+    });
 
     const latestLiabilityObservations = latestBy(
       liabilityObservationRows,
@@ -646,6 +738,17 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       liabilities,
       currencyRates,
     });
+    // Le ledger portefeuille est une lecture DÉRIVÉE : il ne produit aucune ligne de bilan
+    // et n'entre dans aucun total patrimonial. Il mesure des écarts, il ne recompose rien.
+    const portfolioLedger = buildPortfolioLedger({
+      asOfDate: AS_OF_DATE,
+      accounts,
+      positions,
+      events: portfolioEvents,
+      policies: portfolioPolicies,
+      transactions,
+      expenseCategories,
+    });
     const balanceSheetMetrics = deriveCanonicalBalanceSheetMetrics({
       balanceSheet,
       liabilities,
@@ -667,6 +770,8 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       ledgerCoverageSource: coverage.source,
       accounts,
       positions,
+      portfolioEvents,
+      portfolioPolicies,
       liabilities,
       incomes,
       expenseCategories,
@@ -682,6 +787,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       documents,
       balanceSheet,
       balanceSheetMetrics,
+      portfolioLedger,
       metrics: composeDashboardMetrics({ balanceSheet, balanceSheetMetrics, flow: flowMetrics }),
       assumptions,
     };
@@ -1084,6 +1190,75 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             .eq("user_id", user)
             .select("id"),
           "suppression de règle récurrente",
+        );
+        break;
+      }
+      case "record_portfolio_event": {
+        const event = mutation.event;
+        unwrap(
+          await db.rpc("lfo_record_portfolio_event", {
+            p_user_id: user,
+            p_payload: {
+              account_id: event.accountId,
+              event_type: event.type,
+              event_date: event.eventDate,
+              settlement_date: event.settlementDate,
+              security: event.securityId
+                ? { id: event.securityId }
+                : event.security
+                  ? {
+                      name: event.security.name,
+                      ticker: event.security.ticker,
+                      isin: event.security.isin,
+                      currency: event.security.currency,
+                      asset_class: event.security.assetClass,
+                    }
+                  : null,
+              quantity: event.quantity,
+              unit_price: event.unitPrice,
+              gross_amount: event.grossAmount,
+              fee_amount: event.feeAmount,
+              tax_amount: event.taxAmount,
+              envelope_cash_amount: event.envelopeCashAmount,
+              currency: event.currency,
+              counterparty_account_id: event.counterpartyAccountId,
+              transaction_id: event.transactionId,
+              matched_acquisition_event_id: event.matchedAcquisitionEventId,
+              external_reference: event.externalReference,
+              data_kind: "ACTUAL",
+              confidence: "HIGH",
+              source: "Saisie ledger portefeuille",
+              notes: event.notes,
+            },
+          }),
+          "enregistrement atomique d’un événement de portefeuille",
+        );
+        break;
+      }
+      case "delete_portfolio_event": {
+        unwrap(
+          await db.rpc("lfo_delete_portfolio_event", {
+            p_user_id: user,
+            p_event_id: mutation.eventId,
+          }),
+          "suppression d’un événement de portefeuille",
+        );
+        break;
+      }
+      case "set_portfolio_envelope_policy": {
+        // `null` efface la déclaration : c'est une valeur, jamais un oubli.
+        unwrap(
+          await db.rpc("lfo_set_portfolio_envelope_policy", {
+            p_user_id: user,
+            p_payload: {
+              account_id: mutation.policy.accountId,
+              lot_matching_method: mutation.policy.lotMatchingMethod,
+              ledger_coverage_start: mutation.policy.ledgerCoverageStart,
+              ledger_coverage_source: mutation.policy.ledgerCoverageSource,
+              notes: mutation.policy.notes,
+            },
+          }),
+          "déclaration des conventions d’enveloppe",
         );
         break;
       }

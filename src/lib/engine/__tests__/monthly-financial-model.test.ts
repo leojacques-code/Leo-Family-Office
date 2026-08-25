@@ -646,6 +646,8 @@ describe("bilan d’ouverture", () => {
       ledgerCoverageSource: "MANUAL" as const,
       accounts,
       positions,
+      portfolioEvents: [],
+      portfolioPolicies: [],
       liabilities: [
         {
           id: "lia",

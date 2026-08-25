@@ -27,6 +27,12 @@ export interface FinancialAccount {
 export interface Position {
   id: string;
   accountId: string;
+  /**
+   * Instrument sous-jacent. Sert à rapprocher une position observée du ledger
+   * portefeuille sans passer par le libellé, qu'un renommage suffirait à désaligner.
+   * Optionnel : d'anciens fixtures n'en portent pas.
+   */
+  securityId?: string;
   securityName: string;
   ticker?: string;
   assetClass: string;
@@ -512,6 +518,104 @@ export interface DashboardMetrics extends DeclaredFlowMetrics {
 export const LEDGER_COVERAGE_SOURCES = ["MANUAL", "IMPORT", "API"] as const;
 export type LedgerCoverageSource = (typeof LEDGER_COVERAGE_SOURCES)[number];
 
+/**
+ * PORTFOLIO DATA FOUNDATION
+ *
+ * Une position observée dit ce qu'une ligne VAUT. Elle ne dit pas comment elle s'est
+ * constituée. Le ledger portefeuille porte cette seconde vérité : des faits datés, jamais
+ * un calcul. Lots, coût de revient et PnL réalisé en sont DÉRIVÉS par
+ * `src/lib/engine/portfolio.ts` ; ils ne sont pas persistés, sans quoi une correction
+ * d'événement laisserait derrière elle un coût de revient périmé.
+ */
+export const PORTFOLIO_EVENT_TYPES = [
+  /** Ancrage : la position telle qu'observée au début de la couverture déclarée. */
+  "OPENING_POSITION",
+  /** Ancrage : le cash d'enveloppe au début de la couverture déclarée. */
+  "OPENING_CASH",
+  "CONTRIBUTION",
+  "WITHDRAWAL",
+  "BUY",
+  "SELL",
+  "DIVIDEND",
+  /** Coupon obligataire ou intérêt crédité dans l'enveloppe. */
+  "INTEREST",
+  "FEE",
+  "TAX",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
+] as const;
+export type PortfolioEventType = (typeof PORTFOLIO_EVENT_TYPES)[number];
+
+/**
+ * Position d'un événement vis-à-vis de la FRONTIÈRE de l'enveloppe.
+ *
+ * `OPENING` n'est ni externe ni interne : c'est un point de départ observé. Le compter
+ * comme un apport ferait passer pour de l'argent neuf un capital déjà investi, et
+ * détruirait toute mesure de performance construite plus tard sur ce ledger.
+ *
+ * Un dividende encaissé DANS l'enveloppe est `INTERNAL` : c'est un rendement du capital
+ * déjà investi, jamais un apport. `DIVIDENDE ≠ CONTRIBUTION`.
+ */
+export type PortfolioFlowDirection = "OPENING" | "EXTERNAL_IN" | "EXTERNAL_OUT" | "INTERNAL";
+
+/**
+ * Convention d'appariement des lots à la cession. Elle change le coût de revient retenu,
+ * donc le PnL réalisé : le moteur ne la choisit jamais à la place de l'utilisateur.
+ */
+export const LOT_MATCHING_METHODS = ["FIFO", "LIFO", "WEIGHTED_AVERAGE", "SPECIFIC_LOT"] as const;
+export type LotMatchingMethod = (typeof LOT_MATCHING_METHODS)[number];
+
+export interface PortfolioEvent {
+  id: string;
+  /** Enveloppe qui porte l'événement. */
+  accountId: string;
+  /** `null` = événement de cash d'enveloppe, sans instrument. */
+  securityId: string | null;
+  securityName: string | null;
+  ticker: string | null;
+  assetClass: string | null;
+  type: PortfolioEventType;
+  eventDate: string;
+  settlementDate: string | null;
+  /** Toujours positive : la direction vient du type, jamais du signe. */
+  quantity: number | null;
+  unitPrice: number | null;
+  /** Montant brut, avant frais et taxes. */
+  grossAmount: number | null;
+  /** `null` = frais inconnus, jamais des frais nuls. */
+  feeAmount: number | null;
+  taxAmount: number | null;
+  /**
+   * Effet SIGNÉ sur le cash de l'enveloppe ; NIVEAU d'ancrage sur les deux types
+   * d'ouverture. `null` = effet inconnu, jamais nul.
+   */
+  envelopeCashAmount: number | null;
+  currency: string;
+  /** Contrepartie bancaire d'un flux externe. Aucune écriture n'en découle. */
+  counterpartyAccountId: string | null;
+  /** Jambe Cash Flow déjà existante. Le portefeuille ne reclasse ni ne crée aucun flux. */
+  transactionId: string | null;
+  /** Lot désigné, requis par la seule convention `SPECIFIC_LOT`. */
+  matchedAcquisitionEventId: string | null;
+  externalReference: string | null;
+  provenance: Provenance;
+}
+
+/** Ce que l'utilisateur a DÉCLARÉ d'une enveloppe. Un `null` y signifie « non déclaré ». */
+export interface PortfolioEnvelopePolicy {
+  id: string;
+  accountId: string;
+  lotMatchingMethod: LotMatchingMethod | null;
+  /**
+   * Date à partir de laquelle le ledger de CETTE enveloppe est exhaustif. Distincte de
+   * `DashboardState.ledgerCoverageStart`, qui porte sur le ledger bancaire.
+   */
+  ledgerCoverageStart: string | null;
+  ledgerCoverageSource: LedgerCoverageSource | null;
+  notes: string | null;
+  provenance: Provenance;
+}
+
 export interface DashboardState {
   asOfDate: string;
   reportingCurrency: string;
@@ -533,6 +637,10 @@ export interface DashboardState {
   ledgerCoverageSource: LedgerCoverageSource;
   accounts: FinancialAccount[];
   positions: Position[];
+  /** Ledger portefeuille : faits datés. Vide tant qu'aucun événement n'a été saisi. */
+  portfolioEvents: PortfolioEvent[];
+  /** Déclarations d'enveloppe. Une enveloppe sans entrée n'a rien déclaré. */
+  portfolioPolicies: PortfolioEnvelopePolicy[];
   liabilities: Liability[];
   incomes: IncomeSource[];
   expenseCategories: ExpenseCategory[];
@@ -550,6 +658,8 @@ export interface DashboardState {
   /** Vérité patrimoniale canonique ; absente seulement dans les anciens fixtures/tests. */
   balanceSheet?: import("@/lib/engine/balance-sheet").CanonicalBalanceSheet;
   balanceSheetMetrics?: import("@/lib/engine/balance-sheet-metrics").CanonicalBalanceSheetMetrics;
+  /** Lecture dérivée du ledger portefeuille ; absente seulement dans d'anciens fixtures. */
+  portfolioLedger?: import("@/lib/engine/portfolio").PortfolioLedger;
   assumptions: Array<{
     id: string;
     name: string;

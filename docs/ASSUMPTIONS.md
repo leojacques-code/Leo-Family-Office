@@ -98,3 +98,85 @@ positions non chiffrées ne sont pas inventées et aucun coût historique n'est 
 
 Une dépense essentielle manquante rend la couverture incomplète. Les échéances de dette n'entrent
 dans le cash flow exigible qu'à leur date contractuelle effective.
+
+## Contrat Portfolio Data Foundation
+
+Le ledger portefeuille est une couche de FAITS. Il ne produit aucun montant de bilan et
+n'entre dans aucun agrégat patrimonial : le Canonical Balance Sheet reste la vérité des
+montants, et les positions observées continuent d'expliquer les enveloppes sans s'y ajouter.
+
+### Nature des événements
+
+| Nature | Direction | Effet |
+| --- | --- | --- |
+| `OPENING_POSITION`, `OPENING_CASH` | `OPENING` | ancrage observé au début de la couverture déclarée ; ni apport, ni opération interne |
+| `CONTRIBUTION`, `TRANSFER_IN` | `EXTERNAL_IN` | argent ou titres neufs entrant dans l'enveloppe |
+| `WITHDRAWAL`, `TRANSFER_OUT` | `EXTERNAL_OUT` | sortie hors de l'enveloppe |
+| `BUY`, `SELL` | `INTERNAL` | arbitrage : cash d'enveloppe contre titres, et réciproquement |
+| `DIVIDEND`, `INTEREST` | `INTERNAL` | rendement du capital déjà investi, jamais un apport |
+| `FEE`, `TAX` | `INTERNAL` | coût économique supporté par l'enveloppe |
+
+La direction est DÉRIVÉE de la nature ; elle n'est ni saisie ni persistée. Un utilisateur ne
+peut pas décréter qu'un achat est un apport. Compter un ancrage d'ouverture comme un apport
+ferait passer pour de l'argent neuf un capital déjà investi et détruirait toute mesure de
+performance construite ensuite sur ce ledger.
+
+### Coût de revient et produit de cession
+
+Le mouvement de cash d'enveloppe observé prime : c'est ce qui est réellement sorti ou entré,
+frais et taxes inclus. À défaut, la reconstitution `brut + frais + taxes` (ou `brut − frais −
+taxes` à la cession) n'est retenue que si les trois composantes sont connues. Des frais
+inconnus ne sont pas des frais nuls : ils rendent le coût inconnu, et le moteur pose
+`ACQUISITION_FEES_UNKNOWN`. Quand les deux chemins sont disponibles et divergent au-delà d'un
+centime, l'écart est signalé plutôt qu'arbitré.
+
+Un transfert de titres entrant n'apporte aucun prix : son coût de revient est celui du lot
+d'origine, que LFO ne connaît pas (`TRANSFER_IN_COST_UNKNOWN`). Le déclarer nul fabriquerait une
+plus-value à la première vente.
+
+### Date d'analyse et ancrages
+
+Toute grandeur dérivée est datée. Un événement postérieur à la date d'analyse est conservé comme
+fait et compté dans `futureEventCount`, mais n'affecte ni le cash, ni les lots, ni les quantités,
+ni le PnL à cette date. Un événement daté du jour même de l'analyse est retenu.
+
+Un ancrage (`OPENING_CASH`, `OPENING_POSITION`) est un NIVEAU observé au début de la couverture,
+jamais un mouvement. Il contient déjà tout ce qui l'a précédé : les événements antérieurs sont
+écartés de la série dérivée et comptés dans `supersededEventCount`. Sur une même date, l'ancrage
+précède les opérations du jour, qui s'y ajoutent normalement.
+
+Trois cas rendent la dérivation impossible plutôt qu'approximative :
+
+- ancrage antérieur à la couverture déclarée : entre les deux dates, rien ne garantit
+  l'exhaustivité (`LEDGER_ANCHOR_BEFORE_COVERAGE`) ;
+- instrument sans ancrage dont des opérations précèdent la couverture : le stock de départ est
+  inconnu (`LEDGER_QUANTITY_NOT_ANCHORED`) ;
+- ancrage de cash absent alors qu'une couverture est déclarée (`LEDGER_CASH_ANCHOR_MISSING`).
+
+### Lot désigné (convention `SPECIFIC_LOT`)
+
+Une cession ne peut désigner qu'un événement qui ouvre réellement un lot du même instrument,
+dans la même enveloppe et pour le même propriétaire. Les quatre conditions sont portées par une
+clé étrangère composite, donc opposables à toute écriture, y compris hors RPC. Désigner le
+dividende encaissé sur la ligne, une autre vente ou le lot d'un titre voisin est refusé par la
+base : le moteur n'a pas à rattraper une donnée structurellement impossible.
+
+Sans désignation alors que la convention l'exige, le coût cédé reste `NOT_COMPUTABLE`
+(`SPECIFIC_LOT_REFERENCE_MISSING`) ; désigner un lot déjà épuisé donne
+`SPECIFIC_LOT_NOT_OPEN`.
+
+### Cash d'enveloppe dérivé
+
+`cash dérivé = ancrage OPENING_CASH + Σ mouvements de cash`. Il reste `null` sans ancrage, dès
+qu'un mouvement porte un effet inconnu, ou dès que le ledger mélange deux devises. L'écart avec
+le cash observé (positions `isCash` de l'enveloppe, dans la devise du compte) est chiffré et
+qualifié `RECONCILED` / `UNDER_EXPLAINED` / `OVER_EXPLAINED` / `MISSING`, jamais supposé nul.
+
+### Cas de référence
+
+Un PEA observé à 15 000 €, composé de 8 700 € d'ETF et 6 300 € de cash, sans aucun historique :
+le bilan affiche 15 000 €, le ledger affiche zéro événement, `Historique non déclaré`, et rend
+`NOT_COMPUTABLE` pour le cash dérivé, les lots et le coût de revient. Aucun achat n'est
+reconstitué. Dès que l'utilisateur saisit l'ancrage, un apport de 5 000 €, un achat de 20 ETF,
+5 € de frais, un dividende de 47 € et une vente partielle, le ledger explique la position et le
+cash correspondants, et l'écart avec l'observation devient mesurable.
