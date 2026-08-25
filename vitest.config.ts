@@ -3,7 +3,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    // Les scripts de vérification de schéma sont testés comme le reste : leur logique de
+    // comparaison décide si une divergence de base est détectée ou non.
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     coverage: { reporter: ["text", "json-summary"] },
   },
   resolve: {

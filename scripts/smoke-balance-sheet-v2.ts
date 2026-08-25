@@ -4,7 +4,10 @@ import pg from "pg";
 const { Client } = pg;
 const connectionString = process.env.SUPABASE_DB_URL;
 if (!connectionString) throw new Error("SUPABASE_DB_URL manquant");
-const client = new Client({ connectionString, ssl: true });
+// Même règle que le verifier : une cible locale n'a pas de TLS, une cible distante l'exige.
+const connectionUrl = new URL(connectionString);
+const localHost = ["localhost", "127.0.0.1", "::1"].includes(connectionUrl.hostname);
+const client = new Client({ connectionString, ssl: localHost ? false : true });
 
 type Counts = { closes: string; snapshots: string; items: string };
 

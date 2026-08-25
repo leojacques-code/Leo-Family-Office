@@ -67,7 +67,16 @@ npm run build
 npm run check
 ```
 
-`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 47 tables, colonnes, contraintes, 12 RPC, permissions, RLS, policies, bucket Storage ou 13 versions de migration divergent du code.
+`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 47 tables, colonnes, contraintes, 12 RPC, permissions, RLS, policies, bucket Storage ou l'historique de migration divergent du code. Le contrôle des migrations est symétrique : une version attendue absente échoue, et une version appliquée hors du dépôt échoue aussi.
+
+Le même contrôle s'exécute sans aucun credential, sur un PostgreSQL local jetable reconstruit depuis les seules migrations du dépôt :
+
+```bash
+npm run db:local:up
+npm run gate:local
+```
+
+Le dépôt déclare 15 migrations, égales à celles de la production. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
 
 ## Fonctionnalités
 
@@ -96,9 +105,12 @@ Les migrations sont appliquées dans cet ordre, sans modification rétroactive :
 11. `20260825020545_canonical_balance_sheet_v2.sql`
 12. `20260825021127_liability_currency_balance_sheet_v2.sql`
 13. `20260825021742_snapshot_item_owner_integrity.sql`
+14. `20260825063626_snapshot_item_owner_fk_index.sql`
+15. `20260825063831_snapshot_item_fk_covering_index.sql`
 
 La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persistance. Elle ne déplace aucune formule financière dans la base.
 Les migrations Canonical Balance Sheet V2 enrichissent et versionnent les snapshots, sans supprimer ni écraser les données historiques ; toutes les formules restent dans les engines TypeScript.
+Les migrations 14 et 15 ne portent que des index de `net_worth_snapshot_items` : la 15 remplace l'index de la 14, l'état final couvrant la FK composite `(snapshot_id, user_id)`.
 
 ## Sécurité
 

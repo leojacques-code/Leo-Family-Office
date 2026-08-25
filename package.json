@@ -17,6 +17,11 @@
     "check": "npm run lint && npm run test && npm run build",
     "seed:supabase": "node --env-file=.env.local --experimental-strip-types scripts/seed-supabase.ts",
     "db:verify": "node --env-file=.env.local --experimental-strip-types scripts/verify-supabase-schema.ts",
+    "db:local:up": "bash scripts/db-local-up.sh",
+    "db:local:reset": "node --experimental-strip-types scripts/db-local-reset.ts",
+    "db:verify:local": "SUPABASE_DB_URL=\"${LFO_LOCAL_DB_URL:-postgres://${LFO_LOCAL_DB_USER:-postgres}:${LFO_LOCAL_DB_PASSWORD:-lfo_local}@127.0.0.1:5432/${LFO_LOCAL_DB_NAME:-lfo_local}?sslmode=disable}\" node --experimental-strip-types scripts/verify-supabase-schema.ts",
+    "smoke:local": "SUPABASE_DB_URL=\"${LFO_LOCAL_DB_URL:-postgres://${LFO_LOCAL_DB_USER:-postgres}:${LFO_LOCAL_DB_PASSWORD:-lfo_local}@127.0.0.1:5432/${LFO_LOCAL_DB_NAME:-lfo_local}?sslmode=disable}\" node --experimental-strip-types scripts/smoke-balance-sheet-v2.ts && SUPABASE_DB_URL=\"${LFO_LOCAL_DB_URL:-postgres://${LFO_LOCAL_DB_USER:-postgres}:${LFO_LOCAL_DB_PASSWORD:-lfo_local}@127.0.0.1:5432/${LFO_LOCAL_DB_NAME:-lfo_local}?sslmode=disable}\" node --experimental-strip-types scripts/smoke-debt-contract.ts",
+    "gate:local": "npm run db:local:reset && npm run db:verify:local && npm run smoke:local",
     "smoke:debt-contract": "node --env-file=.env.local --experimental-strip-types scripts/smoke-debt-contract.ts",
     "smoke:balance-sheet": "node --env-file=.env.local --experimental-strip-types scripts/smoke-balance-sheet-v2.ts"
   },
