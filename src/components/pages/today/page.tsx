@@ -28,6 +28,7 @@ import {
   scenarioAssumptions,
   toAnnualPoints,
 } from "@/lib/engine/monthly-financial-model";
+import { buildCanonicalAllocation, canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
 import {
   Currency,
   DataBadge,
@@ -39,6 +40,8 @@ import {
 import {
   type SectionProps,
   assetsExplanation,
+  allocationExplanation,
+  allocationSliceLabel,
   cashFlowExplanation,
   chartCurrency,
   formatDate,
@@ -48,6 +51,8 @@ import {
 } from "@/components/pages/shared";
 
 function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
+  // Vérité unique de l'écran : le bilan canonique déjà calculé par le repository.
+  const sheet = canonicalBalanceSheetOf(state);
   const central =
     state.scenarios.find((scenario) => scenario.name === "Central") ?? state.scenarios[0];
   // Le graphique consomme le Personal Monthly Financial Model : bilan mois par mois,
@@ -64,38 +69,22 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
     debt: point.debt,
   }));
   const ALLOCATION_COLORS = ["#356b72", "#89a7a2", "#c0a66a", "#7d8fa8", "#b58a7a"];
-  const investmentAccountIds = new Set(
-    state.accounts
-      .filter((account) => account.type === "PEA" || account.type === "CTO")
-      .map((account) => account.id),
-  );
-  const positionsByClass = new Map<string, number>();
-  state.positions.forEach((position) => {
-    const key = position.isCash ? "Cash d’enveloppe" : position.assetClass;
-    positionsByClass.set(key, (positionsByClass.get(key) ?? 0) + position.value);
-  });
-  // Un compte d'investissement dont les positions n'expliquent pas le solde garde son
-  // reliquat visible plutôt que d'être aligné en silence sur la somme des positions.
-  const unallocated = state.accounts
-    .filter((account) => investmentAccountIds.has(account.id))
-    .reduce((sum, account) => {
-      const covered = state.positions
-        .filter((position) => position.accountId === account.id)
-        .reduce((total, position) => total + position.value, 0);
-      return sum + Math.max(0, account.balance - covered);
-    }, 0);
-  const allocation = [
-    ...[...positionsByClass.entries()]
-      .sort(([, a], [, b]) => b - a)
-      .map(([name, value], index) => ({
-        name,
-        value,
-        color: ALLOCATION_COLORS[index % ALLOCATION_COLORS.length],
-      })),
-    { name: "Solde non ventilé", value: unallocated, color: "#b1bcbd" },
-    { name: "Cash bancaire", value: state.metrics.bankCash ?? 0, color: "#dce5e2" },
-  ].filter((item) => item.value > 0);
-  const allocationTotal = allocation.reduce((sum, item) => sum + item.value, 0);
+  const SLICE_COLORS: Record<string, string> = {
+    BANK_CASH: "#dce5e2",
+    ENVELOPE_CASH: "#a8c3bd",
+    UNEXPOSED_ENVELOPE: "#b1bcbd",
+  };
+  // La ventilation est LUE sur le bilan canonique : classes d'actifs converties, cash
+  // d'enveloppe et reliquats non exposés. Aucune allocation n'est reconstruite ici à partir
+  // des positions natives, et la somme des tranches boucle sur les actifs financiers.
+  const allocationTruth = buildCanonicalAllocation(sheet);
+  const allocation = allocationTruth.slices.map((slice, index) => ({
+    name: allocationSliceLabel(slice),
+    value: slice.value,
+    unreliable: slice.unreliable,
+    color: SLICE_COLORS[slice.key] ?? ALLOCATION_COLORS[index % ALLOCATION_COLORS.length],
+  }));
+  const allocationTotal = allocationTruth.knownValue;
   const upcomingDebt = nextDebtEvent(state.liabilities, state.asOfDate);
   // Surplus réellement constaté au ledger. La moyenne n'existe que si la fenêtre est
   // couverte : un mois sans historique n'est pas un mois à zéro euro.
@@ -109,15 +98,21 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
     t3.end,
     { ledgerCoverageStart: state.ledgerCoverageStart, asOfDate: state.asOfDate },
   );
-  const runway = cashRunwayDays(
-    forecastCashFlow({
-      asOfDate: state.asOfDate,
-      horizonDays: 365,
-      openingCash: state.metrics.bankCash ?? 0,
-      rules: state.recurringRules,
-      liabilities: state.liabilities,
-    }),
-  );
+  // Une trésorerie d'ouverture non convertible n'est pas une trésorerie nulle : sans elle,
+  // la projection de trésorerie n'existe pas plutôt que de partir de zéro.
+  const openingCash = state.metrics.bankCash;
+  const runway =
+    openingCash === null
+      ? null
+      : cashRunwayDays(
+          forecastCashFlow({
+            asOfDate: state.asOfDate,
+            horizonDays: 365,
+            openingCash,
+            rules: state.recurringRules,
+            liabilities: state.liabilities,
+          }),
+        );
   const primaryGoal = state.goals[0];
 
   return (
@@ -192,7 +187,7 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
                       maximumFractionDigits: 1,
                     })} mois`}
               </span>{" "}
-              de dépenses essentielles connues
+              de sorties incompressibles connues
             </>
           }
           onExplain={() => setExplanation(liquidityExplanation(state))}
@@ -323,6 +318,12 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
               <span className="eyebrow">Allocation identifiée</span>
               <h2>Où sont les actifs</h2>
             </div>
+            <button
+              className="link-button"
+              onClick={() => setExplanation(allocationExplanation(state, allocationTruth))}
+            >
+              Explain calculation
+            </button>
           </div>
           <div className="allocation-content">
             <div className="donut-wrap">
@@ -356,14 +357,22 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
                   <span>
                     <i style={{ background: item.color }} />
                     {item.name}
+                    {item.unreliable ? " ·⚠" : ""}
                   </span>
                   <strong>
-                    <Percent value={item.value / allocationTotal} />
+                    <Percent value={allocationTotal === 0 ? null : item.value / allocationTotal} />
                   </strong>
                 </div>
               ))}
             </div>
           </div>
+          {allocationTruth.compositionStatus === "COMPLETE" ? null : (
+            <p className="muted-copy warning-text">
+              Ventilation partielle : {allocationTruth.blockers.join(", ")}. Le total reste la
+              valeur comptable des actifs financiers ; seule la répartition de la part concernée est
+              inconnue, les autres enveloppes gardent leur exposition.
+            </p>
+          )}
         </article>
         <article className="panel cashflow-card">
           <div className="panel-header">
@@ -433,7 +442,11 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
                 /mois
               </>
             )}
-            {runway !== null ? ` · trésorerie négative projetée dans ${runway} jours` : ""}
+            {openingCash === null
+              ? " · trésorerie de départ non convertible : projection de trésorerie non calculable"
+              : runway !== null
+                ? ` · trésorerie négative projetée dans ${runway} jours`
+                : ""}
           </p>
         </article>
         <article className="panel goals-card">

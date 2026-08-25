@@ -8,7 +8,8 @@ import {
   AS_OF_DATE,
   REPORTING_CURRENCY,
   SCENARIO_NAME_ORDER,
-  deriveMetrics,
+  composeDashboardMetrics,
+  deriveFlowMetrics,
   ledgerWindowStart,
   readLedgerCoverage,
   readLoanTerms,
@@ -652,12 +653,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       positions,
       snapshots: netWorthSnapshots,
     });
-    const legacyMetrics = deriveMetrics(
-      accounts,
+    const flowMetrics = deriveFlowMetrics(
       liabilities,
       incomes,
       expenseCategories,
-      positions,
       transactions,
       AS_OF_DATE,
     );
@@ -683,17 +682,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       documents,
       balanceSheet,
       balanceSheetMetrics,
-      metrics: {
-        ...legacyMetrics,
-        grossAssets: balanceSheet.grossAssets.value,
-        debt: balanceSheet.totalLiabilities.value,
-        netWorth: balanceSheet.netWorth.value,
-        bankCash: balanceSheet.immediateCash.value,
-        liquidAssets: balanceSheet.liquidAssets.value,
-        liquidNetWorth: balanceSheet.liquidNetWorth.value,
-        investedAssets: balanceSheet.marketInvestedAssets.value,
-        productiveNetWorth: balanceSheet.productiveNetWorth.value,
-      },
+      metrics: composeDashboardMetrics({ balanceSheet, balanceSheetMetrics, flow: flowMetrics }),
       assumptions,
     };
   }

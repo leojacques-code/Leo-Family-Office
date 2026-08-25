@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronRight, Landmark, Plus, Save } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Landmark, Plus, Save } from "lucide-react";
 import type { FinancialAccount } from "@/lib/types";
 import {
   Callout,
@@ -12,10 +12,15 @@ import {
   Percent,
   SectionHeader,
 } from "@/components/ui";
+import { canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
 import {
+  AccountTable,
+  ConversionNotice,
+  OptionalCurrency,
   type SectionProps,
   assetsExplanation,
   formatEur,
+  formatNative,
   inputNumber,
   netWorthExplanation,
 } from "@/components/pages/shared";
@@ -33,11 +38,11 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
   });
   const bank = state.accounts.filter((item) => item.type === "BANK" || item.type === "SAVINGS");
   const investments = state.accounts.filter((item) => item.type === "PEA" || item.type === "CTO");
-  // Aucune conversion FX n'est branchée : un compte en devise étrangère est signalé plutôt
-  // qu'agrégé silencieusement à 1 pour 1.
-  const foreignCurrencyAccounts = state.accounts.filter(
-    (item) => item.currency !== state.reportingCurrency,
-  );
+  // Vérité unique de l'écran : le bilan canonique, conversions de change incluses. Aucun
+  // solde natif n'est resommé localement.
+  const sheet = useMemo(() => canonicalBalanceSheetOf(state), [state]);
+  const debtLine = (liabilityId: string) =>
+    sheet.contributions.find((line) => line.id === `debt:${liabilityId}`) ?? null;
   async function save(event: React.FormEvent) {
     event.preventDefault();
     const ok = selected
@@ -135,14 +140,27 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
           onExplain={() =>
             setExplanation({
               title: "Liquid net worth",
-              formula: "Σ soldes des comptes dont la liquidité n’est pas ILLIQUID − Σ dettes",
+              formula:
+                "Σ soldes convertis des comptes dont la liquidité n’est pas ILLIQUID − Σ dettes converties",
               inputs: [
-                ...state.accounts.map((account) => ({
-                  label: `${account.name} · ${account.liquidity}`,
-                  value: formatEur(account.liquidity === "ILLIQUID" ? 0 : account.balance),
-                  kind: account.provenance.kind,
-                  date: account.balanceDate,
-                })),
+                ...sheet.contributions
+                  .filter(
+                    (line) =>
+                      line.domain === "FINANCIAL_ACCOUNT" &&
+                      line.side === "ASSET" &&
+                      line.isAccountingPrimary,
+                  )
+                  .map((line) => ({
+                    label: `${state.accounts.find((account) => account.id === line.entityId)?.name ?? line.entityId} · ${line.liquidity}`,
+                    value:
+                      line.liquidity === "ILLIQUID"
+                        ? formatEur(0)
+                        : line.currency === state.reportingCurrency
+                          ? formatEur(line.reportingValue)
+                          : `${formatNative(line.nativeValue, line.currency)} → ${formatEur(line.reportingValue)}`,
+                    kind: line.provenance.kind,
+                    date: line.valuationDate,
+                  })),
                 {
                   label: "Dettes identifiées",
                   value: formatEur(state.metrics.debt),
@@ -159,19 +177,22 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
         Ce bilan inclut uniquement les actifs et dettes déclarés. Il ne prétend pas représenter un
         patrimoine économique exhaustif.
       </Callout>
-      {foreignCurrencyAccounts.length ? (
-        <Callout tone="warning" title="Devises non converties">
-          {foreignCurrencyAccounts
-            .map((account) => `${account.name} (${account.currency})`)
-            .join(", ")}{" "}
-          {foreignCurrencyAccounts.length > 1 ? "sont agrégés" : "est agrégé"} en{" "}
-          {state.reportingCurrency} sans taux de change daté. Le total affiché est donc faux à
-          hauteur de l’écart de change tant qu’aucun taux n’est branché.
-        </Callout>
-      ) : null}
+      <ConversionNotice state={state} sheet={sheet} />
       <section className="two-column">
-        <AccountTable title="Cash bancaire" accounts={bank} onEdit={edit} />
-        <AccountTable title="Investissements" accounts={investments} onEdit={edit} />
+        <AccountTable
+          title="Cash bancaire"
+          accounts={bank}
+          sheet={sheet}
+          state={state}
+          onEdit={edit}
+        />
+        <AccountTable
+          title="Investissements"
+          accounts={investments}
+          sheet={sheet}
+          state={state}
+          onEdit={edit}
+        />
       </section>
       <section className="panel">
         <div className="panel-header">
@@ -190,11 +211,22 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <span>
                 {liability.lender} ·{" "}
                 {liability.annualRate === 0 ? "Taux 0 %" : <Percent value={liability.annualRate} />}
+                {debtLine(liability.id) && liability.currency
+                  ? liability.currency === state.reportingCurrency
+                    ? ""
+                    : ` · ${formatNative(liability.currentBalance, liability.currency)} → ${state.reportingCurrency}`
+                  : ""}
               </span>
             </div>
             <DataBadge kind={liability.provenance.kind} />
             <strong className="account-balance negative-text">
-              −<Currency value={liability.currentBalance} />
+              −
+              <OptionalCurrency
+                value={
+                  debtLine(liability.id)?.reportingValue ??
+                  (liability.currentBalance === 0 ? 0 : null)
+                }
+              />
             </strong>
           </div>
         ))}
@@ -292,52 +324,6 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
         </form>
       </Modal>
     </div>
-  );
-}
-
-function AccountTable({
-  title,
-  accounts,
-  onEdit,
-}: {
-  title: string;
-  accounts: FinancialAccount[];
-  onEdit: (account: FinancialAccount) => void;
-}) {
-  return (
-    <article className="panel">
-      <div className="panel-header">
-        <div>
-          <span className="eyebrow">Actifs</span>
-          <h2>{title}</h2>
-        </div>
-        <strong>
-          <Currency value={accounts.reduce((sum, item) => sum + item.balance, 0)} />
-        </strong>
-      </div>
-      <div className="account-list">
-        {accounts.map((account) => (
-          <button
-            className="account-row account-button"
-            key={account.id}
-            onClick={() => onEdit(account)}
-          >
-            <span className="account-logo">{account.institution.slice(0, 2).toUpperCase()}</span>
-            <div className="account-main">
-              <strong>{account.name}</strong>
-              <span>
-                {account.institution} · {account.currency}
-              </span>
-            </div>
-            <DataBadge kind={account.provenance.kind} />
-            <strong className={`account-balance ${account.balance < 0 ? "negative-text" : ""}`}>
-              <Currency value={account.balance} />
-            </strong>
-            <ChevronRight size={15} />
-          </button>
-        ))}
-      </div>
-    </article>
   );
 }
 

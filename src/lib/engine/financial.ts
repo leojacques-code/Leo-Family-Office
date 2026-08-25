@@ -1,4 +1,14 @@
-import type { FinancialAccount, Liability, Scenario } from "@/lib/types";
+import type { Scenario } from "@/lib/types";
+
+/**
+ * Primitives financières génériques (capitalisation, actualisation, TRI, amortissement).
+ *
+ * Ce module ne porte AUCUNE vérité patrimoniale : le patrimoine net, les actifs bruts et
+ * toute conversion de change appartiennent au Canonical Balance Sheet et au FX Engine. Les
+ * anciens `calculateNetWorth` et `fxConvert` ont été supprimés pour cette raison : ils
+ * additionnaient des soldes sans devise et convertissaient sans taux daté, c'est-à-dire
+ * qu'ils constituaient une seconde vérité, non datée et non traçable.
+ */
 
 export interface AmortizationRow {
   paymentNumber: number;
@@ -21,11 +31,6 @@ export function compoundReturn(
 
 export function realValue(nominalValue: number, annualInflation: number, years: number): number {
   return nominalValue / Math.pow(1 + annualInflation, years);
-}
-
-export function fxConvert(amount: number, eurPerUnit: number): number {
-  if (eurPerUnit <= 0) throw new Error("FX rate must be positive");
-  return amount * eurPerUnit;
 }
 
 export function amortizeLoan(
@@ -107,24 +112,6 @@ export function irr(cashFlows: number[], guess = 0.1): number | null {
 export function moic(totalDistributions: number, investedCapital: number): number {
   if (investedCapital <= 0) throw new Error("Invested capital must be positive");
   return totalDistributions / investedCapital;
-}
-
-export function calculateNetWorth(
-  accounts: Pick<FinancialAccount, "balance">[],
-  liabilities: Pick<Liability, "currentBalance">[],
-) {
-  const grossAssets = accounts.reduce((sum, account) => sum + Math.max(account.balance, 0), 0);
-  const accountLiabilities = accounts.reduce(
-    (sum, account) => sum + Math.max(-account.balance, 0),
-    0,
-  );
-  const contractualDebt = liabilities.reduce(
-    (sum, liability) => sum + Math.max(liability.currentBalance, 0),
-    0,
-  );
-  const debt = accountLiabilities + contractualDebt;
-  const netWorth = grossAssets - debt;
-  return { grossAssets, debt, netWorth };
 }
 
 export function applyScenarioOverrides<T extends Record<string, unknown>>(

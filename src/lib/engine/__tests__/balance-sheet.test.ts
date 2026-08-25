@@ -356,6 +356,70 @@ describe("canonical balance sheet invariants", () => {
   });
 });
 
+describe("lignes de position canoniques", () => {
+  function position(overrides: Partial<Position> = {}): Position {
+    return {
+      id: "p1",
+      accountId: "pea",
+      securityName: "Titre test",
+      assetClass: "Actions",
+      value: 1000,
+      currency: "EUR",
+      isCash: false,
+      provenance: actual,
+      ...overrides,
+    };
+  }
+
+  it("porte la classe d’actif et l’enveloppe qui l’explique", () => {
+    const result = sheet({
+      accounts: [account("pea", 1000, "PEA")],
+      positions: [position()],
+    });
+    const line = result.contributions.find((item) => item.id === "position:p1");
+    expect(line?.subcategory).toBe("Actions");
+    expect(line?.envelopeAccountId).toBe("pea");
+    expect(line?.isAccountingPrimary).toBe(false);
+  });
+
+  it("convertit le coût d’acquisition au même taux que la valeur", () => {
+    const result = sheet({
+      accounts: [account("cto", 900, "CTO")],
+      positions: [position({ currency: "USD", costBasis: 800 })],
+      currencyRates: [
+        {
+          baseCurrency: "USD",
+          quoteCurrency: "EUR",
+          rate: 0.9,
+          rateDate: "2026-08-23",
+          provenance: external,
+        },
+      ],
+    });
+    const line = result.contributions.find((item) => item.id === "position:p1");
+    expect(line?.nativeCostBasis).toBe(800);
+    expect(line?.reportingCostBasis).toBeCloseTo(720, 6);
+    expect(line?.flags).toContain("FX_PNL_NOT_ISOLATED");
+  });
+
+  it("laisse le coût d’acquisition inconnu à null plutôt qu’à zéro", () => {
+    const result = sheet({ accounts: [account("pea", 1000, "PEA")], positions: [position()] });
+    const line = result.contributions.find((item) => item.id === "position:p1");
+    expect(line?.nativeCostBasis).toBeNull();
+    expect(line?.reportingCostBasis).toBeNull();
+  });
+
+  it("signale une position logée hors enveloppe d’investissement", () => {
+    const result = sheet({
+      accounts: [account("bank", 1000, "BANK")],
+      positions: [position({ accountId: "bank" })],
+    });
+    expect(result.quality.flags).toContain("POSITION_OUTSIDE_ENVELOPE:p1");
+    // Aucune enveloppe, donc aucune exposition projetable revendiquée sur ce compte.
+    expect(result.envelopeExposures).toHaveLength(0);
+  });
+});
+
 describe("net-worth attribution", () => {
   it("keeps an unexplained residual instead of inventing market PnL", () => {
     expect(

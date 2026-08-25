@@ -464,7 +464,33 @@ export interface DocumentRecord {
   status: "INBOX" | "CLASSIFIED";
 }
 
-export interface DashboardMetrics {
+/**
+ * Métriques de FLUX déclarés du cockpit.
+ *
+ * Elles ne sortent pas encore du Canonical Balance Sheet : ce sont des agrégats de
+ * revenus, de dépenses et de service de dette déclarés, sans conversion de change (aucun
+ * de ces objets ne porte de devise dans le modèle actuel, ils sont donc implicitement en
+ * devise de reporting). Les remplacer suppose de faire du Cash Flow Engine V2 la source
+ * unique des flux du cockpit : c'est un chantier Cash Flow, pas un alignement de
+ * consommateur, et il reste hors de ce périmètre.
+ */
+export interface DeclaredFlowMetrics {
+  monthlyIncome: number;
+  monthlyExpenses: number;
+  monthlyDebtService: number;
+  freeCashFlow: number;
+  /** Flux constatés au ledger. `null` = non calculable faute de flux observés. */
+  savingsRate: number | null;
+  investmentRate: number | null;
+  dataCompleteness: number;
+}
+
+/**
+ * Métriques du cockpit. Tout ce qui relève du bilan vient EXCLUSIVEMENT du Canonical
+ * Balance Sheet : aucune de ces valeurs n'est resommée localement à partir des soldes
+ * natifs, sans quoi deux vérités patrimoniales coexisteraient.
+ */
+export interface DashboardMetrics extends DeclaredFlowMetrics {
   grossAssets: number | null;
   debt: number | null;
   netWorth: number | null;
@@ -475,16 +501,8 @@ export interface DashboardMetrics {
   liquidNetWorth: number | null;
   investedAssets: number | null;
   productiveNetWorth: number | null;
-  monthlyIncome: number;
-  monthlyExpenses: number;
-  monthlyDebtService: number;
-  freeCashFlow: number;
-  /** Flux constatés au ledger. `null` = non calculable faute de flux observés. */
-  savingsRate: number | null;
-  investmentRate: number | null;
   /** `null` signifie que les sorties incompressibles sont inconnues ou nulles. */
   emergencyCoverageMonths: number | null;
-  dataCompleteness: number;
 }
 
 /**

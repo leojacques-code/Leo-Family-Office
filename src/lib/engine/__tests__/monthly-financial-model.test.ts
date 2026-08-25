@@ -14,6 +14,7 @@ import {
 } from "@/lib/engine/monthly-financial-model";
 import { FINANCING_COST_FLAG, FUNDING_GAP_FLAG } from "@/lib/engine/monthly-financial-model";
 import { runMonteCarlo } from "@/lib/engine/monte-carlo";
+import { canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
 import type { DashboardState, Liability, Provenance, Scenario } from "@/lib/types";
 
 const provenance: Provenance = { kind: "ACTUAL", confidence: "HIGH" };
@@ -729,6 +730,144 @@ describe("bilan d’ouverture", () => {
     expect(result.states[0].netWorth).toBe(300);
     expect(result.states[12].otherLiabilityBalance).toBe(200);
     expect(result.states[12].netWorth).toBe(300);
+  });
+});
+
+/**
+ * OUVERTURE MULTI-ENVELOPPES
+ *
+ * Le cas de référence du gate : PEA 50 000 € réconcilié, CTO 2 000 € over-explained. Une
+ * seule enveloppe incohérente ne doit jamais neutraliser l'exposition connue des autres.
+ */
+describe("bilan d'ouverture — expositions enveloppe par enveloppe", () => {
+  function envelopeState(overrides: { ctoPositionValue: number }) {
+    const accounts = [
+      {
+        id: "acc_bank",
+        institutionId: "i",
+        institution: "Banque test",
+        name: "Compte courant test",
+        type: "BANK" as const,
+        currency: "EUR",
+        balance: 1000,
+        balanceDate: "2026-08-19",
+        liquidity: "IMMEDIATE" as const,
+        provenance,
+      },
+      {
+        id: "acc_pea",
+        institutionId: "i",
+        institution: "Courtier test",
+        name: "PEA test",
+        type: "PEA" as const,
+        currency: "EUR",
+        balance: 50_000,
+        balanceDate: "2026-08-19",
+        liquidity: "LIQUID" as const,
+        provenance,
+      },
+      {
+        id: "acc_cto",
+        institutionId: "i",
+        institution: "Courtier test",
+        name: "CTO test",
+        type: "CTO" as const,
+        currency: "EUR",
+        balance: 2000,
+        balanceDate: "2026-08-19",
+        liquidity: "LIQUID" as const,
+        provenance,
+      },
+    ];
+    const positions = [
+      {
+        id: "pea_eq",
+        accountId: "acc_pea",
+        securityName: "Position cotée test",
+        assetClass: "Actions",
+        value: 40_000,
+        currency: "EUR",
+        isCash: false,
+        provenance,
+      },
+      {
+        id: "pea_cash",
+        accountId: "acc_pea",
+        securityName: "Cash interne test",
+        assetClass: "Cash",
+        value: 10_000,
+        currency: "EUR",
+        isCash: true,
+        provenance,
+      },
+      {
+        id: "cto_eq",
+        accountId: "acc_cto",
+        securityName: "Position test à ventiler",
+        assetClass: "Actions",
+        value: overrides.ctoPositionValue,
+        currency: "EUR",
+        isCash: false,
+        provenance,
+      },
+    ];
+    return {
+      asOfDate: "2026-08-19",
+      reportingCurrency: "EUR",
+      accounts,
+      positions,
+      liabilities: [],
+      currencyRates: [],
+    } as unknown as DashboardState;
+  }
+
+  it("conserve l’exposition du PEA malgré un CTO over-explained", () => {
+    const opening = buildOpeningBalanceSheet(envelopeState({ ctoPositionValue: 2500 }));
+    expect(opening.marketInvestedAssets).toBeCloseTo(40_000, 6);
+    expect(opening.investmentCash).toBeCloseTo(10_000, 6);
+    // Les 2 000 € du CTO restent au bilan, sans exposition inventée.
+    expect(opening.otherFinancialAssets).toBeCloseTo(2000, 6);
+    expect(opening.grossFinancialAssets).toBeCloseTo(53_000, 6);
+    expect(opening.bankCash).toBeCloseTo(1000, 6);
+    expect(opening.netWorth).toBeCloseTo(53_000, 6);
+    expect(opening.flags).toContain("ENVELOPE_EXPOSURE_UNKNOWN:acc_cto");
+    expect(opening.flags).toContain("POSITION_OVER_EXPLAINED:acc_cto");
+  });
+
+  it("projette l’exposition connue au lieu d’un portefeuille nul", () => {
+    const state = envelopeState({ ctoPositionValue: 2500 });
+    const result = runDeterministicModel(
+      buildOpeningBalanceSheet(state),
+      [],
+      assumptions({ operatingSurplus: 0, annualReturn: 0.1 }),
+      12,
+    );
+    // 40 000 € réellement exposés produisent un rendement ; un portefeuille neutralisé
+    // aurait laissé le patrimoine strictement constant.
+    expect(result.states[12].marketInvestedAssets).toBeCloseTo(44_000, 2);
+    expect(result.states[12].netWorth).toBeGreaterThan(result.states[0].netWorth);
+    expect(result.states[12].otherFinancialAssets).toBeCloseTo(2000, 6);
+  });
+
+  it("préserve le mois zéro égal au patrimoine net canonique", () => {
+    const state = envelopeState({ ctoPositionValue: 2500 });
+    const canonical = canonicalBalanceSheetOf(state);
+    const result = runDeterministicModel(
+      buildOpeningBalanceSheet(state),
+      [],
+      assumptions({ operatingSurplus: 500 }),
+      6,
+    );
+    expect(result.states[0].netWorth).toBeCloseTo(canonical.netWorth.value!, 6);
+    expect(result.states[0].monthIndex).toBe(0);
+  });
+
+  it("expose intégralement les deux enveloppes quand elles sont réconciliées", () => {
+    const opening = buildOpeningBalanceSheet(envelopeState({ ctoPositionValue: 2000 }));
+    expect(opening.marketInvestedAssets).toBeCloseTo(42_000, 6);
+    expect(opening.investmentCash).toBeCloseTo(10_000, 6);
+    expect(opening.otherFinancialAssets).toBeCloseTo(0, 6);
+    expect(opening.flags).not.toContain("ENVELOPE_EXPOSURE_UNKNOWN:acc_cto");
   });
 });
 

@@ -1,5 +1,6 @@
-import { calculateNetWorth } from "@/lib/engine/financial";
 import { addMonths, monthBounds, monthlyDebtServiceAt } from "@/lib/engine/debt";
+import type { CanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
+import type { CanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
 import { LEDGER_COVERAGE_SOURCES } from "@/lib/types";
 import {
@@ -13,6 +14,7 @@ import {
 } from "@/lib/data/row-validation";
 import type {
   DashboardMetrics,
+  DeclaredFlowMetrics,
   DeferralKind,
   DeferredInterestTreatment,
   EarlyRepayment,
@@ -30,9 +32,7 @@ import type {
   RateChange,
   RateType,
   ExpenseCategory,
-  FinancialAccount,
   IncomeSource,
-  Position,
   Transaction,
 } from "@/lib/types";
 
@@ -308,31 +308,24 @@ export function computeFlowRates(
 }
 
 /**
- * Dérivation des métriques du cockpit.
+ * Dérivation des métriques de FLUX du cockpit.
  *
- * Les grandeurs datées (service de dette, flux constatés) sont calculées sur le mois
- * civil contenant `asOfDate` : aucune borne de date littérale n'intervient plus.
+ * Aucune grandeur de bilan n'est calculée ici : patrimoine net, actifs, cash, liquidité et
+ * couverture de liquidité viennent du Canonical Balance Sheet et de ses métriques. Cette
+ * fonction ne lit donc plus ni compte ni position : une somme de soldes natifs additionne
+ * des devises différentes sans le dire, et faisait coexister une seconde vérité
+ * patrimoniale avec la vérité canonique.
+ *
+ * Les grandeurs datées (service de dette, flux constatés) sont calculées sur le mois civil
+ * contenant `asOfDate` : aucune borne de date littérale n'intervient.
  */
-export function deriveMetrics(
-  accounts: FinancialAccount[],
+export function deriveFlowMetrics(
   liabilities: Liability[],
   incomes: IncomeSource[],
   expenses: ExpenseCategory[],
-  positions: Position[],
   transactions: Transaction[] = [],
   asOfDate: string = AS_OF_DATE,
-): DashboardMetrics {
-  const { grossAssets, debt, netWorth } = calculateNetWorth(accounts, liabilities);
-  const bankCash = accounts
-    .filter((account) => account.type === "BANK" || account.type === "SAVINGS")
-    .reduce((sum, account) => sum + Math.max(account.balance, 0), 0);
-  // La liquidité est portée par le champ `liquidity`, jamais déduite du type de compte.
-  const liquidAssets = accounts
-    .filter((account) => account.liquidity !== "ILLIQUID")
-    .reduce((sum, account) => sum + Math.max(account.balance, 0), 0);
-  const investedAssets = positions
-    .filter((position) => !position.isCash)
-    .reduce((sum, position) => sum + position.value, 0);
+): DeclaredFlowMetrics {
   const monthlyIncome = incomes
     .filter((income) => income.active)
     .reduce((sum, income) => sum + (income.monthlyNet ?? 0), 0);
@@ -343,13 +336,7 @@ export function deriveMetrics(
   );
   const monthlyDebtService = monthlyDebtServiceAt(liabilities, asOfDate);
   const freeCashFlow = monthlyIncome - monthlyExpenses - monthlyDebtService;
-  const essentialExpenses = expenses
-    .filter((expense) => expense.essential && expense.monthlyAmount !== null)
-    .reduce((sum, expense) => sum + (expense.monthlyAmount ?? 0), 0);
-  // Le service de dette est incompressible : la réserve doit le couvrir au même titre
-  // que le loyer. À une date sans échéance exigible, le dénominateur est inchangé.
-  const incompressibleExpenses = essentialExpenses + monthlyDebtService;
-  const completeFields = expenses.filter((expense) => expense.monthlyAmount !== null).length;
+  const completeFields = knownExpenses.length;
   const period = monthBounds(asOfDate);
   const { savingsRate, investmentRate } = computeFlowRates(
     transactions,
@@ -358,28 +345,43 @@ export function deriveMetrics(
     period.end,
   );
   return {
-    grossAssets,
-    debt,
-    netWorth,
-    bankCash,
-    liquidAssets,
-    liquidNetWorth: liquidAssets - debt,
-    investedAssets,
-    // Conservé uniquement pour compatibilité UI : la vraie métrique V2 est explicitement
-    // NOT_COMPUTABLE tant que les passifs ne sont pas attribués aux actifs productifs.
-    productiveNetWorth: investedAssets,
     monthlyIncome,
     monthlyExpenses,
     monthlyDebtService,
     freeCashFlow,
     savingsRate,
     investmentRate,
-    emergencyCoverageMonths:
-      expenses.some((expense) => expense.essential && expense.monthlyAmount === null) ||
-      incompressibleExpenses === 0
-        ? null
-        : bankCash / incompressibleExpenses,
     dataCompleteness: expenses.length === 0 ? 0 : completeFields / expenses.length,
+  };
+}
+
+/**
+ * Composition des métriques du cockpit : structure canonique + flux déclarés.
+ *
+ * Point de passage UNIQUE entre le bilan canonique et l'écran. Tout ce qui touche au
+ * patrimoine y est recopié tel quel depuis le bilan, `null` compris : une valeur non
+ * convertible reste non calculable et ne devient jamais zéro.
+ */
+export function composeDashboardMetrics(input: {
+  balanceSheet: CanonicalBalanceSheet;
+  balanceSheetMetrics: CanonicalBalanceSheetMetrics;
+  flow: DeclaredFlowMetrics;
+}): DashboardMetrics {
+  const { balanceSheet: sheet } = input;
+  return {
+    ...input.flow,
+    grossAssets: sheet.grossAssets.value,
+    debt: sheet.totalLiabilities.value,
+    netWorth: sheet.netWorth.value,
+    bankCash: sheet.immediateCash.value,
+    liquidAssets: sheet.liquidAssets.value,
+    liquidNetWorth: sheet.liquidNetWorth.value,
+    investedAssets: sheet.marketInvestedAssets.value,
+    productiveNetWorth: sheet.productiveNetWorth.value,
+    // Couverture canonique : cash immédiat converti ÷ (dépenses essentielles connues +
+    // décaissements de dette exigibles à 30 jours). Le dénominateur est la fenêtre à 30
+    // jours du Debt Engine, et non plus le mois civil de l'ancien calcul local.
+    emergencyCoverageMonths: input.balanceSheetMetrics.liquidity.cashCoverageMonths.value,
   };
 }
 
