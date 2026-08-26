@@ -15,6 +15,8 @@ import {
 import { FINANCING_COST_FLAG, FUNDING_GAP_FLAG } from "@/lib/engine/monthly-financial-model";
 import { runMonteCarlo } from "@/lib/engine/monte-carlo";
 import { canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
+import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
+import type { CanonicalBalanceSheetContribution } from "@/lib/engine/balance-sheet";
 import type { DashboardState, Liability, Provenance, Scenario } from "@/lib/types";
 
 const provenance: Provenance = { kind: "ACTUAL", confidence: "HIGH" };
@@ -29,6 +31,7 @@ function opening(overrides: Partial<OpeningBalanceSheet> = {}): OpeningBalanceSh
     investmentCash: 0,
     otherFinancialAssets: 0,
     grossFinancialAssets: 0,
+    nonFinancialAssets: 0,
     loanBalance: 0,
     otherLiabilityBalance: 0,
     fundingGap: 0,
@@ -648,6 +651,11 @@ describe("bilan d’ouverture", () => {
       positions,
       portfolioEvents: [],
       portfolioPolicies: [],
+      realEstateAssets: [],
+      realEstateValuations: [],
+      realEstateCapitalEvents: [],
+      realEstateOperatingTerms: [],
+      realEstateFinancingLinks: [],
       liabilities: [
         {
           id: "lia",
@@ -1385,5 +1393,102 @@ describe("CASE DM6 — frais financé à travers le bilan mensuel", () => {
       months.reduce((sum, state) => sum + state.economicDebtCosts, 0),
       9,
     );
+  });
+});
+
+describe("CASE K — actifs non financiers au bilan d'ouverture", () => {
+  const property: CanonicalBalanceSheetContribution = {
+    id: "real-estate:prop",
+    entityId: "prop",
+    domain: "REAL_ESTATE",
+    side: "ASSET",
+    category: "PROPERTY",
+    nativeValue: 300_000,
+    currency: "EUR",
+    valuationDate: "2026-06-30",
+    valuationMethod: "EXTERNAL_VALUATION",
+    valuationStatus: "CURRENT",
+    liquidity: "ILLIQUID",
+    provenance: { kind: "EXTERNAL_DATA", confidence: "MEDIUM" },
+    confidence: "MEDIUM",
+    reconciliationState: "NOT_APPLICABLE",
+    isAccountingPrimary: true,
+    flags: [],
+  };
+
+  /** État minimal : un compte bancaire, éventuellement un actif non financier. */
+  function stateWith(contributions: CanonicalBalanceSheetContribution[]): DashboardState {
+    const accounts = [
+      {
+        id: "acc",
+        institutionId: "inst",
+        institution: "Banque",
+        name: "Compte courant",
+        type: "BANK" as const,
+        currency: "EUR",
+        balance: 20_000,
+        balanceDate: "2026-08-19",
+        liquidity: "IMMEDIATE" as const,
+        provenance,
+      },
+    ];
+    return {
+      asOfDate: "2026-08-19",
+      reportingCurrency: "EUR",
+      accounts,
+      positions: [],
+      liabilities: [],
+      currencyRates: [],
+      balanceSheet: buildCanonicalBalanceSheet({
+        asOfDate: "2026-08-19",
+        reportingCurrency: "EUR",
+        accounts,
+        positions: [],
+        liabilities: [],
+        contributions,
+        currencyRates: [],
+      }),
+    } as unknown as DashboardState;
+  }
+
+  it("porte l'actif non financier constant sans lui inventer de rendement", () => {
+    const opening = buildOpeningBalanceSheet(stateWith([property]));
+    expect(opening.grossFinancialAssets).toBeCloseTo(20_000, 6);
+    expect(opening.nonFinancialAssets).toBeCloseTo(300_000, 6);
+    expect(opening.netWorth).toBeCloseTo(320_000, 6);
+    expect(opening.flags).toContain("NON_FINANCIAL_ASSET_PROJECTION_TERMS_MISSING");
+
+    const model = runDeterministicModel(opening, [], assumptions({ operatingSurplus: 0 }), 12);
+    // Le mois 0 et le mois 1 portent le même patrimoine : aucun changement de périmètre
+    // ne se déguise en variation de patrimoine.
+    expect(model.states[1].netWorth).toBeCloseTo(model.states[0].netWorth, 6);
+    expect(model.states[12].nonFinancialAssets).toBeCloseTo(300_000, 6);
+    // Constant : ni capitalisé, ni effacé.
+    expect(model.states[12].netWorth).toBeCloseTo(320_000, 6);
+  });
+
+  it("reste projetable quand un actif non financier n'est pas valorisable", () => {
+    const unvalued: CanonicalBalanceSheetContribution = {
+      ...property,
+      id: "real-estate:prop2",
+      entityId: "prop2",
+      nativeValue: null,
+      valuationStatus: "MISSING",
+      valuationBlockers: ["REAL_ESTATE_VALUATION_MISSING:prop2"],
+    };
+    const opening = buildOpeningBalanceSheet(stateWith([property, unvalued]));
+    // Le bien non valorisable est exclu, pas compté pour zéro, et l'exclusion est signalée.
+    expect(opening.nonFinancialAssets).toBeCloseTo(300_000, 6);
+    expect(opening.flags).toContain("NON_FINANCIAL_ASSET_VALUE_PARTIAL");
+    const model = runDeterministicModel(opening, [], assumptions({ operatingSurplus: 0 }), 3);
+    expect(model.states[1].netWorth).toBeCloseTo(model.states[0].netWorth, 6);
+  });
+
+  it("sans actif non financier, le mois zéro reste le patrimoine net canonique", () => {
+    const state = stateWith([]);
+    const opening = buildOpeningBalanceSheet(state);
+    expect(opening.nonFinancialAssets).toBeCloseTo(0, 6);
+    expect(opening.netWorth).toBeCloseTo(canonicalBalanceSheetOf(state).netWorth.value!, 6);
+    expect(opening.flags).not.toContain("NON_FINANCIAL_ASSET_PROJECTION_TERMS_MISSING");
   });
 });

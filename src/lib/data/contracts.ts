@@ -17,6 +17,9 @@ import type {
   LedgerCoverageSource,
   PaymentFrequency,
   RateType,
+  RealEstateCapitalEventType,
+  RealEstateUsage,
+  RealEstateValuationMethod,
   RecurrenceFrequency,
   Scenario,
 } from "@/lib/types";
@@ -113,6 +116,84 @@ export interface PortfolioEnvelopePolicyInput {
   lotMatchingMethod: LotMatchingMethod | null;
   ledgerCoverageStart: string | null;
   ledgerCoverageSource: LedgerCoverageSource | null;
+  notes: string | null;
+}
+
+/**
+ * Identité d'un bien. Ne porte AUCUN montant : prix, valeur et loyers sont des faits
+ * datés, saisis par leurs propres mutations. `propertyId` absent = création.
+ */
+export interface RealEstateAssetInput {
+  propertyId: string | null;
+  name: string;
+  location: string | null;
+  surfaceSqm: number | null;
+  /** `null` = usage non déclaré. Jamais « OTHER » par défaut. */
+  usage: RealEstateUsage | null;
+  /** Dans ]0,1]. `null` = non déclarée : la valeur attribuable devient non calculable. */
+  ownershipShare: number | null;
+  /**
+   * Le bien est-il financé par une dette ? `false` = déclaré sans dette, `true` = financé,
+   * `null` = non déclaré. Absence de rattachement n'est PAS absence de dette : sans
+   * déclaration, aucune métrique dépendant du financement n'est calculable.
+   */
+  isDebtFinanced: boolean | null;
+  acquisitionDate: string | null;
+  disposalDate: string | null;
+  notes: string | null;
+}
+
+export interface RealEstateValuationInput {
+  propertyId: string;
+  valuedAt: string;
+  /** Valeur du bien ENTIER, en devise native. La quote-part est appliquée par le moteur. */
+  value: number;
+  currency: string;
+  method: RealEstateValuationMethod;
+  notes: string | null;
+}
+
+export interface RealEstateCapitalEventInput {
+  propertyId: string;
+  type: RealEstateCapitalEventType;
+  eventDate: string;
+  /** Toujours positif : la direction économique vient du type. */
+  amount: number;
+  currency: string;
+  label: string | null;
+  /** Jambe de trésorerie déjà existante. Aucun flux n'est créé. */
+  transactionId: string | null;
+  notes: string | null;
+}
+
+/**
+ * Termes d'exploitation à une date d'effet. Chaque `null` est écrit tel quel : « non
+ * déclaré » est une information que la persistance ne doit pas convertir en zéro.
+ */
+export interface RealEstateOperatingTermsInput {
+  propertyId: string;
+  effectiveFrom: string;
+  currency: string;
+  annualGrossRent: number | null;
+  vacancyRate: number | null;
+  annualOperatingCharges: number | null;
+  annualPropertyTax: number | null;
+  annualInsurance: number | null;
+  annualMaintenance: number | null;
+  annualManagementFees: number | null;
+  managementFeeRate: number | null;
+  annualOtherCosts: number | null;
+  /** Taux effectif DÉCLARÉ. `null` = aucun résultat après impôt ne sera produit. */
+  effectiveIncomeTaxRate: number | null;
+  notes: string | null;
+}
+
+/** Rattachement à une dette EXISTANTE. Ne crée aucun passif. */
+export interface RealEstateFinancingLinkInput {
+  propertyId: string;
+  liabilityId: string;
+  /** Dans ]0,1]. La somme des parts d'un même concours ne dépasse jamais 1. */
+  allocationShare: number;
   notes: string | null;
 }
 
@@ -216,6 +297,23 @@ export type Mutation =
   | { action: "record_portfolio_event"; event: PortfolioEventInput }
   | { action: "delete_portfolio_event"; eventId: string }
   | { action: "set_portfolio_envelope_policy"; policy: PortfolioEnvelopePolicyInput }
+  | { action: "save_real_estate_asset"; asset: RealEstateAssetInput }
+  | { action: "archive_real_estate_asset"; propertyId: string }
+  | { action: "record_real_estate_valuation"; valuation: RealEstateValuationInput }
+  | { action: "record_real_estate_capital_event"; event: RealEstateCapitalEventInput }
+  | { action: "delete_real_estate_capital_event"; eventId: string }
+  | { action: "set_real_estate_operating_terms"; terms: RealEstateOperatingTermsInput }
+  | { action: "set_real_estate_financing_link"; link: RealEstateFinancingLinkInput }
+  | { action: "delete_real_estate_financing_link"; linkId: string }
+  | {
+      /**
+       * Rattache un flux réel à un bien, ou l'en détache avec `propertyId: null`. Aucune
+       * nature canonique n'est modifiée : le domaine immobilier ne reclasse aucun flux.
+       */
+      action: "attribute_transaction_to_property";
+      transactionId: string;
+      propertyId: string | null;
+    }
   | {
       /**
        * Déclare, corrige ou efface la profondeur d'historique du ledger LFO.

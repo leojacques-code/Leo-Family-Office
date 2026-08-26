@@ -265,6 +265,89 @@ describe("canonical balance sheet invariants", () => {
     expect(result.grossAssets.value).toBe((1 / 3) * 0.9123456789);
   });
 
+  it("refuse un montant natif inconnu qui ne dit pas pourquoi il l'est", () => {
+    // Un `null` sans motif serait indiscernable d'un oubli de calcul en amont : le moteur
+    // exige que le domaine dise ce qu'il ne sait pas.
+    expect(() =>
+      buildCanonicalBalanceSheet({
+        asOfDate: "2026-08-23",
+        reportingCurrency: "EUR",
+        contributions: [
+          {
+            id: "opaque",
+            entityId: "opaque",
+            domain: "OTHER_ASSET",
+            side: "ASSET",
+            category: "UNKNOWN",
+            nativeValue: null,
+            currency: "EUR",
+            valuationDate: "2026-08-23",
+            valuationMethod: "USER_ESTIMATE",
+            valuationStatus: "MISSING",
+            liquidity: "ILLIQUID",
+            provenance: external,
+            confidence: "UNKNOWN",
+            reconciliationState: "NOT_APPLICABLE",
+            isAccountingPrimary: true,
+            flags: [],
+          },
+        ],
+      }),
+    ).toThrow(/valuationBlockers/);
+  });
+
+  it("un actif dont le montant est inconnu rend l'actif brut PARTIAL, jamais sous-évalué", () => {
+    const result = buildCanonicalBalanceSheet({
+      asOfDate: "2026-08-23",
+      reportingCurrency: "EUR",
+      contributions: [
+        {
+          id: "known",
+          entityId: "known",
+          domain: "OTHER_ASSET",
+          side: "ASSET",
+          category: "OTHER",
+          nativeValue: 50_000,
+          currency: "EUR",
+          valuationDate: "2026-08-23",
+          valuationMethod: "USER_ESTIMATE",
+          valuationStatus: "CURRENT",
+          liquidity: "ILLIQUID",
+          provenance: external,
+          confidence: "MEDIUM",
+          reconciliationState: "NOT_APPLICABLE",
+          isAccountingPrimary: true,
+          flags: [],
+        },
+        {
+          id: "unknown",
+          entityId: "unknown",
+          domain: "OTHER_ASSET",
+          side: "ASSET",
+          category: "OTHER",
+          nativeValue: null,
+          valuationBlockers: ["VALUATION_MISSING:unknown"],
+          currency: "EUR",
+          valuationDate: "2026-08-23",
+          valuationMethod: "USER_ESTIMATE",
+          valuationStatus: "MISSING",
+          liquidity: "ILLIQUID",
+          provenance: external,
+          confidence: "UNKNOWN",
+          reconciliationState: "NOT_APPLICABLE",
+          isAccountingPrimary: true,
+          flags: [],
+        },
+      ],
+    });
+    expect(result.grossAssets.status).toBe("PARTIAL");
+    expect(result.grossAssets.value).toBeNull();
+    // Le montant connu reste intégralement connu : une ignorance n'efface pas une certitude.
+    expect(result.grossAssets.knownValue).toBe(50_000);
+    expect(result.grossAssets.blockers).toContain("VALUATION_MISSING:unknown");
+    expect(result.netWorth.value).toBeNull();
+  });
+
   it("accepts future property and business-equity values without importing domain formulas", () => {
     const contributions: CanonicalBalanceSheetContribution[] = [
       {

@@ -11,6 +11,7 @@ import {
   deriveCanonicalBalanceSheetMetrics,
   type CanonicalBalanceSheetMetrics,
 } from "@/lib/engine/balance-sheet-metrics";
+import { buildRealEstatePortfolio, type RealEstatePortfolio } from "@/lib/engine/real-estate";
 import type { DashboardState } from "@/lib/types";
 
 /**
@@ -49,6 +50,39 @@ export function canonicalMetricsOf(state: DashboardState): CanonicalBalanceSheet
       positions: state.positions,
       snapshots: state.netWorthSnapshots ?? [],
     })
+  );
+}
+
+/**
+ * Le domaine immobilier de l'état, reconstruit à l'identique s'il n'a pas été fourni.
+ *
+ * Reconstruction stricte : mêmes entrées, mêmes conventions, donc mêmes lignes de bilan.
+ * Un écran qui appelle cette fonction obtient exactement ce que le repository a calculé.
+ */
+export function realEstateOf(state: DashboardState): RealEstatePortfolio {
+  return (
+    state.realEstate ??
+    buildRealEstatePortfolio({
+      asOfDate: state.asOfDate,
+      reportingCurrency: state.reportingCurrency,
+      assets: state.realEstateAssets ?? [],
+      valuations: state.realEstateValuations ?? [],
+      capitalEvents: state.realEstateCapitalEvents ?? [],
+      operatingTerms: state.realEstateOperatingTerms ?? [],
+      financingLinks: state.realEstateFinancingLinks ?? [],
+      liabilities: state.liabilities,
+      transactions: state.transactions,
+      expenseCategories: state.expenseCategories,
+      ledgerCoverageStart: state.ledgerCoverageStart,
+      currencyRates: state.currencyRates ?? [],
+    })
+  );
+}
+
+/** Lignes d'actif immobilier du bilan canonique. Aucun montant n'y est recalculé. */
+export function realEstateAssetLines(sheet: CanonicalBalanceSheet): ConvertedBalanceSheetLine[] {
+  return sheet.contributions.filter(
+    (line) => line.domain === "REAL_ESTATE" && line.side === "ASSET" && line.isAccountingPrimary,
   );
 }
 

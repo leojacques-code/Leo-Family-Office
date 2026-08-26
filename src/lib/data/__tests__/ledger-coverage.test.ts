@@ -67,6 +67,7 @@ const tx = (amount: number, date: string): Transaction => ({
   currency: "EUR",
   kindOverride: null,
   transferGroupId: null,
+  propertyId: null,
   notes: null,
   provenance,
 });

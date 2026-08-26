@@ -74,6 +74,15 @@ export interface OpeningBalanceSheet {
   /** Solde d'enveloppe non expliqué par des positions. Aucune exposition connue. */
   otherFinancialAssets: number;
   grossFinancialAssets: number;
+  /**
+   * Actifs NON financiers au bilan canonique : immobilier, et demain business equity. Ils
+   * sont portés CONSTANTS sur toute la projection, faute de termes projetables — même
+   * traitement que `otherLiabilityBalance`, et pour la même raison. Les faire disparaître
+   * au mois 1 reviendrait à traiter un inconnu comme un zéro ; leur appliquer une
+   * croissance reviendrait à inventer un rendement immobilier. La part non calculable
+   * (valorisation ou quote-part manquante) est exclue et signalée.
+   */
+  nonFinancialAssets: number;
   loanBalance: number;
   /** Découverts et autres passifs sans échéancier ; constants faute de termes projetables. */
   otherLiabilityBalance: number;
@@ -139,6 +148,12 @@ export interface MonthlyFinancialState {
   investmentCash: number;
   otherFinancialAssets: number;
   grossFinancialAssets: number;
+  /**
+   * Actifs non financiers, portés constants depuis l'ouverture. Ils entrent dans le
+   * patrimoine net projeté mais ne reçoivent aucun rendement : leur trajectoire n'est pas
+   * modélisée, et LFO ne lui en invente pas une.
+   */
+  nonFinancialAssets: number;
   loanBalance: number;
   otherLiabilityBalance: number;
   fundingGap: number;
@@ -191,11 +206,10 @@ const TOLERANCE = 0.01;
  */
 export function buildOpeningBalanceSheet(state: DashboardState): OpeningBalanceSheet {
   const canonical = canonicalBalanceSheetOf(state);
-  if (
-    canonical.financialAssets.value === null ||
-    canonical.totalLiabilities.value === null ||
-    canonical.netWorth.value === null
-  ) {
+  // La projection a besoin des actifs FINANCIERS et du passif : ce sont les seules
+  // grandeurs qu'elle fait évoluer. Un actif non financier non valorisable n'empêche pas
+  // de projeter la trajectoire financière : il en est exclu et signalé, il ne la bloque pas.
+  if (canonical.financialAssets.value === null || canonical.totalLiabilities.value === null) {
     throw new Error(
       `Projection impossible : bilan canonique ${canonical.netWorth.status} (${canonical.netWorth.blockers.join(", ")})`,
     );
@@ -216,6 +230,22 @@ export function buildOpeningBalanceSheet(state: DashboardState): OpeningBalanceS
   const otherLiabilityBalance = canonical.totalLiabilities.value - loanBalance;
   if (otherLiabilityBalance > TOLERANCE) flags.push("LIABILITY_PROJECTION_TERMS_MISSING");
 
+  // Part non financière du bilan : actifs bruts − actifs financiers. Seule la part
+  // CONNUE est retenue ; un bien dont la valeur n'est pas calculable n'entre pas dans le
+  // patrimoine projeté, et le drapeau dit qu'il en manque une.
+  const nonFinancialAssets =
+    canonical.grossAssets.knownValue - canonical.financialAssets.knownValue;
+  if (canonical.grossAssets.status !== "COMPLETE") {
+    flags.push("NON_FINANCIAL_ASSET_VALUE_PARTIAL");
+  }
+  if (Math.abs(nonFinancialAssets) > TOLERANCE) {
+    flags.push("NON_FINANCIAL_ASSET_PROJECTION_TERMS_MISSING");
+  }
+  // Le patrimoine net d'ouverture est reconstruit avec les mêmes termes que ceux des mois
+  // suivants. Reprendre `canonical.netWorth` ferait apparaître, entre le mois 0 et le mois
+  // 1, une variation qui n'est qu'un changement de périmètre.
+  const netWorth = grossFinancialAssets + nonFinancialAssets - loanBalance - otherLiabilityBalance;
+
   return {
     date: state.asOfDate,
     bankCash,
@@ -223,10 +253,11 @@ export function buildOpeningBalanceSheet(state: DashboardState): OpeningBalanceS
     investmentCash,
     otherFinancialAssets,
     grossFinancialAssets,
+    nonFinancialAssets,
     loanBalance,
     otherLiabilityBalance,
     fundingGap: 0,
-    netWorth: canonical.netWorth.value,
+    netWorth,
     flags,
   };
 }
@@ -321,6 +352,7 @@ function openingState(opening: OpeningBalanceSheet): MonthlyFinancialState {
     investmentCash: opening.investmentCash,
     otherFinancialAssets: opening.otherFinancialAssets,
     grossFinancialAssets: opening.grossFinancialAssets,
+    nonFinancialAssets: opening.nonFinancialAssets,
     loanBalance: opening.loanBalance,
     otherLiabilityBalance: opening.otherLiabilityBalance,
     fundingGap: opening.fundingGap,
@@ -428,7 +460,15 @@ export function advanceMonth(
   const loanBalance = Math.max(0, openingLoan + debt.liabilityDelta);
   const grossFinancialAssets =
     bankCash + marketInvestedAssets + openingInvestmentCash + openingOther;
-  const netWorth = grossFinancialAssets - loanBalance - openingOtherLiability - fundingGap;
+  // Les actifs non financiers restent au bilan projeté, à leur valeur d'ouverture. Ils ne
+  // sont ni capitalisés ni effacés : leur trajectoire n'est pas modélisée, et le dire est
+  // plus honnête que de la simuler.
+  const netWorth =
+    grossFinancialAssets +
+    previous.nonFinancialAssets -
+    loanBalance -
+    openingOtherLiability -
+    fundingGap;
 
   const economicDebtCosts = debt.economicCost;
   const netWorthChange = netWorth - openingNetWorth;
@@ -469,6 +509,7 @@ export function advanceMonth(
     investmentCash: openingInvestmentCash,
     otherFinancialAssets: openingOther,
     grossFinancialAssets,
+    nonFinancialAssets: previous.nonFinancialAssets,
     loanBalance,
     otherLiabilityBalance: openingOtherLiability,
     fundingGap,

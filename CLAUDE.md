@@ -64,7 +64,22 @@ Corollaires appliqués dans le code existant, à préserver :
   reste utilisable mais signalé ; un taux absent rend le total non calculable ;
 - le remboursement de capital est neutre sur le patrimoine net ;
 - une première transaction observée ne prouve pas la couverture de l'historique, et une
-  absence d'historique n'est pas un mois à zéro.
+  absence d'historique n'est pas un mois à zéro ;
+- une valorisation immobilière est une observation datée : elle est signalée périmée, jamais
+  indexée ni corrigée, et son absence est un montant inconnu, pas un bien sans valeur ;
+- une quote-part détenue non déclarée ne vaut pas 100 % : la valeur attribuable au
+  patrimoine devient non calculable ;
+- la quote-part d'un concours affectée à des biens ne dépasse jamais 1, sans quoi la même
+  dette serait comptée deux fois : c'est un invariant de la base, garanti sous concurrence,
+  pas un contrôle applicatif ;
+- l'absence de dette rattachée à un bien n'est pas une absence de dette : seul un zéro
+  DÉCLARÉ autorise à calculer une equity, sans quoi le patrimoine serait surévalué du
+  montant entier du crédit non saisi ;
+- un capital emprunté est un montant historique : sans date de décaissement connue, sa
+  contre-valeur en devise de reporting n'est pas calculable, et la première échéance n'en
+  tient pas lieu ;
+- une charge d'exploitation déclarée à zéro est une information, une charge non déclarée n'en
+  est pas une : le rendement net qui en dépend reste non calculable.
 
 ## 4. Provenance, qualité, honnêteté
 
@@ -98,10 +113,12 @@ réservées à `service_role`, qui persistent des résultats déjà calculés.
 Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.md`, elle
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`. La divergence des deux index de
-`net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026, dépôt et production
-ont ensuite été alignés sur 17 versions : Portfolio Data Foundation puis ses index
-couvrant les clés étrangères. Les deux dernières migrations ont été appliquées en
-production et contrôlées par assertions SQL transactionnelles et advisors Supabase.
+`net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026. Dépôt et production sont
+alignés sur 19 versions : Portfolio Data Foundation et ses index couvrant les clés
+étrangères, puis Real Estate V2 et les siens. Chaque paire suit le même schéma, une
+migration de fond puis une migration d'index révélée par les advisors, et chacune a été
+appliquée en production puis contrôlée par assertions SQL transactionnelles, advisors
+Supabase et test d'isolation sous le rôle `authenticated` réel.
 
 ## 6. Tests et gates
 
@@ -129,15 +146,23 @@ Correctness → données → intégration → calculs → tests → produit → 
 
 ```text
 faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données + analytics)
+               Real Estate (faits + scénarios)
 en cours       vérité de schéma · vérité des consommateurs
-suivant        Real Estate → Business Equity → Career + Tax
+suivant        Business Equity → Career + Tax
 puis           Event Engine → Scenarios V2 → Goals → Decision Lab
 enfin          imports et connecteurs → expérience globale → orchestration IA
 ```
 
 Un moteur aval ne démarre pas avant que son amont soit fiable. Real Estate consomme le
-Debt Engine et ne recalcule aucun échéancier : le moteur immobilier actuel, qui amortit
-lui-même, ne doit pas entrer dans le patrimoine réel avant sa refonte.
+Debt Engine et ne recalcule aucun échéancier : depuis Real Estate V2, le domaine immobilier
+n'amortit plus rien lui-même, il émet une ligne d'actif au bilan canonique et se rattache à
+une dette existante par une quote-part. Aucune ligne de passif immobilier n'est produite par
+le domaine : elle viendrait doubler celle de `liabilities`. Un crédit hypothétique passe par
+`syntheticLoan` puis par le Debt Engine ; `amortizeLoan` de `financial.ts` est déprécié.
+
+Real Estate n'entre PAS dans le Personal Monthly Financial Model comme actif projeté : sa
+valeur y est portée constante et signalée, faute de termes projetables. Une trajectoire
+immobilière modélisée reste un chantier distinct.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

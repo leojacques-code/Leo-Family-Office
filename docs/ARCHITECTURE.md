@@ -126,6 +126,78 @@ supposée diversifiée. Le drift reste `NOT_COMPUTABLE` tant qu'une allocation c
 pas. Les composants React ne contiennent aucune formule : ils rendent le résultat et les motifs
 produits par le moteur.
 
+## Real Estate V2
+
+`buildRealEstatePortfolio()` est une couche pure en aval de quatre vérités qu'elle ne détient pas :
+
+- les faits immobiliers (`properties`, `real_estate_valuations`, `real_estate_capital_events`,
+  `real_estate_operating_terms`) disent ce que le bien est, ce qu'il vaut, ce qu'il a coûté et ce
+  qu'il rapporte ;
+- le **Debt Engine** fournit la totalité du financement. Le moteur immobilier n'amortit rien :
+  chaque encours vient de `outstandingBalanceAt`, chaque service de dette et chaque coût
+  économique de `debtServiceBreakdownForPeriod`. `real_estate_financing_links` ne porte qu'une
+  quote-part, jamais un passif ;
+- le **Cash Flow Engine** classe les flux réels. `computeObservedCashFlow` est appelé tel quel sur
+  le sous-ensemble des transactions rattachées à un bien par `transactions.property_id` : aucune
+  nature n'est réinterprétée, aucun flux n'est créé ;
+- le **FX Engine** est l'unique convertisseur. Chaque fait est converti à SA date ; un taux absent
+  rend la grandeur dépendante `NOT_COMPUTABLE` et ne vaut jamais 1.
+
+Le domaine produit **une seule ligne de bilan par bien, du côté actif**, en devise native : c'est le
+Canonical Balance Sheet qui convertit, une fois, avec sa propre traçabilité. Il n'émet **aucune
+ligne de passif** : la dette immobilière est déjà au bilan par `liabilities`, et en émettre une ici
+la compterait deux fois. Un bien sans valorisation, ou dont la quote-part détenue n'est pas
+déclarée, émet une ligne de montant `null` portant ses motifs : l'actif existe, son montant est
+inconnu, et l'actif brut devient `PARTIAL` au lieu d'être silencieusement sous-évalué.
+
+Un terme d'exploitation non déclaré n'est jamais traité comme nul. Déclarer 0 est une information ;
+ne rien déclarer n'en est pas une, et toute grandeur qui en dépend reste `NOT_COMPUTABLE` en disant
+lequel manque. Chaque rendement nomme son dénominateur (`grossYieldOnValue`, `grossYieldOnCost`,
+`netYieldOnValue`, `netYieldOnCost`) : un rendement sur prix nu et un rendement sur coût complet ne
+sont pas la même grandeur. Aucune fiscalité n'est produite sans taux effectif déclaré par
+l'utilisateur, et l'assiette à laquelle ce taux s'applique est nommée dans le résultat
+(`REAL_ESTATE_TAX_BASE_CONVENTION`) plutôt que laissée implicite.
+
+### Absence de rattachement n'est pas absence de dette
+
+`RealEstateFinancingState` distingue trois situations, et cette distinction est la plus
+coûteuse du domaine :
+
+- `LINKED` — un concours est rattaché : les conséquences viennent du Debt Engine ;
+- `DECLARED_NONE` — l'utilisateur a DÉCLARÉ que le bien n'est financé par aucune dette. Zéro
+  est alors une valeur, et l'equity du bien vaut sa valeur attribuable ;
+- `UNKNOWN` — rien n'est rattaché et rien n'est déclaré, ou une dette est déclarée sans être
+  rattachée. Dette attribuée, equity, apport réel, cash flow et rendements sur fonds propres
+  sont tous `NOT_COMPUTABLE`.
+
+Sans cette distinction, un bien dont le crédit n'a pas encore été saisi afficherait la même
+equity qu'un bien acheté comptant, et le patrimoine serait surévalué du montant entier de la
+dette. Un rattachement contredisant une déclaration d'achat comptant l'emporte, parce qu'il
+pointe une dette réelle, et la contradiction est signalée.
+
+Le capital emprunté d'origine est un montant HISTORIQUE dont la date de décaissement
+n'existe pas dans le modèle de dette : la première échéance la suit, parfois de plusieurs
+mois. En devise de reporting il est exact ; dans toute autre devise il reste
+`NOT_COMPUTABLE`, comme l'apport réel qui en dépend. Aucune date approchée n'est substituée.
+
+Les revenus observés d'un bien sont la somme des flux rattachés que le Cash Flow Engine
+classe en revenu. Ce n'est pas « le loyer observé » : LFO ne porte aucune nature de revenu
+locatif, et un flux rattaché peut être une indemnité, une régularisation ou une subvention.
+L'écart avec le loyer déclaré est donc un écart entre deux grandeurs de nature différente,
+utile pour repérer un décrochage, jamais une mesure de manque de loyer.
+
+`real-estate-scenarios.ts` est la couche de projection, strictement séparée des faits :
+conservation, cession, refinancement, travaux et étude d'un projet non détenu. Un crédit
+hypothétique y passe par `syntheticLoan`, qui construit une `Liability` confiée au Debt Engine :
+LFO n'a qu'un moteur d'amortissement. `amortizeLoan` de `financial.ts` est déprécié et sans
+consommateur applicatif. Une hypothèse de croissance non fournie n'est pas remplacée par zéro : le
+scénario reste incalculable et le dit.
+
+Le Personal Monthly Financial Model porte les actifs non financiers **constants** sur toute la
+projection, comme il porte déjà les passifs sans échéancier, avec le drapeau
+`NON_FINANCIAL_ASSET_PROJECTION_TERMS_MISSING`. Les faire disparaître au mois 1 traiterait un
+inconnu comme un zéro ; leur appliquer une croissance inventerait un rendement immobilier.
+
 ## Lecture paginée des ledgers
 
 `readAllPages` (`src/lib/data/pagination.ts`) lit une source page par page et **refuse** de

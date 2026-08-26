@@ -35,7 +35,15 @@ export interface CanonicalBalanceSheetContribution {
   side: BalanceSheetSide;
   category: string;
   subcategory?: string;
-  nativeValue: number;
+  /**
+   * Montant en devise native. `null` signifie « non connaissable », jamais zéro : un bien
+   * détenu dont la valorisation manque est un actif dont le MONTANT est inconnu, pas un
+   * actif qui vaut zéro. Une ligne `null` doit porter ses `valuationBlockers`, qui
+   * voyagent jusqu'aux agrégats et y rendent le total PARTIAL ou NOT_COMPUTABLE.
+   */
+  nativeValue: number | null;
+  /** Raisons pour lesquelles `nativeValue` est `null`. Requis dans ce seul cas. */
+  valuationBlockers?: string[];
   currency: string;
   valuationDate: string;
   valuationMethod: ValuationMethod;
@@ -169,7 +177,12 @@ function aggregate(lines: ConvertedBalanceSheetLine[]): CanonicalAggregate {
   const missing = lines.filter((line) => line.reportingValue === null);
   if (missing.length === 0)
     return { value: knownValue, knownValue, status: "COMPLETE", coverage: 1, blockers: [] };
-  const blockers = [...new Set(missing.flatMap((line) => line.fx.flags))];
+  // Une ligne peut manquer pour deux raisons distinctes : un taux de change absent, ou un
+  // montant natif que le domaine amont déclare inconnu. Les deux doivent remonter, sinon
+  // l'agrégat dit « non calculable » sans dire pourquoi.
+  const blockers = [
+    ...new Set(missing.flatMap((line) => [...line.fx.flags, ...(line.valuationBlockers ?? [])])),
+  ];
   if (known.length === 0)
     return { value: null, knownValue: 0, status: "NOT_COMPUTABLE", coverage: 0, blockers };
   return {
@@ -394,6 +407,16 @@ export function buildCanonicalBalanceSheet(
     ...(input.contributions ?? []),
   ];
   for (const line of native) {
+    if (line.nativeValue === null) {
+      // Un montant inconnu sans motif serait indistinguable d'un oubli de calcul : le
+      // moteur amont doit dire POURQUOI il ne sait pas, sans quoi l'agrégat ne pourrait
+      // pas l'expliquer à l'utilisateur.
+      if (!line.valuationBlockers?.length)
+        throw new Error(
+          `Canonical contribution ${line.id}: a null nativeValue must carry valuationBlockers`,
+        );
+      continue;
+    }
     if (!Number.isFinite(line.nativeValue) || line.nativeValue < 0)
       throw new Error(
         `Canonical contribution ${line.id}: nativeValue must be finite and non-negative`,
@@ -404,7 +427,7 @@ export function buildCanonicalBalanceSheet(
     return {
       ...line,
       reportingCurrency: input.reportingCurrency,
-      reportingValue: convertWithFx(line.nativeValue, fx),
+      reportingValue: line.nativeValue === null ? null : convertWithFx(line.nativeValue, fx),
       fx,
     };
   });

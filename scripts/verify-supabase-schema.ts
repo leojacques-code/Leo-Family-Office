@@ -28,6 +28,8 @@ const canonicalMigrations = [
   "20260825063831",
   "20260825193427",
   "20260825193606",
+  "20260826090117",
+  "20260826090347",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -143,6 +145,62 @@ const requiredColumns: Record<string, string[]> = {
     "ledger_coverage_start",
     "ledger_coverage_source",
   ],
+  properties: [
+    "id",
+    "property_usage",
+    "debt_financed",
+    "ownership_share",
+    "acquisition_date",
+    "disposal_date",
+    "archived",
+    "data_kind",
+    "confidence",
+  ],
+  real_estate_valuations: [
+    "id",
+    "property_id",
+    "valued_at",
+    "value",
+    "currency",
+    "valuation_method",
+    "data_kind",
+    "confidence",
+  ],
+  real_estate_capital_events: [
+    "id",
+    "property_id",
+    "event_type",
+    "event_date",
+    "amount",
+    "currency",
+    "transaction_id",
+    "data_kind",
+    "confidence",
+  ],
+  real_estate_operating_terms: [
+    "id",
+    "property_id",
+    "effective_from",
+    "currency",
+    "annual_gross_rent",
+    "vacancy_rate",
+    "annual_operating_charges",
+    "annual_property_tax",
+    "annual_insurance",
+    "annual_maintenance",
+    "annual_management_fees",
+    "management_fee_rate",
+    "annual_other_costs",
+    "effective_income_tax_rate",
+  ],
+  real_estate_financing_links: [
+    "id",
+    "property_id",
+    "liability_id",
+    "allocation_share",
+    "data_kind",
+    "confidence",
+  ],
 };
 
 const userOwnedTables = [
@@ -195,6 +253,10 @@ const userOwnedTables = [
   "net_worth_snapshot_items",
   "portfolio_events",
   "portfolio_envelope_policies",
+  "real_estate_valuations",
+  "real_estate_capital_events",
+  "real_estate_operating_terms",
+  "real_estate_financing_links",
 ] as const;
 
 /**
@@ -220,8 +282,38 @@ const requiredIndexes = [
   // mises à jour de comptes ou de lots désignés.
   "portfolio_events_account_owner_idx",
   "portfolio_events_matched_lot_covering_idx",
+  // Cibles composites des FK de propriété du domaine immobilier.
+  "properties_id_user_uidx",
+  "liabilities_id_user_uidx",
+  // Un bien n'a qu'un prix d'achat et qu'un prix de cession.
+  "real_estate_capital_events_acquisition_uk",
+  "real_estate_capital_events_disposal_uk",
+  // Index couvrants des FK immobilières.
+  "real_estate_financing_links_liability_idx",
+  "real_estate_financing_links_property_idx",
+  "real_estate_capital_events_transaction_idx",
+  "transactions_property_owner_idx",
+  // Index dans l'ORDRE de la FK composite `(property_id, user_id)`. Ceux de Real Estate V2
+  // sont en `(user_id, property_id)` : PostgreSQL ne peut pas s'en servir pour vérifier la
+  // clé étrangère ni la cascader, et chaque suppression de bien balayait la table.
+  "real_estate_valuations_property_owner_idx",
+  "real_estate_capital_events_property_owner_idx",
+  "real_estate_operating_terms_property_owner_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx"] as const;
+
+/**
+ * Triggers dont l'absence supprimerait un invariant financier, et non une commodité.
+ *
+ * `real_estate_financing_links_allocation_guard` est le SEUL endroit où la règle « la
+ * somme des quote-parts d'un même concours ne dépasse jamais 1 » est réellement garantie :
+ * `authenticated` détient des droits d'écriture directs sur la table, et deux écritures
+ * concurrentes contourneraient tout contrôle applicatif. Une base qui l'aurait perdu
+ * accepterait de compter la même dette deux fois sans rien signaler.
+ */
+const requiredTriggers = ["real_estate_financing_links_allocation_guard"] as const;
+/** Fonction portée par ce trigger. Hors nomenclature `lfo_` : ce n'est pas une RPC. */
+const requiredTriggerFunctions = ["real_estate_allocation_guard"] as const;
 
 const requiredConstraints = [
   "scenarios_investment_allocation_rate_ck",
@@ -265,6 +357,29 @@ const requiredConstraints = [
   "portfolio_envelope_policies_coverage_pair_ck",
   "portfolio_envelope_policies_account_fk",
   "portfolio_envelope_policies_account_uk",
+  "properties_usage_ck",
+  "properties_ownership_share_ck",
+  "properties_disposal_after_acquisition_ck",
+  "real_estate_valuations_property_fk",
+  "real_estate_valuations_value_ck",
+  "real_estate_valuations_method_ck",
+  "real_estate_valuations_data_kind_ck",
+  "real_estate_capital_events_property_fk",
+  "real_estate_capital_events_transaction_fk",
+  "real_estate_capital_events_amount_ck",
+  "real_estate_capital_events_type_ck",
+  "real_estate_capital_events_data_kind_ck",
+  "real_estate_operating_terms_property_fk",
+  "real_estate_operating_terms_effective_uk",
+  "real_estate_operating_terms_amounts_ck",
+  "real_estate_operating_terms_rates_ck",
+  "real_estate_operating_terms_management_exclusive_ck",
+  "real_estate_operating_terms_data_kind_ck",
+  "real_estate_financing_links_property_fk",
+  "real_estate_financing_links_liability_fk",
+  "real_estate_financing_links_pair_uk",
+  "real_estate_financing_links_share_ck",
+  "transactions_property_fk",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
@@ -292,6 +407,16 @@ const requiredRpcs: Record<string, string> = {
   lfo_record_portfolio_event: "p_user_id uuid, p_payload jsonb",
   lfo_delete_portfolio_event: "p_user_id uuid, p_event_id uuid",
   lfo_set_portfolio_envelope_policy: "p_user_id uuid, p_payload jsonb",
+  lfo_save_real_estate_asset: "p_user_id uuid, p_payload jsonb",
+  lfo_archive_real_estate_asset: "p_user_id uuid, p_property_id uuid",
+  lfo_record_real_estate_valuation: "p_user_id uuid, p_payload jsonb",
+  lfo_record_real_estate_capital_event: "p_user_id uuid, p_payload jsonb",
+  lfo_delete_real_estate_capital_event: "p_user_id uuid, p_event_id uuid",
+  lfo_set_real_estate_operating_terms: "p_user_id uuid, p_payload jsonb",
+  lfo_set_real_estate_financing_link: "p_user_id uuid, p_payload jsonb",
+  lfo_delete_real_estate_financing_link: "p_user_id uuid, p_link_id uuid",
+  lfo_attribute_transaction_to_property:
+    "p_user_id uuid, p_transaction_id uuid, p_property_id uuid",
 };
 
 const storagePolicies = [
@@ -391,6 +516,33 @@ try {
   for (const index of forbiddenIndexes) {
     if (indexNames.has(index)) failures.push(`Index remplacé toujours présent : public.${index}`);
   }
+
+  const triggers = await client.query<{ tgname: string }>(`
+    select tg.tgname
+      from pg_catalog.pg_trigger tg
+      join pg_catalog.pg_class rel on rel.oid = tg.tgrelid
+      join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace
+     where ns.nspname = 'public' and not tg.tgisinternal
+  `);
+  addMissing(
+    failures,
+    "Trigger(s)",
+    requiredTriggers,
+    triggers.rows.map((row) => row.tgname),
+  );
+
+  const triggerFunctions = await client.query<{ proname: string }>(`
+    select pr.proname
+      from pg_catalog.pg_proc pr
+      join pg_catalog.pg_namespace ns on ns.oid = pr.pronamespace
+     where ns.nspname = 'public' and pr.prorettype = 'pg_catalog.trigger'::regtype
+  `);
+  addMissing(
+    failures,
+    "Fonction(s) de trigger",
+    requiredTriggerFunctions,
+    triggerFunctions.rows.map((row) => row.proname),
+  );
 
   const rls = await client.query<{ relname: string; relrowsecurity: boolean }>(`
     select rel.relname, rel.relrowsecurity
@@ -546,5 +698,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Schéma Supabase vérifié en lecture seule : ${userOwnedTables.length} tables, ${requiredConstraints.length} contraintes, ${Object.keys(requiredRpcs).length} RPC, RLS/policies, Storage, index de snapshot et ${canonicalMigrations.length} migrations conformes.`,
+  `Schéma Supabase vérifié en lecture seule : ${userOwnedTables.length} tables, ${requiredConstraints.length} contraintes, ${Object.keys(requiredRpcs).length} RPC, ${requiredTriggers.length} trigger(s) d'invariant, RLS/policies, Storage, index de snapshot et ${canonicalMigrations.length} migrations conformes.`,
 );
