@@ -1,4 +1,4 @@
-name: Business Equity V2 bootstrap
+name: Business Equity V2 repair and checks
 
 on:
   push:
@@ -9,29 +9,28 @@ permissions:
   contents: write
 
 jobs:
-  implement:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/business-equity-v2
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-      - run: python3 scripts/fix-business-bootstrap.py
-      - run: node --check scripts/bootstrap-business-equity-v2.mjs
-      - run: node scripts/bootstrap-business-equity-v2.mjs
-      - name: Persist generated implementation
+      - run: python3 scripts/repair-business-equity-v2.py
+      - name: Persist repair
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "feat(business): generate Business Equity V2 implementation" || true
+          git add src/lib/data/contracts.ts
+          git commit -m "fix(business): repair mutation contracts" || true
           git push
       - run: npm ci
       - run: npm run lint
       - run: npm run test
       - run: npx tsc --noEmit
       - run: npm run build
-# persist-wip
+# repair-v1
