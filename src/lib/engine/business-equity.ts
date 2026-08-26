@@ -121,7 +121,7 @@ export interface BusinessEquityPosition {
   attributableValue: BusinessMetric;
   investedCapital: BusinessMetric;
   cashReturned: BusinessMetric;
-  unrealisedPnL: BusinessMetric;
+  economicGain: BusinessMetric;
   moic: BusinessMetric;
   xirr: BusinessMetric;
   ebitdaMargin: BusinessMetric;
@@ -275,7 +275,7 @@ export function buildBusinessEquityPortfolio(input: BuildBusinessEquityInput): B
     };
     const invested = sumMetrics(convertEvents(investedEvents), `COST_BASIS_HISTORY_MISSING:${business.id}`);
     const cashReturned = returnedEvents.length ? sumMetrics(convertEvents(returnedEvents), `CASH_RETURN_HISTORY_MISSING:${business.id}`) : known(0);
-    const unrealisedPnL = invested.value === null || attributable.value === null ? nc([...(invested.blockers ?? []), ...(attributable.blockers ?? [])]) : known(attributable.value + cashReturned.value! - invested.value);
+    const economicGain = invested.value === null || attributable.value === null ? nc([...(invested.blockers ?? []), ...(attributable.blockers ?? [])]) : known(attributable.value + cashReturned.value! - invested.value);
     const moic = invested.value === null || attributable.value === null || invested.value <= 0 ? nc([...(invested.blockers ?? []), ...(attributable.blockers ?? []), ...(invested.value === 0 ? ['ZERO_INVESTED_CAPITAL'] : [])]) : known((attributable.value + cashReturned.value!) / invested.value);
 
     const datedFlows: Array<{ date: string; amount: number }> = [];
@@ -293,7 +293,7 @@ export function buildBusinessEquityPortfolio(input: BuildBusinessEquityInput): B
     const leverage = netDebt.value !== null && financial?.ebitda != null && financial.ebitda > 0 && financial.currency === input.reportingCurrency ? known(netDebt.value / financial.ebitda) : nc([`NET_DEBT_TO_EBITDA_INPUTS_MISSING:${business.id}`]);
     const flags = [...new Set([...(whole.flags ?? []), ...(valuation && daysBetween(valuation.valuationDate, input.asOfDate) > 365 ? ['VALUATION_STALE_GT_365D'] : [])])];
     const blockers = [...new Set([...(whole.blockers ?? []), ...(attributable.blockers ?? [])])];
-    return { business, ownership, latestFinancials: financial, latestValuation: valuation, enterpriseValue: ev, netDebt, wholeEquityValue: whole, attributableValue: attributable, investedCapital: invested, cashReturned, unrealisedPnL, moic, xirr, ebitdaMargin, netDebtToEbitda: leverage, quality: { blockers, flags } };
+    return { business, ownership, latestFinancials: financial, latestValuation: valuation, enterpriseValue: ev, netDebt, wholeEquityValue: whole, attributableValue: attributable, investedCapital: invested, cashReturned, economicGain, moic, xirr, ebitdaMargin, netDebtToEbitda: leverage, quality: { blockers, flags } };
   }).sort((a, b) => (b.attributableValue.value ?? -Infinity) - (a.attributableValue.value ?? -Infinity));
 
   const direct = positions.filter((p) => p.ownership && p.ownership.economicRate !== null);

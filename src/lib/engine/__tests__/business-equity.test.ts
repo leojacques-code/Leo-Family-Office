@@ -18,7 +18,7 @@ describe('Business Equity V2', () => {
     const result = buildBusinessEquityPortfolio({ ...base, businesses:[{ id:'b', name:'Startup', legalForm:null, type:'STARTUP', functionalCurrency:'EUR', archived:false, notes:null, provenance:p }], ownership:[{ id:'o', businessId:'b', effectiveDate:'2025-01-01', legalRate:.2, economicRate:.2, votingRate:null, fullyDilutedRate:.2, notes:null, provenance:p }], financials:[], valuations:[{ id:'v', businessId:'b', valuationDate:'2026-01-01', currency:'EUR', method:'FUNDING_ROUND', enterpriseValue:null, equityValue:10_000_000, valuationMultiple:null, notes:null, provenance:p }], capitalEvents:[] });
     expect(result.positions[0].attributableValue.value).toBe(2_000_000);
     expect(result.positions[0].investedCapital.value).toBeNull();
-    expect(result.positions[0].unrealisedPnL.value).toBeNull();
+    expect(result.positions[0].economicGain.value).toBeNull();
     expect(result.positions[0].moic.value).toBeNull();
   });
   it('derives a holding look-through without double-counting the child as a personal asset', () => {
