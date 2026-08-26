@@ -5,6 +5,7 @@ import {
   PORTFOLIO_TOLERANCE,
   envelopeLedgerOf,
   type PortfolioEnvelopeLedger,
+  type PortfolioHolding,
   type PortfolioLedger,
 } from "@/lib/engine/portfolio";
 import type {
@@ -212,56 +213,168 @@ function externalCashFlow(event: PortfolioEvent): number | null {
     : Math.abs(event.envelopeCashAmount);
 }
 
+interface ConvertedAmount {
+  value: number | null;
+  blockers: string[];
+  flags: string[];
+}
+
+function convertHistoricalAmount(
+  amount: number | null,
+  sourceCurrency: string,
+  targetCurrency: string,
+  valueDate: string,
+  rates: CurrencyRate[],
+  missingAmountBlocker: string,
+): ConvertedAmount {
+  if (amount === null) return { value: null, blockers: [missingAmountBlocker], flags: [] };
+  const fx = resolveFxRate(sourceCurrency, targetCurrency, valueDate, rates);
+  if (fx.rate === null) {
+    return {
+      value: null,
+      blockers:
+        fx.flags.length > 0
+          ? fx.flags
+          : [`FX_MISSING:${sourceCurrency}/${targetCurrency}@${valueDate}`],
+      flags: fx.flags,
+    };
+  }
+  return { value: amount * fx.rate, blockers: [], flags: fx.flags };
+}
+
+function strictConvertedSum(amounts: ConvertedAmount[]): AnalyticsMetric {
+  const blockers = amounts.flatMap((item) => item.blockers);
+  const flags = amounts.flatMap((item) => item.flags);
+  if (blockers.length > 0) return unavailable(blockers, flags);
+  return complete(
+    amounts.reduce((sum, item) => sum + (item.value as number), 0),
+    [...new Set(flags)],
+  );
+}
+
 function sumExternal(
   selected: PortfolioEvent[],
   direction: "EXTERNAL_IN" | "EXTERNAL_OUT",
+  targetCurrency: string,
+  rates: CurrencyRate[],
 ): AnalyticsMetric {
   const matching = selected.filter((event) => PORTFOLIO_FLOW_DIRECTION[event.type] === direction);
   if (matching.some((event) => event.securityId !== null)) {
     return unavailable(["EXTERNAL_TRANSFER_IN_KIND"]);
   }
-  if (matching.some((event) => event.envelopeCashAmount === null)) {
-    return unavailable(["EXTERNAL_FLOW_AMOUNT_MISSING"]);
-  }
-  return complete(
-    matching.reduce((sum, event) => sum + Math.abs(event.envelopeCashAmount as number), 0),
+  return strictConvertedSum(
+    matching.map((event) =>
+      convertHistoricalAmount(
+        event.envelopeCashAmount === null ? null : Math.abs(event.envelopeCashAmount),
+        event.currency,
+        targetCurrency,
+        event.eventDate,
+        rates,
+        `EXTERNAL_FLOW_AMOUNT_MISSING:${event.id}`,
+      ),
+    ),
   );
 }
 
 function sumEventCash(
   selected: PortfolioEvent[],
   types: PortfolioEvent["type"][],
+  targetCurrency: string,
+  rates: CurrencyRate[],
 ): AnalyticsMetric {
   const matching = selected.filter((event) => types.includes(event.type));
-  if (matching.some((event) => event.envelopeCashAmount === null && event.grossAmount === null)) {
-    return unavailable(["EVENT_AMOUNT_MISSING"]);
-  }
-  return complete(
-    matching.reduce(
-      (sum, event) => sum + Math.abs(event.envelopeCashAmount ?? (event.grossAmount as number)),
-      0,
+  return strictConvertedSum(
+    matching.map((event) =>
+      convertHistoricalAmount(
+        event.envelopeCashAmount === null && event.grossAmount === null
+          ? null
+          : Math.abs(event.envelopeCashAmount ?? (event.grossAmount as number)),
+        event.currency,
+        targetCurrency,
+        event.eventDate,
+        rates,
+        `EVENT_AMOUNT_MISSING:${event.id}`,
+      ),
     ),
   );
 }
 
-function sumCharges(selected: PortfolioEvent[], dedicatedType: "FEE" | "TAX"): AnalyticsMetric {
+function sumCharges(
+  selected: PortfolioEvent[],
+  dedicatedType: "FEE" | "TAX",
+  targetCurrency: string,
+  rates: CurrencyRate[],
+): AnalyticsMetric {
   const bearing = selected.filter(
     (event) =>
       event.type === dedicatedType ||
       ["BUY", "SELL", "TRANSFER_IN", "TRANSFER_OUT"].includes(event.type),
   );
-  const values = bearing.map((event) => {
-    if (event.type === dedicatedType) {
-      return (
-        event.grossAmount ??
-        (event.envelopeCashAmount === null ? null : Math.abs(event.envelopeCashAmount))
+  return strictConvertedSum(
+    bearing.map((event) => {
+      const amount =
+        event.type === dedicatedType
+          ? (event.grossAmount ??
+            (event.envelopeCashAmount === null ? null : Math.abs(event.envelopeCashAmount)))
+          : dedicatedType === "FEE"
+            ? event.feeAmount
+            : event.taxAmount;
+      return convertHistoricalAmount(
+        amount,
+        event.currency,
+        targetCurrency,
+        event.eventDate,
+        rates,
+        `${dedicatedType}_AMOUNT_MISSING:${event.id}`,
       );
+    }),
+  );
+}
+
+interface NormalisedExternalEvents {
+  events: PortfolioEvent[] | null;
+  blockers: string[];
+  flags: string[];
+}
+
+function normaliseExternalEvents(
+  events: PortfolioEvent[],
+  targetCurrency: string,
+  rates: CurrencyRate[],
+): NormalisedExternalEvents {
+  const normalised: PortfolioEvent[] = [];
+  const blockers: string[] = [];
+  const flags: string[] = [];
+  for (const event of events.filter((item) =>
+    PORTFOLIO_FLOW_DIRECTION[item.type].startsWith("EXTERNAL"),
+  )) {
+    if (event.securityId !== null) {
+      blockers.push(`EXTERNAL_TRANSFER_IN_KIND:${event.id}`);
+      continue;
     }
-    return dedicatedType === "FEE" ? event.feeAmount : event.taxAmount;
-  });
-  if (values.some((value) => value === null))
-    return unavailable([`${dedicatedType}_AMOUNT_MISSING`]);
-  return complete(values.reduce<number>((sum, value) => sum + (value as number), 0));
+    const converted = convertHistoricalAmount(
+      event.envelopeCashAmount,
+      event.currency,
+      targetCurrency,
+      event.eventDate,
+      rates,
+      `EXTERNAL_FLOW_AMOUNT_MISSING:${event.id}`,
+    );
+    blockers.push(...converted.blockers);
+    flags.push(...converted.flags);
+    if (converted.value !== null) {
+      normalised.push({
+        ...event,
+        currency: targetCurrency,
+        envelopeCashAmount: converted.value,
+      });
+    }
+  }
+  return {
+    events: blockers.length === 0 ? normalised : null,
+    blockers: [...new Set(blockers)],
+    flags: [...new Set(flags)],
+  };
 }
 
 interface TwrResult {
@@ -398,62 +511,218 @@ function calculateXirr(flows: DatedCashFlow[]): AnalyticsMetric {
   return Number.isFinite(rate) ? complete(rate) : unavailable(["XIRR_NUMERICAL_FAILURE"]);
 }
 
-function realisedMetric(ledger: PortfolioEnvelopeLedger): AnalyticsMetric {
-  if (ledger.disposals.length === 0) return complete(0);
-  if (ledger.realisedPnL === null) {
-    return unavailable(["DISPOSAL_COST_OR_PROCEEDS_UNKNOWN"], ledger.flags);
-  }
-  return complete(
-    ledger.realisedPnL,
-    ledger.disposals.flatMap((item) => item.flags),
+function weightedAverageFxUnsafe(
+  ledger: PortfolioEnvelopeLedger,
+  events: PortfolioEvent[],
+  targetCurrency: string,
+  securityId?: string,
+): boolean {
+  const hasRelevantDisposal = ledger.disposals.some(
+    (disposal) => securityId === undefined || disposal.securityId === securityId,
   );
+  return (
+    ledger.lotMatchingMethod === "WEIGHTED_AVERAGE" &&
+    hasRelevantDisposal &&
+    events.some(
+      (event) =>
+        event.accountId === ledger.accountId &&
+        event.securityId !== null &&
+        (securityId === undefined || event.securityId === securityId) &&
+        event.currency.toUpperCase() !== targetCurrency.toUpperCase(),
+    )
+  );
+}
+
+function realisedMetric(
+  ledger: PortfolioEnvelopeLedger,
+  events: PortfolioEvent[],
+  targetCurrency: string,
+  rates: CurrencyRate[],
+  securityId?: string,
+): AnalyticsMetric {
+  const disposals = ledger.disposals.filter(
+    (disposal) => securityId === undefined || disposal.securityId === securityId,
+  );
+  if (disposals.length === 0) return complete(0);
+  if (weightedAverageFxUnsafe(ledger, events, targetCurrency, securityId)) {
+    return unavailable(["FX_WEIGHTED_AVERAGE_LOTS_NOT_NORMALISED"]);
+  }
+
+  const convertedPnls: ConvertedAmount[] = [];
+  const disposalFlags: string[] = [];
+  for (const disposal of disposals) {
+    disposalFlags.push(...disposal.flags);
+    if (disposal.netProceeds === null || disposal.matchedCost === null) {
+      return unavailable(
+        [`DISPOSAL_COST_OR_PROCEEDS_UNKNOWN:${disposal.eventId}`],
+        [...ledger.flags, ...disposalFlags],
+      );
+    }
+    const disposalEvent = events.find((event) => event.id === disposal.eventId);
+    if (!disposalEvent) {
+      return unavailable([`DISPOSAL_EVENT_MISSING:${disposal.eventId}`], disposalFlags);
+    }
+    const proceeds = convertHistoricalAmount(
+      disposal.netProceeds,
+      disposalEvent.currency,
+      targetCurrency,
+      disposalEvent.eventDate,
+      rates,
+      `DISPOSAL_PROCEEDS_MISSING:${disposal.eventId}`,
+    );
+    const costs = disposal.matches.map((match) => {
+      const acquisition = events.find((event) => event.id === match.lotEventId);
+      if (!acquisition) {
+        return {
+          value: null,
+          blockers: [`ACQUISITION_EVENT_MISSING:${match.lotEventId}`],
+          flags: [],
+        };
+      }
+      return convertHistoricalAmount(
+        match.cost,
+        acquisition.currency,
+        targetCurrency,
+        acquisition.eventDate,
+        rates,
+        `MATCHED_COST_MISSING:${match.lotEventId}`,
+      );
+    });
+    const convertedCost = strictConvertedSum(costs);
+    if (proceeds.value === null || convertedCost.value === null) {
+      return unavailable(
+        [...proceeds.blockers, ...convertedCost.blockers],
+        [...disposalFlags, ...proceeds.flags, ...convertedCost.flags],
+      );
+    }
+    const hasFx =
+      disposalEvent.currency.toUpperCase() !== targetCurrency.toUpperCase() ||
+      disposal.matches.some((match) => {
+        const acquisition = events.find((event) => event.id === match.lotEventId);
+        return (
+          acquisition !== undefined &&
+          acquisition.currency.toUpperCase() !== targetCurrency.toUpperCase()
+        );
+      });
+    convertedPnls.push({
+      value: proceeds.value - convertedCost.value,
+      blockers: [],
+      flags: [
+        ...proceeds.flags,
+        ...convertedCost.flags,
+        ...(hasFx ? ["FX_PNL_INCLUDES_CURRENCY_EFFECT"] : []),
+      ],
+    });
+  }
+  const result = strictConvertedSum(convertedPnls);
+  return {
+    ...result,
+    flags: [...new Set([...result.flags, ...disposalFlags])],
+  };
+}
+
+function holdingUnrealisedMetric(
+  holding: PortfolioHolding,
+  ledger: PortfolioEnvelopeLedger,
+  positions: Position[],
+  events: PortfolioEvent[],
+  targetCurrency: string,
+  rates: CurrencyRate[],
+): AnalyticsMetric {
+  if (weightedAverageFxUnsafe(ledger, events, targetCurrency, holding.securityId)) {
+    return unavailable(["FX_WEIGHTED_AVERAGE_LOTS_NOT_NORMALISED"]);
+  }
+  const securityPositions = positions.filter(
+    (position) =>
+      position.accountId === ledger.accountId &&
+      position.securityId === holding.securityId &&
+      !position.isCash,
+  );
+  if (holding.quantityState !== "RECONCILED") {
+    return unavailable([`POSITION_LEDGER_RECONCILIATION_INCOMPLETE:${holding.securityId}`]);
+  }
+  const marketValue = strictConvertedSum(
+    securityPositions.map((position) => {
+      if (!position.valuationDate) {
+        return {
+          value: null,
+          blockers: [`POSITION_VALUATION_DATE_MISSING:${position.id}`],
+          flags: [],
+        };
+      }
+      return convertHistoricalAmount(
+        position.value,
+        position.currency,
+        targetCurrency,
+        position.valuationDate,
+        rates,
+        `POSITION_VALUE_MISSING:${position.id}`,
+      );
+    }),
+  );
+  const openLots = holding.lots.filter((lot) => lot.openQuantity > PORTFOLIO_TOLERANCE);
+  if ((holding.ledgerQuantity ?? 0) > PORTFOLIO_TOLERANCE && openLots.length === 0) {
+    return unavailable([`OPEN_LOTS_MISSING:${holding.securityId}`], marketValue.flags);
+  }
+  const openCost = strictConvertedSum(
+    openLots.map((lot) =>
+      convertHistoricalAmount(
+        lot.openCost,
+        lot.currency,
+        targetCurrency,
+        lot.acquiredAt,
+        rates,
+        `OPEN_COST_BASIS_MISSING:${lot.eventId}`,
+      ),
+    ),
+  );
+  if (marketValue.value === null || openCost.value === null) {
+    return unavailable(
+      [...marketValue.blockers, ...openCost.blockers],
+      [...marketValue.flags, ...openCost.flags],
+    );
+  }
+  const hasFx =
+    securityPositions.some(
+      (position) => position.currency.toUpperCase() !== targetCurrency.toUpperCase(),
+    ) || openLots.some((lot) => lot.currency.toUpperCase() !== targetCurrency.toUpperCase());
+  return complete(marketValue.value - openCost.value, [
+    ...new Set([
+      ...marketValue.flags,
+      ...openCost.flags,
+      ...(hasFx ? ["FX_PNL_INCLUDES_CURRENCY_EFFECT"] : []),
+    ]),
+  ]);
 }
 
 function unrealisedMetric(
   ledger: PortfolioEnvelopeLedger,
   positions: Position[],
+  events: PortfolioEvent[],
+  targetCurrency: string,
   rates: CurrencyRate[],
 ): AnalyticsMetric {
   const accountPositions = positions.filter(
     (position) => position.accountId === ledger.accountId && !position.isCash,
   );
-  const flags: string[] = [];
-  let marketValue = 0;
-  for (const position of accountPositions) {
-    if (!position.securityId) return unavailable(["POSITION_SECURITY_ID_MISSING"]);
-    const holding = ledger.holdings.find((item) => item.securityId === position.securityId);
-    if (!holding || holding.quantityState !== "RECONCILED" || holding.ledgerCostBasis === null) {
-      return unavailable([`POSITION_LEDGER_RECONCILIATION_INCOMPLETE:${position.id}`]);
-    }
-    const fx = resolveFxRate(
-      position.currency,
-      ledger.currency,
-      position.valuationDate ?? "",
-      rates,
-    );
-    flags.push(...fx.flags);
-    if (fx.rate === null) return unavailable([`FX_MISSING:${position.id}`], flags);
-    marketValue += position.value * fx.rate;
+  if (accountPositions.some((position) => !position.securityId)) {
+    return unavailable(["POSITION_SECURITY_ID_MISSING"]);
   }
-  const positiveHoldings = ledger.holdings.filter(
-    (holding) => (holding.ledgerQuantity ?? 0) > PORTFOLIO_TOLERANCE,
+  const orphanPosition = accountPositions.find(
+    (position) => !ledger.holdings.some((holding) => holding.securityId === position.securityId),
   );
-  if (
-    positiveHoldings.some(
-      (holding) => holding.quantityState !== "RECONCILED" || holding.ledgerCostBasis === null,
-    )
-  ) {
-    return unavailable(["OPEN_POSITION_RECONCILIATION_INCOMPLETE"], flags);
+  if (orphanPosition) {
+    return unavailable([`POSITION_LEDGER_RECONCILIATION_INCOMPLETE:${orphanPosition.id}`]);
   }
-  const openCost = positiveHoldings.reduce(
-    (sum, holding) => sum + (holding.ledgerCostBasis as number),
-    0,
+  const holdings = ledger.holdings.map((holding) =>
+    holdingUnrealisedMetric(holding, ledger, positions, events, targetCurrency, rates),
   );
+  const blockers = holdings.flatMap((metric) => metric.blockers);
+  const flags = holdings.flatMap((metric) => metric.flags);
+  if (blockers.length > 0) return unavailable(blockers, flags);
   return complete(
-    marketValue - openCost,
-    accountPositions.length > 0
-      ? [...new Set([...flags, "FX_PNL_NOT_ISOLATED"])]
-      : [...new Set(flags)],
+    holdings.reduce((sum, metric) => sum + (metric.value as number), 0),
+    [...new Set(flags)],
   );
 }
 
@@ -520,74 +789,106 @@ function buildAttribution(
 
   const components: PortfolioAttributionComponent[] = [];
   for (const holding of ledger.holdings) {
-    const securityRealised = ledger.disposals
-      .filter((item) => item.securityId === holding.securityId)
-      .reduce((sum, item) => sum + (item.realisedPnL ?? 0), 0);
     const matchingPositions = events.filter(
       (event) =>
         event.securityId === holding.securityId &&
         (event.type === "DIVIDEND" || event.type === "INTEREST"),
     );
-    const securityIncome = matchingPositions.reduce(
-      (sum, event) => sum + Math.abs(event.envelopeCashAmount ?? event.grossAmount ?? 0),
-      0,
+    const securityRealised = realisedMetric(
+      ledger,
+      events,
+      ledger.currency,
+      rates,
+      holding.securityId,
     );
-    const securityPositions = positions.filter(
-      (position) =>
-        position.accountId === ledger.accountId &&
-        position.securityId === holding.securityId &&
-        !position.isCash,
+    const securityIncome = sumEventCash(
+      matchingPositions,
+      ["DIVIDEND", "INTEREST"],
+      ledger.currency,
+      rates,
     );
-    let securityMarketValue = 0;
-    for (const position of securityPositions) {
-      const fx = resolveFxRate(
-        position.currency,
-        ledger.currency,
-        position.valuationDate ?? "",
-        rates,
-      );
-      if (fx.rate === null) {
-        return {
-          status: "NOT_COMPUTABLE",
-          explainedPerformance: null,
-          residual: null,
-          components: [],
-          blockers: [`FX_MISSING:${position.id}`],
-          flags: fx.flags,
-        };
-      }
-      securityMarketValue += position.value * fx.rate;
+    const securityUnrealised = holdingUnrealisedMetric(
+      holding,
+      ledger,
+      positions,
+      events,
+      ledger.currency,
+      rates,
+    );
+    const securityBlockers = [
+      ...securityRealised.blockers,
+      ...securityIncome.blockers,
+      ...securityUnrealised.blockers,
+    ];
+    if (securityBlockers.length > 0) {
+      return {
+        status: "NOT_COMPUTABLE",
+        explainedPerformance: null,
+        residual: null,
+        components: [],
+        blockers: [...new Set(securityBlockers)],
+        flags: [
+          ...new Set([
+            ...securityRealised.flags,
+            ...securityIncome.flags,
+            ...securityUnrealised.flags,
+          ]),
+        ],
+      };
     }
-    const securityUnrealised = securityMarketValue - (holding.ledgerCostBasis ?? 0);
     components.push({
       key: holding.securityId,
       label: holding.securityName,
-      value: securityRealised + securityUnrealised + securityIncome,
+      value:
+        (securityRealised.value as number) +
+        (securityUnrealised.value as number) +
+        (securityIncome.value as number),
       kind: "SECURITY",
     });
   }
-  const unassignedIncome = events
-    .filter(
+  const unassignedIncome = sumEventCash(
+    events.filter(
       (event) =>
         event.securityId === null && (event.type === "DIVIDEND" || event.type === "INTEREST"),
-    )
-    .reduce((sum, event) => sum + Math.abs(event.envelopeCashAmount ?? event.grossAmount ?? 0), 0);
-  if (unassignedIncome !== 0) {
+    ),
+    ["DIVIDEND", "INTEREST"],
+    ledger.currency,
+    rates,
+  );
+  if (unassignedIncome.value === null) {
+    return {
+      status: "NOT_COMPUTABLE",
+      explainedPerformance: null,
+      residual: null,
+      components: [],
+      blockers: unassignedIncome.blockers,
+      flags: unassignedIncome.flags,
+    };
+  }
+  if (unassignedIncome.value !== 0) {
     components.push({
       key: "income",
       label: "Revenus non affectés",
-      value: unassignedIncome,
+      value: unassignedIncome.value,
       kind: "INCOME",
     });
   }
-  const dedicatedCharges = events
-    .filter((event) => event.type === "FEE" || event.type === "TAX")
-    .reduce((sum, event) => sum + Math.abs(event.envelopeCashAmount ?? event.grossAmount ?? 0), 0);
-  if (dedicatedCharges !== 0) {
+  const dedicatedCharges = sumEventCash(events, ["FEE", "TAX"], ledger.currency, rates);
+  if (dedicatedCharges.value === null) {
+    return {
+      status: "NOT_COMPUTABLE",
+      explainedPerformance: null,
+      residual: null,
+      components: [],
+      blockers: dedicatedCharges.blockers,
+      flags: dedicatedCharges.flags,
+    };
+  }
+  if (dedicatedCharges.value !== 0) {
     components.push({
       key: "charges",
       label: "Frais et taxes dédiés",
-      value: -dedicatedCharges,
+      value: -dedicatedCharges.value,
       kind: "CHARGE",
     });
   }
@@ -663,14 +964,15 @@ function envelopeAnalytics(
     input.asOfDate,
   );
   const selectedEvents = windowEvents(account.id, input.events, start, input.asOfDate);
+  const rates = input.currencyRates ?? [];
   const opening = observations.find((item) => item.balanceDate === start);
   const ending = observations.find((item) => item.balanceDate === input.asOfDate);
   const openingValue = opening
     ? complete(opening.balance)
     : unavailable(["OPENING_VALUATION_MISSING"]);
   const endingValue = ending ? complete(ending.balance) : unavailable(["ENDING_VALUATION_MISSING"]);
-  const contributions = sumExternal(selectedEvents, "EXTERNAL_IN");
-  const withdrawals = sumExternal(selectedEvents, "EXTERNAL_OUT");
+  const contributions = sumExternal(selectedEvents, "EXTERNAL_IN", account.currency, rates);
+  const withdrawals = sumExternal(selectedEvents, "EXTERNAL_OUT", account.currency, rates);
   const netExternalFlow =
     contributions.value === null || withdrawals.value === null
       ? unavailable([...contributions.blockers, ...withdrawals.blockers])
@@ -683,24 +985,39 @@ function envelopeAnalytics(
           ...netExternalFlow.blockers,
         ])
       : complete(endingValue.value - openingValue.value - netExternalFlow.value);
-  const income = sumEventCash(selectedEvents, ["DIVIDEND", "INTEREST"]);
-  const fees = sumCharges(selectedEvents, "FEE");
-  const taxes = sumCharges(selectedEvents, "TAX");
-  const realised = realisedMetric(ledger);
-  const unrealised = unrealisedMetric(ledger, input.positions, input.currencyRates ?? []);
-  const twr = calculateTwr(observations, selectedEvents, start, input.asOfDate);
+  const income = sumEventCash(selectedEvents, ["DIVIDEND", "INTEREST"], account.currency, rates);
+  const fees = sumCharges(selectedEvents, "FEE", account.currency, rates);
+  const taxes = sumCharges(selectedEvents, "TAX", account.currency, rates);
+  const realised = realisedMetric(ledger, selectedEvents, account.currency, rates);
+  const unrealised = unrealisedMetric(
+    ledger,
+    input.positions,
+    selectedEvents,
+    account.currency,
+    rates,
+  );
+  const normalisedExternal = normaliseExternalEvents(selectedEvents, account.currency, rates);
+  const twr: TwrResult = normalisedExternal.events
+    ? calculateTwr(observations, normalisedExternal.events, start, input.asOfDate)
+    : {
+        metric: unavailable(normalisedExternal.blockers, normalisedExternal.flags),
+        series: [],
+        returns: [],
+        gaps: [],
+      };
   const risk = riskMetrics(twr);
   let xirr: AnalyticsMetric;
   if (openingValue.value === null || endingValue.value === null) {
     xirr = unavailable([...openingValue.blockers, ...endingValue.blockers]);
-  } else if (selectedEvents.some((event) => externalCashFlow(event) === null)) {
-    xirr = unavailable(["EXTERNAL_FLOW_NOT_VALUED"]);
+  } else if (normalisedExternal.events === null) {
+    xirr = unavailable(normalisedExternal.blockers, normalisedExternal.flags);
   } else {
     const flows: DatedCashFlow[] = [
       { date: start, amount: -openingValue.value },
-      ...selectedEvents
-        .filter((event) => PORTFOLIO_FLOW_DIRECTION[event.type].startsWith("EXTERNAL"))
-        .map((event) => ({ date: event.eventDate, amount: externalCashFlow(event) as number })),
+      ...normalisedExternal.events.map((event) => ({
+        date: event.eventDate,
+        amount: externalCashFlow(event) as number,
+      })),
       { date: input.asOfDate, amount: endingValue.value },
     ].sort((a, b) => a.date.localeCompare(b.date));
     xirr = calculateXirr(flows);
@@ -709,7 +1026,7 @@ function envelopeAnalytics(
     ledger,
     selectedEvents,
     input.positions,
-    input.currencyRates ?? [],
+    rates,
     realised,
     unrealised,
     income,
@@ -842,7 +1159,9 @@ function buildAggregatePerformance(
       if (fx.rate === null) {
         return unavailablePerformance(
           input.reportingCurrency,
-          [`FX_MISSING:${account.id}@${date}`],
+          fx.flags.length > 0
+            ? fx.flags
+            : [`FX_MISSING:${account.currency}/${input.reportingCurrency}@${date}`],
           start,
           flags,
         );
@@ -884,7 +1203,9 @@ function buildAggregatePerformance(
       if (fx.rate === null) {
         return unavailablePerformance(
           input.reportingCurrency,
-          [`FX_MISSING:${event.id}`],
+          fx.flags.length > 0
+            ? fx.flags
+            : [`FX_MISSING:${event.currency}/${input.reportingCurrency}@${event.eventDate}`],
           start,
           flags,
         );
@@ -903,8 +1224,18 @@ function buildAggregatePerformance(
   const ending = syntheticObservations.find((item) => item.balanceDate === input.asOfDate)!;
   const openingValue = complete(opening.balance, flags);
   const endingValue = complete(ending.balance, flags);
-  const contributions = sumExternal(syntheticEvents, "EXTERNAL_IN");
-  const withdrawals = sumExternal(syntheticEvents, "EXTERNAL_OUT");
+  const contributions = sumExternal(
+    syntheticEvents,
+    "EXTERNAL_IN",
+    input.reportingCurrency,
+    input.currencyRates ?? [],
+  );
+  const withdrawals = sumExternal(
+    syntheticEvents,
+    "EXTERNAL_OUT",
+    input.reportingCurrency,
+    input.currencyRates ?? [],
+  );
   const netExternalFlow =
     contributions.value === null || withdrawals.value === null
       ? unavailable([...contributions.blockers, ...withdrawals.blockers], flags)

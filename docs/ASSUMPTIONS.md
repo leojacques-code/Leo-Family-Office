@@ -200,11 +200,18 @@ elle reste inconnue. Les ancrages d'ouverture ne sont jamais des contributions.
   domaine `r > -100 %` et refuse un résultat lorsqu'il ne trouve aucune racine ou en trouve
   plusieurs.
 
-Le PnL réalisé vient exclusivement des cessions appariées par le ledger. Le PnL non réalisé exige
-des quantités réconciliées et un coût ouvert complet pour chaque position ; sa valeur de marché
-est convertie par le FX Engine à la date de valorisation. L'effet de change sur le capital investi
-n'est pas isolé et reste signalé. Frais et taxes des achats/ventes sont déjà incorporés aux coûts
-et produits nets ; l'attribution ne les soustrait pas une seconde fois.
+Le PnL réalisé vient exclusivement des cessions appariées par le ledger, mais n'additionne jamais
+son agrégat natif en présence de devises différentes : le produit net est converti à la date de
+cession et chaque coût apparié à la date de son acquisition. Le PnL non réalisé exige des quantités
+réconciliées et un coût ouvert complet pour chaque position ; sa valeur de marché est convertie à
+la date de valorisation et chaque lot ouvert à sa date d'acquisition. Contributions, retraits,
+revenus, frais et taxes sont également convertis à la date de l'événement. Toutes ces conversions
+passent exclusivement par le FX Engine ; un taux ou une date nécessaire absent bloque la métrique.
+Le coût moyen pondéré multi-devise après cession reste `NOT_COMPUTABLE`, car le ledger a déjà
+réparti un pool de coûts natifs qu'une conversion aval ne peut normaliser fidèlement. L'effet de
+change sur le capital investi n'est pas isolé et reste signalé. Frais et taxes des achats/ventes
+sont déjà incorporés aux coûts et produits nets ; l'attribution ne les soustrait pas une seconde
+fois.
 
 ### Risque, allocation et attribution
 

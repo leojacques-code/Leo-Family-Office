@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
+import type { CurrencyRate } from "@/lib/engine/fx";
 import { buildPortfolioAnalytics } from "@/lib/engine/portfolio-analytics";
 import { buildPortfolioLedger } from "@/lib/engine/portfolio";
 import type {
@@ -79,12 +80,14 @@ function analytics({
   positions = [],
   policy = declared,
   currentAccount = account,
+  rates = [],
 }: {
   events: PortfolioEvent[];
   balances: AccountBalanceObservation[];
   positions?: Position[];
   policy?: PortfolioEnvelopePolicy | null;
   currentAccount?: FinancialAccount;
+  rates?: CurrencyRate[];
 }) {
   const policies = policy ? [policy] : [];
   const ledger = buildPortfolioLedger({
@@ -99,6 +102,7 @@ function analytics({
     reportingCurrency: "EUR",
     accounts: [currentAccount],
     positions,
+    currencyRates: rates,
   });
   return buildPortfolioAnalytics({
     asOfDate: "2026-01-01",
@@ -109,7 +113,19 @@ function analytics({
     balanceHistory: balances,
     ledger,
     balanceSheet,
+    currencyRates: rates,
   });
+}
+
+function usdEurRate(rateDate: string, rate: number): CurrencyRate {
+  return {
+    id: `usd-eur-${rateDate}`,
+    baseCurrency: "USD",
+    quoteCurrency: "EUR",
+    rate,
+    rateDate,
+    provenance,
+  };
 }
 
 describe("Portfolio Analytics — performance et flux", () => {
@@ -439,5 +455,397 @@ describe("Portfolio Analytics — PnL, attribution et exposition", () => {
       weight: 1,
     });
     expect(result.concentration.effectivePositions).toBe(1);
+  });
+});
+
+describe("Portfolio Analytics — vérité multi-devise", () => {
+  it("conserve exactement les métriques d'une enveloppe et d'événements EUR", () => {
+    const result = analytics({
+      events: [
+        event({
+          id: "open-eur",
+          type: "OPENING_CASH",
+          eventDate: "2025-01-01",
+          envelopeCashAmount: 1000,
+        }),
+        event({
+          id: "contribution-eur",
+          type: "CONTRIBUTION",
+          eventDate: "2025-07-01",
+          envelopeCashAmount: 100,
+        }),
+      ],
+      balances: [
+        observation("2025-01-01", 1000),
+        observation("2025-07-01", 1100),
+        observation("2026-01-01", 1210),
+      ],
+      currentAccount: { ...account, balance: 1210 },
+    }).envelopes[0];
+
+    expect(result.contributions.value).toBe(100);
+    expect(result.twr.value).toBeCloseTo(0.1, 10);
+    expect(result.xirr.value).not.toBeNull();
+  });
+
+  it("convertit achat, vente et coût ouvert USD aux dates économiques correctes", () => {
+    const positions: Position[] = [
+      {
+        id: "position-usd",
+        accountId: account.id,
+        securityId: "usd-security",
+        securityName: "Titre USD",
+        assetClass: "Actions",
+        quantity: 6,
+        value: 720,
+        currency: "USD",
+        valuationDate: "2026-01-01",
+        isCash: false,
+        provenance,
+      },
+      {
+        id: "cash-eur",
+        accountId: account.id,
+        securityId: "cash-eur",
+        securityName: "Cash EUR",
+        assetClass: "Cash",
+        value: 456,
+        currency: "EUR",
+        valuationDate: "2026-01-01",
+        isCash: true,
+        provenance,
+      },
+    ];
+    const events = [
+      event({
+        id: "open-fx",
+        type: "OPENING_CASH",
+        eventDate: "2025-01-01",
+        envelopeCashAmount: 0,
+      }),
+      event({
+        id: "contribution-fx",
+        type: "CONTRIBUTION",
+        eventDate: "2025-02-01",
+        envelopeCashAmount: 900,
+      }),
+      event({
+        id: "buy-usd",
+        type: "BUY",
+        eventDate: "2025-02-02",
+        securityId: "usd-security",
+        securityName: "Titre USD",
+        assetClass: "Actions",
+        quantity: 10,
+        unitPrice: 100,
+        grossAmount: 1000,
+        feeAmount: 0,
+        taxAmount: 0,
+        envelopeCashAmount: -1000,
+        currency: "USD",
+      }),
+      event({
+        id: "sell-usd",
+        type: "SELL",
+        eventDate: "2025-06-01",
+        securityId: "usd-security",
+        securityName: "Titre USD",
+        assetClass: "Actions",
+        quantity: 4,
+        unitPrice: 120,
+        grossAmount: 480,
+        feeAmount: 0,
+        taxAmount: 0,
+        envelopeCashAmount: 480,
+        currency: "USD",
+      }),
+    ];
+    const result = analytics({
+      events,
+      balances: [observation("2025-01-01", 0), observation("2026-01-01", 1176)],
+      positions,
+      currentAccount: { ...account, balance: 1176 },
+      rates: [
+        usdEurRate("2025-02-02", 0.9),
+        usdEurRate("2025-06-01", 0.95),
+        usdEurRate("2026-01-01", 1),
+      ],
+    }).envelopes[0];
+
+    // Produit : 480 USD × 0,95. Coût cédé : 400 USD × 0,90.
+    expect(result.realisedPnL.value).toBeCloseTo(96, 10);
+    expect(result.realisedPnL.flags).toContain("FX_PNL_INCLUDES_CURRENCY_EFFECT");
+    // Valeur : 720 USD × 1,00. Coût ouvert : 600 USD × 0,90.
+    expect(result.unrealisedPnL.value).toBeCloseTo(180, 10);
+    expect(result.unrealisedPnL.flags).toContain("FX_PNL_INCLUDES_CURRENCY_EFFECT");
+    expect(result.attribution.status).toBe("COMPLETE");
+    expect(result.attribution.explainedPerformance).toBeCloseTo(276, 10);
+  });
+
+  it("convertit dividende, frais et taxe USD sans les additionner comme des EUR", () => {
+    const dividend = analytics({
+      events: [
+        event({
+          id: "open-dividend",
+          type: "OPENING_CASH",
+          eventDate: "2025-01-01",
+          envelopeCashAmount: 0,
+        }),
+        event({
+          id: "dividend-usd",
+          type: "DIVIDEND",
+          eventDate: "2025-05-01",
+          envelopeCashAmount: 100,
+          currency: "USD",
+        }),
+      ],
+      balances: [observation("2025-01-01", 0), observation("2026-01-01", 90)],
+      currentAccount: { ...account, balance: 90 },
+      rates: [usdEurRate("2025-05-01", 0.9)],
+    }).envelopes[0];
+    expect(dividend.income.value).toBeCloseTo(90, 10);
+    expect(dividend.attribution.status).toBe("COMPLETE");
+    expect(dividend.attribution.explainedPerformance).toBeCloseTo(90, 10);
+
+    const charges = analytics({
+      events: [
+        event({
+          id: "open-charges",
+          type: "OPENING_CASH",
+          eventDate: "2025-01-01",
+          envelopeCashAmount: 0,
+        }),
+        event({
+          id: "fee-usd",
+          type: "FEE",
+          eventDate: "2025-05-01",
+          grossAmount: 10,
+          envelopeCashAmount: -10,
+          currency: "USD",
+        }),
+        event({
+          id: "tax-usd",
+          type: "TAX",
+          eventDate: "2025-05-01",
+          grossAmount: 5,
+          envelopeCashAmount: -5,
+          currency: "USD",
+        }),
+      ],
+      balances: [observation("2025-01-01", 0), observation("2026-01-01", -13.5)],
+      currentAccount: { ...account, balance: -13.5 },
+      rates: [usdEurRate("2025-05-01", 0.9)],
+    }).envelopes[0];
+    expect(charges.fees.value).toBeCloseTo(9, 10);
+    expect(charges.taxes.value).toBeCloseTo(4.5, 10);
+    expect(charges.attribution.status).toBe("COMPLETE");
+    expect(charges.attribution.explainedPerformance).toBeCloseTo(-13.5, 10);
+  });
+
+  it("bloque chaque métrique concernée quand le FX historique manque", () => {
+    const result = analytics({
+      events: [
+        event({
+          id: "open-missing-fx",
+          type: "OPENING_CASH",
+          eventDate: "2025-01-01",
+          envelopeCashAmount: 1000,
+        }),
+        event({
+          id: "contribution-usd",
+          type: "CONTRIBUTION",
+          eventDate: "2025-07-01",
+          envelopeCashAmount: 100,
+          currency: "USD",
+        }),
+        event({
+          id: "dividend-missing-fx",
+          type: "DIVIDEND",
+          eventDate: "2025-08-01",
+          envelopeCashAmount: 20,
+          currency: "USD",
+        }),
+      ],
+      balances: [
+        observation("2025-01-01", 1000),
+        observation("2025-07-01", 1090),
+        observation("2026-01-01", 1110),
+      ],
+      currentAccount: { ...account, balance: 1110 },
+    }).envelopes[0];
+
+    expect(result.contributions.value).toBeNull();
+    expect(result.income.value).toBeNull();
+    expect(result.twr.value).toBeNull();
+    expect(result.xirr.value).toBeNull();
+    expect(result.contributions.blockers).toContain("FX_MISSING:USD/EUR@2025-07-01");
+    expect(result.income.blockers).toContain("FX_MISSING:USD/EUR@2025-08-01");
+  });
+
+  it("ne publie aucun PnL quand le FX d'acquisition, de cession ou de valorisation manque", () => {
+    const positions: Position[] = [
+      {
+        id: "position-pnl-no-fx",
+        accountId: account.id,
+        securityId: "usd-no-fx",
+        securityName: "Titre USD sans FX",
+        assetClass: "Actions",
+        quantity: 5,
+        value: 600,
+        currency: "USD",
+        valuationDate: "2026-01-01",
+        isCash: false,
+        provenance,
+      },
+    ];
+    const result = analytics({
+      events: [
+        event({
+          id: "open-pnl-no-fx",
+          type: "OPENING_CASH",
+          eventDate: "2025-01-01",
+          envelopeCashAmount: 0,
+        }),
+        event({
+          id: "buy-pnl-no-fx",
+          type: "BUY",
+          eventDate: "2025-02-01",
+          securityId: "usd-no-fx",
+          securityName: "Titre USD sans FX",
+          assetClass: "Actions",
+          quantity: 10,
+          unitPrice: 100,
+          grossAmount: 1000,
+          feeAmount: 0,
+          taxAmount: 0,
+          envelopeCashAmount: -1000,
+          currency: "USD",
+        }),
+        event({
+          id: "sell-pnl-no-fx",
+          type: "SELL",
+          eventDate: "2025-06-01",
+          securityId: "usd-no-fx",
+          securityName: "Titre USD sans FX",
+          assetClass: "Actions",
+          quantity: 5,
+          unitPrice: 120,
+          grossAmount: 600,
+          feeAmount: 0,
+          taxAmount: 0,
+          envelopeCashAmount: 600,
+          currency: "USD",
+        }),
+      ],
+      balances: [observation("2025-01-01", 0), observation("2026-01-01", 600)],
+      positions,
+      currentAccount: { ...account, balance: 600 },
+    }).envelopes[0];
+
+    expect(result.realisedPnL.value).toBeNull();
+    expect(result.realisedPnL.blockers).toContain("FX_MISSING:USD/EUR@2025-06-01");
+    expect(result.realisedPnL.blockers).toContain("FX_MISSING:USD/EUR@2025-02-01");
+    expect(result.unrealisedPnL.value).toBeNull();
+    expect(result.unrealisedPnL.blockers).toContain("FX_MISSING:USD/EUR@2026-01-01");
+    expect(result.unrealisedPnL.blockers).toContain("FX_MISSING:USD/EUR@2025-02-01");
+    expect(result.attribution.status).toBe("NOT_COMPUTABLE");
+  });
+
+  it("bloque le coût moyen multi-devise après cession au lieu de convertir un pool natif", () => {
+    const result = analytics({
+      policy: { ...declared, lotMatchingMethod: "WEIGHTED_AVERAGE" },
+      events: [
+        event({
+          id: "open-weighted-fx",
+          type: "OPENING_CASH",
+          eventDate: "2025-01-01",
+          envelopeCashAmount: 0,
+        }),
+        event({
+          id: "buy-weighted-fx-1",
+          type: "BUY",
+          eventDate: "2025-02-01",
+          securityId: "weighted-fx",
+          securityName: "Pool USD",
+          quantity: 10,
+          grossAmount: 1000,
+          feeAmount: 0,
+          taxAmount: 0,
+          envelopeCashAmount: -1000,
+          currency: "USD",
+        }),
+        event({
+          id: "buy-weighted-fx-2",
+          type: "BUY",
+          eventDate: "2025-03-01",
+          securityId: "weighted-fx",
+          securityName: "Pool USD",
+          quantity: 10,
+          grossAmount: 1500,
+          feeAmount: 0,
+          taxAmount: 0,
+          envelopeCashAmount: -1500,
+          currency: "USD",
+        }),
+        event({
+          id: "sell-weighted-fx",
+          type: "SELL",
+          eventDate: "2025-06-01",
+          securityId: "weighted-fx",
+          securityName: "Pool USD",
+          quantity: 10,
+          grossAmount: 1800,
+          feeAmount: 0,
+          taxAmount: 0,
+          envelopeCashAmount: 1800,
+          currency: "USD",
+        }),
+      ],
+      balances: [observation("2025-01-01", 0), observation("2026-01-01", 0)],
+      rates: [
+        usdEurRate("2025-02-01", 0.9),
+        usdEurRate("2025-03-01", 0.8),
+        usdEurRate("2025-06-01", 0.95),
+      ],
+      currentAccount: { ...account, balance: 0 },
+    }).envelopes[0];
+
+    expect(result.realisedPnL).toMatchObject({
+      value: null,
+      status: "NOT_COMPUTABLE",
+      blockers: ["FX_WEIGHTED_AVERAGE_LOTS_NOT_NORMALISED"],
+    });
+    expect(result.unrealisedPnL.blockers).toContain("FX_WEIGHTED_AVERAGE_LOTS_NOT_NORMALISED");
+  });
+
+  it("convertit un apport USD avant TWR et XIRR sans régresser le cas mono-devise", () => {
+    const result = analytics({
+      events: [
+        event({
+          id: "open-flow-fx",
+          type: "OPENING_CASH",
+          eventDate: "2025-01-01",
+          envelopeCashAmount: 1000,
+        }),
+        event({
+          id: "contribution-flow-usd",
+          type: "CONTRIBUTION",
+          eventDate: "2025-07-01",
+          envelopeCashAmount: 100,
+          currency: "USD",
+        }),
+      ],
+      balances: [
+        observation("2025-01-01", 1000),
+        observation("2025-07-01", 1090),
+        observation("2026-01-01", 1199),
+      ],
+      currentAccount: { ...account, balance: 1199 },
+      rates: [usdEurRate("2025-07-01", 0.9)],
+    }).envelopes[0];
+
+    expect(result.contributions.value).toBeCloseTo(90, 10);
+    expect(result.twr.value).toBeCloseTo(0.1, 10);
+    expect(result.xirr.value).not.toBeNull();
   });
 });
