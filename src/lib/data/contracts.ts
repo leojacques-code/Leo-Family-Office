@@ -3,6 +3,7 @@
 import type {
   BusinessAmountScope,
   BusinessBridgeItemCategory,
+  BusinessBridgeStatus,
   BusinessCapitalEventType,
   BusinessCapitalHistorySource,
   BusinessDcfTerminalMethod,
@@ -288,6 +289,7 @@ export interface BusinessValuationInput {
   secondaryAmount: number | null;
   investorContribution: number | null;
   preferredRightsKnown: boolean | null;
+  bridgeStatus: BusinessBridgeStatus;
   source: string | null;
   notes: string | null;
 }
@@ -384,6 +386,8 @@ export interface BusinessQuickStartInput {
   multiple: number;
   multipleLow: number | null;
   multipleHigh: number | null;
+  /** Confirmation explicite qu'aucun autre ajustement EV → Equity n'existe. */
+  bridgeStatus: "DECLARED_NONE";
   capitalHistoryStart: string | null;
   capitalHistorySource: BusinessCapitalHistorySource;
   notes: string | null;

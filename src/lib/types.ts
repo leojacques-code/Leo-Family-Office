@@ -845,6 +845,7 @@ export interface DashboardState {
   businessValuations?: import("@/lib/engine/business-equity").BusinessValuationBasis[];
   businessEbitdaAdjustments?: import("@/lib/engine/business-equity").BusinessEbitdaAdjustment[];
   businessBridgeItems?: import("@/lib/engine/business-equity").BusinessBridgeItem[];
+  businessBridgeDeclarations?: import("@/lib/engine/business-equity").BusinessBridgeDeclaration[];
   businessDcfAssumptions?: import("@/lib/engine/business-equity").BusinessDcfAssumptions[];
   businessCapitalEvents?: import("@/lib/engine/business-equity").BusinessCapitalEvent[];
   businessHoldings?: import("@/lib/engine/business-equity").BusinessHoldingLink[];

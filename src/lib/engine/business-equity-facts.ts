@@ -112,6 +112,21 @@ export const BUSINESS_BRIDGE_ITEM_CATEGORIES = [
 ] as const;
 export type BusinessBridgeItemCategory = (typeof BUSINESS_BRIDGE_ITEM_CATEGORIES)[number];
 
+/**
+ * Complétude DÉCLARÉE du pont EV → Equity hors dette brute et trésorerie.
+ *
+ * Une liste vide n'a aucun sens sans cette déclaration : elle peut vouloir dire « aucun
+ * autre ajustement » comme « pas encore renseigné ». La date permet de ne jamais appliquer
+ * rétroactivement une déclaration faite pour une valorisation ultérieure.
+ */
+export const BUSINESS_BRIDGE_STATUSES = [
+  "UNKNOWN",
+  "DECLARED_NONE",
+  "PARTIAL",
+  "COMPLETE",
+] as const;
+export type BusinessBridgeStatus = (typeof BUSINESS_BRIDGE_STATUSES)[number];
+
 export const BUSINESS_CAPITAL_EVENT_TYPES = [
   "OPENING_COST_BASIS",
   "ACQUISITION",
@@ -203,6 +218,8 @@ export type BusinessBlockerCode =
   | "VALUATION_FINANCIAL_PERIOD_MISSING"
   | "EV_TO_EQUITY_GROSS_DEBT_MISSING"
   | "EV_TO_EQUITY_CASH_MISSING"
+  | "EV_TO_EQUITY_BRIDGE_STATUS_MISSING"
+  | "EV_TO_EQUITY_BRIDGE_INCOMPLETE"
   | "EQUITY_VALUE_NOT_COMPUTABLE"
   | "OWNERSHIP_MISSING"
   | "ECONOMIC_OWNERSHIP_MISSING"
@@ -498,6 +515,16 @@ export interface BusinessBridgeItem {
   /** Signé : positif ajoute à l'Equity Value, négatif la réduit. */
   amount: number;
   currency: string;
+  notes: string | null;
+  provenance: Provenance;
+}
+
+/** Déclaration datée de la complétude des ajustements du pont EV → Equity. */
+export interface BusinessBridgeDeclaration {
+  id: string;
+  businessId: string;
+  effectiveDate: string;
+  status: BusinessBridgeStatus;
   notes: string | null;
   provenance: Provenance;
 }

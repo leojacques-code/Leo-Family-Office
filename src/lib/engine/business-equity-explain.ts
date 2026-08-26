@@ -208,6 +208,10 @@ const BLOCKER_PHRASES: Record<BusinessBlockerCode, BlockerPhrase> = {
     ),
   EV_TO_EQUITY_CASH_MISSING: (item) =>
     withDetail("la trésorerie de la société n’est pas déclarée", item),
+  EV_TO_EQUITY_BRIDGE_STATUS_MISSING: (item) =>
+    withDetail("la complétude des autres ajustements du pont EV → Equity n’est pas déclarée", item),
+  EV_TO_EQUITY_BRIDGE_INCOMPLETE: (item) =>
+    withDetail("les autres ajustements du pont EV → Equity sont incomplets", item),
   EQUITY_VALUE_NOT_COMPUTABLE: (item) =>
     withDetail("l’Equity Value ne peut pas être établie à partir des faits connus", item),
   OWNERSHIP_MISSING: (item) => withDetail("aucune détention n’est déclarée à cette date", item),

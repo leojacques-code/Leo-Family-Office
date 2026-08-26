@@ -20,6 +20,7 @@ import {
   valuationsAtOrBefore,
   type BusinessAmount,
   type BusinessBlocker,
+  type BusinessBridgeDeclaration,
   type BusinessBridgeItem,
   type BusinessDcfAssumptions,
   type BusinessEbitdaAdjustment,
@@ -137,6 +138,7 @@ export interface ValueBusinessInput {
   financials: BusinessFinancialSnapshot[];
   ebitdaAdjustments: BusinessEbitdaAdjustment[];
   bridgeItems: BusinessBridgeItem[];
+  bridgeDeclarations: BusinessBridgeDeclaration[];
   dcf: BusinessDcfAssumptions[];
   currencyRates: CurrencyRate[];
   /** Droits économiques applicables. Ferme le pont jusqu'à la valeur personnelle. */
@@ -182,13 +184,13 @@ function rangeQuality(range: BusinessValueRange): BusinessQuality {
 
 /**
  * Pont EV → Equity, hors cash et dette : minoritaires, provisions, earn-out, comptes
- * courants d'associés, actifs hors exploitation. Absents = NON DÉCLARÉS, donc la somme
- * d'une liste vide vaut zéro déclaré : ne rien déclarer signifie ici « pas d'autre terme »,
- * ce qui est une position par défaut légitime car ces termes sont l'exception. Cash et
- * dette brute, eux, ne bénéficient jamais de cette tolérance.
+ * courants d'associés, actifs hors exploitation. Une liste vide ne vaut zéro que si une
+ * déclaration datée dit explicitement qu'il n'existe aucun autre ajustement ou que le pont
+ * est complet. UNKNOWN et PARTIAL restent non calculables : jamais de faux zéro silencieux.
  */
 function sumBridgeItems(
   items: BusinessBridgeItem[],
+  declarations: BusinessBridgeDeclaration[],
   business: BusinessEntity,
   asOfDate: string,
   reportingCurrency: string,
@@ -209,8 +211,22 @@ function sumBridgeItems(
       business.id,
     ).amount,
   }));
+  const declaration = latestAtOrBefore(
+    declarations.filter((item) => item.businessId === business.id),
+    asOfDate,
+    (item) => item.effectiveDate,
+  );
+  const status = declaration?.status ?? "UNKNOWN";
+  const declaredTotal =
+    converted.length === 0 ? known(0) : sumAll(converted.map((row) => row.amount));
+  const total =
+    status === "UNKNOWN"
+      ? unknown([blocker("EV_TO_EQUITY_BRIDGE_STATUS_MISSING", business.id)])
+      : status === "PARTIAL" || (status === "DECLARED_NONE" && converted.length > 0)
+        ? unknown([blocker("EV_TO_EQUITY_BRIDGE_INCOMPLETE", business.id)])
+        : declaredTotal;
   return {
-    total: converted.length === 0 ? known(0) : sumAll(converted.map((row) => row.amount)),
+    total,
     steps: converted.map((row) =>
       step(
         `BRIDGE_ITEM:${row.item.category}`,
@@ -246,6 +262,7 @@ function bridgeContext(
   valuationDate: string,
   financials: BusinessFinancialSnapshot[],
   bridgeItems: BusinessBridgeItem[],
+  bridgeDeclarations: BusinessBridgeDeclaration[],
   reportingCurrency: string,
   rates: CurrencyRate[],
 ): BridgeContext {
@@ -254,7 +271,14 @@ function bridgeContext(
     valuationDate,
     (row) => row.periodEnd,
   );
-  const items = sumBridgeItems(bridgeItems, business, valuationDate, reportingCurrency, rates);
+  const items = sumBridgeItems(
+    bridgeItems,
+    bridgeDeclarations,
+    business,
+    valuationDate,
+    reportingCurrency,
+    rates,
+  );
   if (!snapshot) {
     const missing = unknown([
       blocker("EV_TO_EQUITY_GROSS_DEBT_MISSING", business.id),
@@ -649,6 +673,7 @@ export function valueBusiness(input: ValueBusinessInput): BusinessValuationResul
     basis.valuationDate,
     input.financials,
     input.bridgeItems,
+    input.bridgeDeclarations,
     reportingCurrency,
     rates,
   );
@@ -904,6 +929,7 @@ function lookThroughValuation(
     asOfDate,
     input.financials,
     input.bridgeItems,
+    input.bridgeDeclarations,
     reportingCurrency,
     rates,
   );

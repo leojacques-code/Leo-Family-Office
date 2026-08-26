@@ -19,6 +19,7 @@ import {
   unknown,
   type BusinessAmount,
   type BusinessBlocker,
+  type BusinessBridgeDeclaration,
   type BusinessBridgeItem,
   type BusinessCapitalEvent,
   type BusinessDcfAssumptions,
@@ -159,6 +160,7 @@ export interface BuildBusinessEquityInput {
   holdings: BusinessHoldingLink[];
   ebitdaAdjustments?: BusinessEbitdaAdjustment[];
   bridgeItems?: BusinessBridgeItem[];
+  bridgeDeclarations?: BusinessBridgeDeclaration[];
   dcfAssumptions?: BusinessDcfAssumptions[];
   currencyRates?: CurrencyRate[];
 }
@@ -174,6 +176,7 @@ export function buildBusinessEquityPortfolio(
   const rates = input.currencyRates ?? [];
   const adjustments = input.ebitdaAdjustments ?? [];
   const bridgeItems = input.bridgeItems ?? [];
+  const bridgeDeclarations = input.bridgeDeclarations ?? [];
   const dcf = input.dcfAssumptions ?? [];
   const businesses = input.businesses.filter((business) => !business.archived);
   const byId = new Map(businesses.map((business) => [business.id, business]));
@@ -207,6 +210,7 @@ export function buildBusinessEquityPortfolio(
       financials: input.financials,
       ebitdaAdjustments: adjustments,
       bridgeItems,
+      bridgeDeclarations,
       dcf,
       currencyRates: rates,
       economicRate:

@@ -1023,7 +1023,7 @@ export function ScenariosTab({ position, context, currency }: TabProps) {
   const hold = projectBusinessHold({
     currentEquityValue: position.equityValue.central,
     economicRate: position.ownership.economicRate,
-    years: Number(horizon) || 0,
+    years: optionalNumber(horizon),
     annualValueGrowth: optionalRate(growth),
     annualDistributionToOwner: optionalNumber(distribution),
     discountRate: optionalRate(discountRate),
@@ -1038,22 +1038,24 @@ export function ScenariosTab({ position, context, currency }: TabProps) {
     cash: position.valuation.cash,
     otherBridgeItems: position.valuation.bridgeItemsTotal,
     economicRate: position.ownership.economicRate,
-    saleFraction: optionalRate(saleFraction) ?? 0,
+    saleFraction: optionalRate(saleFraction),
     transactionFeeRate: optionalRate(feeRate),
     remainingCostBasis: position.capital.remainingCostBasis,
     effectiveTaxRate: optionalRate(taxRate),
   });
 
   const ownershipBefore = position.ownership.economicRate.value;
+  const contributionValue = optionalNumber(contribution);
   const raise =
     ownershipBefore !== null &&
     optionalNumber(preMoney) !== null &&
-    optionalNumber(primaryNewMoney) !== null
+    optionalNumber(primaryNewMoney) !== null &&
+    contributionValue !== null
       ? projectBusinessRaisePreview({
           preMoney: optionalNumber(preMoney)!,
           primary: optionalNumber(primaryNewMoney)!,
           ownershipBefore,
-          contribution: optionalNumber(contribution) ?? 0,
+          contribution: contributionValue,
           costBasisBefore: position.capital.remainingCostBasis,
         })
       : null;

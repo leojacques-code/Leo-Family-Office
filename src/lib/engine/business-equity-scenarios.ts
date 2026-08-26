@@ -42,7 +42,7 @@ export interface BusinessHoldScenarioInput {
   /** Equity value actuelle de la société entière, en devise de reporting. */
   currentEquityValue: BusinessAmount;
   economicRate: BusinessAmount;
-  years: number;
+  years: number | null;
   /** Croissance annuelle DÉCLARÉE de la valeur. `null` = non déclarée. */
   annualValueGrowth: number | null;
   /** Distribution personnelle annuelle DÉCLARÉE. `null` = non déclarée. */
@@ -52,7 +52,7 @@ export interface BusinessHoldScenarioInput {
 }
 
 export interface BusinessHoldScenarioResult {
-  horizonYears: number;
+  horizonYears: number | null;
   terminalEquityValue: BusinessAmount;
   terminalAttributableValue: BusinessAmount;
   cumulativeDistributions: BusinessAmount;
@@ -70,6 +70,7 @@ export interface BusinessHoldScenarioResult {
  */
 export function projectBusinessHold(input: BusinessHoldScenarioInput): BusinessHoldScenarioResult {
   const flags: BusinessFlag[] = [];
+  const horizon = declared(input.years, "horizon de projection");
   const growth = declared(input.annualValueGrowth, "croissance annuelle de la valeur");
   const distribution = declared(
     input.annualDistributionToOwner,
@@ -77,10 +78,12 @@ export function projectBusinessHold(input: BusinessHoldScenarioInput): BusinessH
   );
   const terminalEquityValue = multiply(
     input.currentEquityValue,
-    growth.value === null ? growth : known((1 + growth.value) ** input.years),
+    growth.value === null || horizon.value === null
+      ? sumAll([growth, horizon])
+      : known((1 + growth.value) ** horizon.value),
   );
   const terminalAttributableValue = multiply(terminalEquityValue, input.economicRate);
-  const cumulativeDistributions = multiply(distribution, known(input.years));
+  const cumulativeDistributions = multiply(distribution, horizon);
   const totalOwnerValue = sumAll([terminalAttributableValue, cumulativeDistributions]);
   const discount = declared(input.discountRate, "taux d'actualisation");
   return {
@@ -91,7 +94,9 @@ export function projectBusinessHold(input: BusinessHoldScenarioInput): BusinessH
     totalOwnerValue,
     presentValue: multiply(
       totalOwnerValue,
-      discount.value === null ? discount : known(1 / (1 + discount.value) ** input.years),
+      discount.value === null || horizon.value === null
+        ? sumAll([discount, horizon])
+        : known(1 / (1 + discount.value) ** horizon.value),
     ),
     flags: dedupeFlags(flags),
   };
@@ -114,7 +119,7 @@ export interface BusinessSaleScenarioInput {
   otherBridgeItems: BusinessAmount;
   economicRate: BusinessAmount;
   /** Part de la détention cédée, dans ]0,1]. */
-  saleFraction: number;
+  saleFraction: number | null;
   /** Taux de frais de transaction DÉCLARÉ. `null` = non déclaré. */
   transactionFeeRate: number | null;
   /** Coût de revient personnel encore attaché à la participation. */
@@ -164,12 +169,13 @@ export function projectBusinessSale(input: BusinessSaleScenarioInput): BusinessS
       : (input.exitEquityValue ??
         unknown([blocker("VALUATION_BASIS_MISSING", undefined, "Equity Value de sortie")]));
 
-  const ownershipSold = multiply(input.economicRate, known(input.saleFraction));
+  const saleFraction = declared(input.saleFraction, "quote-part cédée");
+  const ownershipSold = multiply(input.economicRate, saleFraction);
   const grossProceeds = multiply(exitEquityValue, ownershipSold);
   const feeRate = declared(input.transactionFeeRate, "taux de frais de transaction");
   const transactionFees = multiply(grossProceeds, feeRate);
   const preTaxNetProceeds = subtract(grossProceeds, transactionFees);
-  const releasedCostBasis = multiply(input.remainingCostBasis, known(input.saleFraction));
+  const releasedCostBasis = multiply(input.remainingCostBasis, saleFraction);
   const taxableGain = subtract(preTaxNetProceeds, releasedCostBasis);
 
   if (input.effectiveTaxRate === null) flags.push(flag("TAX_RATE_NOT_DECLARED"));
@@ -196,7 +202,10 @@ export function projectBusinessSale(input: BusinessSaleScenarioInput): BusinessS
     afterTaxNetProceeds,
     retainedValue: multiply(
       exitEquityValue,
-      multiply(input.economicRate, known(1 - input.saleFraction)),
+      multiply(
+        input.economicRate,
+        saleFraction.value === null ? saleFraction : known(1 - saleFraction.value),
+      ),
     ),
     flags: dedupeFlags(flags),
   };

@@ -2,6 +2,7 @@ import {
   buildBusinessEquityPortfolio,
   type BuildBusinessEquityInput,
   type BusinessBridgeItem,
+  type BusinessBridgeDeclaration,
   type BusinessCapitalEvent,
   type BusinessDcfAssumptions,
   type BusinessEbitdaAdjustment,
@@ -168,6 +169,21 @@ export function bridgeItem(
   };
 }
 
+export function bridgeDeclaration(
+  overrides: Partial<BusinessBridgeDeclaration> & {
+    id: string;
+    businessId: string;
+    effectiveDate: string;
+  },
+): BusinessBridgeDeclaration {
+  return {
+    status: "DECLARED_NONE",
+    notes: null,
+    provenance: DECLARED,
+    ...overrides,
+  };
+}
+
 export function capitalEvent(
   overrides: Partial<BusinessCapitalEvent> & {
     id: string;
@@ -261,10 +277,11 @@ export function rate(
 }
 
 export function portfolio(input: Partial<BuildBusinessEquityInput>): BusinessEquityPortfolio {
+  const businesses = input.businesses ?? [];
   return buildBusinessEquityPortfolio({
     asOfDate: AS_OF,
     reportingCurrency: "EUR",
-    businesses: [],
+    businesses,
     ownership: [],
     financials: [],
     valuations: [],
@@ -272,6 +289,13 @@ export function portfolio(input: Partial<BuildBusinessEquityInput>): BusinessEqu
     holdings: [],
     ebitdaAdjustments: [],
     bridgeItems: [],
+    bridgeDeclarations: businesses.map((item) =>
+      bridgeDeclaration({
+        id: `bridge-declaration-${item.id}`,
+        businessId: item.id,
+        effectiveDate: "1900-01-01",
+      }),
+    ),
     dcfAssumptions: [],
     currencyRates: [],
     ...input,

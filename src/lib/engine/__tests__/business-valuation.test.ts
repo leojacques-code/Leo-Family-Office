@@ -9,6 +9,8 @@ import {
 import { known, unknown, blocker, subtract, sumAll } from "@/lib/engine/business-equity-facts";
 import {
   adjustment,
+  bridgeDeclaration,
+  bridgeItem,
   blockerCodes,
   business,
   dcf,
@@ -353,6 +355,87 @@ describe("EBITDA ajusté", () => {
 });
 
 describe("Éléments de bridge EV → Equity", () => {
+  it("ne transforme pas l’absence de déclaration du bridge en zéro", () => {
+    const result = portfolio({
+      businesses: [business({ id: "unknown-bridge", name: "UnknownBridgeCo" })],
+      ownership: [
+        ownership({
+          id: "o",
+          businessId: "unknown-bridge",
+          effectiveDate: "2020-01-01",
+          legalRate: 1,
+        }),
+      ],
+      financials: [
+        financials({
+          id: "f",
+          businessId: "unknown-bridge",
+          periodEnd: "2025-12-31",
+          ebitda: 100_000,
+          cash: 0,
+          grossDebt: 0,
+        }),
+      ],
+      valuations: [
+        valuation({
+          id: "v",
+          businessId: "unknown-bridge",
+          valuationDate: "2026-06-30",
+          method: "EBITDA_MULTIPLE",
+          multiple: 5,
+        }),
+      ],
+      bridgeDeclarations: [],
+    });
+    const equity = positionOf(result, "unknown-bridge").equityValue.central;
+    expect(equity.value).toBeNull();
+    expect(blockerCodes(equity)).toContain("EV_TO_EQUITY_BRIDGE_STATUS_MISSING");
+  });
+
+  it("lit une déclaration explicite sans autre ajustement comme un vrai zéro", () => {
+    const result = portfolio({
+      businesses: [business({ id: "none-bridge", name: "NoBridgeCo" })],
+      ownership: [
+        ownership({
+          id: "o",
+          businessId: "none-bridge",
+          effectiveDate: "2020-01-01",
+          legalRate: 1,
+        }),
+      ],
+      financials: [
+        financials({
+          id: "f",
+          businessId: "none-bridge",
+          periodEnd: "2025-12-31",
+          ebitda: 100_000,
+          cash: 0,
+          grossDebt: 0,
+        }),
+      ],
+      valuations: [
+        valuation({
+          id: "v",
+          businessId: "none-bridge",
+          valuationDate: "2026-06-30",
+          method: "EBITDA_MULTIPLE",
+          multiple: 5,
+        }),
+      ],
+      bridgeDeclarations: [
+        bridgeDeclaration({
+          id: "bd",
+          businessId: "none-bridge",
+          effectiveDate: "2026-06-30",
+          status: "DECLARED_NONE",
+        }),
+      ],
+    });
+    const position = positionOf(result, "none-bridge");
+    expect(position.valuation.bridgeItemsTotal.value).toBe(0);
+    expect(position.equityValue.central.value).toBe(500_000);
+  });
+
   it("retranche des minoritaires et ajoute un actif hors exploitation, chacun tracé", () => {
     const result = portfolio({
       businesses: [business({ id: "br", name: "BridgeCo" })],
@@ -402,6 +485,14 @@ describe("Éléments de bridge EV → Equity", () => {
           provenance: { kind: "USER_ASSUMPTION" as const, confidence: "MEDIUM" as const },
         },
       ],
+      bridgeDeclarations: [
+        bridgeDeclaration({
+          id: "bd",
+          businessId: "br",
+          effectiveDate: "2026-06-30",
+          status: "COMPLETE",
+        }),
+      ],
     });
     const position = positionOf(result, "br");
     // 7 000 000 − 500 000 + 200 000 − 300 000 + 450 000
@@ -410,5 +501,74 @@ describe("Éléments de bridge EV → Equity", () => {
       .filter((step) => step.key.startsWith("BRIDGE_ITEM"))
       .map((step) => step.label);
     expect(labels).toEqual(["Minoritaires filiale", "Immeuble hors exploitation"]);
+  });
+
+  it("calcule minoritaires, compte courant d’associé et earn-out quand la liste est complète", () => {
+    const result = portfolio({
+      businesses: [business({ id: "full-bridge", name: "FullBridgeCo" })],
+      ownership: [
+        ownership({
+          id: "o",
+          businessId: "full-bridge",
+          effectiveDate: "2020-01-01",
+          legalRate: 1,
+        }),
+      ],
+      financials: [
+        financials({
+          id: "f",
+          businessId: "full-bridge",
+          periodEnd: "2025-12-31",
+          ebitda: 1_000_000,
+          cash: 200_000,
+          grossDebt: 500_000,
+        }),
+      ],
+      valuations: [
+        valuation({
+          id: "v",
+          businessId: "full-bridge",
+          valuationDate: "2026-06-30",
+          method: "EBITDA_MULTIPLE",
+          multiple: 7,
+        }),
+      ],
+      bridgeItems: [
+        bridgeItem({
+          id: "minority",
+          businessId: "full-bridge",
+          effectiveDate: "2026-06-30",
+          label: "Minoritaires",
+          category: "MINORITY_INTERESTS",
+          amount: -300_000,
+        }),
+        bridgeItem({
+          id: "shareholder-loan",
+          businessId: "full-bridge",
+          effectiveDate: "2026-06-30",
+          label: "Compte courant",
+          category: "SHAREHOLDER_LOAN",
+          amount: -120_000,
+        }),
+        bridgeItem({
+          id: "earn-out",
+          businessId: "full-bridge",
+          effectiveDate: "2026-06-30",
+          label: "Earn-out",
+          category: "EARN_OUT",
+          amount: -80_000,
+        }),
+      ],
+      bridgeDeclarations: [
+        bridgeDeclaration({
+          id: "bd",
+          businessId: "full-bridge",
+          effectiveDate: "2026-06-30",
+          status: "COMPLETE",
+        }),
+      ],
+    });
+    // 7 000 000 - 500 000 + 200 000 - 300 000 - 120 000 - 80 000
+    expect(positionOf(result, "full-bridge").equityValue.central.value).toBe(6_200_000);
   });
 });

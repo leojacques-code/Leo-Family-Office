@@ -1,6 +1,7 @@
 import type { BuildBusinessEquityInput } from "@/lib/engine/business-equity";
 import {
   adjustment,
+  bridgeDeclaration,
   business,
   capitalEvent,
   financials,
@@ -279,6 +280,21 @@ export const SYNTHETIC_PORTFOLIO: BuildBusinessEquityInput = {
     }),
   ],
   bridgeItems: [],
+  bridgeDeclarations: [
+    "vernier",
+    "fontaine",
+    "lumen",
+    "sevigne",
+    "marceau",
+    "beauvoir",
+    "halden",
+  ].map((businessId) =>
+    bridgeDeclaration({
+      id: `bridge-declaration-${businessId}`,
+      businessId,
+      effectiveDate: "1900-01-01",
+    }),
+  ),
   dcfAssumptions: [],
   capitalEvents: [
     capitalEvent({

@@ -60,6 +60,7 @@ type Counts = {
   holdings: string;
   adjustments: string;
   bridge: string;
+  bridgeDeclarations: string;
   dcf: string;
   dcfPeriods: string;
 };
@@ -75,6 +76,7 @@ async function counts(): Promise<Counts> {
       (select count(*) from public.business_holdings)::text as holdings,
       (select count(*) from public.business_ebitda_adjustments)::text as adjustments,
       (select count(*) from public.business_bridge_items)::text as bridge,
+      (select count(*) from public.business_bridge_declarations)::text as "bridgeDeclarations",
       (select count(*) from public.business_dcf_assumptions)::text as dcf,
       (select count(*) from public.business_dcf_periods)::text as "dcfPeriods"
   `);
@@ -129,13 +131,14 @@ try {
       ebitda: 650_000,
       cash: 300_000,
       gross_debt: 1_100_000,
-      legal_rate: 0.7,
-      economic_rate: 0.7,
+      legal_rate: 1,
+      economic_rate: 1,
       valuation_date: "2026-06-30",
       method: "EBITDA_MULTIPLE",
       multiple: 6,
       multiple_low: 5,
       multiple_high: 7,
+      bridge_status: "DECLARED_NONE",
       capital_history_source: "DECLARED_COMPLETE",
       capital_history_start: "2016-01-01",
     },
@@ -149,6 +152,7 @@ try {
     currency: string;
     metric_basis: string;
     enterprise_value: string | null;
+    bridge_declarations: string;
   }>(
     `select
        (select count(*) from public.business_ownership where business_id = $1)::text as ownership,
@@ -156,14 +160,25 @@ try {
        (select count(*) from public.business_valuations where business_id = $1)::text as valuations,
        (select functional_currency from public.businesses where id = $1) as currency,
        (select metric_basis from public.business_valuations where business_id = $1) as metric_basis,
-       (select enterprise_value from public.business_valuations where business_id = $1) as enterprise_value`,
+       (select enterprise_value from public.business_valuations where business_id = $1) as enterprise_value,
+       (select count(*) from public.business_bridge_declarations where business_id = $1)::text as bridge_declarations`,
     [businessId],
   );
   assert(created.rows[0].ownership === "1", "Le démarrage rapide n'a pas écrit la détention");
   assert(created.rows[0].financials === "1", "Le démarrage rapide n'a pas écrit la période");
-  assert(created.rows[0].valuations === "1", "Le démarrage rapide n'a pas écrit la base de valorisation");
+  assert(
+    created.rows[0].valuations === "1",
+    "Le démarrage rapide n'a pas écrit la base de valorisation",
+  );
   assert(created.rows[0].currency === "EUR", "La devise n'a pas été normalisée en majuscules");
-  assert(created.rows[0].metric_basis === "EBITDA", "L'agrégat de référence n'a pas été déduit de la méthode");
+  assert(
+    created.rows[0].metric_basis === "EBITDA",
+    "L'agrégat de référence n'a pas été déduit de la méthode",
+  );
+  assert(
+    created.rows[0].bridge_declarations === "1",
+    "La complétude du bridge n'a pas été déclarée",
+  );
   assert(
     created.rows[0].enterprise_value === null,
     "Une valorisation dérivée a persisté un résultat : la valeur doit rester dérivée en TypeScript",
@@ -175,13 +190,176 @@ try {
     `select public.lfo_create_business_quick_start($1::uuid, $2::jsonb)`,
     [
       userId,
-      JSON.stringify({ name: "X", currency: "EUR", period_end: "2025-12-31", legal_rate: 1, economic_rate: 1, valuation_date: "2026-01-01", method: "TRANSACTION", multiple: 1 }),
+      JSON.stringify({
+        name: "X",
+        currency: "EUR",
+        period_end: "2025-12-31",
+        legal_rate: 1,
+        economic_rate: 1,
+        valuation_date: "2026-01-01",
+        method: "TRANSACTION",
+        multiple: 1,
+      }),
     ],
     "Le démarrage rapide a accepté une méthode qu'il ne sait pas dériver",
     "multiple",
   );
 
-  // ── 2. Une méthode dérivée ne persiste jamais son résultat ────────────────────────
+  // ── 2. Opérations de titres : événement + détention, une seule mutation ───────────
+  const sale = await rpc(
+    "lfo_record_business_capital_event",
+    {
+      business_id: businessId,
+      event_type: "SALE",
+      event_date: "2026-01-15",
+      amount: 600_000,
+      amount_scope: "USER_CASH",
+      currency: "EUR",
+      ownership_rate_after: 0.7,
+      source: "Smoke cession 30 points",
+    },
+    userId,
+  );
+  const sold = await client.query<{ delta: string; after: string; rate: string; origin: string }>(
+    `select e.ownership_delta::text as delta, e.ownership_rate_after::text as after,
+            o.economic_rate::text as rate, o.origin_event_id::text as origin
+       from public.business_capital_events e
+       join public.business_ownership o on o.origin_event_id=e.id and o.user_id=e.user_id
+      where e.id=$1`,
+    [sale.rows[0].id],
+  );
+  assert(Number(sold.rows[0].delta) === -0.3, "100 % → vente 30 % : delta incohérent");
+  assert(Number(sold.rows[0].after) === 0.7, "100 % → vente 30 % : taux après incohérent");
+  assert(Number(sold.rows[0].rate) === 0.7, "100 % → vente 30 % : ownership 70 % absent");
+  assert(
+    sold.rows[0].origin === sale.rows[0].id,
+    "La détention résiduelle n'a pas l'événement pour origine",
+  );
+
+  const acquisitionBusinessId = (
+    await rpc(
+      "lfo_save_business",
+      {
+        name: "Acquisition smoke",
+        business_type: "OPERATING",
+        functional_currency: "EUR",
+        capital_history_source: "UNKNOWN",
+      },
+      userId,
+    )
+  ).rows[0].id;
+  await rpc(
+    "lfo_record_business_ownership",
+    {
+      business_id: acquisitionBusinessId,
+      effective_date: "2025-01-01",
+      legal_rate: 0.2,
+      economic_rate: 0.2,
+    },
+    userId,
+  );
+  const acquisition = await rpc(
+    "lfo_record_business_capital_event",
+    {
+      business_id: acquisitionBusinessId,
+      event_type: "ACQUISITION",
+      event_date: "2026-01-15",
+      amount: 150_000,
+      amount_scope: "USER_CASH",
+      currency: "EUR",
+      ownership_rate_after: 0.35,
+      source: "Smoke acquisition 15 points",
+    },
+    userId,
+  );
+  const acquired = await client.query<{ delta: string; rate: string; origin: string }>(
+    `select e.ownership_delta::text as delta, o.economic_rate::text as rate,
+            o.origin_event_id::text as origin
+       from public.business_capital_events e
+       join public.business_ownership o on o.origin_event_id=e.id and o.user_id=e.user_id
+      where e.id=$1`,
+    [acquisition.rows[0].id],
+  );
+  assert(Number(acquired.rows[0].delta) === 0.15, "20 % → acquisition 15 pts : delta incohérent");
+  assert(
+    Number(acquired.rows[0].rate) === 0.35,
+    "20 % → acquisition 15 pts : ownership 35 % absent",
+  );
+  assert(
+    acquired.rows[0].origin === acquisition.rows[0].id,
+    "L'acquisition n'est pas l'origine de la détention",
+  );
+
+  const exit = await rpc(
+    "lfo_record_business_capital_event",
+    {
+      business_id: businessId,
+      event_type: "BUYBACK",
+      event_date: "2026-02-15",
+      amount: 1_400_000,
+      amount_scope: "USER_CASH",
+      currency: "EUR",
+      ownership_rate_after: 0,
+      source: "Smoke sortie totale",
+    },
+    userId,
+  );
+  const exitedAtomically = await client.query<{ delta: string; rate: string }>(
+    `select e.ownership_delta::text as delta, o.economic_rate::text as rate
+       from public.business_capital_events e
+       join public.business_ownership o on o.origin_event_id=e.id and o.user_id=e.user_id
+      where e.id=$1`,
+    [exit.rows[0].id],
+  );
+  assert(Number(exitedAtomically.rows[0].delta) === -0.7, "Sortie totale : delta incohérent");
+  assert(Number(exitedAtomically.rows[0].rate) === 0, "Sortie totale : ownership 0 % absent");
+
+  // Provoque une erreur sur la DEUXIÈME écriture de la RPC. PostgreSQL doit annuler aussi
+  // l'événement déjà inséré par la première écriture de la même fonction.
+  await client.query("reset role");
+  await client.query(`
+    create or replace function public.lfo_smoke_reject_ownership()
+    returns trigger language plpgsql security invoker set search_path='' as $$
+    begin
+      if new.source='ROLLBACK_SMOKE' then raise exception 'ownership write rejected'; end if;
+      return new;
+    end $$
+  `);
+  await client.query(`
+    create trigger lfo_smoke_reject_ownership
+    before insert or update on public.business_ownership
+    for each row execute function public.lfo_smoke_reject_ownership()
+  `);
+  await client.query("set local role service_role");
+  await rejects(
+    "select public.lfo_record_business_capital_event($1::uuid, $2::jsonb)",
+    [
+      userId,
+      JSON.stringify({
+        business_id: acquisitionBusinessId,
+        event_type: "SALE",
+        event_date: "2026-02-15",
+        amount: 10_000,
+        amount_scope: "USER_CASH",
+        currency: "EUR",
+        ownership_rate_after: 0.3,
+        source: "ROLLBACK_SMOKE",
+      }),
+    ],
+    "La mutation composée n'a pas propagé l'échec de l'ownership",
+    "ownership write rejected",
+  );
+  const rolledBack = await client.query<{ count: string }>(
+    "select count(*)::text from public.business_capital_events where business_id=$1 and source='ROLLBACK_SMOKE'",
+    [acquisitionBusinessId],
+  );
+  assert(rolledBack.rows[0].count === "0", "L'événement a survécu à l'échec de l'ownership");
+  await client.query("reset role");
+  await client.query("drop trigger lfo_smoke_reject_ownership on public.business_ownership");
+  await client.query("drop function public.lfo_smoke_reject_ownership()");
+  await client.query("set local role service_role");
+
+  // ── 3. Une méthode dérivée ne persiste jamais son résultat ────────────────────────
   await rejects(
     `insert into public.business_valuations
        (user_id, business_id, valuation_date, method, enterprise_value, valuation_multiple, assumptions, data_kind)
@@ -202,7 +380,14 @@ try {
   // ── 3. NULL ≠ ZERO sur les termes du pont ─────────────────────────────────────────
   await rpc(
     "lfo_record_business_financials",
-    { business_id: businessId, period_end: "2024-12-31", period_kind: "ANNUAL", currency: "EUR", revenue: 4_350_000, ebitda: 540_000 },
+    {
+      business_id: businessId,
+      period_end: "2024-12-31",
+      period_kind: "ANNUAL",
+      currency: "EUR",
+      revenue: 4_350_000,
+      ebitda: 540_000,
+    },
     userId,
   );
   const nulls = await client.query<{ cash: string | null; debt: string | null }>(
@@ -225,17 +410,34 @@ try {
     [businessId],
   );
   assert(Number(exited.rows[0].rate) === 0, "Une détention nulle n'a pas été persistée");
-  await client.query("delete from public.business_ownership where business_id = $1 and effective_date = date '2026-08-01'", [businessId]);
+  await client.query(
+    "delete from public.business_ownership where business_id = $1 and effective_date = date '2026-08-01'",
+    [businessId],
+  );
 
   // ── 5. Deux méthodes peuvent diverger à la même date ──────────────────────────────
   await rpc(
     "lfo_record_business_valuation",
-    { business_id: businessId, valuation_date: "2026-06-30", method: "TRANSACTION", currency: "EUR", equity_value: 3_500_000, data_kind: "EXTERNAL_DATA" },
+    {
+      business_id: businessId,
+      valuation_date: "2026-06-30",
+      method: "TRANSACTION",
+      currency: "EUR",
+      equity_value: 3_500_000,
+      data_kind: "EXTERNAL_DATA",
+    },
     userId,
   );
   await rpc(
     "lfo_record_business_valuation",
-    { business_id: businessId, valuation_date: "2026-06-30", method: "EXTERNAL_APPRAISAL", currency: "EUR", equity_value: 3_100_000, data_kind: "EXTERNAL_DATA" },
+    {
+      business_id: businessId,
+      valuation_date: "2026-06-30",
+      method: "EXTERNAL_APPRAISAL",
+      currency: "EUR",
+      equity_value: 3_100_000,
+      data_kind: "EXTERNAL_DATA",
+    },
     userId,
   );
   const sameDate = await client.query<{ count: string }>(
@@ -249,7 +451,14 @@ try {
   // La même méthode, elle, reste unique : c'est une correction, pas une divergence.
   await rpc(
     "lfo_record_business_valuation",
-    { business_id: businessId, valuation_date: "2026-06-30", method: "TRANSACTION", currency: "EUR", equity_value: 3_600_000, data_kind: "EXTERNAL_DATA" },
+    {
+      business_id: businessId,
+      valuation_date: "2026-06-30",
+      method: "TRANSACTION",
+      currency: "EUR",
+      equity_value: 3_600_000,
+      data_kind: "EXTERNAL_DATA",
+    },
     userId,
   );
   const corrected = await client.query<{ count: string; value: string }>(
@@ -264,7 +473,14 @@ try {
   // ── 6. Distribution société ≠ cash personnel ──────────────────────────────────────
   await rpc(
     "lfo_record_business_capital_event",
-    { business_id: businessId, event_type: "DISTRIBUTION", event_date: "2026-05-30", amount: 200_000, amount_scope: "COMPANY_TOTAL", currency: "EUR" },
+    {
+      business_id: businessId,
+      event_type: "DISTRIBUTION",
+      event_date: "2026-05-30",
+      amount: 200_000,
+      amount_scope: "COMPANY_TOTAL",
+      currency: "EUR",
+    },
     userId,
   );
   await rejects(
@@ -279,12 +495,28 @@ try {
   // ── 7. Retraitements et éléments de pont ──────────────────────────────────────────
   await rpc(
     "lfo_record_business_ebitda_adjustment",
-    { business_id: businessId, period_end: "2025-12-31", category: "OWNER_COMPENSATION", label: "Rémunération normalisée", amount: 60_000, currency: "EUR", recurring: true },
+    {
+      business_id: businessId,
+      period_end: "2025-12-31",
+      category: "OWNER_COMPENSATION",
+      label: "Rémunération normalisée",
+      amount: 60_000,
+      currency: "EUR",
+      recurring: true,
+    },
     userId,
   );
   await rpc(
     "lfo_record_business_ebitda_adjustment",
-    { business_id: businessId, period_end: "2025-12-31", category: "OWNER_COMPENSATION", label: "Rémunération normalisée", amount: 75_000, currency: "EUR", recurring: true },
+    {
+      business_id: businessId,
+      period_end: "2025-12-31",
+      category: "OWNER_COMPENSATION",
+      label: "Rémunération normalisée",
+      amount: 75_000,
+      currency: "EUR",
+      recurring: true,
+    },
     userId,
   );
   const adjustment = await client.query<{ count: string; amount: string }>(
@@ -292,11 +524,24 @@ try {
        from public.business_ebitda_adjustments where business_id = $1`,
     [businessId],
   );
-  assert(adjustment.rows[0].count === "1", "Le même retraitement a été dupliqué au lieu d'être corrigé");
-  assert(Number(adjustment.rows[0].amount) === 75_000, "La correction du retraitement n'a pas été appliquée");
+  assert(
+    adjustment.rows[0].count === "1",
+    "Le même retraitement a été dupliqué au lieu d'être corrigé",
+  );
+  assert(
+    Number(adjustment.rows[0].amount) === 75_000,
+    "La correction du retraitement n'a pas été appliquée",
+  );
   await rpc(
     "lfo_record_business_bridge_item",
-    { business_id: businessId, effective_date: "2025-12-31", category: "MINORITY_INTERESTS", label: "Minoritaires", amount: -120_000, currency: "EUR" },
+    {
+      business_id: businessId,
+      effective_date: "2025-12-31",
+      category: "MINORITY_INTERESTS",
+      label: "Minoritaires",
+      amount: -120_000,
+      currency: "EUR",
+    },
     userId,
   );
 
@@ -313,8 +558,20 @@ try {
       terminal_growth: 0.02,
       discount_convention: "YEAR_END",
       periods: [
-        { year_index: 1, ebit: 1_000_000, depreciation_amortisation: 200_000, capex: 250_000, working_capital_change: 50_000 },
-        { year_index: 2, ebit: 1_050_000, depreciation_amortisation: 210_000, capex: 260_000, working_capital_change: 50_000 },
+        {
+          year_index: 1,
+          ebit: 1_000_000,
+          depreciation_amortisation: 200_000,
+          capex: 250_000,
+          working_capital_change: 50_000,
+        },
+        {
+          year_index: 2,
+          ebit: 1_050_000,
+          depreciation_amortisation: 210_000,
+          capex: 260_000,
+          working_capital_change: 50_000,
+        },
       ],
     },
     userId,
@@ -335,7 +592,15 @@ try {
       tax_rate: 0.25,
       terminal_method: "PERPETUAL_GROWTH",
       terminal_growth: 0.02,
-      periods: [{ year_index: 1, ebit: 900_000, depreciation_amortisation: 180_000, capex: 200_000, working_capital_change: 40_000 }],
+      periods: [
+        {
+          year_index: 1,
+          ebit: 900_000,
+          depreciation_amortisation: 180_000,
+          capex: 200_000,
+          working_capital_change: 40_000,
+        },
+      ],
     },
     userId,
   );
@@ -343,7 +608,10 @@ try {
     "select count(*)::text from public.business_dcf_periods where dcf_id = $1",
     [dcf.rows[0].id],
   );
-  assert(rewritten.rows[0].count === "1", "La réécriture du DCF a accumulé les années au lieu de les remplacer");
+  assert(
+    rewritten.rows[0].count === "1",
+    "La réécriture du DCF a accumulé les années au lieu de les remplacer",
+  );
   await rejects(
     `insert into public.business_dcf_assumptions
        (user_id, business_id, valuation_date, currency, wacc, tax_rate, terminal_method, terminal_growth)
@@ -357,7 +625,12 @@ try {
   const startupId = (
     await rpc(
       "lfo_save_business",
-      { name: "Startup smoke", business_type: "STARTUP", functional_currency: "EUR", capital_history_source: "UNKNOWN" },
+      {
+        name: "Startup smoke",
+        business_type: "STARTUP",
+        functional_currency: "EUR",
+        capital_history_source: "UNKNOWN",
+      },
       userId,
     )
   ).rows[0].id;
@@ -380,7 +653,12 @@ try {
     },
     userId,
   );
-  const round = await client.query<{ valuations: string; events: string; kind: string; rate: string }>(
+  const round = await client.query<{
+    valuations: string;
+    events: string;
+    kind: string;
+    rate: string;
+  }>(
     `select
        (select count(*) from public.business_valuations where business_id = $1 and method = 'FUNDING_ROUND')::text as valuations,
        (select count(*) from public.business_capital_events where business_id = $1 and event_type = 'CAPITAL_INJECTION')::text as events,
@@ -390,13 +668,21 @@ try {
   );
   assert(round.rows[0].valuations === "1", "Les termes du tour n'ont pas été persistés");
   assert(round.rows[0].events === "1", "La souscription n'a pas produit d'apport en capital");
-  assert(round.rows[0].kind === "DERIVED", "La détention post-money n'est pas marquée comme dérivée");
+  assert(
+    round.rows[0].kind === "DERIVED",
+    "La détention post-money n'est pas marquée comme dérivée",
+  );
   assert(Number(round.rows[0].rate) === 0.25, "La détention post-money dérivée n'a pas été écrite");
 
   // ── 10. Holdings et cloisonnement par propriétaire ────────────────────────────────
   await rpc(
     "lfo_set_business_holding",
-    { parent_business_id: startupId, child_business_id: businessId, effective_date: "2026-03-01", ownership_rate: 0.6 },
+    {
+      parent_business_id: startupId,
+      child_business_id: businessId,
+      effective_date: "2026-03-01",
+      ownership_rate: 0.6,
+    },
     userId,
   );
   await rejects(
@@ -421,7 +707,10 @@ try {
       [businessId],
     )
   ).rows[0].id;
-  await client.query("select public.lfo_delete_business_capital_event($1::uuid, $2::uuid)", [userId, eventId]);
+  await client.query("select public.lfo_delete_business_capital_event($1::uuid, $2::uuid)", [
+    userId,
+    eventId,
+  ]);
   const deleted = await client.query<{ count: string }>(
     "select count(*)::text from public.business_capital_events where id = $1",
     [eventId],

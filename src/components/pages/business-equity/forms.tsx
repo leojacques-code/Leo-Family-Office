@@ -130,18 +130,23 @@ export function QuickStartForm({
   const [multiple, setMultiple] = useState("6");
   const [multipleLow, setMultipleLow] = useState("");
   const [multipleHigh, setMultipleHigh] = useState("");
+  const [bridgeDeclaredNone, setBridgeDeclaredNone] = useState(false);
   const [historyComplete, setHistoryComplete] = useState(false);
   const [historyStart, setHistoryStart] = useState("");
 
   const metricValue =
     method === "EBITDA_MULTIPLE" ? optionalNumber(ebitda) : optionalNumber(revenue);
   const centralMultiple = optionalNumber(multiple);
+  const cashValue = optionalNumber(cash);
+  const grossDebtValue = optionalNumber(grossDebt);
+  const ownershipValue = optionalRate(ownershipRate);
+  const ownershipValid = ownershipValue !== null && ownershipValue > 0 && ownershipValue <= 1;
   const preview =
     metricValue !== null &&
     centralMultiple !== null &&
-    optionalNumber(cash) !== null &&
-    optionalNumber(grossDebt) !== null
-      ? metricValue * centralMultiple - optionalNumber(grossDebt)! + optionalNumber(cash)!
+    cashValue !== null &&
+    grossDebtValue !== null
+      ? metricValue * centralMultiple - grossDebtValue + cashValue
       : null;
 
   return (
@@ -149,8 +154,17 @@ export function QuickStartForm({
       className="input-sections"
       onSubmit={async (event) => {
         event.preventDefault();
-        const rate = optionalRate(ownershipRate);
-        if (rate === null || centralMultiple === null) return;
+        const rate = ownershipValue;
+        if (
+          !ownershipValid ||
+          rate === null ||
+          centralMultiple === null ||
+          metricValue === null ||
+          cashValue === null ||
+          grossDebtValue === null ||
+          !bridgeDeclaredNone
+        )
+          return;
         const ok = await mutate({
           action: "create_business_quick_start",
           quickStart: {
@@ -165,8 +179,8 @@ export function QuickStartForm({
             periodLabel: `FY${periodEnd.slice(0, 4)}`,
             revenue: optionalNumber(revenue),
             ebitda: optionalNumber(ebitda),
-            cash: optionalNumber(cash),
-            grossDebt: optionalNumber(grossDebt),
+            cash: cashValue,
+            grossDebt: grossDebtValue,
             legalRate: rate,
             economicRate: rate,
             valuationDate: asOfDate,
@@ -174,6 +188,7 @@ export function QuickStartForm({
             multiple: centralMultiple,
             multipleLow: optionalNumber(multipleLow),
             multipleHigh: optionalNumber(multipleHigh),
+            bridgeStatus: "DECLARED_NONE",
             capitalHistoryStart: historyComplete ? historyStart || null : null,
             capitalHistorySource: historyComplete ? "DECLARED_COMPLETE" : "UNKNOWN",
             notes: null,
@@ -219,6 +234,19 @@ export function QuickStartForm({
             maxLength={3}
             onChange={(event) => setCurrency(event.target.value.toUpperCase())}
           />
+        </label>
+      </div>
+
+      <div className="checkbox-row">
+        <input
+          id="quick-bridge-none"
+          type="checkbox"
+          checked={bridgeDeclaredNone}
+          onChange={(event) => setBridgeDeclaredNone(event.target.checked)}
+        />
+        <label htmlFor="quick-bridge-none">
+          Je confirme qu’il n’existe aucun autre ajustement du pont EV → Equity (minoritaires,
+          compte courant d’associé, earn-out ou actif hors exploitation)
         </label>
       </div>
 
@@ -384,9 +412,43 @@ export function QuickStartForm({
       <FormActions
         busy={busy}
         label="Créer et valoriser"
-        disabled={!name.trim() || centralMultiple === null}
+        disabled={
+          !name.trim() ||
+          centralMultiple === null ||
+          metricValue === null ||
+          cashValue === null ||
+          grossDebtValue === null ||
+          !ownershipValid ||
+          !bridgeDeclaredNone
+        }
         onCancel={onDone}
       />
+      <button
+        type="button"
+        className="button secondary"
+        disabled={busy || !name.trim()}
+        onClick={async () => {
+          const ok = await mutate({
+            action: "save_business",
+            business: {
+              businessId: null,
+              name: name.trim(),
+              legalForm: nullableText(legalForm),
+              type,
+              functionalCurrency: currency.toUpperCase(),
+              sector: null,
+              country: null,
+              foundedOn: null,
+              capitalHistoryStart: historyComplete ? historyStart || null : null,
+              capitalHistorySource: historyComplete ? "DECLARED_COMPLETE" : "UNKNOWN",
+              notes: null,
+            },
+          });
+          if (ok) onDone();
+        }}
+      >
+        Créer sans valorisation complète
+      </button>
     </form>
   );
 }
@@ -1058,6 +1120,9 @@ export function ValuationBasisForm({
   const [metricPeriodEnd, setMetricPeriodEnd] = useState(periods.at(-1)?.periodEnd ?? "");
   const [enterpriseValue, setEnterpriseValue] = useState("");
   const [equityValue, setEquityValue] = useState("");
+  const [bridgeStatus, setBridgeStatus] = useState<
+    "UNKNOWN" | "DECLARED_NONE" | "PARTIAL" | "COMPLETE"
+  >("UNKNOWN");
   const [source, setSource] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -1094,6 +1159,7 @@ export function ValuationBasisForm({
             secondaryAmount: null,
             investorContribution: null,
             preferredRightsKnown: null,
+            bridgeStatus,
             source: nullableText(source),
             notes: nullableText(notes),
           },
@@ -1209,6 +1275,24 @@ export function ValuationBasisForm({
           WACC, valeur terminale, puis pont vers l’Equity Value.
         </p>
       ) : null}
+
+      <h3>Complétude du pont EV → Equity</h3>
+      <label>
+        Autres ajustements hors dette brute et trésorerie
+        <select
+          value={bridgeStatus}
+          onChange={(event) => setBridgeStatus(event.target.value as typeof bridgeStatus)}
+        >
+          <option value="UNKNOWN">Non renseignés</option>
+          <option value="DECLARED_NONE">Aucun autre ajustement — déclaration explicite</option>
+          <option value="PARTIAL">Liste partielle</option>
+          <option value="COMPLETE">Liste complète</option>
+        </select>
+        <UnknownHint>
+          « Non renseignés » et « Liste partielle » empêchent le calcul final. Seule une déclaration
+          explicite autorise un total de 0.
+        </UnknownHint>
+      </label>
 
       {isObserved ? (
         <>
@@ -1559,6 +1643,7 @@ export function DcfForm({
     );
 
   const waccValue = optionalRate(wacc);
+  const taxRateValue = optionalRate(taxRate);
   const growthValue = optionalRate(terminalGrowth);
   const growthInvalid =
     terminalMethod === "PERPETUAL_GROWTH" &&
@@ -1571,7 +1656,7 @@ export function DcfForm({
       className="input-sections"
       onSubmit={async (event) => {
         event.preventDefault();
-        if (waccValue === null) return;
+        if (waccValue === null || taxRateValue === null) return;
         const ok = await mutate({
           action: "set_business_dcf",
           dcf: {
@@ -1579,7 +1664,7 @@ export function DcfForm({
             valuationDate,
             currency,
             wacc: waccValue,
-            taxRate: optionalRate(taxRate) ?? 0,
+            taxRate: taxRateValue,
             terminalMethod,
             terminalGrowth: terminalMethod === "PERPETUAL_GROWTH" ? growthValue : null,
             terminalExitMultiple:
@@ -1801,7 +1886,7 @@ export function DcfForm({
       <FormActions
         busy={busy}
         label="Enregistrer les hypothèses"
-        disabled={growthInvalid}
+        disabled={growthInvalid || waccValue === null || taxRateValue === null}
         onCancel={onDone}
       />
     </form>
@@ -1812,6 +1897,7 @@ export function DcfForm({
 
 const DISTRIBUTION_TYPES = ["DIVIDEND", "DISTRIBUTION", "CAPITAL_RETURN"];
 const DISPOSAL_TYPES = ["SALE", "BUYBACK"];
+const OWNERSHIP_CHANGING_TYPES = ["ACQUISITION", ...DISPOSAL_TYPES];
 
 export function CapitalEventForm({
   businessId,
@@ -1840,8 +1926,11 @@ export function CapitalEventForm({
 
   const isDistribution = DISTRIBUTION_TYPES.includes(type);
   const isDisposal = DISPOSAL_TYPES.includes(type);
+  const changesOwnership = OWNERSHIP_CHANGING_TYPES.includes(type);
   const after = optionalRate(ownershipAfter);
   const delta = after !== null && currentOwnership !== null ? after - currentOwnership : null;
+  const ownershipChangeValid =
+    !changesOwnership || (delta !== null && (type === "ACQUISITION" ? delta > 0 : delta < 0));
 
   return (
     <form
@@ -1849,7 +1938,7 @@ export function CapitalEventForm({
       onSubmit={async (event) => {
         event.preventDefault();
         const value = optionalNumber(amount);
-        if (value === null) return;
+        if (value === null || !ownershipChangeValid) return;
         const ok = await mutate({
           action: "record_business_capital_event",
           event: {
@@ -1860,8 +1949,8 @@ export function CapitalEventForm({
             amountScope: isDistribution ? amountScope : "USER_CASH",
             fees: optionalNumber(fees),
             currency,
-            ownershipDelta: isDisposal ? delta : null,
-            ownershipRateAfter: isDisposal ? after : null,
+            ownershipDelta: changesOwnership ? delta : null,
+            ownershipRateAfter: changesOwnership ? after : null,
             sharesDelta: null,
             pricePerShare: null,
             label: nullableText(label),
@@ -1919,7 +2008,7 @@ export function CapitalEventForm({
             </UnknownHint>
           </label>
         ) : null}
-        {isDisposal ? (
+        {changesOwnership ? (
           <>
             <label>
               Détention après l’opération
@@ -1933,19 +2022,21 @@ export function CapitalEventForm({
                 <span>%</span>
               </div>
               <UnknownHint>
-                Sans elle, la part de coût de revient libérée est inconnue et la plus-value réalisée
-                restera non calculable.
+                Cette donnée est obligatoire : l’opération et la détention résiduelle seront écrites
+                ensemble, avec une origine commune.
               </UnknownHint>
             </label>
-            <label>
-              Frais de transaction
-              <input
-                className="text-input"
-                value={fees}
-                onChange={(event) => setFees(event.target.value)}
-                inputMode="decimal"
-              />
-            </label>
+            {isDisposal ? (
+              <label>
+                Frais de transaction
+                <input
+                  className="text-input"
+                  value={fees}
+                  onChange={(event) => setFees(event.target.value)}
+                  inputMode="decimal"
+                />
+              </label>
+            ) : null}
           </>
         ) : null}
         <label className="full">
@@ -1957,13 +2048,19 @@ export function CapitalEventForm({
           />
         </label>
       </div>
-      {isDisposal && delta !== null ? (
+      {changesOwnership && delta !== null ? (
         <p className="form-notice">
-          Quote-part cédée dérivée : {(Math.abs(delta) * 100).toFixed(2)} points de détention.
-          Pensez ensuite à enregistrer la détention résiduelle à cette même date.
+          Variation dérivée : {delta > 0 ? "+" : ""}
+          {(delta * 100).toFixed(2)} points. L’événement, cette variation et la détention après
+          opération seront enregistrés atomiquement.
         </p>
       ) : null}
-      <FormActions busy={busy} label="Enregistrer l’opération" onCancel={onDone} />
+      <FormActions
+        busy={busy}
+        label="Enregistrer l’opération"
+        disabled={optionalNumber(amount) === null || !ownershipChangeValid}
+        onCancel={onDone}
+      />
     </form>
   );
 }
@@ -2094,9 +2191,9 @@ export function FundingRoundForm({
 
   const pre = optionalNumber(preMoney);
   const primary = optionalNumber(primaryNewMoney);
-  const contribution = optionalNumber(investorContribution) ?? 0;
+  const contribution = optionalNumber(investorContribution);
   const preview =
-    pre !== null && primary !== null && ownershipBefore !== null
+    pre !== null && primary !== null && contribution !== null && ownershipBefore !== null
       ? fundingRoundOutcome({
           preMoneyEquityValue: pre,
           primaryNewMoney: primary,
@@ -2112,7 +2209,8 @@ export function FundingRoundForm({
       className="input-sections"
       onSubmit={async (event) => {
         event.preventDefault();
-        if (pre === null || primary === null || ownershipBefore === null) return;
+        if (pre === null || primary === null || contribution === null || ownershipBefore === null)
+          return;
         const ok = await mutate({
           action: "apply_business_funding_round",
           round: {
@@ -2189,6 +2287,7 @@ export function FundingRoundForm({
             value={investorContribution}
             onChange={(event) => setInvestorContribution(event.target.value)}
             inputMode="decimal"
+            required
           />
         </label>
       </div>
@@ -2205,8 +2304,8 @@ export function FundingRoundForm({
       </div>
       {preview && preview.ownershipAfter.value !== null ? (
         <p className="form-notice">
-          Post-money dérivé : {formatMoney(preview.postMoneyEquityValue.value ?? 0, currency)} ·
-          votre détention passerait de {((ownershipBefore ?? 0) * 100).toFixed(2)} % à{" "}
+          Post-money dérivé : {formatMoney(preview.postMoneyEquityValue.value!, currency)} · votre
+          détention passerait de {(ownershipBefore! * 100).toFixed(2)} % à{" "}
           {(preview.ownershipAfter.value * 100).toFixed(2)} %
           {preferredRightsKnown
             ? "."

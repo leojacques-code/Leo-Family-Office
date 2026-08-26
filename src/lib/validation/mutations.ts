@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   BUSINESS_AMOUNT_SCOPES,
   BUSINESS_BRIDGE_ITEM_CATEGORIES,
+  BUSINESS_BRIDGE_STATUSES,
   BUSINESS_CAPITAL_EVENT_TYPES,
   BUSINESS_CAPITAL_HISTORY_SOURCES,
   BUSINESS_DCF_TERMINAL_METHODS,
@@ -396,7 +397,6 @@ const realEstateFinancingLinkSchema = z
   })
   .strict();
 
-
 /**
  * Business Equity V2.1 — un champ vide signifie INCONNU, jamais zéro.
  *
@@ -519,6 +519,7 @@ const businessValuationSchema = z
     secondaryAmount: finite.nonnegative().nullable(),
     investorContribution: finite.nonnegative().nullable(),
     preferredRightsKnown: z.boolean().nullable(),
+    bridgeStatus: z.enum(BUSINESS_BRIDGE_STATUSES),
     source: z.string().trim().max(200).nullable(),
     notes: z.string().trim().max(1000).nullable(),
   })
@@ -550,21 +551,32 @@ const businessValuationSchema = z
         path: ["multiple"],
       });
     }
-    if (value.method === "FUNDING_ROUND" && (value.preMoneyEquityValue === null || value.primaryNewMoney === null)) {
+    if (
+      value.method === "FUNDING_ROUND" &&
+      (value.preMoneyEquityValue === null || value.primaryNewMoney === null)
+    ) {
       context.addIssue({
         code: "custom",
         message: "Un tour de table exige un pre-money et un montant d’argent frais primaire",
         path: ["preMoneyEquityValue"],
       });
     }
-    if (value.multipleLow !== null && value.multiple !== null && value.multipleLow > value.multiple) {
+    if (
+      value.multipleLow !== null &&
+      value.multiple !== null &&
+      value.multipleLow > value.multiple
+    ) {
       context.addIssue({
         code: "custom",
         message: "Le multiple bas ne peut pas dépasser le multiple central",
         path: ["multipleLow"],
       });
     }
-    if (value.multipleHigh !== null && value.multiple !== null && value.multipleHigh < value.multiple) {
+    if (
+      value.multipleHigh !== null &&
+      value.multiple !== null &&
+      value.multipleHigh < value.multiple
+    ) {
       context.addIssue({
         code: "custom",
         message: "Le multiple haut ne peut pas être inférieur au multiple central",
@@ -697,6 +709,43 @@ const businessCapitalEventSchema = z
         path: ["amountScope"],
       });
     }
+    const changesOwnership = ["ACQUISITION", "SALE", "BUYBACK"].includes(value.type);
+    if (changesOwnership && value.ownershipRateAfter === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Cette opération exige la détention économique après opération",
+        path: ["ownershipRateAfter"],
+      });
+    }
+    if (changesOwnership && value.ownershipDelta === null) {
+      context.addIssue({
+        code: "custom",
+        message: "La variation de détention doit être dérivée avant l’écriture atomique",
+        path: ["ownershipDelta"],
+      });
+    }
+    if (
+      value.type === "ACQUISITION" &&
+      value.ownershipDelta !== null &&
+      value.ownershipDelta <= 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Une acquisition doit augmenter la détention",
+        path: ["ownershipDelta"],
+      });
+    }
+    if (
+      (value.type === "SALE" || value.type === "BUYBACK") &&
+      value.ownershipDelta !== null &&
+      value.ownershipDelta >= 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Une cession ou un rachat doit réduire la détention",
+        path: ["ownershipDelta"],
+      });
+    }
   });
 
 const businessQuickStartSchema = z
@@ -721,6 +770,7 @@ const businessQuickStartSchema = z
     multiple: finite.positive(),
     multipleLow: finite.positive().nullable(),
     multipleHigh: finite.positive().nullable(),
+    bridgeStatus: z.literal("DECLARED_NONE"),
     capitalHistoryStart: businessDate.nullable(),
     capitalHistorySource: z.enum(BUSINESS_CAPITAL_HISTORY_SOURCES),
     notes: z.string().trim().max(1000).nullable(),
@@ -738,11 +788,33 @@ const businessQuickStartSchema = z
         path: [value.method === "REVENUE_MULTIPLE" ? "revenue" : "ebitda"],
       });
     }
+    if (value.cash === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Le Quick Start exige une trésorerie connue, y compris 0 explicite",
+        path: ["cash"],
+      });
+    }
+    if (value.grossDebt === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Le Quick Start exige une dette brute connue, y compris 0 explicite",
+        path: ["grossDebt"],
+      });
+    }
     if (value.multipleLow !== null && value.multipleLow > value.multiple) {
-      context.addIssue({ code: "custom", message: "Multiple bas supérieur au central", path: ["multipleLow"] });
+      context.addIssue({
+        code: "custom",
+        message: "Multiple bas supérieur au central",
+        path: ["multipleLow"],
+      });
     }
     if (value.multipleHigh !== null && value.multipleHigh < value.multiple) {
-      context.addIssue({ code: "custom", message: "Multiple haut inférieur au central", path: ["multipleHigh"] });
+      context.addIssue({
+        code: "custom",
+        message: "Multiple haut inférieur au central",
+        path: ["multipleHigh"],
+      });
     }
     if (value.capitalHistorySource === "DECLARED_COMPLETE" && value.capitalHistoryStart === null) {
       context.addIssue({
@@ -789,26 +861,59 @@ const businessFundingRoundSchema = z
   .strict();
 
 export const mutationSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("create_business_quick_start"), quickStart: businessQuickStartSchema }).strict(),
+  z
+    .object({
+      action: z.literal("create_business_quick_start"),
+      quickStart: businessQuickStartSchema,
+    })
+    .strict(),
   z.object({ action: z.literal("save_business"), business: businessSchema }).strict(),
   z.object({ action: z.literal("archive_business"), businessId: z.uuid() }).strict(),
-  z.object({ action: z.literal("record_business_ownership"), ownership: businessOwnershipSchema }).strict(),
+  z
+    .object({ action: z.literal("record_business_ownership"), ownership: businessOwnershipSchema })
+    .strict(),
   z.object({ action: z.literal("delete_business_ownership"), ownershipId: z.uuid() }).strict(),
-  z.object({ action: z.literal("record_business_financials"), financials: businessFinancialSchema }).strict(),
+  z
+    .object({
+      action: z.literal("record_business_financials"),
+      financials: businessFinancialSchema,
+    })
+    .strict(),
   z.object({ action: z.literal("delete_business_financials"), financialsId: z.uuid() }).strict(),
-  z.object({ action: z.literal("record_business_valuation"), valuation: businessValuationSchema }).strict(),
+  z
+    .object({ action: z.literal("record_business_valuation"), valuation: businessValuationSchema })
+    .strict(),
   z.object({ action: z.literal("delete_business_valuation"), valuationId: z.uuid() }).strict(),
-  z.object({ action: z.literal("record_business_ebitda_adjustment"), adjustment: businessEbitdaAdjustmentSchema }).strict(),
-  z.object({ action: z.literal("delete_business_ebitda_adjustment"), adjustmentId: z.uuid() }).strict(),
-  z.object({ action: z.literal("record_business_bridge_item"), item: businessBridgeItemSchema }).strict(),
+  z
+    .object({
+      action: z.literal("record_business_ebitda_adjustment"),
+      adjustment: businessEbitdaAdjustmentSchema,
+    })
+    .strict(),
+  z
+    .object({ action: z.literal("delete_business_ebitda_adjustment"), adjustmentId: z.uuid() })
+    .strict(),
+  z
+    .object({ action: z.literal("record_business_bridge_item"), item: businessBridgeItemSchema })
+    .strict(),
   z.object({ action: z.literal("delete_business_bridge_item"), itemId: z.uuid() }).strict(),
   z.object({ action: z.literal("set_business_dcf"), dcf: businessDcfSchema }).strict(),
   z.object({ action: z.literal("delete_business_dcf"), dcfId: z.uuid() }).strict(),
-  z.object({ action: z.literal("record_business_capital_event"), event: businessCapitalEventSchema }).strict(),
+  z
+    .object({
+      action: z.literal("record_business_capital_event"),
+      event: businessCapitalEventSchema,
+    })
+    .strict(),
   z.object({ action: z.literal("delete_business_capital_event"), eventId: z.uuid() }).strict(),
   z.object({ action: z.literal("set_business_holding"), holding: businessHoldingSchema }).strict(),
   z.object({ action: z.literal("delete_business_holding"), holdingId: z.uuid() }).strict(),
-  z.object({ action: z.literal("apply_business_funding_round"), round: businessFundingRoundSchema }).strict(),
+  z
+    .object({
+      action: z.literal("apply_business_funding_round"),
+      round: businessFundingRoundSchema,
+    })
+    .strict(),
   z.object({ action: z.literal("save_debt_contract"), contract: debtContractSchema }),
   z.object({
     action: z.literal("record_debt_balance"),

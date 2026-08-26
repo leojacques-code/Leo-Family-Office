@@ -20,6 +20,7 @@ import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
 import {
   BUSINESS_AMOUNT_SCOPES,
   BUSINESS_BRIDGE_ITEM_CATEGORIES,
+  BUSINESS_BRIDGE_STATUSES,
   BUSINESS_CAPITAL_EVENT_TYPES,
   BUSINESS_CAPITAL_HISTORY_SOURCES,
   BUSINESS_DCF_TERMINAL_METHODS,
@@ -32,6 +33,7 @@ import {
   buildBusinessEquityPortfolio,
   businessEquityBalanceSheetContributions,
   type BusinessBridgeItem,
+  type BusinessBridgeDeclaration,
   type BusinessCapitalEvent,
   type BusinessDcfAssumptions,
   type BusinessDcfPeriod,
@@ -304,6 +306,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       businessCapitalEventRows,
       businessHoldingRows,
       businessEbitdaAdjustmentRows,
+      businessBridgeDeclarationRows,
       businessBridgeItemRows,
       businessDcfRows,
       businessDcfPeriodRows,
@@ -351,6 +354,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       fetchAllPages("business_capital_events", "event_date"),
       fetchAllPages("business_holdings", "effective_date"),
       fetchAllPages("business_ebitda_adjustments", "period_end"),
+      fetchAllPages("business_bridge_declarations", "effective_date"),
       fetchAllPages("business_bridge_items", "effective_date"),
       fetchAllPages("business_dcf_assumptions", "valuation_date"),
       mine("business_dcf_periods"),
@@ -971,7 +975,6 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }))
       .sort((a, b) => b.snapshotDate.localeCompare(a.snapshotDate) || b.version - a.version);
 
-
     const businesses: BusinessEntity[] = businessRows
       .filter((row) => row.archived !== true)
       .map((row) => ({
@@ -979,9 +982,15 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         name: str(row.name),
         legalForm: row.legal_form ? str(row.legal_form) : null,
         type: row.business_type
-          ? enumValue(str(row.business_type), BUSINESS_TYPES, `businesses[id=${str(row.id)}].business_type`)
+          ? enumValue(
+              str(row.business_type),
+              BUSINESS_TYPES,
+              `businesses[id=${str(row.id)}].business_type`,
+            )
           : null,
-        functionalCurrency: row.functional_currency ? str(row.functional_currency).toUpperCase() : null,
+        functionalCurrency: row.functional_currency
+          ? str(row.functional_currency).toUpperCase()
+          : null,
         sector: row.sector ? str(row.sector) : null,
         country: row.country ? str(row.country).toUpperCase() : null,
         foundedOn: row.founded_on ? str(row.founded_on) : null,
@@ -1003,13 +1012,34 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         id: str(row.id),
         businessId: str(row.business_id),
         effectiveDate: str(row.effective_date),
-        legalRate: finiteNumber(row.ownership_rate, `business_ownership[id=${str(row.id)}].ownership_rate`),
-        economicRate: nullableFiniteNumber(row.economic_rate, `business_ownership[id=${str(row.id)}].economic_rate`),
-        votingRate: nullableFiniteNumber(row.voting_rate, `business_ownership[id=${str(row.id)}].voting_rate`),
-        fullyDilutedRate: nullableFiniteNumber(row.fully_diluted_rate, `business_ownership[id=${str(row.id)}].fully_diluted_rate`),
-        sharesHeld: nullableFiniteNumber(row.shares_held, `business_ownership[id=${str(row.id)}].shares_held`),
-        sharesOutstanding: nullableFiniteNumber(row.shares_outstanding, `business_ownership[id=${str(row.id)}].shares_outstanding`),
-        fullyDilutedShares: nullableFiniteNumber(row.fully_diluted_shares, `business_ownership[id=${str(row.id)}].fully_diluted_shares`),
+        legalRate: finiteNumber(
+          row.ownership_rate,
+          `business_ownership[id=${str(row.id)}].ownership_rate`,
+        ),
+        economicRate: nullableFiniteNumber(
+          row.economic_rate,
+          `business_ownership[id=${str(row.id)}].economic_rate`,
+        ),
+        votingRate: nullableFiniteNumber(
+          row.voting_rate,
+          `business_ownership[id=${str(row.id)}].voting_rate`,
+        ),
+        fullyDilutedRate: nullableFiniteNumber(
+          row.fully_diluted_rate,
+          `business_ownership[id=${str(row.id)}].fully_diluted_rate`,
+        ),
+        sharesHeld: nullableFiniteNumber(
+          row.shares_held,
+          `business_ownership[id=${str(row.id)}].shares_held`,
+        ),
+        sharesOutstanding: nullableFiniteNumber(
+          row.shares_outstanding,
+          `business_ownership[id=${str(row.id)}].shares_outstanding`,
+        ),
+        fullyDilutedShares: nullableFiniteNumber(
+          row.fully_diluted_shares,
+          `business_ownership[id=${str(row.id)}].fully_diluted_shares`,
+        ),
         shareClass: row.share_class ? str(row.share_class) : null,
         originEventId: row.origin_event_id ? str(row.origin_event_id) : null,
         notes: row.notes ? str(row.notes) : null,
@@ -1029,22 +1059,43 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         ),
         periodLabel: row.period_label ? str(row.period_label) : null,
         currency: row.currency ? str(row.currency).toUpperCase() : null,
-        revenue: nullableFiniteNumber(row.revenue, `business_financials[id=${str(row.id)}].revenue`),
-        grossProfit: nullableFiniteNumber(row.gross_profit, `business_financials[id=${str(row.id)}].gross_profit`),
+        revenue: nullableFiniteNumber(
+          row.revenue,
+          `business_financials[id=${str(row.id)}].revenue`,
+        ),
+        grossProfit: nullableFiniteNumber(
+          row.gross_profit,
+          `business_financials[id=${str(row.id)}].gross_profit`,
+        ),
         ebitda: nullableFiniteNumber(row.ebitda, `business_financials[id=${str(row.id)}].ebitda`),
         ebit: nullableFiniteNumber(row.ebit, `business_financials[id=${str(row.id)}].ebit`),
-        netIncome: nullableFiniteNumber(row.net_income, `business_financials[id=${str(row.id)}].net_income`),
+        netIncome: nullableFiniteNumber(
+          row.net_income,
+          `business_financials[id=${str(row.id)}].net_income`,
+        ),
         cash: nullableFiniteNumber(row.cash, `business_financials[id=${str(row.id)}].cash`),
         grossDebt: nullableFiniteNumber(row.debt, `business_financials[id=${str(row.id)}].debt`),
-        workingCapital: nullableFiniteNumber(row.working_capital, `business_financials[id=${str(row.id)}].working_capital`),
+        workingCapital: nullableFiniteNumber(
+          row.working_capital,
+          `business_financials[id=${str(row.id)}].working_capital`,
+        ),
         capex: nullableFiniteNumber(row.capex, `business_financials[id=${str(row.id)}].capex`),
         depreciationAmortisation: nullableFiniteNumber(
           row.depreciation_amortisation,
           `business_financials[id=${str(row.id)}].depreciation_amortisation`,
         ),
-        interestExpense: nullableFiniteNumber(row.interest_expense, `business_financials[id=${str(row.id)}].interest_expense`),
-        taxExpense: nullableFiniteNumber(row.tax_expense, `business_financials[id=${str(row.id)}].tax_expense`),
-        freeCashFlow: nullableFiniteNumber(row.free_cash_flow, `business_financials[id=${str(row.id)}].free_cash_flow`),
+        interestExpense: nullableFiniteNumber(
+          row.interest_expense,
+          `business_financials[id=${str(row.id)}].interest_expense`,
+        ),
+        taxExpense: nullableFiniteNumber(
+          row.tax_expense,
+          `business_financials[id=${str(row.id)}].tax_expense`,
+        ),
+        freeCashFlow: nullableFiniteNumber(
+          row.free_cash_flow,
+          `business_financials[id=${str(row.id)}].free_cash_flow`,
+        ),
         notes: row.notes ? str(row.notes) : null,
         provenance: provenance(row),
       }));
@@ -1055,20 +1106,55 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         businessId: str(row.business_id),
         valuationDate: str(row.valuation_date),
         currency: row.currency ? str(row.currency).toUpperCase() : null,
-        method: enumValue(str(row.method), BUSINESS_VALUATION_METHODS, `business_valuations[id=${str(row.id)}].method`),
-        enterpriseValue: nullableFiniteNumber(row.enterprise_value, `business_valuations[id=${str(row.id)}].enterprise_value`),
-        equityValue: nullableFiniteNumber(row.equity_value, `business_valuations[id=${str(row.id)}].equity_value`),
-        multiple: nullableFiniteNumber(row.valuation_multiple, `business_valuations[id=${str(row.id)}].valuation_multiple`),
-        multipleLow: nullableFiniteNumber(row.multiple_low, `business_valuations[id=${str(row.id)}].multiple_low`),
-        multipleHigh: nullableFiniteNumber(row.multiple_high, `business_valuations[id=${str(row.id)}].multiple_high`),
+        method: enumValue(
+          str(row.method),
+          BUSINESS_VALUATION_METHODS,
+          `business_valuations[id=${str(row.id)}].method`,
+        ),
+        enterpriseValue: nullableFiniteNumber(
+          row.enterprise_value,
+          `business_valuations[id=${str(row.id)}].enterprise_value`,
+        ),
+        equityValue: nullableFiniteNumber(
+          row.equity_value,
+          `business_valuations[id=${str(row.id)}].equity_value`,
+        ),
+        multiple: nullableFiniteNumber(
+          row.valuation_multiple,
+          `business_valuations[id=${str(row.id)}].valuation_multiple`,
+        ),
+        multipleLow: nullableFiniteNumber(
+          row.multiple_low,
+          `business_valuations[id=${str(row.id)}].multiple_low`,
+        ),
+        multipleHigh: nullableFiniteNumber(
+          row.multiple_high,
+          `business_valuations[id=${str(row.id)}].multiple_high`,
+        ),
         metricBasis: row.metric_basis
-          ? enumValue(str(row.metric_basis), BUSINESS_METRIC_BASES, `business_valuations[id=${str(row.id)}].metric_basis`)
+          ? enumValue(
+              str(row.metric_basis),
+              BUSINESS_METRIC_BASES,
+              `business_valuations[id=${str(row.id)}].metric_basis`,
+            )
           : null,
         metricPeriodEnd: row.metric_period_end ? str(row.metric_period_end) : null,
-        preMoneyEquityValue: nullableFiniteNumber(row.pre_money_equity_value, `business_valuations[id=${str(row.id)}].pre_money_equity_value`),
-        primaryNewMoney: nullableFiniteNumber(row.primary_new_money, `business_valuations[id=${str(row.id)}].primary_new_money`),
-        secondaryAmount: nullableFiniteNumber(row.secondary_amount, `business_valuations[id=${str(row.id)}].secondary_amount`),
-        investorContribution: nullableFiniteNumber(row.investor_contribution, `business_valuations[id=${str(row.id)}].investor_contribution`),
+        preMoneyEquityValue: nullableFiniteNumber(
+          row.pre_money_equity_value,
+          `business_valuations[id=${str(row.id)}].pre_money_equity_value`,
+        ),
+        primaryNewMoney: nullableFiniteNumber(
+          row.primary_new_money,
+          `business_valuations[id=${str(row.id)}].primary_new_money`,
+        ),
+        secondaryAmount: nullableFiniteNumber(
+          row.secondary_amount,
+          `business_valuations[id=${str(row.id)}].secondary_amount`,
+        ),
+        investorContribution: nullableFiniteNumber(
+          row.investor_contribution,
+          `business_valuations[id=${str(row.id)}].investor_contribution`,
+        ),
         preferredRightsKnown: nullableBoolean(
           row.preferred_rights_known ?? null,
           `business_valuations[id=${str(row.id)}].preferred_rights_known`,
@@ -1111,6 +1197,20 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         notes: row.notes ? str(row.notes) : null,
         provenance: provenance(row),
       }));
+    const businessBridgeDeclarations: BusinessBridgeDeclaration[] = businessBridgeDeclarationRows
+      .filter((row) => businessIds.has(str(row.business_id)))
+      .map((row) => ({
+        id: str(row.id),
+        businessId: str(row.business_id),
+        effectiveDate: str(row.effective_date),
+        status: enumValue(
+          str(row.status),
+          BUSINESS_BRIDGE_STATUSES,
+          `business_bridge_declarations[id=${str(row.id)}].status`,
+        ),
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
+      }));
     const businessDcfPeriods: BusinessDcfPeriod[] = businessDcfPeriodRows.map((row) => ({
       id: str(row.id),
       dcfId: str(row.dcf_id),
@@ -1143,7 +1243,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           BUSINESS_DCF_TERMINAL_METHODS,
           `business_dcf_assumptions[id=${str(row.id)}].terminal_method`,
         ),
-        terminalGrowth: nullableFiniteNumber(row.terminal_growth, `business_dcf_assumptions[id=${str(row.id)}].terminal_growth`),
+        terminalGrowth: nullableFiniteNumber(
+          row.terminal_growth,
+          `business_dcf_assumptions[id=${str(row.id)}].terminal_growth`,
+        ),
         terminalExitMultiple: nullableFiniteNumber(
           row.terminal_exit_multiple,
           `business_dcf_assumptions[id=${str(row.id)}].terminal_exit_multiple`,
@@ -1181,26 +1284,42 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         ),
         fees: nullableFiniteNumber(row.fees, `business_capital_events[id=${str(row.id)}].fees`),
         currency: str(row.currency).toUpperCase(),
-        ownershipDelta: nullableFiniteNumber(row.ownership_delta, `business_capital_events[id=${str(row.id)}].ownership_delta`),
+        ownershipDelta: nullableFiniteNumber(
+          row.ownership_delta,
+          `business_capital_events[id=${str(row.id)}].ownership_delta`,
+        ),
         ownershipRateAfter: nullableFiniteNumber(
           row.ownership_rate_after,
           `business_capital_events[id=${str(row.id)}].ownership_rate_after`,
         ),
-        sharesDelta: nullableFiniteNumber(row.shares_delta, `business_capital_events[id=${str(row.id)}].shares_delta`),
-        pricePerShare: nullableFiniteNumber(row.price_per_share, `business_capital_events[id=${str(row.id)}].price_per_share`),
+        sharesDelta: nullableFiniteNumber(
+          row.shares_delta,
+          `business_capital_events[id=${str(row.id)}].shares_delta`,
+        ),
+        pricePerShare: nullableFiniteNumber(
+          row.price_per_share,
+          `business_capital_events[id=${str(row.id)}].price_per_share`,
+        ),
         label: row.label ? str(row.label) : null,
         transactionId: row.transaction_id ? str(row.transaction_id) : null,
         notes: row.notes ? str(row.notes) : null,
         provenance: provenance(row),
       }));
     const businessHoldings: BusinessHoldingLink[] = businessHoldingRows
-      .filter((row) => businessIds.has(str(row.parent_business_id)) && businessIds.has(str(row.child_business_id)))
+      .filter(
+        (row) =>
+          businessIds.has(str(row.parent_business_id)) &&
+          businessIds.has(str(row.child_business_id)),
+      )
       .map((row) => ({
         id: str(row.id),
         parentBusinessId: str(row.parent_business_id),
         childBusinessId: str(row.child_business_id),
         effectiveDate: str(row.effective_date),
-        ownershipRate: finiteNumber(row.ownership_rate, `business_holdings[id=${str(row.id)}].ownership_rate`),
+        ownershipRate: finiteNumber(
+          row.ownership_rate,
+          `business_holdings[id=${str(row.id)}].ownership_rate`,
+        ),
         notes: row.notes ? str(row.notes) : null,
         provenance: provenance(row),
       }));
@@ -1238,6 +1357,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       holdings: businessHoldings,
       ebitdaAdjustments: businessEbitdaAdjustments,
       bridgeItems: businessBridgeItems,
+      bridgeDeclarations: businessBridgeDeclarations,
       dcfAssumptions: businessDcfAssumptions,
       currencyRates,
     });
@@ -1310,6 +1430,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       businessValuations,
       businessEbitdaAdjustments,
       businessBridgeItems,
+      businessBridgeDeclarations,
       businessDcfAssumptions,
       businessCapitalEvents,
       businessHoldings,
@@ -1366,6 +1487,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
               multiple: value.multiple,
               multiple_low: value.multipleLow,
               multiple_high: value.multipleHigh,
+              bridge_status: value.bridgeStatus,
               capital_history_start: value.capitalHistoryStart,
               capital_history_source: value.capitalHistorySource,
               notes: value.notes,
@@ -1402,7 +1524,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }
       case "archive_business": {
         unwrap(
-          await db.rpc("lfo_archive_business", { p_user_id: user, p_business_id: mutation.businessId }),
+          await db.rpc("lfo_archive_business", {
+            p_user_id: user,
+            p_business_id: mutation.businessId,
+          }),
           "archivage société",
         );
         break;
@@ -1433,7 +1558,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }
       case "delete_business_ownership": {
         unwrap(
-          await db.rpc("lfo_delete_business_ownership", { p_user_id: user, p_ownership_id: mutation.ownershipId }),
+          await db.rpc("lfo_delete_business_ownership", {
+            p_user_id: user,
+            p_ownership_id: mutation.ownershipId,
+          }),
           "suppression détention",
         );
         break;
@@ -1475,7 +1603,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }
       case "delete_business_financials": {
         unwrap(
-          await db.rpc("lfo_delete_business_financials", { p_user_id: user, p_financials_id: mutation.financialsId }),
+          await db.rpc("lfo_delete_business_financials", {
+            p_user_id: user,
+            p_financials_id: mutation.financialsId,
+          }),
           "suppression période financière",
         );
         break;
@@ -1506,6 +1637,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
               secondary_amount: value.secondaryAmount,
               investor_contribution: value.investorContribution,
               preferred_rights_known: value.preferredRightsKnown,
+              bridge_status: value.bridgeStatus,
               notes: value.notes,
               assumptions: {},
               data_kind: observed ? "EXTERNAL_DATA" : "USER_ASSUMPTION",
@@ -1519,7 +1651,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }
       case "delete_business_valuation": {
         unwrap(
-          await db.rpc("lfo_delete_business_valuation", { p_user_id: user, p_valuation_id: mutation.valuationId }),
+          await db.rpc("lfo_delete_business_valuation", {
+            p_user_id: user,
+            p_valuation_id: mutation.valuationId,
+          }),
           "suppression valorisation",
         );
         break;
@@ -1581,7 +1716,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }
       case "delete_business_bridge_item": {
         unwrap(
-          await db.rpc("lfo_delete_business_bridge_item", { p_user_id: user, p_item_id: mutation.itemId }),
+          await db.rpc("lfo_delete_business_bridge_item", {
+            p_user_id: user,
+            p_item_id: mutation.itemId,
+          }),
           "suppression élément de bridge",
         );
         break;
@@ -1658,7 +1796,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }
       case "delete_business_capital_event": {
         unwrap(
-          await db.rpc("lfo_delete_business_capital_event", { p_user_id: user, p_event_id: mutation.eventId }),
+          await db.rpc("lfo_delete_business_capital_event", {
+            p_user_id: user,
+            p_event_id: mutation.eventId,
+          }),
           "suppression événement de capital",
         );
         break;
@@ -1683,7 +1824,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }
       case "delete_business_holding": {
         unwrap(
-          await db.rpc("lfo_delete_business_holding", { p_user_id: user, p_holding_id: mutation.holdingId }),
+          await db.rpc("lfo_delete_business_holding", {
+            p_user_id: user,
+            p_holding_id: mutation.holdingId,
+          }),
           "suppression rattachement holding",
         );
         break;
