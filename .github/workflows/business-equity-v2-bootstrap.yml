@@ -25,5 +25,5 @@ jobs:
       - run: npm run test
       - run: npx tsc --noEmit
       - run: npm run build
+      - run: npm run db:local:up
       - run: npm run gate:local
-# rerun-after-lint-fix
