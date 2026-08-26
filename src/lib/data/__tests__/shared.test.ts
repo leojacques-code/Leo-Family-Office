@@ -379,6 +379,7 @@ describe("computeFlowRates", () => {
     currency: "EUR",
     kindOverride: null,
     transferGroupId: null,
+    propertyId: null,
     notes: null,
     provenance,
   });

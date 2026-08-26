@@ -67,7 +67,7 @@ npm run build
 npm run check
 ```
 
-`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 49 tables, colonnes, contraintes, 15 RPC, permissions, RLS, policies, bucket Storage ou l'historique de migration divergent du code. Le contrôle des migrations est symétrique : une version attendue absente échoue, et une version appliquée hors du dépôt échoue aussi.
+`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 53 tables, colonnes, contraintes, 24 RPC, permissions, RLS, policies, bucket Storage ou l'historique de migration divergent du code. Le contrôle des migrations est symétrique : une version attendue absente échoue, et une version appliquée hors du dépôt échoue aussi.
 
 Le même contrôle s'exécute sans aucun credential, sur un PostgreSQL local jetable reconstruit depuis les seules migrations du dépôt :
 
@@ -76,7 +76,7 @@ npm run db:local:up
 npm run gate:local
 ```
 
-Le dépôt et la production sont alignés sur 17 migrations. Les migrations 16 et 17 installent la fondation Portfolio puis les index couvrant ses clés étrangères. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
+Le dépôt porte 18 migrations. Les migrations 16 et 17 installent la fondation Portfolio puis les index couvrant ses clés étrangères ; elles sont appliquées en production. La migration 18 (Real Estate V2) est présente dans le dépôt et **pas encore appliquée en production** : voir la section SUPABASE HANDOFF de la Pull Request Real Estate V2. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
 
 ## Fonctionnalités
 
@@ -109,11 +109,13 @@ Les migrations sont appliquées dans cet ordre, sans modification rétroactive :
 15. `20260825063831_snapshot_item_fk_covering_index.sql`
 16. `20260825193427_portfolio_data_foundation.sql`
 17. `20260825193606_portfolio_fk_covering_indexes.sql`
+18. `20260826080000_real_estate_v2.sql`
 
 La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persistance. Elle ne déplace aucune formule financière dans la base.
 Les migrations Canonical Balance Sheet V2 enrichissent et versionnent les snapshots, sans supprimer ni écraser les données historiques ; toutes les formules restent dans les engines TypeScript.
 La migration 16 ajoute le ledger portefeuille (`portfolio_events`, `portfolio_envelope_policies`) et ses RPC. Aucun lot ni coût de revient n'y est persisté : ces grandeurs sont dérivées par `src/lib/engine/portfolio.ts`. La migration 17 couvre les clés étrangères du ledger avec leurs index dédiés.
 Les migrations 14 et 15 ne portent que des index de `net_worth_snapshot_items` : la 15 remplace l'index de la 14, l'état final couvrant la FK composite `(snapshot_id, user_id)`.
+La migration 18 installe Real Estate V2 : quatre tables de faits (`real_estate_valuations`, `real_estate_capital_events`, `real_estate_operating_terms`, `real_estate_financing_links`), les colonnes canoniques de `properties`, la colonne d'attribution `transactions.property_id` et neuf RPC. Elle ne crée AUCUNE seconde vérité : la dette immobilière reste une ligne de `liabilities` à laquelle le bien se rattache par une quote-part, et les flux réels restent des lignes de `transactions` simplement rattachées à un bien. Rendement, equity, plus-value et coût économique du financement sont dérivés par `src/lib/engine/real-estate.ts`. Les tables héritées `mortgages` et `real_estate_cashflows` y sont marquées obsolètes et ne sont ni lues ni écrites.
 
 ## Sécurité
 

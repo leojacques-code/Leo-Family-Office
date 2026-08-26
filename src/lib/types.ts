@@ -363,6 +363,12 @@ export interface Transaction {
   kindOverride: CashFlowKind | null;
   /** Rapproche les deux jambes d'un même transfert interne. */
   transferGroupId: string | null;
+  /**
+   * Bien immobilier auquel ce flux est rattaché. ATTRIBUTION seule : ni le montant ni la
+   * nature canonique du flux n'en dépendent, et le domaine immobilier ne crée jamais de
+   * transaction. `null` = non rattaché.
+   */
+  propertyId: string | null;
   notes: string | null;
   provenance: Provenance;
 }
@@ -632,6 +638,154 @@ export interface PortfolioEnvelopePolicy {
   provenance: Provenance;
 }
 
+/**
+ * REAL ESTATE V2 — TYPES CANONIQUES
+ *
+ * L'immobilier est une couche de FAITS, pas un simulateur. Quatre familles de faits, et
+ * rien d'autre : ce que le bien EST, ce qu'il VAUT, ce qu'il a COÛTÉ, ce qu'il RAPPORTE.
+ * Le financement n'en fait pas partie : il vit dans `Liability` et le domaine immobilier
+ * s'y RATTACHE. Aucun échéancier n'est reconstruit ici.
+ *
+ * Rendement, equity, plus-value, coût économique du financement et scénarios sont DÉRIVÉS
+ * par `src/lib/engine/real-estate.ts`. Rien de tout cela n'est persisté : une correction
+ * de valorisation laisserait derrière elle un rendement périmé.
+ */
+export const REAL_ESTATE_USAGES = [
+  "PRIMARY_RESIDENCE",
+  "SECONDARY_RESIDENCE",
+  "RENTAL",
+  "MIXED_USE",
+  "LAND",
+  "OTHER",
+] as const;
+/**
+ * Usage économique du bien. `null` sur l'actif signifie « non déclaré » et jamais
+ * « OTHER » : une résidence principale ne produit aucun loyer et n'a pas de rendement, un
+ * locatif en a un. Supposer l'un à la place de l'autre fausse les deux lectures.
+ */
+export type RealEstateUsage = (typeof REAL_ESTATE_USAGES)[number];
+
+export const REAL_ESTATE_VALUATION_METHODS = [
+  "MARKET_APPRAISAL",
+  "NOTARY_ESTIMATE",
+  "AGENT_ESTIMATE",
+  "INDEX_ADJUSTED",
+  "USER_ESTIMATE",
+  "PURCHASE_PRICE",
+] as const;
+export type RealEstateValuationMethod = (typeof REAL_ESTATE_VALUATION_METHODS)[number];
+
+/**
+ * Faits de capital. Le montant est TOUJOURS positif : la direction économique vient du
+ * type. `ACQUISITION_COST` et `CAPEX` entrent dans la base de coût ; l'entretien courant
+ * n'est pas ici, c'est une charge d'exploitation. COÛT DE REVIENT ≠ CHARGE.
+ */
+export const REAL_ESTATE_CAPITAL_EVENT_TYPES = [
+  "ACQUISITION_PRICE",
+  "ACQUISITION_COST",
+  "CAPEX",
+  "DISPOSAL_PRICE",
+  "DISPOSAL_COST",
+] as const;
+export type RealEstateCapitalEventType = (typeof REAL_ESTATE_CAPITAL_EVENT_TYPES)[number];
+
+/** Identité d'un bien détenu. Ne porte aucun montant : les montants sont des faits datés. */
+export interface RealEstateAsset {
+  id: string;
+  name: string;
+  location: string | null;
+  surfaceSqm: number | null;
+  /** `null` = usage non déclaré. */
+  usage: RealEstateUsage | null;
+  /**
+   * Quote-part détenue, dans ]0,1]. `null` = non déclarée : la valeur attribuable au
+   * patrimoine devient alors NON CALCULABLE, elle n'est jamais supposée entière.
+   */
+  ownershipShare: number | null;
+  acquisitionDate: string | null;
+  /** Date de cession effective. Un bien cédé quitte le bilan à cette date. */
+  disposalDate: string | null;
+  archived: boolean;
+  notes: string | null;
+  provenance: Provenance;
+}
+
+/** Valorisation datée. Une OBSERVATION : le moteur ne l'indexe ni ne la fait vieillir. */
+export interface RealEstateValuation {
+  id: string;
+  propertyId: string;
+  valuedAt: string;
+  /** Valeur du bien ENTIER, en devise native. La quote-part est appliquée par le moteur. */
+  value: number;
+  currency: string;
+  method: RealEstateValuationMethod;
+  notes: string | null;
+  provenance: Provenance;
+}
+
+export interface RealEstateCapitalEvent {
+  id: string;
+  propertyId: string;
+  type: RealEstateCapitalEventType;
+  eventDate: string;
+  /** Toujours positif. La direction vient du type. */
+  amount: number;
+  currency: string;
+  label: string | null;
+  /** Jambe de trésorerie déjà existante. Aucun flux n'est créé ni recopié. */
+  transactionId: string | null;
+  notes: string | null;
+  provenance: Provenance;
+}
+
+/**
+ * Termes d'exploitation DÉCLARÉS, datés. Tout terme `null` signifie « non déclaré » et
+ * jamais « zéro » : un rendement net calculé en traitant une charge inconnue comme nulle
+ * serait flatteur et faux. Tous les montants sont ANNUELS et en devise `currency`.
+ */
+export interface RealEstateOperatingTerms {
+  id: string;
+  propertyId: string;
+  effectiveFrom: string;
+  currency: string;
+  /** Loyer contractuel brut annuel, hors vacance. */
+  annualGrossRent: number | null;
+  /** Dans [0,1]. `null` = non déclaré : le loyer effectif devient non calculable. */
+  vacancyRate: number | null;
+  annualOperatingCharges: number | null;
+  annualPropertyTax: number | null;
+  annualInsurance: number | null;
+  annualMaintenance: number | null;
+  annualManagementFees: number | null;
+  /** Part du loyer encaissé. Exclusif de `annualManagementFees`. */
+  managementFeeRate: number | null;
+  annualOtherCosts: number | null;
+  /**
+   * Taux d'imposition effectif DÉCLARÉ sur le résultat foncier. LFO ne porte aucune règle
+   * fiscale immobilière fiable : à `null`, aucun résultat après impôt n'est produit. Ce
+   * n'est pas un taux par défaut.
+   */
+  effectiveIncomeTaxRate: number | null;
+  notes: string | null;
+  provenance: Provenance;
+}
+
+/**
+ * Rattachement d'un bien à une dette EXISTANTE. Ne porte aucun montant de passif : le
+ * passif du bilan vient de `Liability` et de lui seul. Ce lien répond à une question
+ * d'ATTRIBUTION, et c'est ce qui permet de calculer l'equity dans un bien sans jamais
+ * compter la même dette deux fois.
+ */
+export interface RealEstateFinancingLink {
+  id: string;
+  propertyId: string;
+  liabilityId: string;
+  /** Part du concours affectée à ce bien, dans ]0,1]. */
+  allocationShare: number;
+  notes: string | null;
+  provenance: Provenance;
+}
+
 export interface DashboardState {
   asOfDate: string;
   reportingCurrency: string;
@@ -659,6 +813,13 @@ export interface DashboardState {
   portfolioEvents: PortfolioEvent[];
   /** Déclarations d'enveloppe. Une enveloppe sans entrée n'a rien déclaré. */
   portfolioPolicies: PortfolioEnvelopePolicy[];
+  /** Biens détenus. Vide tant qu'aucun bien n'a été enregistré. */
+  realEstateAssets: RealEstateAsset[];
+  realEstateValuations: RealEstateValuation[];
+  realEstateCapitalEvents: RealEstateCapitalEvent[];
+  realEstateOperatingTerms: RealEstateOperatingTerms[];
+  /** Rattachements bien ↔ dette. Ne portent aucun passif. */
+  realEstateFinancingLinks: RealEstateFinancingLink[];
   liabilities: Liability[];
   incomes: IncomeSource[];
   expenseCategories: ExpenseCategory[];
@@ -680,6 +841,8 @@ export interface DashboardState {
   portfolioLedger?: import("@/lib/engine/portfolio").PortfolioLedger;
   /** Analytics dérivées, jamais une seconde source de faits. */
   portfolioAnalytics?: import("@/lib/engine/portfolio-analytics").PortfolioAnalytics;
+  /** Lecture dérivée du domaine immobilier ; absente seulement dans d'anciens fixtures. */
+  realEstate?: import("@/lib/engine/real-estate").RealEstatePortfolio;
   assumptions: Array<{
     id: string;
     name: string;

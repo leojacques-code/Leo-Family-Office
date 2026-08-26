@@ -19,6 +19,10 @@ import { debtCashOut, monthBounds } from "@/lib/engine/debt";
 import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
 import { buildPortfolioLedger } from "@/lib/engine/portfolio";
 import { buildPortfolioAnalytics } from "@/lib/engine/portfolio-analytics";
+import {
+  buildRealEstatePortfolio,
+  realEstateBalanceSheetContributions,
+} from "@/lib/engine/real-estate";
 import { deriveCanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
 import type { CurrencyRate } from "@/lib/engine/fx";
 import {
@@ -47,6 +51,11 @@ import type {
   PortfolioEvent,
   Position,
   Provenance,
+  RealEstateAsset,
+  RealEstateCapitalEvent,
+  RealEstateFinancingLink,
+  RealEstateOperatingTerms,
+  RealEstateValuation,
   RecurringCashFlowRule,
   Scenario,
   Transaction,
@@ -56,6 +65,9 @@ import {
   LEDGER_COVERAGE_SOURCES,
   LOT_MATCHING_METHODS,
   PORTFOLIO_EVENT_TYPES,
+  REAL_ESTATE_CAPITAL_EVENT_TYPES,
+  REAL_ESTATE_USAGES,
+  REAL_ESTATE_VALUATION_METHODS,
 } from "@/lib/types";
 
 type Row = Record<string, unknown>;
@@ -237,6 +249,11 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       liabilityObservationRows,
       portfolioEventRows,
       portfolioPolicyRows,
+      propertyRows,
+      realEstateValuationRows,
+      realEstateCapitalEventRows,
+      realEstateOperatingTermRows,
+      realEstateFinancingLinkRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -269,6 +286,11 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("liability_balance_observations"),
       fetchAllPages("portfolio_events", "event_date"),
       mine("portfolio_envelope_policies"),
+      mine("properties"),
+      fetchAllPages("real_estate_valuations", "valued_at"),
+      fetchAllPages("real_estate_capital_events", "event_date"),
+      fetchAllPages("real_estate_operating_terms", "effective_from"),
+      mine("real_estate_financing_links"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -427,6 +449,137 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         provenance: provenance(row),
       };
     });
+
+    // ── Domaine immobilier ───────────────────────────────────────────────────────────
+    // Quatre familles de faits, aucune valeur par défaut. Un `null` lu en base reste un
+    // `null` en mémoire : c'est le moteur qui dira ce qu'il ne peut pas calculer, pas le
+    // mapping qui comblera le trou.
+    const realEstateAssets: RealEstateAsset[] = propertyRows
+      .filter((row) => row.archived !== true)
+      .map((row) => {
+        const context = `properties[id=${str(row.id)}]`;
+        return {
+          id: str(row.id),
+          name: str(row.name),
+          location: row.location ? str(row.location) : null,
+          surfaceSqm: nullableFiniteNumber(row.surface_sqm ?? null, `${context}.surface_sqm`),
+          usage: row.property_usage
+            ? (enumValue(
+                str(row.property_usage),
+                REAL_ESTATE_USAGES,
+                `${context}.property_usage`,
+              ) as RealEstateAsset["usage"])
+            : null,
+          ownershipShare: nullableFiniteNumber(
+            row.ownership_share ?? null,
+            `${context}.ownership_share`,
+          ),
+          acquisitionDate: row.acquisition_date ? str(row.acquisition_date) : null,
+          disposalDate: row.disposal_date ? str(row.disposal_date) : null,
+          archived: bool(row.archived),
+          notes: row.notes ? str(row.notes) : null,
+          provenance: provenance(row),
+        };
+      })
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    const realEstateAssetIds = new Set(realEstateAssets.map((asset) => asset.id));
+    /** Un fait orphelin appartient à un bien archivé : il est ignoré, jamais rattaché ailleurs. */
+    const ownedByLiveAsset = (row: Row) => realEstateAssetIds.has(str(row.property_id));
+
+    const realEstateValuations: RealEstateValuation[] = realEstateValuationRows
+      .filter(ownedByLiveAsset)
+      .map((row) => {
+        const context = `real_estate_valuations[id=${str(row.id)}]`;
+        return {
+          id: str(row.id),
+          propertyId: str(row.property_id),
+          valuedAt: str(row.valued_at),
+          value: finiteNumber(row.value, `${context}.value`),
+          currency: str(row.currency).toUpperCase(),
+          method: enumValue(
+            str(row.valuation_method),
+            REAL_ESTATE_VALUATION_METHODS,
+            `${context}.valuation_method`,
+          ),
+          notes: row.notes ? str(row.notes) : null,
+          provenance: provenance(row),
+        };
+      })
+      .sort(
+        (left, right) =>
+          left.valuedAt.localeCompare(right.valuedAt) || left.id.localeCompare(right.id),
+      );
+
+    const realEstateCapitalEvents: RealEstateCapitalEvent[] = realEstateCapitalEventRows
+      .filter(ownedByLiveAsset)
+      .map((row) => {
+        const context = `real_estate_capital_events[id=${str(row.id)}]`;
+        return {
+          id: str(row.id),
+          propertyId: str(row.property_id),
+          type: enumValue(
+            str(row.event_type),
+            REAL_ESTATE_CAPITAL_EVENT_TYPES,
+            `${context}.event_type`,
+          ),
+          eventDate: str(row.event_date),
+          amount: finiteNumber(row.amount, `${context}.amount`),
+          currency: str(row.currency).toUpperCase(),
+          label: row.label ? str(row.label) : null,
+          transactionId: row.transaction_id ? str(row.transaction_id) : null,
+          notes: row.notes ? str(row.notes) : null,
+          provenance: provenance(row),
+        };
+      })
+      .sort(
+        (left, right) =>
+          left.eventDate.localeCompare(right.eventDate) || left.id.localeCompare(right.id),
+      );
+
+    const realEstateOperatingTerms: RealEstateOperatingTerms[] = realEstateOperatingTermRows
+      .filter(ownedByLiveAsset)
+      .map((row) => {
+        const context = `real_estate_operating_terms[id=${str(row.id)}]`;
+        const amount = (field: string) =>
+          nullableFiniteNumber(row[field] ?? null, `${context}.${field}`);
+        return {
+          id: str(row.id),
+          propertyId: str(row.property_id),
+          effectiveFrom: str(row.effective_from),
+          currency: str(row.currency).toUpperCase(),
+          annualGrossRent: amount("annual_gross_rent"),
+          vacancyRate: amount("vacancy_rate"),
+          annualOperatingCharges: amount("annual_operating_charges"),
+          annualPropertyTax: amount("annual_property_tax"),
+          annualInsurance: amount("annual_insurance"),
+          annualMaintenance: amount("annual_maintenance"),
+          annualManagementFees: amount("annual_management_fees"),
+          managementFeeRate: amount("management_fee_rate"),
+          annualOtherCosts: amount("annual_other_costs"),
+          effectiveIncomeTaxRate: amount("effective_income_tax_rate"),
+          notes: row.notes ? str(row.notes) : null,
+          provenance: provenance(row),
+        };
+      })
+      .sort(
+        (left, right) =>
+          left.effectiveFrom.localeCompare(right.effectiveFrom) || left.id.localeCompare(right.id),
+      );
+
+    const realEstateFinancingLinks: RealEstateFinancingLink[] = realEstateFinancingLinkRows
+      .filter(ownedByLiveAsset)
+      .map((row) => {
+        const context = `real_estate_financing_links[id=${str(row.id)}]`;
+        return {
+          id: str(row.id),
+          propertyId: str(row.property_id),
+          liabilityId: str(row.liability_id),
+          allocationShare: finiteNumber(row.allocation_share, `${context}.allocation_share`),
+          notes: row.notes ? str(row.notes) : null,
+          provenance: provenance(row),
+        };
+      });
 
     const latestLiabilityObservations = latestBy(
       liabilityObservationRows,
@@ -621,6 +774,11 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         ? (str(row.kind_override) as Transaction["kindOverride"])
         : null,
       transferGroupId: row.transfer_group_id ? str(row.transfer_group_id) : null,
+      // Rattachement immobilier : une ATTRIBUTION, pas une reclassification. La nature
+      // canonique du flux reste celle de sa catégorie ou de son override.
+      propertyId: requiredField(row, "property_id", `transactions[id=${str(row.id)}]`)
+        ? str(row.property_id)
+        : null,
       notes: row.notes ? str(row.notes) : null,
       provenance: provenance(row),
     }));
@@ -749,12 +907,30 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
 
     const coverage = readLedgerCoverage(profileRows[0]);
     const reportingCurrency = str(profileRows[0]?.reporting_currency || REPORTING_CURRENCY);
+    // Le domaine immobilier est dérivé AVANT le bilan : il en produit les lignes d'actif.
+    // Il ne produit AUCUNE ligne de passif : la dette immobilière est déjà portée par
+    // `liabilities`, et le bilan la lit là. En émettre une ici la compterait deux fois.
+    const realEstate = buildRealEstatePortfolio({
+      asOfDate: AS_OF_DATE,
+      reportingCurrency,
+      assets: realEstateAssets,
+      valuations: realEstateValuations,
+      capitalEvents: realEstateCapitalEvents,
+      operatingTerms: realEstateOperatingTerms,
+      financingLinks: realEstateFinancingLinks,
+      liabilities,
+      transactions,
+      expenseCategories,
+      ledgerCoverageStart: coverage.start,
+      currencyRates,
+    });
     const balanceSheet = buildCanonicalBalanceSheet({
       asOfDate: AS_OF_DATE,
       reportingCurrency,
       accounts,
       positions,
       liabilities,
+      contributions: realEstateBalanceSheetContributions(realEstate),
       currencyRates,
     });
     // Le ledger portefeuille est une lecture DÉRIVÉE : il ne produit aucune ligne de bilan
@@ -803,6 +979,11 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       positions,
       portfolioEvents,
       portfolioPolicies,
+      realEstateAssets,
+      realEstateValuations,
+      realEstateCapitalEvents,
+      realEstateOperatingTerms,
+      realEstateFinancingLinks,
       liabilities,
       incomes,
       expenseCategories,
@@ -820,6 +1001,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       balanceSheetMetrics,
       portfolioLedger,
       portfolioAnalytics,
+      realEstate,
       metrics: composeDashboardMetrics({ balanceSheet, balanceSheetMetrics, flow: flowMetrics }),
       assumptions,
     };
@@ -1291,6 +1473,159 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             },
           }),
           "déclaration des conventions d’enveloppe",
+        );
+        break;
+      }
+      case "save_real_estate_asset": {
+        // Aucun montant n'est écrit ici : l'identité d'un bien et ses faits chiffrés sont
+        // deux choses distinctes, saisies par deux mutations distinctes.
+        unwrap(
+          await db.rpc("lfo_save_real_estate_asset", {
+            p_user_id: user,
+            p_payload: {
+              property_id: mutation.asset.propertyId,
+              name: mutation.asset.name,
+              location: mutation.asset.location,
+              surface_sqm: mutation.asset.surfaceSqm,
+              property_usage: mutation.asset.usage,
+              ownership_share: mutation.asset.ownershipShare,
+              acquisition_date: mutation.asset.acquisitionDate,
+              disposal_date: mutation.asset.disposalDate,
+              notes: mutation.asset.notes,
+              source: "Saisie Real Estate",
+            },
+          }),
+          "enregistrement du bien immobilier",
+        );
+        break;
+      }
+      case "archive_real_estate_asset": {
+        unwrap(
+          await db.rpc("lfo_archive_real_estate_asset", {
+            p_user_id: user,
+            p_property_id: mutation.propertyId,
+          }),
+          "archivage du bien immobilier",
+        );
+        break;
+      }
+      case "record_real_estate_valuation": {
+        unwrap(
+          await db.rpc("lfo_record_real_estate_valuation", {
+            p_user_id: user,
+            p_payload: {
+              property_id: mutation.valuation.propertyId,
+              valued_at: mutation.valuation.valuedAt,
+              value: mutation.valuation.value,
+              currency: mutation.valuation.currency,
+              valuation_method: mutation.valuation.method,
+              data_kind:
+                mutation.valuation.method === "USER_ESTIMATE" ? "USER_ASSUMPTION" : "EXTERNAL_DATA",
+              confidence: mutation.valuation.method === "USER_ESTIMATE" ? "LOW" : "MEDIUM",
+              source: "Saisie Real Estate",
+              notes: mutation.valuation.notes,
+            },
+          }),
+          "enregistrement de la valorisation",
+        );
+        break;
+      }
+      case "record_real_estate_capital_event": {
+        unwrap(
+          await db.rpc("lfo_record_real_estate_capital_event", {
+            p_user_id: user,
+            p_payload: {
+              property_id: mutation.event.propertyId,
+              event_type: mutation.event.type,
+              event_date: mutation.event.eventDate,
+              amount: mutation.event.amount,
+              currency: mutation.event.currency,
+              label: mutation.event.label,
+              transaction_id: mutation.event.transactionId,
+              source: "Saisie Real Estate",
+              notes: mutation.event.notes,
+            },
+          }),
+          "enregistrement du fait de capital immobilier",
+        );
+        break;
+      }
+      case "delete_real_estate_capital_event": {
+        unwrap(
+          await db.rpc("lfo_delete_real_estate_capital_event", {
+            p_user_id: user,
+            p_event_id: mutation.eventId,
+          }),
+          "suppression du fait de capital immobilier",
+        );
+        break;
+      }
+      case "set_real_estate_operating_terms": {
+        // Chaque `null` est transmis tel quel : « non déclaré » est une information, et la
+        // remplacer par zéro produirait un rendement net flatteur et faux.
+        unwrap(
+          await db.rpc("lfo_set_real_estate_operating_terms", {
+            p_user_id: user,
+            p_payload: {
+              property_id: mutation.terms.propertyId,
+              effective_from: mutation.terms.effectiveFrom,
+              currency: mutation.terms.currency,
+              annual_gross_rent: mutation.terms.annualGrossRent,
+              vacancy_rate: mutation.terms.vacancyRate,
+              annual_operating_charges: mutation.terms.annualOperatingCharges,
+              annual_property_tax: mutation.terms.annualPropertyTax,
+              annual_insurance: mutation.terms.annualInsurance,
+              annual_maintenance: mutation.terms.annualMaintenance,
+              annual_management_fees: mutation.terms.annualManagementFees,
+              management_fee_rate: mutation.terms.managementFeeRate,
+              annual_other_costs: mutation.terms.annualOtherCosts,
+              effective_income_tax_rate: mutation.terms.effectiveIncomeTaxRate,
+              source: "Saisie Real Estate",
+              notes: mutation.terms.notes,
+            },
+          }),
+          "déclaration des termes d’exploitation",
+        );
+        break;
+      }
+      case "set_real_estate_financing_link": {
+        // La RPC refuse une quote-part cumulée supérieure à 1 : la même dette ne peut pas
+        // être attribuée deux fois. Aucun passif n'est créé par cette écriture.
+        unwrap(
+          await db.rpc("lfo_set_real_estate_financing_link", {
+            p_user_id: user,
+            p_payload: {
+              property_id: mutation.link.propertyId,
+              liability_id: mutation.link.liabilityId,
+              allocation_share: mutation.link.allocationShare,
+              source: "Saisie Real Estate",
+              notes: mutation.link.notes,
+            },
+          }),
+          "rattachement du financement au bien",
+        );
+        break;
+      }
+      case "delete_real_estate_financing_link": {
+        unwrap(
+          await db.rpc("lfo_delete_real_estate_financing_link", {
+            p_user_id: user,
+            p_link_id: mutation.linkId,
+          }),
+          "suppression du rattachement de financement",
+        );
+        break;
+      }
+      case "attribute_transaction_to_property": {
+        // Attribution seule : ni le montant, ni la catégorie, ni la nature canonique du
+        // flux ne sont touchés. Le Cash Flow Engine reste la seule vérité des flux.
+        unwrap(
+          await db.rpc("lfo_attribute_transaction_to_property", {
+            p_user_id: user,
+            p_transaction_id: mutation.transactionId,
+            p_property_id: mutation.propertyId,
+          }),
+          "rattachement du flux au bien",
         );
         break;
       }

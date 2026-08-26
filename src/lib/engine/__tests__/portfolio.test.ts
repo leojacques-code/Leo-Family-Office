@@ -1161,6 +1161,7 @@ describe("Portfolio ledger — frontière avec le Cash Flow", () => {
     currency: "EUR",
     kindOverride: null,
     transferGroupId: null,
+    propertyId: null,
     notes: null,
     provenance,
   });

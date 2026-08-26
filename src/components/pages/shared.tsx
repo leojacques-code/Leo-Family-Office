@@ -86,6 +86,14 @@ export function formatNative(value: number, currency: string) {
   }
 }
 
+/**
+ * Montant natif qui peut être inconnu. Un actif détenu dont la valorisation manque
+ * n'affiche jamais « 0 € » : il affiche que le montant n'est pas calculable.
+ */
+export function formatNativeOptional(value: number | null, currency: string) {
+  return value === null ? NOT_COMPUTABLE : formatNative(value, currency);
+}
+
 /** Libellé lisible d'une ligne canonique, résolu depuis l'état plutôt qu'inventé. */
 export function canonicalLineLabel(state: DashboardState, line: ConvertedBalanceSheetLine): string {
   const account = state.accounts.find((item) => item.id === line.entityId);
@@ -134,7 +142,7 @@ export function ConversionNotice({
   const stale = foreign.filter((line) => line.fx.status === "STALE");
   const current = foreign.filter((line) => line.fx.status === "CURRENT");
   const describe = (line: ConvertedBalanceSheetLine) =>
-    `${canonicalLineLabel(state, line)} ${formatNative(line.nativeValue, line.currency)}`;
+    `${canonicalLineLabel(state, line)} ${formatNativeOptional(line.nativeValue, line.currency)}`;
   return (
     <>
       {current.length ? (
@@ -260,7 +268,7 @@ export function canonicalLineInput(state: DashboardState, line: ConvertedBalance
     value:
       line.currency === state.reportingCurrency
         ? converted
-        : `${formatNative(line.nativeValue, line.currency)} → ${converted}${
+        : `${formatNativeOptional(line.nativeValue, line.currency)} → ${converted}${
             line.fx.rateDate ? ` (taux du ${formatDate(line.fx.rateDate)})` : ""
           }`,
     kind: line.reportingValue === null ? ("MISSING" as const) : line.provenance.kind,

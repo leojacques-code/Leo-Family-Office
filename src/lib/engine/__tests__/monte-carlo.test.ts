@@ -28,6 +28,7 @@ const opening: OpeningBalanceSheet = {
   investmentCash: 3000,
   otherFinancialAssets: 0,
   grossFinancialAssets: 10000,
+  nonFinancialAssets: 0,
   loanBalance: 0,
   otherLiabilityBalance: 0,
   fundingGap: 0,

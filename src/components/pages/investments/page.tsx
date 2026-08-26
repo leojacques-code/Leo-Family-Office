@@ -20,6 +20,7 @@ import {
   canonicalLineLabel,
   formatEur,
   formatNative,
+  formatNativeOptional,
   type SectionProps,
 } from "@/components/pages/shared";
 import {
@@ -839,7 +840,7 @@ function InvestmentsPage({ state, mutate, busy, setExplanation }: SectionProps) 
                   },
                   ...envelopeMarketLines(sheet, view.account.id).map((line) => ({
                     label: canonicalLineLabel(state, line),
-                    value: formatNative(line.nativeValue, line.currency),
+                    value: formatNativeOptional(line.nativeValue, line.currency),
                     kind: line.provenance.kind,
                     date: line.valuationDate,
                     source: line.source,
@@ -897,7 +898,7 @@ function InvestmentsPage({ state, mutate, busy, setExplanation }: SectionProps) 
                   <strong>
                     <OptionalCurrency value={line.reportingValue} />
                     {isForeign ? (
-                      <small> · {formatNative(line.nativeValue, line.currency)}</small>
+                      <small> · {formatNativeOptional(line.nativeValue, line.currency)}</small>
                     ) : null}
                   </strong>
                   <DataBadge kind={line.provenance.kind} />

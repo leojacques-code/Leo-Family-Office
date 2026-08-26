@@ -1,7 +1,14 @@
 import { z } from "zod";
 
 import { AS_OF_DATE } from "@/lib/data/shared";
-import { LEDGER_COVERAGE_SOURCES, LOT_MATCHING_METHODS, PORTFOLIO_EVENT_TYPES } from "@/lib/types";
+import {
+  LEDGER_COVERAGE_SOURCES,
+  LOT_MATCHING_METHODS,
+  PORTFOLIO_EVENT_TYPES,
+  REAL_ESTATE_CAPITAL_EVENT_TYPES,
+  REAL_ESTATE_USAGES,
+  REAL_ESTATE_VALUATION_METHODS,
+} from "@/lib/types";
 
 const finite = z.number().finite();
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -269,6 +276,108 @@ const portfolioPolicySchema = z
     }
   });
 
+/**
+ * SCHÉMAS DU DOMAINE IMMOBILIER
+ *
+ * Règle unique : un `null` transmis est une VALEUR, il traverse la validation intact.
+ * Refuser le `null` forcerait l'interface à envoyer zéro, et « je ne sais pas » deviendrait
+ * « la charge est nulle » : le rendement net calculé ensuite serait faux et flatteur.
+ */
+const realEstateAssetSchema = z
+  .object({
+    propertyId: z.uuid().nullable(),
+    name: z.string().trim().min(1).max(160),
+    location: z.string().trim().max(240).nullable(),
+    surfaceSqm: finite.positive().nullable(),
+    usage: z.enum(REAL_ESTATE_USAGES).nullable(),
+    // Une quote-part nulle n'existe pas : détenir 0 % d'un bien, c'est ne pas le détenir.
+    ownershipShare: finite.gt(0).max(1).nullable(),
+    acquisitionDate: realDate.nullable(),
+    disposalDate: realDate.nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((asset, context) => {
+    if (
+      asset.acquisitionDate !== null &&
+      asset.disposalDate !== null &&
+      asset.disposalDate < asset.acquisitionDate
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "La cession ne peut pas précéder l’acquisition",
+        path: ["disposalDate"],
+      });
+    }
+  });
+
+const realEstateValuationSchema = z
+  .object({
+    propertyId: z.uuid(),
+    valuedAt: realDate,
+    // Valeur du bien ENTIER : la quote-part est appliquée par le moteur, pas par la saisie.
+    value: finite.nonnegative(),
+    currency: z.string().trim().length(3),
+    method: z.enum(REAL_ESTATE_VALUATION_METHODS),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict();
+
+const realEstateCapitalEventSchema = z
+  .object({
+    propertyId: z.uuid(),
+    type: z.enum(REAL_ESTATE_CAPITAL_EVENT_TYPES),
+    eventDate: realDate,
+    // Toujours positif : la direction économique vient du type, jamais du signe.
+    amount: finite.nonnegative(),
+    currency: z.string().trim().length(3),
+    label: z.string().trim().max(160).nullable(),
+    transactionId: z.uuid().nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict();
+
+const realEstateOperatingTermsSchema = z
+  .object({
+    propertyId: z.uuid(),
+    effectiveFrom: realDate,
+    currency: z.string().trim().length(3),
+    annualGrossRent: nullableMoney,
+    vacancyRate: finite.min(0).max(1).nullable(),
+    annualOperatingCharges: nullableMoney,
+    annualPropertyTax: nullableMoney,
+    annualInsurance: nullableMoney,
+    annualMaintenance: nullableMoney,
+    annualManagementFees: nullableMoney,
+    managementFeeRate: finite.min(0).max(1).nullable(),
+    annualOtherCosts: nullableMoney,
+    effectiveIncomeTaxRate: finite.min(0).max(1).nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((terms, context) => {
+    // Les deux formes de frais de gestion s'excluent : ensemble, elles compteraient deux
+    // fois la même charge. La base le refuse aussi.
+    if (terms.annualManagementFees !== null && terms.managementFeeRate !== null) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Frais de gestion déclarés deux fois : un montant OU une part du loyer, jamais les deux",
+        path: ["managementFeeRate"],
+      });
+    }
+  });
+
+const realEstateFinancingLinkSchema = z
+  .object({
+    propertyId: z.uuid(),
+    liabilityId: z.uuid(),
+    // Une part nulle n'affecte rien : c'est l'absence de rattachement, pas un rattachement.
+    allocationShare: finite.gt(0).max(1),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict();
+
 export const mutationSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("save_debt_contract"), contract: debtContractSchema }),
   z.object({
@@ -407,4 +516,43 @@ export const mutationSchema = z.discriminatedUnion("action", [
       .nullable(),
     source: z.enum(["MANUAL", "IMPORT", "API"]),
   }),
+  // Les mutations immobilières sont STRICTES de bout en bout : un champ inattendu est
+  // refusé plutôt que silencieusement écarté. C'est ce qui garantit qu'une attribution de
+  // flux ne pourra jamais transporter un montant ou une catégorie.
+  z.object({ action: z.literal("save_real_estate_asset"), asset: realEstateAssetSchema }).strict(),
+  z.object({ action: z.literal("archive_real_estate_asset"), propertyId: z.uuid() }).strict(),
+  z
+    .object({
+      action: z.literal("record_real_estate_valuation"),
+      valuation: realEstateValuationSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("record_real_estate_capital_event"),
+      event: realEstateCapitalEventSchema,
+    })
+    .strict(),
+  z.object({ action: z.literal("delete_real_estate_capital_event"), eventId: z.uuid() }).strict(),
+  z
+    .object({
+      action: z.literal("set_real_estate_operating_terms"),
+      terms: realEstateOperatingTermsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("set_real_estate_financing_link"),
+      link: realEstateFinancingLinkSchema,
+    })
+    .strict(),
+  z.object({ action: z.literal("delete_real_estate_financing_link"), linkId: z.uuid() }).strict(),
+  z
+    .object({
+      action: z.literal("attribute_transaction_to_property"),
+      transactionId: z.uuid(),
+      // `null` détache le flux : c'est une valeur, jamais un oubli.
+      propertyId: z.uuid().nullable(),
+    })
+    .strict(),
 ]);

@@ -28,6 +28,7 @@ const canonicalMigrations = [
   "20260825063831",
   "20260825193427",
   "20260825193606",
+  "20260826080000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -143,6 +144,61 @@ const requiredColumns: Record<string, string[]> = {
     "ledger_coverage_start",
     "ledger_coverage_source",
   ],
+  properties: [
+    "id",
+    "property_usage",
+    "ownership_share",
+    "acquisition_date",
+    "disposal_date",
+    "archived",
+    "data_kind",
+    "confidence",
+  ],
+  real_estate_valuations: [
+    "id",
+    "property_id",
+    "valued_at",
+    "value",
+    "currency",
+    "valuation_method",
+    "data_kind",
+    "confidence",
+  ],
+  real_estate_capital_events: [
+    "id",
+    "property_id",
+    "event_type",
+    "event_date",
+    "amount",
+    "currency",
+    "transaction_id",
+    "data_kind",
+    "confidence",
+  ],
+  real_estate_operating_terms: [
+    "id",
+    "property_id",
+    "effective_from",
+    "currency",
+    "annual_gross_rent",
+    "vacancy_rate",
+    "annual_operating_charges",
+    "annual_property_tax",
+    "annual_insurance",
+    "annual_maintenance",
+    "annual_management_fees",
+    "management_fee_rate",
+    "annual_other_costs",
+    "effective_income_tax_rate",
+  ],
+  real_estate_financing_links: [
+    "id",
+    "property_id",
+    "liability_id",
+    "allocation_share",
+    "data_kind",
+    "confidence",
+  ],
 };
 
 const userOwnedTables = [
@@ -195,6 +251,10 @@ const userOwnedTables = [
   "net_worth_snapshot_items",
   "portfolio_events",
   "portfolio_envelope_policies",
+  "real_estate_valuations",
+  "real_estate_capital_events",
+  "real_estate_operating_terms",
+  "real_estate_financing_links",
 ] as const;
 
 /**
@@ -220,6 +280,17 @@ const requiredIndexes = [
   // mises à jour de comptes ou de lots désignés.
   "portfolio_events_account_owner_idx",
   "portfolio_events_matched_lot_covering_idx",
+  // Cibles composites des FK de propriété du domaine immobilier.
+  "properties_id_user_uidx",
+  "liabilities_id_user_uidx",
+  // Un bien n'a qu'un prix d'achat et qu'un prix de cession.
+  "real_estate_capital_events_acquisition_uk",
+  "real_estate_capital_events_disposal_uk",
+  // Index couvrants des FK immobilières.
+  "real_estate_financing_links_liability_idx",
+  "real_estate_financing_links_property_idx",
+  "real_estate_capital_events_transaction_idx",
+  "transactions_property_owner_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx"] as const;
 
@@ -265,6 +336,29 @@ const requiredConstraints = [
   "portfolio_envelope_policies_coverage_pair_ck",
   "portfolio_envelope_policies_account_fk",
   "portfolio_envelope_policies_account_uk",
+  "properties_usage_ck",
+  "properties_ownership_share_ck",
+  "properties_disposal_after_acquisition_ck",
+  "real_estate_valuations_property_fk",
+  "real_estate_valuations_value_ck",
+  "real_estate_valuations_method_ck",
+  "real_estate_valuations_data_kind_ck",
+  "real_estate_capital_events_property_fk",
+  "real_estate_capital_events_transaction_fk",
+  "real_estate_capital_events_amount_ck",
+  "real_estate_capital_events_type_ck",
+  "real_estate_capital_events_data_kind_ck",
+  "real_estate_operating_terms_property_fk",
+  "real_estate_operating_terms_effective_uk",
+  "real_estate_operating_terms_amounts_ck",
+  "real_estate_operating_terms_rates_ck",
+  "real_estate_operating_terms_management_exclusive_ck",
+  "real_estate_operating_terms_data_kind_ck",
+  "real_estate_financing_links_property_fk",
+  "real_estate_financing_links_liability_fk",
+  "real_estate_financing_links_pair_uk",
+  "real_estate_financing_links_share_ck",
+  "transactions_property_fk",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
@@ -292,6 +386,16 @@ const requiredRpcs: Record<string, string> = {
   lfo_record_portfolio_event: "p_user_id uuid, p_payload jsonb",
   lfo_delete_portfolio_event: "p_user_id uuid, p_event_id uuid",
   lfo_set_portfolio_envelope_policy: "p_user_id uuid, p_payload jsonb",
+  lfo_save_real_estate_asset: "p_user_id uuid, p_payload jsonb",
+  lfo_archive_real_estate_asset: "p_user_id uuid, p_property_id uuid",
+  lfo_record_real_estate_valuation: "p_user_id uuid, p_payload jsonb",
+  lfo_record_real_estate_capital_event: "p_user_id uuid, p_payload jsonb",
+  lfo_delete_real_estate_capital_event: "p_user_id uuid, p_event_id uuid",
+  lfo_set_real_estate_operating_terms: "p_user_id uuid, p_payload jsonb",
+  lfo_set_real_estate_financing_link: "p_user_id uuid, p_payload jsonb",
+  lfo_delete_real_estate_financing_link: "p_user_id uuid, p_link_id uuid",
+  lfo_attribute_transaction_to_property:
+    "p_user_id uuid, p_transaction_id uuid, p_property_id uuid",
 };
 
 const storagePolicies = [

@@ -33,6 +33,15 @@ export function realValue(nominalValue: number, annualInflation: number, years: 
   return nominalValue / Math.pow(1 + annualInflation, years);
 }
 
+/**
+ * @deprecated Second moteur d'amortissement, sans consommateur applicatif depuis Real
+ * Estate V2. Le SEUL moteur d'amortissement de LFO est `src/lib/engine/debt.ts` : il porte
+ * l'assurance, les frais, la périodicité, le profil de remboursement, les paliers datés,
+ * les remboursements anticipés et l'échéancier bancaire réel. Cette fonction n'en connaît
+ * aucun. Ne l'utiliser pour aucun nouveau calcul ; un prêt hypothétique passe par
+ * `syntheticLoan` de `real-estate-scenarios.ts`, puis par le Debt Engine. Conservée le
+ * temps de vérifier qu'aucun consommateur externe n'en dépend.
+ */
 export function amortizeLoan(
   principal: number,
   annualRate: number,

@@ -21,6 +21,7 @@ import {
   assetsExplanation,
   formatEur,
   formatNative,
+  formatNativeOptional,
   inputNumber,
   netWorthExplanation,
 } from "@/components/pages/shared";
@@ -157,7 +158,7 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
                         ? formatEur(0)
                         : line.currency === state.reportingCurrency
                           ? formatEur(line.reportingValue)
-                          : `${formatNative(line.nativeValue, line.currency)} → ${formatEur(line.reportingValue)}`,
+                          : `${formatNativeOptional(line.nativeValue, line.currency)} → ${formatEur(line.reportingValue)}`,
                     kind: line.provenance.kind,
                     date: line.valuationDate,
                   })),

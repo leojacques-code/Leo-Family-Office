@@ -42,13 +42,15 @@ supabase db push
 ```
 
 Ordre attendu : celui du tri alphabétique de `supabase/migrations/`, soit à ce jour les
-17 fichiers listés dans le README. La liste canonique vit dans le dépôt et dans
+18 fichiers listés dans le README. La liste canonique vit dans le dépôt et dans
 `canonicalMigrations` du verifier ; ne pas la dupliquer ici pour éviter une troisième
 vérité qui se périme.
 
 Ne jamais modifier une migration déjà appliquée. Toute évolution future reçoit un nouveau fichier. Ne jamais exécuter `supabase db reset` sur une base distante.
 
 La migration 005 ajoute des RPC transactionnelles réservées au rôle serveur. Elles regroupent les écritures, sans déplacer les formules financières en SQL.
+
+La migration `20260826080000_real_estate_v2` installe Real Estate V2. Elle complète `properties` (usage, quote-part détenue, dates d'acquisition et de cession, `archived`, provenance), relâche le `NOT NULL` des colonnes héritées `property_type` et `status` plutôt que de les remplir d'une valeur fabriquée, crée quatre tables de faits et neuf RPC (`lfo_save_real_estate_asset`, `lfo_archive_real_estate_asset`, `lfo_record_real_estate_valuation`, `lfo_record_real_estate_capital_event`, `lfo_delete_real_estate_capital_event`, `lfo_set_real_estate_operating_terms`, `lfo_set_real_estate_financing_link`, `lfo_delete_real_estate_financing_link`, `lfo_attribute_transaction_to_property`), ajoute la colonne d'attribution `transactions.property_id` et les index uniques `(id, user_id)` sur `properties` et `liabilities` qui servent de cibles aux clés étrangères composites. Elle ne crée aucune seconde vérité : le passif immobilier reste porté par `liabilities`, les flux réels par `transactions`. **Elle n'est pas encore appliquée en production** au moment de son commit.
 
 La migration `20260825193427_portfolio_data_foundation` ajoute le ledger portefeuille et ses trois RPC (`lfo_record_portfolio_event`, `lfo_delete_portfolio_event`, `lfo_set_portfolio_envelope_policy`). Elle crée aussi trois index uniques `(id, user_id)` sur `financial_accounts`, `securities` et `transactions` : ce sont les cibles des clés étrangères composites qui empêchent un événement de référencer l'objet d'un autre utilisateur. La migration `20260825193606_portfolio_fk_covering_indexes` couvre le côté référençant des deux clés étrangères signalées par l'advisor Postgres. Les deux sont appliquées en production et vérifiées par assertions SQL transactionnelles.
 
@@ -88,7 +90,7 @@ npm run db:verify
 supabase db advisors
 ```
 
-`db:verify` ouvre une transaction PostgreSQL `READ ONLY` via `SUPABASE_DB_URL`. Il contrôle les 49 tables et colonnes structurantes, contraintes, 15 RPC et leurs permissions, RLS, policies `owner_all`, bucket et policies Storage, ainsi que les versions de migration.
+`db:verify` ouvre une transaction PostgreSQL `READ ONLY` via `SUPABASE_DB_URL`. Il contrôle les 53 tables et colonnes structurantes, contraintes, 24 RPC et leurs permissions, RLS, policies `owner_all`, bucket et policies Storage, ainsi que les versions de migration.
 
 Le contrôle des migrations est symétrique : une version attendue absente échoue, **et** une version appliquée hors du dépôt échoue également. Une base en avance sur le dépôt signifie que `supabase/migrations/` ne reproduit plus la base, donc que le code a cessé d'être la source de vérité du schéma. Les autres inventaires restent des contrôles d'inclusion : une base peut légitimement porter des objets d'infrastructure inconnus du code applicatif.
 
