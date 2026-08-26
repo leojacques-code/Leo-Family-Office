@@ -98,7 +98,7 @@ doit pas effacer l'information certaine des autres comptes.
 
 Supabase PostgreSQL est la persistance unique. PostgreSQL persiste, TypeScript calcule :
 aucune formule financière en SQL. Les écritures composées passent par les RPC `lfo_*`,
-réservées à `service_role`, qui persistent des résultats déjà calculés.
+réservées à `service_role`, qui persistent des faits et hypothèses atomiquement.
 
 - migrations additives uniquement, jamais de modification rétroactive d'un fichier
   appliqué ;
@@ -112,18 +112,21 @@ réservées à `service_role`, qui persistent des résultats déjà calculés.
 
 Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.md`, elle
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
-`supabase_migrations.schema_migrations`. La divergence des deux index de
-`net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026. Production alignée sur
-21 versions : Portfolio Data Foundation et ses index couvrant les clés étrangères, Real
-Estate V2 et les siens, puis Business Equity V2 et sa vérité datée. Chaque paire suit le
-même schéma, une migration de fond puis une migration d'index révélée par les advisors, et
-chacune a été appliquée en production puis contrôlée par assertions SQL transactionnelles,
-advisors Supabase et test d'isolation sous le rôle `authenticated` réel.
+`supabase_migrations.schema_migrations`.
 
-Le dépôt porte deux versions de plus, Business Equity V2.1 et ses index, vertes au gate
-local et non encore appliquées en production : `npm run db:verify` distant échouera tant
-que le push n'aura pas eu lieu. Ce n'est pas une divergence à documenter au registre — le
-SQL du dépôt fait autorité — mais une application en attente.
+Production alignée sur **24 migrations** au 26 août 2026. Les dernières versions sont :
+
+- `20260826194551_business_equity_v2_1` ;
+- `20260826194605_business_equity_v2_1_indexes` ;
+- `20260826194644_business_equity_v2_1_blocking_invariants`.
+
+Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
+smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
+permissions RPC, RLS/policies et advisors Supabase. Les données Business existantes ont été
+préservées ; les anciennes valorisations V2 qui stockaient un résultat sous une méthode
+dérivée ont été requalifiées en `USER_ESTIMATE`, sans inventer de valeur. Le seul warning
+sécurité Supabase restant est le warning Auth historique de protection des mots de passe
+compromis désactivée ; aucun nouveau finding Business n'a été introduit.
 
 ## 6. Tests et gates
 
@@ -176,9 +179,14 @@ des hypothèses déclarées — un multiple, une base financière, des retraitem
 fourchette et valeur attribuable sont produites à la lecture par `business-valuation.ts`, et
 une contrainte de base interdit de stocker le résultat d'une méthode dérivée. EV ≠ EQUITY
 VALUE : une Enterprise Value connue sans dette brute ni trésorerie datées ne produit aucune
-Equity Value. DETTE CORPORATE ≠ DETTE PERSONNELLE : la dette d'une société détenue réduit son
-Equity Value et n'entre jamais au passif personnel. Une filiale détenue via une holding entre
-au patrimoine par la holding et par elle seule.
+Equity Value. Les autres éléments du bridge EV → Equity ne valent zéro que si leur complétude
+est explicitement déclarée. DETTE CORPORATE ≠ DETTE PERSONNELLE : la dette d'une société
+détenue réduit son Equity Value et n'entre jamais au passif personnel. Une filiale détenue
+via une holding entre au patrimoine par la holding et par elle seule.
+
+Les mutations qui modifient la quote-part (acquisition, cession, rachat, tour de table)
+écrivent l'événement et la détention résultante atomiquement ; elles ne demandent jamais à
+l'utilisateur de maintenir deux vérités indépendantes.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger
@@ -202,7 +210,7 @@ manque.
 
 # This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing du code. Heed deprecation notices.
 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
