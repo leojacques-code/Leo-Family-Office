@@ -1,6 +1,19 @@
 import { z } from "zod";
 
-import { BUSINESS_CAPITAL_EVENT_TYPES, BUSINESS_TYPES, BUSINESS_VALUATION_METHODS } from "@/lib/engine/business-equity";
+import {
+  BUSINESS_AMOUNT_SCOPES,
+  BUSINESS_BRIDGE_ITEM_CATEGORIES,
+  BUSINESS_CAPITAL_EVENT_TYPES,
+  BUSINESS_CAPITAL_HISTORY_SOURCES,
+  BUSINESS_DCF_TERMINAL_METHODS,
+  BUSINESS_DISCOUNT_CONVENTIONS,
+  BUSINESS_EBITDA_ADJUSTMENT_CATEGORIES,
+  BUSINESS_METRIC_BASES,
+  BUSINESS_PERIOD_KINDS,
+  BUSINESS_TYPES,
+  BUSINESS_VALUATION_METHODS,
+  DERIVED_VALUATION_METHODS,
+} from "@/lib/engine/business-equity";
 
 import { AS_OF_DATE } from "@/lib/data/shared";
 import {
@@ -384,70 +397,418 @@ const realEstateFinancingLinkSchema = z
   .strict();
 
 
-/** Business Equity V2 — null means unknown, never zero. */
-const businessSchema = z.object({
-  businessId: z.uuid().nullable(),
-  name: z.string().trim().min(1).max(160),
-  legalForm: z.string().trim().max(80).nullable(),
-  type: z.enum(BUSINESS_TYPES).nullable(),
-  functionalCurrency: z.string().trim().length(3).nullable(),
-  notes: z.string().trim().max(1000).nullable(),
-}).strict();
+/**
+ * Business Equity V2.1 — un champ vide signifie INCONNU, jamais zéro.
+ *
+ * Deux règles de forme y sont vérifiées avant toute écriture, parce qu'elles portent des
+ * invariants économiques et non des contraintes de saisie :
+ *   — une base de valorisation DÉRIVÉE ne transporte jamais son résultat ;
+ *   — une date de fait n'est jamais postérieure à la date d'arrêté du dossier. Un fait
+ *     futur n'est pas un fait.
+ */
+const businessDate = realDate.refine(
+  (value) => value <= AS_OF_DATE,
+  `Date postérieure à l’arrêté du ${AS_OF_DATE} : un fait futur n’est pas un fait`,
+);
+const ownershipRate = finite.min(0).max(1);
+const shareCount = finite.positive().nullable();
 
-const businessOwnershipSchema = z.object({
-  businessId: z.uuid(),
-  effectiveDate: realDate,
-  legalRate: finite.gt(0).max(1),
-  economicRate: finite.gt(0).max(1).nullable(),
-  votingRate: finite.min(0).max(1).nullable(),
-  fullyDilutedRate: finite.gt(0).max(1).nullable(),
-  notes: z.string().trim().max(1000).nullable(),
-}).strict();
+const businessSchema = z
+  .object({
+    businessId: z.uuid().nullable(),
+    name: z.string().trim().min(1).max(160),
+    legalForm: z.string().trim().max(80).nullable(),
+    type: z.enum(BUSINESS_TYPES).nullable(),
+    functionalCurrency: z.string().trim().length(3).nullable(),
+    sector: z.string().trim().max(120).nullable(),
+    country: z.string().trim().length(2).nullable(),
+    foundedOn: businessDate.nullable(),
+    capitalHistoryStart: businessDate.nullable(),
+    capitalHistorySource: z.enum(BUSINESS_CAPITAL_HISTORY_SOURCES),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.capitalHistorySource === "DECLARED_COMPLETE" && value.capitalHistoryStart === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Un historique déclaré complet exige la date à partir de laquelle il l’est",
+        path: ["capitalHistoryStart"],
+      });
+    }
+  });
 
-const businessFinancialSchema = z.object({
-  businessId: z.uuid(), periodEnd: realDate, currency: z.string().trim().length(3).nullable(),
-  revenue: finite.nullable(), grossMargin: finite.nullable(), ebitda: finite.nullable(),
-  ebit: finite.nullable(), netIncome: finite.nullable(), cash: finite.nonnegative().nullable(),
-  grossDebt: finite.nonnegative().nullable(), workingCapital: finite.nullable(),
-  capex: finite.nonnegative().nullable(), freeCashFlow: finite.nullable(),
-  notes: z.string().trim().max(1000).nullable(),
-}).strict();
+const businessOwnershipSchema = z
+  .object({
+    businessId: z.uuid(),
+    effectiveDate: businessDate,
+    legalRate: ownershipRate,
+    economicRate: ownershipRate.nullable(),
+    votingRate: ownershipRate.nullable(),
+    fullyDilutedRate: ownershipRate.nullable(),
+    sharesHeld: finite.nonnegative().nullable(),
+    sharesOutstanding: shareCount,
+    fullyDilutedShares: shareCount,
+    shareClass: z.string().trim().max(80).nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.sharesHeld !== null &&
+      value.sharesOutstanding !== null &&
+      value.sharesHeld > value.sharesOutstanding
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Les titres détenus ne peuvent pas dépasser les titres en circulation",
+        path: ["sharesHeld"],
+      });
+    }
+  });
 
-const businessValuationSchema = z.object({
-  businessId: z.uuid(), valuationDate: realDate, currency: z.string().trim().length(3).nullable(),
-  method: z.enum(BUSINESS_VALUATION_METHODS), enterpriseValue: finite.nullable(),
-  equityValue: finite.nullable(), valuationMultiple: finite.nullable(),
-  notes: z.string().trim().max(1000).nullable(),
-}).strict().superRefine((value, context) => {
-  if (value.enterpriseValue === null && value.equityValue === null) {
-    context.addIssue({ code: "custom", message: "Enterprise Value ou Equity Value requise", path: ["equityValue"] });
-  }
-});
+const businessFinancialSchema = z
+  .object({
+    businessId: z.uuid(),
+    periodEnd: businessDate,
+    periodStart: businessDate.nullable(),
+    periodKind: z.enum(BUSINESS_PERIOD_KINDS),
+    periodLabel: z.string().trim().max(40).nullable(),
+    currency: z.string().trim().length(3).nullable(),
+    revenue: finite.nullable(),
+    grossProfit: finite.nullable(),
+    ebitda: finite.nullable(),
+    ebit: finite.nullable(),
+    netIncome: finite.nullable(),
+    cash: finite.nonnegative().nullable(),
+    grossDebt: finite.nonnegative().nullable(),
+    workingCapital: finite.nullable(),
+    capex: finite.nonnegative().nullable(),
+    depreciationAmortisation: finite.nonnegative().nullable(),
+    interestExpense: finite.nullable(),
+    taxExpense: finite.nullable(),
+    freeCashFlow: finite.nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.periodStart !== null && value.periodStart >= value.periodEnd) {
+      context.addIssue({
+        code: "custom",
+        message: "Le début de période doit précéder sa clôture",
+        path: ["periodStart"],
+      });
+    }
+  });
 
-const businessCapitalEventSchema = z.object({
-  businessId: z.uuid(), type: z.enum(BUSINESS_CAPITAL_EVENT_TYPES), eventDate: realDate,
-  amount: finite.nonnegative(), currency: z.string().trim().length(3),
-  ownershipDelta: finite.min(-1).max(1).nullable(), transactionId: z.uuid().nullable(),
-  notes: z.string().trim().max(1000).nullable(),
-}).strict();
+const businessValuationSchema = z
+  .object({
+    businessId: z.uuid(),
+    valuationDate: businessDate,
+    currency: z.string().trim().length(3).nullable(),
+    method: z.enum(BUSINESS_VALUATION_METHODS),
+    enterpriseValue: finite.nullable(),
+    equityValue: finite.nullable(),
+    multiple: finite.positive().nullable(),
+    multipleLow: finite.positive().nullable(),
+    multipleHigh: finite.positive().nullable(),
+    metricBasis: z.enum(BUSINESS_METRIC_BASES).nullable(),
+    metricPeriodEnd: businessDate.nullable(),
+    preMoneyEquityValue: finite.nonnegative().nullable(),
+    primaryNewMoney: finite.nonnegative().nullable(),
+    secondaryAmount: finite.nonnegative().nullable(),
+    investorContribution: finite.nonnegative().nullable(),
+    preferredRightsKnown: z.boolean().nullable(),
+    source: z.string().trim().max(200).nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const derived = (DERIVED_VALUATION_METHODS as readonly string[]).includes(value.method);
+    if (derived && (value.enterpriseValue !== null || value.equityValue !== null)) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Une méthode dérivée ne porte jamais son résultat : EV et Equity Value sont produites par le moteur",
+        path: ["enterpriseValue"],
+      });
+    }
+    if (!derived && value.enterpriseValue === null && value.equityValue === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Une valorisation observée exige une Enterprise Value ou une Equity Value",
+        path: ["equityValue"],
+      });
+    }
+    if (
+      (value.method === "EBITDA_MULTIPLE" || value.method === "REVENUE_MULTIPLE") &&
+      value.multiple === null
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Un multiple central est requis pour cette méthode",
+        path: ["multiple"],
+      });
+    }
+    if (value.method === "FUNDING_ROUND" && (value.preMoneyEquityValue === null || value.primaryNewMoney === null)) {
+      context.addIssue({
+        code: "custom",
+        message: "Un tour de table exige un pre-money et un montant d’argent frais primaire",
+        path: ["preMoneyEquityValue"],
+      });
+    }
+    if (value.multipleLow !== null && value.multiple !== null && value.multipleLow > value.multiple) {
+      context.addIssue({
+        code: "custom",
+        message: "Le multiple bas ne peut pas dépasser le multiple central",
+        path: ["multipleLow"],
+      });
+    }
+    if (value.multipleHigh !== null && value.multiple !== null && value.multipleHigh < value.multiple) {
+      context.addIssue({
+        code: "custom",
+        message: "Le multiple haut ne peut pas être inférieur au multiple central",
+        path: ["multipleHigh"],
+      });
+    }
+    if ((value.multipleLow !== null || value.multipleHigh !== null) && value.multiple === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Une fourchette de multiples suppose un multiple central",
+        path: ["multiple"],
+      });
+    }
+  });
 
-const businessHoldingSchema = z.object({
-  parentBusinessId: z.uuid(), childBusinessId: z.uuid(), effectiveDate: realDate,
-  ownershipRate: finite.gt(0).max(1), notes: z.string().trim().max(1000).nullable(),
-}).strict().superRefine((value, context) => {
-  if (value.parentBusinessId === value.childBusinessId) {
-    context.addIssue({ code: "custom", message: "Une société ne peut pas se détenir elle-même", path: ["childBusinessId"] });
-  }
-});
+const businessEbitdaAdjustmentSchema = z
+  .object({
+    businessId: z.uuid(),
+    periodEnd: businessDate,
+    category: z.enum(BUSINESS_EBITDA_ADJUSTMENT_CATEGORIES),
+    label: z.string().trim().min(1).max(160),
+    amount: finite,
+    currency: z.string().trim().length(3),
+    recurring: z.boolean(),
+    source: z.string().trim().max(200).nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict();
+
+const businessBridgeItemSchema = z
+  .object({
+    businessId: z.uuid(),
+    effectiveDate: businessDate,
+    category: z.enum(BUSINESS_BRIDGE_ITEM_CATEGORIES),
+    label: z.string().trim().min(1).max(160),
+    amount: finite,
+    currency: z.string().trim().length(3),
+    source: z.string().trim().max(200).nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict();
+
+const businessDcfSchema = z
+  .object({
+    businessId: z.uuid(),
+    valuationDate: businessDate,
+    currency: z.string().trim().length(3),
+    wacc: finite.gt(0).lt(1),
+    taxRate: finite.min(0).lt(1),
+    terminalMethod: z.enum(BUSINESS_DCF_TERMINAL_METHODS),
+    terminalGrowth: finite.nullable(),
+    terminalExitMultiple: finite.positive().nullable(),
+    terminalExitMetric: z.enum(["EBITDA", "EBIT"]).nullable(),
+    discountConvention: z.enum(BUSINESS_DISCOUNT_CONVENTIONS),
+    periods: z
+      .array(
+        z
+          .object({
+            yearIndex: z.number().int().min(1).max(30),
+            revenue: finite.nullable(),
+            ebitda: finite.nullable(),
+            ebit: finite.nullable(),
+            depreciationAmortisation: finite.nonnegative().nullable(),
+            capex: finite.nonnegative().nullable(),
+            workingCapitalChange: finite.nullable(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(30),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.terminalMethod === "PERPETUAL_GROWTH") {
+      if (value.terminalGrowth === null) {
+        context.addIssue({
+          code: "custom",
+          message: "La croissance perpétuelle doit être déclarée",
+          path: ["terminalGrowth"],
+        });
+      } else if (value.terminalGrowth >= value.wacc) {
+        context.addIssue({
+          code: "custom",
+          message: "La croissance perpétuelle doit rester inférieure au WACC",
+          path: ["terminalGrowth"],
+        });
+      }
+    }
+    if (
+      value.terminalMethod === "EXIT_MULTIPLE" &&
+      (value.terminalExitMultiple === null || value.terminalExitMetric === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Un multiple de sortie exige son agrégat de référence",
+        path: ["terminalExitMultiple"],
+      });
+    }
+    const years = value.periods.map((period) => period.yearIndex);
+    if (new Set(years).size !== years.length) {
+      context.addIssue({ code: "custom", message: "Années dupliquées", path: ["periods"] });
+    }
+  });
+
+const businessCapitalEventSchema = z
+  .object({
+    businessId: z.uuid(),
+    type: z.enum(BUSINESS_CAPITAL_EVENT_TYPES),
+    eventDate: businessDate,
+    amount: finite.nonnegative(),
+    amountScope: z.enum(BUSINESS_AMOUNT_SCOPES),
+    fees: finite.nonnegative().nullable(),
+    currency: z.string().trim().length(3),
+    ownershipDelta: finite.min(-1).max(1).nullable(),
+    ownershipRateAfter: ownershipRate.nullable(),
+    sharesDelta: finite.nullable(),
+    pricePerShare: finite.positive().nullable(),
+    label: z.string().trim().max(160).nullable(),
+    transactionId: z.uuid().nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const distribution = ["DIVIDEND", "DISTRIBUTION", "CAPITAL_RETURN"].includes(value.type);
+    if (value.amountScope === "COMPANY_TOTAL" && !distribution) {
+      context.addIssue({
+        code: "custom",
+        message: "Un montant au niveau société ne se conçoit que pour une distribution",
+        path: ["amountScope"],
+      });
+    }
+  });
+
+const businessQuickStartSchema = z
+  .object({
+    name: z.string().trim().min(1).max(160),
+    legalForm: z.string().trim().max(80).nullable(),
+    type: z.enum(BUSINESS_TYPES).nullable(),
+    currency: z.string().trim().length(3),
+    sector: z.string().trim().max(120).nullable(),
+    country: z.string().trim().length(2).nullable(),
+    periodEnd: businessDate,
+    periodKind: z.enum(BUSINESS_PERIOD_KINDS),
+    periodLabel: z.string().trim().max(40).nullable(),
+    revenue: finite.nullable(),
+    ebitda: finite.nullable(),
+    cash: finite.nonnegative().nullable(),
+    grossDebt: finite.nonnegative().nullable(),
+    legalRate: finite.gt(0).max(1),
+    economicRate: finite.gt(0).max(1),
+    valuationDate: businessDate,
+    method: z.enum(["EBITDA_MULTIPLE", "REVENUE_MULTIPLE"]),
+    multiple: finite.positive(),
+    multipleLow: finite.positive().nullable(),
+    multipleHigh: finite.positive().nullable(),
+    capitalHistoryStart: businessDate.nullable(),
+    capitalHistorySource: z.enum(BUSINESS_CAPITAL_HISTORY_SOURCES),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const metric = value.method === "REVENUE_MULTIPLE" ? value.revenue : value.ebitda;
+    if (metric === null) {
+      context.addIssue({
+        code: "custom",
+        message:
+          value.method === "REVENUE_MULTIPLE"
+            ? "Un multiple de chiffre d’affaires exige un chiffre d’affaires"
+            : "Un multiple d’EBITDA exige un EBITDA",
+        path: [value.method === "REVENUE_MULTIPLE" ? "revenue" : "ebitda"],
+      });
+    }
+    if (value.multipleLow !== null && value.multipleLow > value.multiple) {
+      context.addIssue({ code: "custom", message: "Multiple bas supérieur au central", path: ["multipleLow"] });
+    }
+    if (value.multipleHigh !== null && value.multipleHigh < value.multiple) {
+      context.addIssue({ code: "custom", message: "Multiple haut inférieur au central", path: ["multipleHigh"] });
+    }
+    if (value.capitalHistorySource === "DECLARED_COMPLETE" && value.capitalHistoryStart === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Un historique déclaré complet exige sa date de départ",
+        path: ["capitalHistoryStart"],
+      });
+    }
+  });
+
+const businessHoldingSchema = z
+  .object({
+    parentBusinessId: z.uuid(),
+    childBusinessId: z.uuid(),
+    effectiveDate: businessDate,
+    ownershipRate: finite.gt(0).max(1),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.parentBusinessId === value.childBusinessId) {
+      context.addIssue({
+        code: "custom",
+        message: "Une société ne peut pas se détenir elle-même",
+        path: ["childBusinessId"],
+      });
+    }
+  });
+
+const businessFundingRoundSchema = z
+  .object({
+    businessId: z.uuid(),
+    roundDate: businessDate,
+    currency: z.string().trim().length(3),
+    preMoneyEquityValue: finite.positive(),
+    primaryNewMoney: finite.nonnegative(),
+    secondaryAmount: finite.nonnegative().nullable(),
+    investorContribution: finite.nonnegative(),
+    ownershipBefore: ownershipRate,
+    preferredRightsKnown: z.boolean(),
+    source: z.string().trim().max(200).nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+  })
+  .strict();
 
 export const mutationSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("create_business_quick_start"), quickStart: businessQuickStartSchema }).strict(),
   z.object({ action: z.literal("save_business"), business: businessSchema }).strict(),
   z.object({ action: z.literal("archive_business"), businessId: z.uuid() }).strict(),
   z.object({ action: z.literal("record_business_ownership"), ownership: businessOwnershipSchema }).strict(),
+  z.object({ action: z.literal("delete_business_ownership"), ownershipId: z.uuid() }).strict(),
   z.object({ action: z.literal("record_business_financials"), financials: businessFinancialSchema }).strict(),
+  z.object({ action: z.literal("delete_business_financials"), financialsId: z.uuid() }).strict(),
   z.object({ action: z.literal("record_business_valuation"), valuation: businessValuationSchema }).strict(),
+  z.object({ action: z.literal("delete_business_valuation"), valuationId: z.uuid() }).strict(),
+  z.object({ action: z.literal("record_business_ebitda_adjustment"), adjustment: businessEbitdaAdjustmentSchema }).strict(),
+  z.object({ action: z.literal("delete_business_ebitda_adjustment"), adjustmentId: z.uuid() }).strict(),
+  z.object({ action: z.literal("record_business_bridge_item"), item: businessBridgeItemSchema }).strict(),
+  z.object({ action: z.literal("delete_business_bridge_item"), itemId: z.uuid() }).strict(),
+  z.object({ action: z.literal("set_business_dcf"), dcf: businessDcfSchema }).strict(),
+  z.object({ action: z.literal("delete_business_dcf"), dcfId: z.uuid() }).strict(),
   z.object({ action: z.literal("record_business_capital_event"), event: businessCapitalEventSchema }).strict(),
+  z.object({ action: z.literal("delete_business_capital_event"), eventId: z.uuid() }).strict(),
   z.object({ action: z.literal("set_business_holding"), holding: businessHoldingSchema }).strict(),
+  z.object({ action: z.literal("delete_business_holding"), holdingId: z.uuid() }).strict(),
+  z.object({ action: z.literal("apply_business_funding_round"), round: businessFundingRoundSchema }).strict(),
   z.object({ action: z.literal("save_debt_contract"), contract: debtContractSchema }),
   z.object({
     action: z.literal("record_debt_balance"),

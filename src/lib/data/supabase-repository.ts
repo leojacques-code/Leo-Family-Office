@@ -18,18 +18,31 @@ import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
 import { debtCashOut, monthBounds } from "@/lib/engine/debt";
 import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
 import {
+  BUSINESS_AMOUNT_SCOPES,
+  BUSINESS_BRIDGE_ITEM_CATEGORIES,
   BUSINESS_CAPITAL_EVENT_TYPES,
+  BUSINESS_CAPITAL_HISTORY_SOURCES,
+  BUSINESS_DCF_TERMINAL_METHODS,
+  BUSINESS_DISCOUNT_CONVENTIONS,
+  BUSINESS_EBITDA_ADJUSTMENT_CATEGORIES,
+  BUSINESS_METRIC_BASES,
+  BUSINESS_PERIOD_KINDS,
   BUSINESS_TYPES,
   BUSINESS_VALUATION_METHODS,
   buildBusinessEquityPortfolio,
   businessEquityBalanceSheetContributions,
+  type BusinessBridgeItem,
   type BusinessCapitalEvent,
+  type BusinessDcfAssumptions,
+  type BusinessDcfPeriod,
+  type BusinessEbitdaAdjustment,
   type BusinessEntity,
   type BusinessFinancialSnapshot,
   type BusinessHoldingLink,
   type BusinessOwnership,
-  type BusinessValuation,
+  type BusinessValuationBasis,
 } from "@/lib/engine/business-equity";
+import { fundingRoundOutcome } from "@/lib/engine/business-ownership";
 import { buildPortfolioLedger } from "@/lib/engine/portfolio";
 import { buildPortfolioAnalytics } from "@/lib/engine/portfolio-analytics";
 import {
@@ -290,6 +303,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       businessValuationRows,
       businessCapitalEventRows,
       businessHoldingRows,
+      businessEbitdaAdjustmentRows,
+      businessBridgeItemRows,
+      businessDcfRows,
+      businessDcfPeriodRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -333,6 +350,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       fetchAllPages("business_valuations", "valuation_date"),
       fetchAllPages("business_capital_events", "event_date"),
       fetchAllPages("business_holdings", "effective_date"),
+      fetchAllPages("business_ebitda_adjustments", "period_end"),
+      fetchAllPages("business_bridge_items", "effective_date"),
+      fetchAllPages("business_dcf_assumptions", "valuation_date"),
+      mine("business_dcf_periods"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -954,30 +975,62 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     const businesses: BusinessEntity[] = businessRows
       .filter((row) => row.archived !== true)
       .map((row) => ({
-        id: str(row.id), name: str(row.name), legalForm: row.legal_form ? str(row.legal_form) : null,
-        type: row.business_type ? enumValue(str(row.business_type), BUSINESS_TYPES, `businesses[id=${str(row.id)}].business_type`) : null,
+        id: str(row.id),
+        name: str(row.name),
+        legalForm: row.legal_form ? str(row.legal_form) : null,
+        type: row.business_type
+          ? enumValue(str(row.business_type), BUSINESS_TYPES, `businesses[id=${str(row.id)}].business_type`)
+          : null,
         functionalCurrency: row.functional_currency ? str(row.functional_currency).toUpperCase() : null,
-        archived: bool(row.archived), notes: row.notes ? str(row.notes) : null, provenance: provenance(row),
+        sector: row.sector ? str(row.sector) : null,
+        country: row.country ? str(row.country).toUpperCase() : null,
+        foundedOn: row.founded_on ? str(row.founded_on) : null,
+        capitalHistoryStart: row.capital_history_start ? str(row.capital_history_start) : null,
+        capitalHistorySource: enumValue(
+          str(row.capital_history_source || "UNKNOWN"),
+          BUSINESS_CAPITAL_HISTORY_SOURCES,
+          `businesses[id=${str(row.id)}].capital_history_source`,
+        ),
+        archived: bool(row.archived),
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
     const businessIds = new Set(businesses.map((business) => business.id));
     const businessOwnership: BusinessOwnership[] = businessOwnershipRows
       .filter((row) => businessIds.has(str(row.business_id)))
       .map((row) => ({
-        id: str(row.id), businessId: str(row.business_id), effectiveDate: str(row.effective_date),
+        id: str(row.id),
+        businessId: str(row.business_id),
+        effectiveDate: str(row.effective_date),
         legalRate: finiteNumber(row.ownership_rate, `business_ownership[id=${str(row.id)}].ownership_rate`),
         economicRate: nullableFiniteNumber(row.economic_rate, `business_ownership[id=${str(row.id)}].economic_rate`),
         votingRate: nullableFiniteNumber(row.voting_rate, `business_ownership[id=${str(row.id)}].voting_rate`),
         fullyDilutedRate: nullableFiniteNumber(row.fully_diluted_rate, `business_ownership[id=${str(row.id)}].fully_diluted_rate`),
-        notes: row.notes ? str(row.notes) : null, provenance: provenance(row),
+        sharesHeld: nullableFiniteNumber(row.shares_held, `business_ownership[id=${str(row.id)}].shares_held`),
+        sharesOutstanding: nullableFiniteNumber(row.shares_outstanding, `business_ownership[id=${str(row.id)}].shares_outstanding`),
+        fullyDilutedShares: nullableFiniteNumber(row.fully_diluted_shares, `business_ownership[id=${str(row.id)}].fully_diluted_shares`),
+        shareClass: row.share_class ? str(row.share_class) : null,
+        originEventId: row.origin_event_id ? str(row.origin_event_id) : null,
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
       }));
     const businessFinancials: BusinessFinancialSnapshot[] = businessFinancialRows
       .filter((row) => businessIds.has(str(row.business_id)))
       .map((row) => ({
-        id: str(row.id), businessId: str(row.business_id), periodEnd: str(row.period_end),
+        id: str(row.id),
+        businessId: str(row.business_id),
+        periodEnd: str(row.period_end),
+        periodStart: row.period_start ? str(row.period_start) : null,
+        periodKind: enumValue(
+          str(row.period_kind || "ANNUAL"),
+          BUSINESS_PERIOD_KINDS,
+          `business_financials[id=${str(row.id)}].period_kind`,
+        ),
+        periodLabel: row.period_label ? str(row.period_label) : null,
         currency: row.currency ? str(row.currency).toUpperCase() : null,
         revenue: nullableFiniteNumber(row.revenue, `business_financials[id=${str(row.id)}].revenue`),
-        grossMargin: nullableFiniteNumber(row.gross_margin, `business_financials[id=${str(row.id)}].gross_margin`),
+        grossProfit: nullableFiniteNumber(row.gross_profit, `business_financials[id=${str(row.id)}].gross_profit`),
         ebitda: nullableFiniteNumber(row.ebitda, `business_financials[id=${str(row.id)}].ebitda`),
         ebit: nullableFiniteNumber(row.ebit, `business_financials[id=${str(row.id)}].ebit`),
         netIncome: nullableFiniteNumber(row.net_income, `business_financials[id=${str(row.id)}].net_income`),
@@ -985,37 +1038,171 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         grossDebt: nullableFiniteNumber(row.debt, `business_financials[id=${str(row.id)}].debt`),
         workingCapital: nullableFiniteNumber(row.working_capital, `business_financials[id=${str(row.id)}].working_capital`),
         capex: nullableFiniteNumber(row.capex, `business_financials[id=${str(row.id)}].capex`),
+        depreciationAmortisation: nullableFiniteNumber(
+          row.depreciation_amortisation,
+          `business_financials[id=${str(row.id)}].depreciation_amortisation`,
+        ),
+        interestExpense: nullableFiniteNumber(row.interest_expense, `business_financials[id=${str(row.id)}].interest_expense`),
+        taxExpense: nullableFiniteNumber(row.tax_expense, `business_financials[id=${str(row.id)}].tax_expense`),
         freeCashFlow: nullableFiniteNumber(row.free_cash_flow, `business_financials[id=${str(row.id)}].free_cash_flow`),
-        notes: row.notes ? str(row.notes) : null, provenance: provenance(row),
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
       }));
-    const businessValuations: BusinessValuation[] = businessValuationRows
+    const businessValuations: BusinessValuationBasis[] = businessValuationRows
       .filter((row) => businessIds.has(str(row.business_id)))
       .map((row) => ({
-        id: str(row.id), businessId: str(row.business_id), valuationDate: str(row.valuation_date),
+        id: str(row.id),
+        businessId: str(row.business_id),
+        valuationDate: str(row.valuation_date),
         currency: row.currency ? str(row.currency).toUpperCase() : null,
         method: enumValue(str(row.method), BUSINESS_VALUATION_METHODS, `business_valuations[id=${str(row.id)}].method`),
         enterpriseValue: nullableFiniteNumber(row.enterprise_value, `business_valuations[id=${str(row.id)}].enterprise_value`),
         equityValue: nullableFiniteNumber(row.equity_value, `business_valuations[id=${str(row.id)}].equity_value`),
-        valuationMultiple: nullableFiniteNumber(row.valuation_multiple, `business_valuations[id=${str(row.id)}].valuation_multiple`),
-        notes: row.notes ? str(row.notes) : null, provenance: provenance(row),
+        multiple: nullableFiniteNumber(row.valuation_multiple, `business_valuations[id=${str(row.id)}].valuation_multiple`),
+        multipleLow: nullableFiniteNumber(row.multiple_low, `business_valuations[id=${str(row.id)}].multiple_low`),
+        multipleHigh: nullableFiniteNumber(row.multiple_high, `business_valuations[id=${str(row.id)}].multiple_high`),
+        metricBasis: row.metric_basis
+          ? enumValue(str(row.metric_basis), BUSINESS_METRIC_BASES, `business_valuations[id=${str(row.id)}].metric_basis`)
+          : null,
+        metricPeriodEnd: row.metric_period_end ? str(row.metric_period_end) : null,
+        preMoneyEquityValue: nullableFiniteNumber(row.pre_money_equity_value, `business_valuations[id=${str(row.id)}].pre_money_equity_value`),
+        primaryNewMoney: nullableFiniteNumber(row.primary_new_money, `business_valuations[id=${str(row.id)}].primary_new_money`),
+        secondaryAmount: nullableFiniteNumber(row.secondary_amount, `business_valuations[id=${str(row.id)}].secondary_amount`),
+        investorContribution: nullableFiniteNumber(row.investor_contribution, `business_valuations[id=${str(row.id)}].investor_contribution`),
+        preferredRightsKnown: nullableBoolean(
+          row.preferred_rights_known ?? null,
+          `business_valuations[id=${str(row.id)}].preferred_rights_known`,
+        ),
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
+      }));
+    const businessEbitdaAdjustments: BusinessEbitdaAdjustment[] = businessEbitdaAdjustmentRows
+      .filter((row) => businessIds.has(str(row.business_id)))
+      .map((row) => ({
+        id: str(row.id),
+        businessId: str(row.business_id),
+        periodEnd: str(row.period_end),
+        category: enumValue(
+          str(row.category),
+          BUSINESS_EBITDA_ADJUSTMENT_CATEGORIES,
+          `business_ebitda_adjustments[id=${str(row.id)}].category`,
+        ),
+        label: str(row.label),
+        amount: finiteNumber(row.amount, `business_ebitda_adjustments[id=${str(row.id)}].amount`),
+        currency: str(row.currency).toUpperCase(),
+        recurring: bool(row.recurring),
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
+      }));
+    const businessBridgeItems: BusinessBridgeItem[] = businessBridgeItemRows
+      .filter((row) => businessIds.has(str(row.business_id)))
+      .map((row) => ({
+        id: str(row.id),
+        businessId: str(row.business_id),
+        effectiveDate: str(row.effective_date),
+        category: enumValue(
+          str(row.category),
+          BUSINESS_BRIDGE_ITEM_CATEGORIES,
+          `business_bridge_items[id=${str(row.id)}].category`,
+        ),
+        label: str(row.label),
+        amount: finiteNumber(row.amount, `business_bridge_items[id=${str(row.id)}].amount`),
+        currency: str(row.currency).toUpperCase(),
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
+      }));
+    const businessDcfPeriods: BusinessDcfPeriod[] = businessDcfPeriodRows.map((row) => ({
+      id: str(row.id),
+      dcfId: str(row.dcf_id),
+      yearIndex: finiteNumber(row.year_index, `business_dcf_periods[id=${str(row.id)}].year_index`),
+      revenue: nullableFiniteNumber(row.revenue, `business_dcf_periods[id=${str(row.id)}].revenue`),
+      ebitda: nullableFiniteNumber(row.ebitda, `business_dcf_periods[id=${str(row.id)}].ebitda`),
+      ebit: nullableFiniteNumber(row.ebit, `business_dcf_periods[id=${str(row.id)}].ebit`),
+      depreciationAmortisation: nullableFiniteNumber(
+        row.depreciation_amortisation,
+        `business_dcf_periods[id=${str(row.id)}].depreciation_amortisation`,
+      ),
+      capex: nullableFiniteNumber(row.capex, `business_dcf_periods[id=${str(row.id)}].capex`),
+      workingCapitalChange: nullableFiniteNumber(
+        row.working_capital_change,
+        `business_dcf_periods[id=${str(row.id)}].working_capital_change`,
+      ),
+      notes: row.notes ? str(row.notes) : null,
+    }));
+    const businessDcfAssumptions: BusinessDcfAssumptions[] = businessDcfRows
+      .filter((row) => businessIds.has(str(row.business_id)))
+      .map((row) => ({
+        id: str(row.id),
+        businessId: str(row.business_id),
+        valuationDate: str(row.valuation_date),
+        currency: str(row.currency).toUpperCase(),
+        wacc: finiteNumber(row.wacc, `business_dcf_assumptions[id=${str(row.id)}].wacc`),
+        taxRate: finiteNumber(row.tax_rate, `business_dcf_assumptions[id=${str(row.id)}].tax_rate`),
+        terminalMethod: enumValue(
+          str(row.terminal_method),
+          BUSINESS_DCF_TERMINAL_METHODS,
+          `business_dcf_assumptions[id=${str(row.id)}].terminal_method`,
+        ),
+        terminalGrowth: nullableFiniteNumber(row.terminal_growth, `business_dcf_assumptions[id=${str(row.id)}].terminal_growth`),
+        terminalExitMultiple: nullableFiniteNumber(
+          row.terminal_exit_multiple,
+          `business_dcf_assumptions[id=${str(row.id)}].terminal_exit_multiple`,
+        ),
+        terminalExitMetric: row.terminal_exit_metric
+          ? (str(row.terminal_exit_metric) as "EBITDA" | "EBIT")
+          : null,
+        discountConvention: enumValue(
+          str(row.discount_convention || "YEAR_END"),
+          BUSINESS_DISCOUNT_CONVENTIONS,
+          `business_dcf_assumptions[id=${str(row.id)}].discount_convention`,
+        ),
+        periods: businessDcfPeriods
+          .filter((period) => period.dcfId === str(row.id))
+          .sort((left, right) => left.yearIndex - right.yearIndex),
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
       }));
     const businessCapitalEvents: BusinessCapitalEvent[] = businessCapitalEventRows
       .filter((row) => businessIds.has(str(row.business_id)))
       .map((row) => ({
-        id: str(row.id), businessId: str(row.business_id),
-        type: enumValue(str(row.event_type), BUSINESS_CAPITAL_EVENT_TYPES, `business_capital_events[id=${str(row.id)}].event_type`),
-        eventDate: str(row.event_date), amount: finiteNumber(row.amount, `business_capital_events[id=${str(row.id)}].amount`),
+        id: str(row.id),
+        businessId: str(row.business_id),
+        type: enumValue(
+          str(row.event_type),
+          BUSINESS_CAPITAL_EVENT_TYPES,
+          `business_capital_events[id=${str(row.id)}].event_type`,
+        ),
+        eventDate: str(row.event_date),
+        amount: finiteNumber(row.amount, `business_capital_events[id=${str(row.id)}].amount`),
+        amountScope: enumValue(
+          str(row.amount_scope || "USER_CASH"),
+          BUSINESS_AMOUNT_SCOPES,
+          `business_capital_events[id=${str(row.id)}].amount_scope`,
+        ),
+        fees: nullableFiniteNumber(row.fees, `business_capital_events[id=${str(row.id)}].fees`),
         currency: str(row.currency).toUpperCase(),
         ownershipDelta: nullableFiniteNumber(row.ownership_delta, `business_capital_events[id=${str(row.id)}].ownership_delta`),
+        ownershipRateAfter: nullableFiniteNumber(
+          row.ownership_rate_after,
+          `business_capital_events[id=${str(row.id)}].ownership_rate_after`,
+        ),
+        sharesDelta: nullableFiniteNumber(row.shares_delta, `business_capital_events[id=${str(row.id)}].shares_delta`),
+        pricePerShare: nullableFiniteNumber(row.price_per_share, `business_capital_events[id=${str(row.id)}].price_per_share`),
+        label: row.label ? str(row.label) : null,
         transactionId: row.transaction_id ? str(row.transaction_id) : null,
-        notes: row.notes ? str(row.notes) : null, provenance: provenance(row),
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
       }));
     const businessHoldings: BusinessHoldingLink[] = businessHoldingRows
       .filter((row) => businessIds.has(str(row.parent_business_id)) && businessIds.has(str(row.child_business_id)))
       .map((row) => ({
-        id: str(row.id), parentBusinessId: str(row.parent_business_id), childBusinessId: str(row.child_business_id),
-        effectiveDate: str(row.effective_date), ownershipRate: finiteNumber(row.ownership_rate, `business_holdings[id=${str(row.id)}].ownership_rate`),
-        notes: row.notes ? str(row.notes) : null, provenance: provenance(row),
+        id: str(row.id),
+        parentBusinessId: str(row.parent_business_id),
+        childBusinessId: str(row.child_business_id),
+        effectiveDate: str(row.effective_date),
+        ownershipRate: finiteNumber(row.ownership_rate, `business_holdings[id=${str(row.id)}].ownership_rate`),
+        notes: row.notes ? str(row.notes) : null,
+        provenance: provenance(row),
       }));
 
     const coverage = readLedgerCoverage(profileRows[0]);
@@ -1037,10 +1224,22 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       ledgerCoverageStart: coverage.start,
       currencyRates,
     });
+    // Business Equity V2.1 : le moteur reçoit des FAITS et des HYPOTHÈSES, et dérive
+    // lui-même valorisation, pont EV → Equity, fourchette et performance. Aucune valeur
+    // dérivée n'a transité par la base.
     const businessEquity = buildBusinessEquityPortfolio({
-      asOfDate: AS_OF_DATE, reportingCurrency, businesses, ownership: businessOwnership,
-      financials: businessFinancials, valuations: businessValuations, capitalEvents: businessCapitalEvents,
-      holdings: businessHoldings, currencyRates,
+      asOfDate: AS_OF_DATE,
+      reportingCurrency,
+      businesses,
+      ownership: businessOwnership,
+      financials: businessFinancials,
+      valuations: businessValuations,
+      capitalEvents: businessCapitalEvents,
+      holdings: businessHoldings,
+      ebitdaAdjustments: businessEbitdaAdjustments,
+      bridgeItems: businessBridgeItems,
+      dcfAssumptions: businessDcfAssumptions,
+      currencyRates,
     });
     const balanceSheet = buildCanonicalBalanceSheet({
       asOfDate: AS_OF_DATE,
@@ -1109,6 +1308,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       businessOwnership,
       businessFinancials,
       businessValuations,
+      businessEbitdaAdjustments,
+      businessBridgeItems,
+      businessDcfAssumptions,
       businessCapitalEvents,
       businessHoldings,
       liabilities,
@@ -1138,38 +1340,391 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
   async function mutateState(mutation: Mutation): Promise<DashboardState> {
     const now = new Date().toISOString();
     switch (mutation.action) {
+      case "create_business_quick_start": {
+        const value = mutation.quickStart;
+        unwrap(
+          await db.rpc("lfo_create_business_quick_start", {
+            p_user_id: user,
+            p_payload: {
+              name: value.name,
+              legal_form: value.legalForm,
+              business_type: value.type,
+              currency: value.currency,
+              sector: value.sector,
+              country: value.country,
+              period_end: value.periodEnd,
+              period_kind: value.periodKind,
+              period_label: value.periodLabel,
+              revenue: value.revenue,
+              ebitda: value.ebitda,
+              cash: value.cash,
+              gross_debt: value.grossDebt,
+              legal_rate: value.legalRate,
+              economic_rate: value.economicRate,
+              valuation_date: value.valuationDate,
+              method: value.method,
+              multiple: value.multiple,
+              multiple_low: value.multipleLow,
+              multiple_high: value.multipleHigh,
+              capital_history_start: value.capitalHistoryStart,
+              capital_history_source: value.capitalHistorySource,
+              notes: value.notes,
+              source: "Démarrage rapide Business Equity",
+            },
+          }),
+          "création rapide de société",
+        );
+        break;
+      }
       case "save_business": {
-        const business = mutation.business;
-        unwrap(await db.rpc("lfo_save_business", { p_user_id: user, p_payload: { business_id: business.businessId, name: business.name, legal_form: business.legalForm, business_type: business.type, functional_currency: business.functionalCurrency, notes: business.notes, source: "Saisie Business Equity" } }), "enregistrement société");
+        const value = mutation.business;
+        unwrap(
+          await db.rpc("lfo_save_business", {
+            p_user_id: user,
+            p_payload: {
+              business_id: value.businessId,
+              name: value.name,
+              legal_form: value.legalForm,
+              business_type: value.type,
+              functional_currency: value.functionalCurrency,
+              sector: value.sector,
+              country: value.country,
+              founded_on: value.foundedOn,
+              capital_history_start: value.capitalHistoryStart,
+              capital_history_source: value.capitalHistorySource,
+              notes: value.notes,
+              source: "Saisie Business Equity",
+            },
+          }),
+          "enregistrement société",
+        );
         break;
       }
       case "archive_business": {
-        unwrap(await db.rpc("lfo_archive_business", { p_user_id: user, p_business_id: mutation.businessId }), "archivage société");
+        unwrap(
+          await db.rpc("lfo_archive_business", { p_user_id: user, p_business_id: mutation.businessId }),
+          "archivage société",
+        );
         break;
       }
       case "record_business_ownership": {
         const value = mutation.ownership;
-        unwrap(await db.rpc("lfo_record_business_ownership", { p_user_id: user, p_payload: { business_id: value.businessId, effective_date: value.effectiveDate, legal_rate: value.legalRate, economic_rate: value.economicRate, voting_rate: value.votingRate, fully_diluted_rate: value.fullyDilutedRate, notes: value.notes, source: "Saisie Business Equity" } }), "enregistrement détention");
+        unwrap(
+          await db.rpc("lfo_record_business_ownership", {
+            p_user_id: user,
+            p_payload: {
+              business_id: value.businessId,
+              effective_date: value.effectiveDate,
+              legal_rate: value.legalRate,
+              economic_rate: value.economicRate,
+              voting_rate: value.votingRate,
+              fully_diluted_rate: value.fullyDilutedRate,
+              shares_held: value.sharesHeld,
+              shares_outstanding: value.sharesOutstanding,
+              fully_diluted_shares: value.fullyDilutedShares,
+              share_class: value.shareClass,
+              notes: value.notes,
+              source: "Saisie Business Equity",
+            },
+          }),
+          "enregistrement détention",
+        );
+        break;
+      }
+      case "delete_business_ownership": {
+        unwrap(
+          await db.rpc("lfo_delete_business_ownership", { p_user_id: user, p_ownership_id: mutation.ownershipId }),
+          "suppression détention",
+        );
         break;
       }
       case "record_business_financials": {
         const value = mutation.financials;
-        unwrap(await db.rpc("lfo_record_business_financials", { p_user_id: user, p_payload: { business_id: value.businessId, period_end: value.periodEnd, currency: value.currency, revenue: value.revenue, gross_margin: value.grossMargin, ebitda: value.ebitda, ebit: value.ebit, net_income: value.netIncome, cash: value.cash, gross_debt: value.grossDebt, working_capital: value.workingCapital, capex: value.capex, free_cash_flow: value.freeCashFlow, notes: value.notes, data_kind: "ACTUAL", confidence: "HIGH", source: "Saisie Business Equity" } }), "enregistrement financiers business");
+        unwrap(
+          await db.rpc("lfo_record_business_financials", {
+            p_user_id: user,
+            p_payload: {
+              business_id: value.businessId,
+              period_end: value.periodEnd,
+              period_start: value.periodStart,
+              period_kind: value.periodKind,
+              period_label: value.periodLabel,
+              currency: value.currency,
+              revenue: value.revenue,
+              gross_profit: value.grossProfit,
+              ebitda: value.ebitda,
+              ebit: value.ebit,
+              net_income: value.netIncome,
+              cash: value.cash,
+              gross_debt: value.grossDebt,
+              working_capital: value.workingCapital,
+              capex: value.capex,
+              depreciation_amortisation: value.depreciationAmortisation,
+              interest_expense: value.interestExpense,
+              tax_expense: value.taxExpense,
+              free_cash_flow: value.freeCashFlow,
+              notes: value.notes,
+              data_kind: "ACTUAL",
+              confidence: "HIGH",
+              source: "Saisie Business Equity",
+            },
+          }),
+          "enregistrement période financière",
+        );
+        break;
+      }
+      case "delete_business_financials": {
+        unwrap(
+          await db.rpc("lfo_delete_business_financials", { p_user_id: user, p_financials_id: mutation.financialsId }),
+          "suppression période financière",
+        );
         break;
       }
       case "record_business_valuation": {
         const value = mutation.valuation;
-        unwrap(await db.rpc("lfo_record_business_valuation", { p_user_id: user, p_payload: { business_id: value.businessId, valuation_date: value.valuationDate, currency: value.currency, method: value.method, enterprise_value: value.enterpriseValue, equity_value: value.equityValue, valuation_multiple: value.valuationMultiple, notes: value.notes, assumptions: {}, data_kind: value.method === "USER_ESTIMATE" ? "USER_ASSUMPTION" : "EXTERNAL_DATA", confidence: value.method === "USER_ESTIMATE" ? "LOW" : "MEDIUM", source: "Saisie Business Equity" } }), "enregistrement valorisation business");
+        // Une saisie libre est une USER_ASSUMPTION de faible confiance ; une observation
+        // externe est une EXTERNAL_DATA ; une base de méthode dérivée reste une hypothèse
+        // déclarée, car c'est ce qu'elle est — le résultat, lui, n'est pas persisté.
+        const observed = value.method === "EXTERNAL_APPRAISAL" || value.method === "TRANSACTION";
+        unwrap(
+          await db.rpc("lfo_record_business_valuation", {
+            p_user_id: user,
+            p_payload: {
+              business_id: value.businessId,
+              valuation_date: value.valuationDate,
+              currency: value.currency,
+              method: value.method,
+              enterprise_value: value.enterpriseValue,
+              equity_value: value.equityValue,
+              valuation_multiple: value.multiple,
+              multiple_low: value.multipleLow,
+              multiple_high: value.multipleHigh,
+              metric_basis: value.metricBasis,
+              metric_period_end: value.metricPeriodEnd,
+              pre_money_equity_value: value.preMoneyEquityValue,
+              primary_new_money: value.primaryNewMoney,
+              secondary_amount: value.secondaryAmount,
+              investor_contribution: value.investorContribution,
+              preferred_rights_known: value.preferredRightsKnown,
+              notes: value.notes,
+              assumptions: {},
+              data_kind: observed ? "EXTERNAL_DATA" : "USER_ASSUMPTION",
+              confidence: observed ? "HIGH" : value.method === "USER_ESTIMATE" ? "LOW" : "MEDIUM",
+              source: value.source ?? "Saisie Business Equity",
+            },
+          }),
+          "enregistrement base de valorisation",
+        );
+        break;
+      }
+      case "delete_business_valuation": {
+        unwrap(
+          await db.rpc("lfo_delete_business_valuation", { p_user_id: user, p_valuation_id: mutation.valuationId }),
+          "suppression valorisation",
+        );
+        break;
+      }
+      case "record_business_ebitda_adjustment": {
+        const value = mutation.adjustment;
+        unwrap(
+          await db.rpc("lfo_record_business_ebitda_adjustment", {
+            p_user_id: user,
+            p_payload: {
+              business_id: value.businessId,
+              period_end: value.periodEnd,
+              category: value.category,
+              label: value.label,
+              amount: value.amount,
+              currency: value.currency,
+              recurring: value.recurring,
+              notes: value.notes,
+              data_kind: "USER_ASSUMPTION",
+              confidence: "MEDIUM",
+              source: value.source ?? "Saisie Business Equity",
+            },
+          }),
+          "enregistrement ajustement EBITDA",
+        );
+        break;
+      }
+      case "delete_business_ebitda_adjustment": {
+        unwrap(
+          await db.rpc("lfo_delete_business_ebitda_adjustment", {
+            p_user_id: user,
+            p_adjustment_id: mutation.adjustmentId,
+          }),
+          "suppression ajustement EBITDA",
+        );
+        break;
+      }
+      case "record_business_bridge_item": {
+        const value = mutation.item;
+        unwrap(
+          await db.rpc("lfo_record_business_bridge_item", {
+            p_user_id: user,
+            p_payload: {
+              business_id: value.businessId,
+              effective_date: value.effectiveDate,
+              category: value.category,
+              label: value.label,
+              amount: value.amount,
+              currency: value.currency,
+              notes: value.notes,
+              data_kind: "USER_ASSUMPTION",
+              confidence: "MEDIUM",
+              source: value.source ?? "Saisie Business Equity",
+            },
+          }),
+          "enregistrement élément de bridge",
+        );
+        break;
+      }
+      case "delete_business_bridge_item": {
+        unwrap(
+          await db.rpc("lfo_delete_business_bridge_item", { p_user_id: user, p_item_id: mutation.itemId }),
+          "suppression élément de bridge",
+        );
+        break;
+      }
+      case "set_business_dcf": {
+        const value = mutation.dcf;
+        unwrap(
+          await db.rpc("lfo_set_business_dcf", {
+            p_user_id: user,
+            p_payload: {
+              business_id: value.businessId,
+              valuation_date: value.valuationDate,
+              currency: value.currency,
+              wacc: value.wacc,
+              tax_rate: value.taxRate,
+              terminal_method: value.terminalMethod,
+              terminal_growth: value.terminalGrowth,
+              terminal_exit_multiple: value.terminalExitMultiple,
+              terminal_exit_metric: value.terminalExitMetric,
+              discount_convention: value.discountConvention,
+              notes: value.notes,
+              confidence: "LOW",
+              source: "Saisie Business Equity",
+              periods: value.periods.map((period) => ({
+                year_index: period.yearIndex,
+                revenue: period.revenue,
+                ebitda: period.ebitda,
+                ebit: period.ebit,
+                depreciation_amortisation: period.depreciationAmortisation,
+                capex: period.capex,
+                working_capital_change: period.workingCapitalChange,
+              })),
+            },
+          }),
+          "enregistrement hypothèses DCF",
+        );
+        break;
+      }
+      case "delete_business_dcf": {
+        unwrap(
+          await db.rpc("lfo_delete_business_dcf", { p_user_id: user, p_dcf_id: mutation.dcfId }),
+          "suppression hypothèses DCF",
+        );
         break;
       }
       case "record_business_capital_event": {
         const value = mutation.event;
-        unwrap(await db.rpc("lfo_record_business_capital_event", { p_user_id: user, p_payload: { business_id: value.businessId, event_type: value.type, event_date: value.eventDate, amount: value.amount, currency: value.currency, ownership_delta: value.ownershipDelta, transaction_id: value.transactionId, notes: value.notes, data_kind: "ACTUAL", confidence: "HIGH", source: "Saisie Business Equity" } }), "enregistrement événement business");
+        unwrap(
+          await db.rpc("lfo_record_business_capital_event", {
+            p_user_id: user,
+            p_payload: {
+              business_id: value.businessId,
+              event_type: value.type,
+              event_date: value.eventDate,
+              amount: value.amount,
+              amount_scope: value.amountScope,
+              fees: value.fees,
+              currency: value.currency,
+              ownership_delta: value.ownershipDelta,
+              ownership_rate_after: value.ownershipRateAfter,
+              shares_delta: value.sharesDelta,
+              price_per_share: value.pricePerShare,
+              label: value.label,
+              transaction_id: value.transactionId,
+              notes: value.notes,
+              data_kind: "ACTUAL",
+              confidence: "HIGH",
+              source: "Saisie Business Equity",
+            },
+          }),
+          "enregistrement événement de capital",
+        );
+        break;
+      }
+      case "delete_business_capital_event": {
+        unwrap(
+          await db.rpc("lfo_delete_business_capital_event", { p_user_id: user, p_event_id: mutation.eventId }),
+          "suppression événement de capital",
+        );
         break;
       }
       case "set_business_holding": {
         const value = mutation.holding;
-        unwrap(await db.rpc("lfo_set_business_holding", { p_user_id: user, p_payload: { parent_business_id: value.parentBusinessId, child_business_id: value.childBusinessId, effective_date: value.effectiveDate, ownership_rate: value.ownershipRate, notes: value.notes, source: "Saisie Business Equity" } }), "rattachement holding");
+        unwrap(
+          await db.rpc("lfo_set_business_holding", {
+            p_user_id: user,
+            p_payload: {
+              parent_business_id: value.parentBusinessId,
+              child_business_id: value.childBusinessId,
+              effective_date: value.effectiveDate,
+              ownership_rate: value.ownershipRate,
+              notes: value.notes,
+              source: "Saisie Business Equity",
+            },
+          }),
+          "rattachement holding",
+        );
+        break;
+      }
+      case "delete_business_holding": {
+        unwrap(
+          await db.rpc("lfo_delete_business_holding", { p_user_id: user, p_holding_id: mutation.holdingId }),
+          "suppression rattachement holding",
+        );
+        break;
+      }
+      case "apply_business_funding_round": {
+        const value = mutation.round;
+        // La détention post-money est DÉRIVÉE ici, jamais ressaisie : c'est la seule façon
+        // d'empêcher deux vérités contradictoires de coexister dans la base.
+        const outcome = fundingRoundOutcome({
+          preMoneyEquityValue: value.preMoneyEquityValue,
+          primaryNewMoney: value.primaryNewMoney,
+          secondaryAmount: value.secondaryAmount,
+          ownershipBefore: value.ownershipBefore,
+          investorContribution: value.investorContribution,
+          preferredRightsKnown: value.preferredRightsKnown,
+        });
+        if (outcome.ownershipAfter.value === null) {
+          throw new Error(
+            "Tour de table non applicable : le post-money dérivé des termes saisis n’est pas positif",
+          );
+        }
+        unwrap(
+          await db.rpc("lfo_apply_business_funding_round", {
+            p_user_id: user,
+            p_payload: {
+              business_id: value.businessId,
+              round_date: value.roundDate,
+              currency: value.currency,
+              pre_money_equity_value: value.preMoneyEquityValue,
+              primary_new_money: value.primaryNewMoney,
+              secondary_amount: value.secondaryAmount,
+              investor_contribution: value.investorContribution,
+              preferred_rights_known: value.preferredRightsKnown,
+              post_ownership_rate: outcome.ownershipAfter.value,
+              notes: value.notes,
+              confidence: value.preferredRightsKnown ? "MEDIUM" : "LOW",
+              source: value.source ?? "Saisie Business Equity",
+            },
+          }),
+          "application du tour de table",
+        );
         break;
       }
       case "save_debt_contract": {

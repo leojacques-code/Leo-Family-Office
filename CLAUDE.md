@@ -113,12 +113,17 @@ réservées à `service_role`, qui persistent des résultats déjà calculés.
 Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.md`, elle
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`. La divergence des deux index de
-`net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026. Dépôt et production sont
-alignés sur 19 versions : Portfolio Data Foundation et ses index couvrant les clés
-étrangères, puis Real Estate V2 et les siens. Chaque paire suit le même schéma, une
-migration de fond puis une migration d'index révélée par les advisors, et chacune a été
-appliquée en production puis contrôlée par assertions SQL transactionnelles, advisors
-Supabase et test d'isolation sous le rôle `authenticated` réel.
+`net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026. Production alignée sur
+21 versions : Portfolio Data Foundation et ses index couvrant les clés étrangères, Real
+Estate V2 et les siens, puis Business Equity V2 et sa vérité datée. Chaque paire suit le
+même schéma, une migration de fond puis une migration d'index révélée par les advisors, et
+chacune a été appliquée en production puis contrôlée par assertions SQL transactionnelles,
+advisors Supabase et test d'isolation sous le rôle `authenticated` réel.
+
+Le dépôt porte deux versions de plus, Business Equity V2.1 et ses index, vertes au gate
+local et non encore appliquées en production : `npm run db:verify` distant échouera tant
+que le push n'aura pas eu lieu. Ce n'est pas une divergence à documenter au registre — le
+SQL du dépôt fait autorité — mais une application en attente.
 
 ## 6. Tests et gates
 
@@ -146,9 +151,9 @@ Correctness → données → intégration → calculs → tests → produit → 
 
 ```text
 faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données + analytics)
-               Real Estate (faits + scénarios)
+               Real Estate (faits + scénarios) · Business Equity (faits + valorisation dérivée)
 en cours       vérité de schéma · vérité des consommateurs
-suivant        Business Equity → Career + Tax
+suivant        Career + Tax
 puis           Event Engine → Scenarios V2 → Goals → Decision Lab
 enfin          imports et connecteurs → expérience globale → orchestration IA
 ```
@@ -162,7 +167,18 @@ le domaine : elle viendrait doubler celle de `liabilities`. Un crédit hypothét
 
 Real Estate n'entre PAS dans le Personal Monthly Financial Model comme actif projeté : sa
 valeur y est portée constante et signalée, faute de termes projetables. Une trajectoire
-immobilière modélisée reste un chantier distinct.
+immobilière modélisée reste un chantier distinct. Business Equity n'y entre pas davantage,
+pour la même raison.
+
+Business Equity ne persiste AUCUNE valorisation dérivée : la base ne porte que des faits et
+des hypothèses déclarées — un multiple, une base financière, des retraitements d'EBITDA, des
+éléments de pont, des paramètres de DCF, les termes d'un tour. Enterprise Value, Equity Value,
+fourchette et valeur attribuable sont produites à la lecture par `business-valuation.ts`, et
+une contrainte de base interdit de stocker le résultat d'une méthode dérivée. EV ≠ EQUITY
+VALUE : une Enterprise Value connue sans dette brute ni trésorerie datées ne produit aucune
+Equity Value. DETTE CORPORATE ≠ DETTE PERSONNELLE : la dette d'une société détenue réduit son
+Equity Value et n'entre jamais au passif personnel. Une filiale détenue via une holding entre
+au patrimoine par la holding et par elle seule.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

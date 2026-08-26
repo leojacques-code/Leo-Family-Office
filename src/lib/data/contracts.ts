@@ -1,6 +1,18 @@
 // Contrats de la couche données. Aucun import serveur : ce module est importable
 // depuis un composant client (import type) sans tirer "server-only" dans le bundle.
-import type { BusinessCapitalEventType, BusinessType, BusinessValuationMethod } from "@/lib/engine/business-equity";
+import type {
+  BusinessAmountScope,
+  BusinessBridgeItemCategory,
+  BusinessCapitalEventType,
+  BusinessCapitalHistorySource,
+  BusinessDcfTerminalMethod,
+  BusinessDiscountConvention,
+  BusinessEbitdaAdjustmentCategory,
+  BusinessMetricBasis,
+  BusinessPeriodKind,
+  BusinessType,
+  BusinessValuationMethod,
+} from "@/lib/engine/business-equity";
 import type {
   CashFlowKind,
   DocumentRecord,
@@ -204,25 +216,42 @@ export interface BusinessInput {
   legalForm: string | null;
   type: BusinessType | null;
   functionalCurrency: string | null;
+  sector: string | null;
+  country: string | null;
+  foundedOn: string | null;
+  /**
+   * Couverture DÉCLARÉE de l'historique de capital. Seul `DECLARED_COMPLETE` autorise le
+   * moteur à lire une absence d'événement comme un zéro, et donc à produire un MOIC.
+   */
+  capitalHistoryStart: string | null;
+  capitalHistorySource: BusinessCapitalHistorySource;
   notes: string | null;
 }
 
 export interface BusinessOwnershipInput {
   businessId: string;
   effectiveDate: string;
+  /** Dans [0,1]. Zéro est un fait : c'est une sortie totale, pas une absence. */
   legalRate: number;
   economicRate: number | null;
   votingRate: number | null;
   fullyDilutedRate: number | null;
+  sharesHeld: number | null;
+  sharesOutstanding: number | null;
+  fullyDilutedShares: number | null;
+  shareClass: string | null;
   notes: string | null;
 }
 
 export interface BusinessFinancialInput {
   businessId: string;
   periodEnd: string;
+  periodStart: string | null;
+  periodKind: BusinessPeriodKind;
+  periodLabel: string | null;
   currency: string | null;
   revenue: number | null;
-  grossMargin: number | null;
+  grossProfit: number | null;
   ebitda: number | null;
   ebit: number | null;
   netIncome: number | null;
@@ -230,10 +259,18 @@ export interface BusinessFinancialInput {
   grossDebt: number | null;
   workingCapital: number | null;
   capex: number | null;
+  depreciationAmortisation: number | null;
+  interestExpense: number | null;
+  taxExpense: number | null;
   freeCashFlow: number | null;
   notes: string | null;
 }
 
+/**
+ * Base de valorisation. Sur une méthode DÉRIVÉE, `enterpriseValue` et `equityValue` doivent
+ * rester nulles : le moteur les produit, la base ne les porte pas. La validation le refuse,
+ * et la base de données aussi.
+ */
 export interface BusinessValuationInput {
   businessId: string;
   valuationDate: string;
@@ -241,7 +278,65 @@ export interface BusinessValuationInput {
   method: BusinessValuationMethod;
   enterpriseValue: number | null;
   equityValue: number | null;
-  valuationMultiple: number | null;
+  multiple: number | null;
+  multipleLow: number | null;
+  multipleHigh: number | null;
+  metricBasis: BusinessMetricBasis | null;
+  metricPeriodEnd: string | null;
+  preMoneyEquityValue: number | null;
+  primaryNewMoney: number | null;
+  secondaryAmount: number | null;
+  investorContribution: number | null;
+  preferredRightsKnown: boolean | null;
+  source: string | null;
+  notes: string | null;
+}
+
+export interface BusinessEbitdaAdjustmentInput {
+  businessId: string;
+  periodEnd: string;
+  category: BusinessEbitdaAdjustmentCategory;
+  label: string;
+  /** Signé : positif augmente l'EBITDA retenu, négatif le réduit. */
+  amount: number;
+  currency: string;
+  recurring: boolean;
+  source: string | null;
+  notes: string | null;
+}
+
+export interface BusinessBridgeItemInput {
+  businessId: string;
+  effectiveDate: string;
+  category: BusinessBridgeItemCategory;
+  label: string;
+  /** Signé : positif ajoute à l'Equity Value, négatif la réduit. */
+  amount: number;
+  currency: string;
+  source: string | null;
+  notes: string | null;
+}
+
+export interface BusinessDcfInput {
+  businessId: string;
+  valuationDate: string;
+  currency: string;
+  wacc: number;
+  taxRate: number;
+  terminalMethod: BusinessDcfTerminalMethod;
+  terminalGrowth: number | null;
+  terminalExitMultiple: number | null;
+  terminalExitMetric: "EBITDA" | "EBIT" | null;
+  discountConvention: BusinessDiscountConvention;
+  periods: Array<{
+    yearIndex: number;
+    revenue: number | null;
+    ebitda: number | null;
+    ebit: number | null;
+    depreciationAmortisation: number | null;
+    capex: number | null;
+    workingCapitalChange: number | null;
+  }>;
   notes: string | null;
 }
 
@@ -249,10 +344,48 @@ export interface BusinessCapitalEventInput {
   businessId: string;
   type: BusinessCapitalEventType;
   eventDate: string;
+  /** Magnitude positive. Le sens vient du type, jamais du signe. */
   amount: number;
+  /** Ce que `amount` désigne : le cash personnel, ou le montant distribué par la société. */
+  amountScope: BusinessAmountScope;
+  fees: number | null;
   currency: string;
   ownershipDelta: number | null;
+  ownershipRateAfter: number | null;
+  sharesDelta: number | null;
+  pricePerShare: number | null;
+  label: string | null;
   transactionId: string | null;
+  notes: string | null;
+}
+
+/**
+ * Démarrage rapide : les faits minimaux qui suffisent au moteur pour produire une
+ * valorisation complète. L'utilisateur ne saisit NI Enterprise Value NI Equity Value.
+ */
+export interface BusinessQuickStartInput {
+  name: string;
+  legalForm: string | null;
+  type: BusinessType | null;
+  currency: string;
+  sector: string | null;
+  country: string | null;
+  periodEnd: string;
+  periodKind: BusinessPeriodKind;
+  periodLabel: string | null;
+  revenue: number | null;
+  ebitda: number | null;
+  cash: number | null;
+  grossDebt: number | null;
+  legalRate: number;
+  economicRate: number;
+  valuationDate: string;
+  method: "EBITDA_MULTIPLE" | "REVENUE_MULTIPLE";
+  multiple: number;
+  multipleLow: number | null;
+  multipleHigh: number | null;
+  capitalHistoryStart: string | null;
+  capitalHistorySource: BusinessCapitalHistorySource;
   notes: string | null;
 }
 
@@ -261,6 +394,25 @@ export interface BusinessHoldingInput {
   childBusinessId: string;
   effectiveDate: string;
   ownershipRate: number;
+  notes: string | null;
+}
+
+/**
+ * Application d'un tour de table. UNE saisie, TROIS conséquences persistées ensemble : les
+ * termes du tour, la souscription éventuelle, et la détention qui en résulte — dont le taux
+ * est DÉRIVÉ ici et jamais ressaisi par l'utilisateur.
+ */
+export interface BusinessFundingRoundInput {
+  businessId: string;
+  roundDate: string;
+  currency: string;
+  preMoneyEquityValue: number;
+  primaryNewMoney: number;
+  secondaryAmount: number | null;
+  investorContribution: number;
+  ownershipBefore: number;
+  preferredRightsKnown: boolean;
+  source: string | null;
   notes: string | null;
 }
 
@@ -364,13 +516,26 @@ export type Mutation =
   | { action: "record_portfolio_event"; event: PortfolioEventInput }
   | { action: "delete_portfolio_event"; eventId: string }
   | { action: "set_portfolio_envelope_policy"; policy: PortfolioEnvelopePolicyInput }
+  | { action: "create_business_quick_start"; quickStart: BusinessQuickStartInput }
   | { action: "save_business"; business: BusinessInput }
   | { action: "archive_business"; businessId: string }
   | { action: "record_business_ownership"; ownership: BusinessOwnershipInput }
+  | { action: "delete_business_ownership"; ownershipId: string }
   | { action: "record_business_financials"; financials: BusinessFinancialInput }
+  | { action: "delete_business_financials"; financialsId: string }
   | { action: "record_business_valuation"; valuation: BusinessValuationInput }
+  | { action: "delete_business_valuation"; valuationId: string }
+  | { action: "record_business_ebitda_adjustment"; adjustment: BusinessEbitdaAdjustmentInput }
+  | { action: "delete_business_ebitda_adjustment"; adjustmentId: string }
+  | { action: "record_business_bridge_item"; item: BusinessBridgeItemInput }
+  | { action: "delete_business_bridge_item"; itemId: string }
+  | { action: "set_business_dcf"; dcf: BusinessDcfInput }
+  | { action: "delete_business_dcf"; dcfId: string }
   | { action: "record_business_capital_event"; event: BusinessCapitalEventInput }
+  | { action: "delete_business_capital_event"; eventId: string }
   | { action: "set_business_holding"; holding: BusinessHoldingInput }
+  | { action: "delete_business_holding"; holdingId: string }
+  | { action: "apply_business_funding_round"; round: BusinessFundingRoundInput }
   | { action: "save_real_estate_asset"; asset: RealEstateAssetInput }
   | { action: "archive_real_estate_asset"; propertyId: string }
   | { action: "record_real_estate_valuation"; valuation: RealEstateValuationInput }

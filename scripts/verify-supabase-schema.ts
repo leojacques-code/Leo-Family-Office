@@ -32,6 +32,8 @@ const canonicalMigrations = [
   "20260826090347",
   "20260826145426",
   "20260826145803",
+  "20260826163000",
+  "20260826163500",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -216,12 +218,18 @@ const requiredColumns: Record<string, string[]> = {
     "data_kind",
     "confidence",
   ],
-  businesses: ["id","business_type","functional_currency","archived","data_kind","confidence"],
-  business_ownership: ["id","business_id","ownership_rate","economic_rate","voting_rate","fully_diluted_rate","effective_date","data_kind","confidence"],
-  business_financials: ["id","business_id","period_end","currency","revenue","ebitda","cash","debt","ebit","net_income","capex","free_cash_flow","data_kind","confidence"],
-  business_valuations: ["id","business_id","valuation_date","method","currency","enterprise_value","equity_value","valuation_multiple","data_kind","confidence"],
-  business_capital_events: ["id","business_id","event_type","event_date","amount","currency","ownership_delta","transaction_id","data_kind","confidence"],
+  // Business Equity V2.1 : les colonnes ci-dessous portent des HYPOTHÈSES et des faits.
+  // Aucune ne porte une valorisation dérivée — elles sont produites en TypeScript.
+  businesses: ["id","business_type","functional_currency","archived","data_kind","confidence","sector","country","founded_on","capital_history_start","capital_history_source"],
+  business_ownership: ["id","business_id","ownership_rate","economic_rate","voting_rate","fully_diluted_rate","effective_date","data_kind","confidence","shares_held","shares_outstanding","fully_diluted_shares","share_class","origin_event_id"],
+  business_financials: ["id","business_id","period_end","currency","revenue","ebitda","cash","debt","ebit","net_income","capex","free_cash_flow","data_kind","confidence","period_kind","period_start","period_label","gross_profit","depreciation_amortisation","interest_expense","tax_expense"],
+  business_valuations: ["id","business_id","valuation_date","method","currency","enterprise_value","equity_value","valuation_multiple","data_kind","confidence","multiple_low","multiple_high","metric_basis","metric_period_end","pre_money_equity_value","primary_new_money","secondary_amount","investor_contribution","preferred_rights_known"],
+  business_capital_events: ["id","business_id","event_type","event_date","amount","currency","ownership_delta","transaction_id","data_kind","confidence","amount_scope","fees","ownership_rate_after","shares_delta","price_per_share","label"],
   business_holdings: ["id","parent_business_id","child_business_id","effective_date","ownership_rate","data_kind","confidence"],
+  business_ebitda_adjustments: ["id","user_id","business_id","period_end","category","label","amount","currency","recurring","data_kind","confidence"],
+  business_bridge_items: ["id","user_id","business_id","effective_date","category","label","amount","currency","data_kind","confidence"],
+  business_dcf_assumptions: ["id","user_id","business_id","valuation_date","currency","wacc","tax_rate","terminal_method","terminal_growth","terminal_exit_multiple","terminal_exit_metric","discount_convention"],
+  business_dcf_periods: ["id","user_id","dcf_id","year_index","revenue","ebitda","ebit","depreciation_amortisation","capex","working_capital_change"],
 };
 
 const userOwnedTables = [
@@ -280,6 +288,10 @@ const userOwnedTables = [
   "real_estate_financing_links",
   "business_capital_events",
   "business_holdings",
+  "business_ebitda_adjustments",
+  "business_bridge_items",
+  "business_dcf_assumptions",
+  "business_dcf_periods",
 ] as const;
 
 /**
@@ -331,13 +343,38 @@ const requiredIndexes = [
   "business_holdings_parent_owner_idx",
   "business_holdings_child_owner_idx",
   "business_financials_effective_uk",
-  "business_valuations_effective_uk",
+  // Business Equity V2.1 : deux valorisations de MÉTHODES différentes peuvent coexister à
+  // la même date. L'unicité par date seule les rendait mutuellement exclusives et effaçait
+  // le conflit au lieu de l'exposer.
+  "business_valuations_effective_method_uk",
   "businesses_user_idx",
   "business_financials_user_idx",
   "business_valuations_user_idx",
   "business_capital_events_user_idx",
+  // Cible composite de la FK `business_ownership.origin_event_id`.
+  "business_capital_events_id_user_uidx",
+  "business_ownership_origin_event_idx",
+  // Index couvrants des FK introduites par V2.1, dans l'ORDRE des FK composites.
+  "business_ebitda_adjustments_business_owner_idx",
+  "business_bridge_items_business_owner_idx",
+  "business_dcf_assumptions_business_owner_idx",
+  "business_dcf_periods_dcf_idx",
+  "business_ebitda_adjustments_user_idx",
+  "business_bridge_items_user_idx",
+  "business_dcf_assumptions_user_idx",
+  "business_dcf_periods_user_idx",
+  "business_holdings_user_idx",
+  "business_ownership_user_idx",
 ] as const;
-const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx"] as const;
+/**
+ * `business_valuations_effective_uk` est remplacé par son équivalent par méthode. Une base
+ * qui le porte encore n'a pas appliqué Business Equity V2.1 et interdit toujours deux
+ * valorisations concurrentes à la même date.
+ */
+const forbiddenIndexes = [
+  "net_worth_snapshot_items_owner_snapshot_idx",
+  "business_valuations_effective_uk",
+] as const;
 
 /**
  * Triggers dont l'absence supprimerait un invariant financier, et non une commodité.
@@ -420,13 +457,48 @@ const requiredConstraints = [
   "business_ownership_business_fk",
   "business_financials_business_fk",
   "business_valuations_business_fk",
-  "business_ownership_rates_ck",
-  "business_valuations_value_ck",
+  // V2.1 : la détention peut valoir 0 (sortie totale), et une méthode DÉRIVÉE ne persiste
+  // jamais son résultat. Les deux contraintes d'origine ont été remplacées sous un nom
+  // nouveau plutôt que modifiées.
+  "business_ownership_rates_v2_ck",
+  "business_ownership_shares_ck",
+  "business_ownership_origin_event_fk",
+  "business_valuations_basis_v2_ck",
+  "business_valuations_method_ck",
+  "business_valuations_multiple_ck",
+  "business_valuations_metric_basis_ck",
+  "business_valuations_round_ck",
+  "businesses_capital_history_source_ck",
+  "businesses_capital_history_start_ck",
+  "business_financials_period_kind_ck",
+  "business_financials_period_order_ck",
+  "business_financials_non_negative_ck",
   "business_capital_events_business_fk",
   "business_capital_events_transaction_fk",
   "business_capital_events_amount_ck",
-  "business_capital_events_type_ck",
+  "business_capital_events_type_v2_ck",
+  "business_capital_events_amount_scope_ck",
+  "business_capital_events_scope_domain_ck",
+  "business_capital_events_fees_ck",
+  "business_capital_events_ownership_after_ck",
   "business_capital_events_ownership_delta_ck",
+  "business_ebitda_adjustments_business_fk",
+  "business_ebitda_adjustments_category_ck",
+  "business_ebitda_adjustments_data_kind_ck",
+  "business_ebitda_adjustments_label_uk",
+  "business_bridge_items_business_fk",
+  "business_bridge_items_category_ck",
+  "business_bridge_items_data_kind_ck",
+  "business_bridge_items_label_uk",
+  "business_dcf_assumptions_business_fk",
+  "business_dcf_assumptions_wacc_ck",
+  "business_dcf_assumptions_tax_ck",
+  "business_dcf_assumptions_terminal_ck",
+  "business_dcf_assumptions_convention_ck",
+  "business_dcf_assumptions_effective_uk",
+  "business_dcf_periods_year_ck",
+  "business_dcf_periods_non_negative_ck",
+  "business_dcf_periods_year_uk",
   "business_holdings_parent_fk",
   "business_holdings_child_fk",
   "business_holdings_no_self_ck",
@@ -476,6 +548,19 @@ const requiredRpcs: Record<string, string> = {
   lfo_record_business_valuation: "p_user_id uuid, p_payload jsonb",
   lfo_record_business_capital_event: "p_user_id uuid, p_payload jsonb",
   lfo_set_business_holding: "p_user_id uuid, p_payload jsonb",
+  lfo_delete_business_holding: "p_user_id uuid, p_holding_id uuid",
+  lfo_delete_business_ownership: "p_user_id uuid, p_ownership_id uuid",
+  lfo_delete_business_financials: "p_user_id uuid, p_financials_id uuid",
+  lfo_delete_business_valuation: "p_user_id uuid, p_valuation_id uuid",
+  lfo_delete_business_capital_event: "p_user_id uuid, p_event_id uuid",
+  lfo_record_business_ebitda_adjustment: "p_user_id uuid, p_payload jsonb",
+  lfo_delete_business_ebitda_adjustment: "p_user_id uuid, p_adjustment_id uuid",
+  lfo_record_business_bridge_item: "p_user_id uuid, p_payload jsonb",
+  lfo_delete_business_bridge_item: "p_user_id uuid, p_item_id uuid",
+  lfo_set_business_dcf: "p_user_id uuid, p_payload jsonb",
+  lfo_delete_business_dcf: "p_user_id uuid, p_dcf_id uuid",
+  lfo_apply_business_funding_round: "p_user_id uuid, p_payload jsonb",
+  lfo_create_business_quick_start: "p_user_id uuid, p_payload jsonb",
 };
 
 const storagePolicies = [

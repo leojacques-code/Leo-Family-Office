@@ -834,11 +834,18 @@ export interface DashboardState {
   realEstateOperatingTerms: RealEstateOperatingTerms[];
   /** Rattachements bien ↔ dette. Ne portent aucun passif. */
   realEstateFinancingLinks: RealEstateFinancingLink[];
-  /** Business Equity V2 — faits canoniques, puis lecture dérivée. */
+  /**
+   * Business Equity V2.1 — FAITS canoniques uniquement. Aucune valorisation dérivée n'est
+   * persistée ni transportée ici : `businessValuations` porte des BASES de valorisation
+   * (méthode, multiple, hypothèses), pas leurs résultats.
+   */
   businesses?: import("@/lib/engine/business-equity").BusinessEntity[];
   businessOwnership?: import("@/lib/engine/business-equity").BusinessOwnership[];
   businessFinancials?: import("@/lib/engine/business-equity").BusinessFinancialSnapshot[];
-  businessValuations?: import("@/lib/engine/business-equity").BusinessValuation[];
+  businessValuations?: import("@/lib/engine/business-equity").BusinessValuationBasis[];
+  businessEbitdaAdjustments?: import("@/lib/engine/business-equity").BusinessEbitdaAdjustment[];
+  businessBridgeItems?: import("@/lib/engine/business-equity").BusinessBridgeItem[];
+  businessDcfAssumptions?: import("@/lib/engine/business-equity").BusinessDcfAssumptions[];
   businessCapitalEvents?: import("@/lib/engine/business-equity").BusinessCapitalEvent[];
   businessHoldings?: import("@/lib/engine/business-equity").BusinessHoldingLink[];
   liabilities: Liability[];
