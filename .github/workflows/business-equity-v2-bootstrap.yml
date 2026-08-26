@@ -35,3 +35,4 @@ jobs:
       - run: npm run build
       - run: npm run db:local:up
       - run: npm run gate:local
+# semantic-gate
