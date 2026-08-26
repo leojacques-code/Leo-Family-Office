@@ -80,6 +80,12 @@ Corollaires appliqués dans le code existant, à préserver :
   tient pas lieu ;
 - une charge d'exploitation déclarée à zéro est une information, une charge non déclarée n'en
   est pas une : le rendement net qui en dépend reste non calculable.
+- l'absence d'événement de frais d'acquisition ou de capex ne vaut pas zéro : une déclaration
+  explicite, y compris à 0, est requise pour calculer coût de revient, plus-value et rendement sur
+  coût ; un événement futur ne modifie jamais une lecture présente ;
+- les flux immobiliers observés sont convertis par le FX Engine à la date de chaque transaction ;
+  une dette future dans une autre devise reste non calculable sans courbe FX future explicite, le
+  dernier spot n'étant jamais prolongé silencieusement.
 
 ## 4. Provenance, qualité, honnêteté
 

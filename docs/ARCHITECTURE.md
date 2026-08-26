@@ -137,11 +137,19 @@ produits par le moteur.
   chaque encours vient de `outstandingBalanceAt`, chaque service de dette et chaque coût
   économique de `debtServiceBreakdownForPeriod`. `real_estate_financing_links` ne porte qu'une
   quote-part, jamais un passif ;
-- le **Cash Flow Engine** classe les flux réels. `computeObservedCashFlow` est appelé tel quel sur
-  le sous-ensemble des transactions rattachées à un bien par `transactions.property_id` : aucune
-  nature n'est réinterprétée, aucun flux n'est créé ;
+- le **Cash Flow Engine** classe les flux réels. `computeObservedCashFlow` est appelé sur le
+  sous-ensemble des transactions rattachées à un bien par `transactions.property_id`, après leur
+  seule normalisation monétaire par le FX Engine : aucune nature n'est réinterprétée, aucun flux
+  n'est créé ;
 - le **FX Engine** est l'unique convertisseur. Chaque fait est converti à SA date ; un taux absent
   rend la grandeur dépendante `NOT_COMPUTABLE` et ne vaut jamais 1.
+
+Une transaction immobilière en devise étrangère est convertie au taux historique de sa date avant
+d'entrer dans l'agrégat observé ; si un seul taux manque, l'agrégat complet reste
+`NOT_COMPUTABLE`. À l'inverse, une échéance de dette future en devise étrangère n'a pas de taux
+historique : faute de courbe FX future explicitement modélisée, service de dette, principal, coût
+économique et encours projeté restent `NOT_COMPUTABLE`. Le dernier spot n'est jamais figé en
+silence pour fabriquer une projection.
 
 Le domaine produit **une seule ligne de bilan par bien, du côté actif**, en devise native : c'est le
 Canonical Balance Sheet qui convertit, une fois, avec sa propre traçabilité. Il n'émet **aucune
@@ -150,9 +158,11 @@ la compterait deux fois. Un bien sans valorisation, ou dont la quote-part déten
 déclarée, émet une ligne de montant `null` portant ses motifs : l'actif existe, son montant est
 inconnu, et l'actif brut devient `PARTIAL` au lieu d'être silencieusement sous-évalué.
 
-Un terme d'exploitation non déclaré n'est jamais traité comme nul. Déclarer 0 est une information ;
-ne rien déclarer n'en est pas une, et toute grandeur qui en dépend reste `NOT_COMPUTABLE` en disant
-lequel manque. Chaque rendement nomme son dénominateur (`grossYieldOnValue`, `grossYieldOnCost`,
+Un terme d'exploitation ou une famille de coûts de capital non déclarée n'est jamais traité comme
+nul. Déclarer un événement de frais d'acquisition ou de capex à 0 est une information ; ne rien
+déclarer n'en est pas une, et coût de revient, plus-value et rendements dépendants restent
+`NOT_COMPUTABLE` en disant lequel manque. Les événements postérieurs à la date de lecture sont
+ignorés et signalés. Chaque rendement nomme son dénominateur (`grossYieldOnValue`, `grossYieldOnCost`,
 `netYieldOnValue`, `netYieldOnCost`) : un rendement sur prix nu et un rendement sur coût complet ne
 sont pas la même grandeur. Aucune fiscalité n'est produite sans taux effectif déclaré par
 l'utilisateur, et l'assiette à laquelle ce taux s'applique est nommée dans le résultat
@@ -192,6 +202,12 @@ hypothétique y passe par `syntheticLoan`, qui construit une `Liability` confié
 LFO n'a qu'un moteur d'amortissement. `amortizeLoan` de `financial.ts` est déprécié et sans
 consommateur applicatif. Une hypothèse de croissance non fournie n'est pas remplacée par zéro : le
 scénario reste incalculable et le dit.
+
+Le refinancement distingue son coût économique de son flux initial : `nouveau capital − encours
+soldé − indemnité − frais`. Une différence de principal est donc une entrée ou une sortie de
+trésorerie, jamais une économie d'intérêt. Un financement de travaux supérieur au capex, un crédit
+prospectif supérieur au coût total ou toute combinaison future multi-devise sans courbe FX rend la
+métrique concernée `NOT_COMPUTABLE` au lieu d'inventer la destination de l'excédent ou le change.
 
 Le Personal Monthly Financial Model porte les actifs non financiers **constants** sur toute la
 projection, comme il porte déjà les passifs sans échéancier, avec le drapeau

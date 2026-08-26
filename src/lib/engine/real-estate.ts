@@ -98,6 +98,9 @@ export type RealEstateFlagCode =
   | "OWNERSHIP_SHARE_MISSING"
   | "ACQUISITION_PRICE_MISSING"
   | "ACQUISITION_COSTS_NOT_DECLARED"
+  | "CAPEX_NOT_DECLARED"
+  | "DISPOSAL_COSTS_NOT_DECLARED"
+  | "CAPITAL_EVENT_FUTURE_IGNORED"
   | "OPERATING_TERMS_MISSING"
   | "OPERATING_TERM_UNDECLARED"
   | "VACANCY_RATE_MISSING"
@@ -113,6 +116,7 @@ export type RealEstateFlagCode =
   | "CURRENCY_MIXED"
   | "FX_MISSING"
   | "FX_STALE"
+  | "FUTURE_FX_UNAVAILABLE"
   | "FX_PNL_NOT_ISOLATED"
   | "TAX_RATE_UNDECLARED"
   | "DISPOSED"
@@ -412,6 +416,8 @@ export interface RealEstateEquityView {
 
 export interface RealEstateAssetView {
   asset: RealEstateAsset;
+  /** Devise commune de toutes les grandeurs dérivées de cette vue. */
+  reportingCurrency: string;
   usage: RealEstateUsage | null;
   /** Cédé ou archivé : il ne pèse plus au bilan, ses faits restent lisibles. */
   isOnBalanceSheet: boolean;
@@ -558,9 +564,10 @@ function sumCapitalEvents(
   type: RealEstateCapitalEvent["type"],
   reportingCurrency: string,
   rates: CurrencyRate[],
+  missingBlocker: string,
 ): { amount: DerivedAmount; count: number } {
   const matching = events.filter((event) => event.type === type);
-  if (!matching.length) return { amount: known(0), count: 0 };
+  if (!matching.length) return { amount: unknown(missingBlocker), count: 0 };
   const parts = matching.map(
     (event) =>
       convert(event.amount, event.currency, event.eventDate, reportingCurrency, rates).amount,
@@ -698,7 +705,15 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
     };
 
     // ── Base de coût ────────────────────────────────────────────────────────────────
-    const assetEvents = input.capitalEvents.filter((event) => event.propertyId === asset.id);
+    const allAssetEvents = input.capitalEvents.filter((event) => event.propertyId === asset.id);
+    const futureAssetEvents = allAssetEvents.filter((event) => event.eventDate > input.asOfDate);
+    const assetEvents = allAssetEvents.filter((event) => event.eventDate <= input.asOfDate);
+    if (futureAssetEvents.length > 0) {
+      flags.push({
+        code: "CAPITAL_EVENT_FUTURE_IGNORED",
+        detail: `${futureAssetEvents.length} événement(s) de capital postérieur(s) au ${input.asOfDate} sont ignorés à cette date. Un fait futur ne modifie ni le coût de revient ni la plus-value actuelle.`,
+      });
+    }
     const acquisitionPriceEvent = assetEvents.find((event) => event.type === "ACQUISITION_PRICE");
     const acquisitionPrice =
       acquisitionPriceEvent === undefined
@@ -722,6 +737,7 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
       "ACQUISITION_COST",
       input.reportingCurrency,
       rates,
+      `ACQUISITION_COSTS_NOT_DECLARED:${asset.id}`,
     );
     if (acquisitionPriceEvent !== undefined && acquisitionCosts.count === 0) {
       flags.push({
@@ -730,7 +746,20 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
           "Aucun frais d'acquisition déclaré. Le coût de revient retenu est donc le seul prix d'achat, et il est probablement sous-estimé.",
       });
     }
-    const capex = sumCapitalEvents(assetEvents, "CAPEX", input.reportingCurrency, rates);
+    const capex = sumCapitalEvents(
+      assetEvents,
+      "CAPEX",
+      input.reportingCurrency,
+      rates,
+      `CAPEX_NOT_DECLARED:${asset.id}`,
+    );
+    if (capex.count === 0) {
+      flags.push({
+        code: "CAPEX_NOT_DECLARED",
+        detail:
+          "Historique des travaux capitalisés non déclaré. Aucun événement ne signifie pas zéro : coût de revient, plus-value et rendements sur coût restent non calculables jusqu’à une déclaration explicite, y compris 0.",
+      });
+    }
     const disposalPriceEvent = assetEvents.find((event) => event.type === "DISPOSAL_PRICE");
     const disposalPrice =
       disposalPriceEvent === undefined
@@ -747,7 +776,15 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
       "DISPOSAL_COST",
       input.reportingCurrency,
       rates,
+      `DISPOSAL_COSTS_NOT_DECLARED:${asset.id}`,
     );
+    if (disposalPriceEvent !== undefined && disposalCosts.count === 0) {
+      flags.push({
+        code: "DISPOSAL_COSTS_NOT_DECLARED",
+        detail:
+          "Prix de cession enregistré sans frais de cession déclarés. La plus-value réalisée reste non calculable : l’absence de frais saisis n’est pas un frais nul.",
+      });
+    }
     const totalCostBasis = sumAll([acquisitionPrice, acquisitionCosts.amount, capex.amount]);
     const costBasis: RealEstateCostBasisView = {
       acquisitionPrice,
@@ -856,10 +893,16 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
           addYear(input.asOfDate),
         );
         const timeline = buildLoanTimeline(liability, input.asOfDate);
-        const scaled = scaleDebtConsequences(
-          breakdown,
-          overAllocated ? Number.NaN : link.allocationShare,
-        );
+        const scaled = scaleDebtConsequences(breakdown, link.allocationShare);
+        const futureFxBlocker = `FUTURE_FX_UNAVAILABLE:${currency}/${input.reportingCurrency}:${liability.id}`;
+        const crossCurrencyProjection =
+          currency.toUpperCase() !== input.reportingCurrency.toUpperCase();
+        if (crossCurrencyProjection) {
+          flags.push({
+            code: "FUTURE_FX_UNAVAILABLE",
+            detail: `Les échéances futures du concours « ${liability.name} » sont en ${currency}. Le FX Engine ne porte aucune courbe de change future fiable vers ${input.reportingCurrency} : service de dette, principal et coût économique projetés restent non calculables au lieu de figer silencieusement le dernier spot.`,
+          });
+        }
         const guarded: RealEstateDebtConsequences = overAllocated
           ? {
               ...EMPTY_DEBT_CONSEQUENCES,
@@ -872,7 +915,18 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
               economicCost: unknown(`DEBT_OVER_ALLOCATED:${liability.id}`),
               dataKind: "MISSING",
             }
-          : scaled;
+          : crossCurrencyProjection
+            ? {
+                cashDebtService: unknown(futureFxBlocker),
+                principalPaid: unknown(futureFxBlocker),
+                interestPaid: unknown(futureFxBlocker),
+                capitalisedInterest: unknown(futureFxBlocker),
+                insurancePaid: unknown(futureFxBlocker),
+                feesPaid: unknown(futureFxBlocker),
+                economicCost: unknown(futureFxBlocker),
+                dataKind: "MISSING",
+              }
+            : scaled;
         return {
           link,
           liability,
@@ -900,9 +954,11 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
     const financingState: RealEstateFinancingState =
       financing.length > 0
         ? "LINKED"
-        : asset.isDebtFinanced === false
-          ? "DECLARED_NONE"
-          : "UNKNOWN";
+        : assetLinks.length > 0
+          ? "UNKNOWN"
+          : asset.isDebtFinanced === false
+            ? "DECLARED_NONE"
+            : "UNKNOWN";
 
     if (financingState === "LINKED" && asset.isDebtFinanced === false) {
       // Un rattachement est un FAIT qui pointe une dette réelle ; la déclaration n'est
@@ -940,9 +996,11 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
     /** `null` de financement inconnu, avec le motif qui dit laquelle des deux situations. */
     const financingUnknown = (): DerivedAmount =>
       unknown(
-        asset.isDebtFinanced === true
-          ? `DEBT_DECLARED_NOT_LINKED:${asset.id}`
-          : `FINANCING_UNDECLARED:${asset.id}`,
+        assetLinks.length > 0
+          ? `FINANCING_LINK_ORPHAN:${asset.id}`
+          : asset.isDebtFinanced === true
+            ? `DEBT_DECLARED_NOT_LINKED:${asset.id}`
+            : `FINANCING_UNDECLARED:${asset.id}`,
       );
 
     const debt: RealEstateDebtConsequences =
@@ -1175,13 +1233,47 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
     const attachedTransactions = transactions.filter(
       (transaction) => transaction.propertyId === asset.id,
     );
+    const observedFxBlockers: string[] = [];
+    const convertedTransactions = attachedTransactions.flatMap((transaction) => {
+      const converted = convert(
+        transaction.amount,
+        transaction.currency,
+        transaction.date,
+        input.reportingCurrency,
+        rates,
+      );
+      if (converted.fx.status === "MISSING" || converted.amount.value === null) {
+        const blocker = `FX_MISSING:${transaction.currency}/${input.reportingCurrency}@${transaction.date}`;
+        observedFxBlockers.push(blocker);
+        flags.push({
+          code: "FX_MISSING",
+          detail: `Transaction immobilière « ${transaction.label} » du ${transaction.date} en ${transaction.currency} : aucun taux historique vers ${input.reportingCurrency}. Les flux observés du bien restent non calculables.`,
+        });
+        return [];
+      }
+      if (converted.fx.status === "STALE") {
+        flags.push({
+          code: "FX_STALE",
+          detail: `Transaction immobilière « ${transaction.label} » du ${transaction.date} convertie avec le taux ${transaction.currency}/${input.reportingCurrency} du ${converted.fx.rateDate}.`,
+        });
+      }
+      return [
+        {
+          ...transaction,
+          amount: converted.amount.value,
+          currency: input.reportingCurrency,
+        },
+      ];
+    });
     const cashFlow =
       attachedTransactions.length === 0
         ? null
-        : computeObservedCashFlow(attachedTransactions, categories, observedStart, observedEnd, {
-            ledgerCoverageStart: input.ledgerCoverageStart ?? null,
-            asOfDate: input.asOfDate,
-          });
+        : observedFxBlockers.length > 0
+          ? null
+          : computeObservedCashFlow(convertedTransactions, categories, observedStart, observedEnd, {
+              ledgerCoverageStart: input.ledgerCoverageStart ?? null,
+              asOfDate: input.asOfDate,
+            });
     if (cashFlow !== null && cashFlow.coverage.status !== "COMPLETE") {
       flags.push({
         code: "OBSERVED_LEDGER_NOT_COVERED",
@@ -1192,9 +1284,11 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
     // ledger, le moteur ne peut pas affirmer que ces encaissements sont des loyers : il
     // livre la somme qu'il sait classer et signale ce qu'elle ne prouve pas.
     const observedIncome =
-      cashFlow === null || cashFlow.coverage.status !== "COMPLETE"
-        ? unknown(`OBSERVED_LEDGER_NOT_COVERED:${asset.id}`)
-        : known(cashFlow.income);
+      observedFxBlockers.length > 0
+        ? unknown(...observedFxBlockers)
+        : cashFlow === null || cashFlow.coverage.status !== "COMPLETE"
+          ? unknown(`OBSERVED_LEDGER_NOT_COVERED:${asset.id}`)
+          : known(cashFlow.income);
     if (observedIncome.value !== null) {
       flags.push({
         code: "OBSERVED_INCOME_NOT_RENT_QUALIFIED",
@@ -1213,6 +1307,7 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
 
     return {
       asset,
+      reportingCurrency: input.reportingCurrency,
       usage: asset.usage,
       isOnBalanceSheet,
       disposedAt,
@@ -1243,6 +1338,7 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
 
   const grossValue = aggregateOnSheet((view) => view.valuation.ownerValue);
   const attributedDebt = aggregateOnSheet((view) => view.equity.attributedOutstandingDebt);
+  const equity = aggregateOnSheet((view) => view.equity.currentEquity);
   const flags = dedupeFlags(assets.flatMap((view) => view.flags));
   const blockers = [...new Set([...grossValue.blockers, ...attributedDebt.blockers])];
 
@@ -1252,7 +1348,7 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
     assets,
     grossValue,
     attributedDebt,
-    equity: aggregateOnSheet((view) => view.equity.currentEquity),
+    equity,
     unrealisedGain: aggregateOnSheet((view) => view.equity.unrealisedGain),
     annualNetOperatingIncome: aggregateOnSheet(
       (view) => view.operating.attributedNetOperatingIncome,
@@ -1260,7 +1356,7 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
     annualPreTaxCashFlow: aggregateOnSheet((view) => view.returns.preTaxCashFlow),
     annualEconomicFinancingCost: aggregateOnSheet((view) => view.debt.economicCost),
     flags,
-    quality: { status: grossValue.status, blockers },
+    quality: { status: equity.status, blockers },
   };
 }
 

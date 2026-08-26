@@ -1182,7 +1182,7 @@ function ProspectiveStudy({
           />
           <MetricCard
             label="Apport réellement engagé"
-            value={<Currency value={result.equityEngaged} />}
+            value={<Derived amount={result.equityEngaged} />}
             detail="Coût total − capital emprunté"
           />
           <MetricCard
