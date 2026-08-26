@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { BUSINESS_CAPITAL_EVENT_TYPES, BUSINESS_TYPES, BUSINESS_VALUATION_METHODS } from "@/lib/engine/business-equity";
+
 import { AS_OF_DATE } from "@/lib/data/shared";
 import {
   LEDGER_COVERAGE_SOURCES,
@@ -381,7 +383,71 @@ const realEstateFinancingLinkSchema = z
   })
   .strict();
 
+
+/** Business Equity V2 — null means unknown, never zero. */
+const businessSchema = z.object({
+  businessId: z.uuid().nullable(),
+  name: z.string().trim().min(1).max(160),
+  legalForm: z.string().trim().max(80).nullable(),
+  type: z.enum(BUSINESS_TYPES).nullable(),
+  functionalCurrency: z.string().trim().length(3).nullable(),
+  notes: z.string().trim().max(1000).nullable(),
+}).strict();
+
+const businessOwnershipSchema = z.object({
+  businessId: z.uuid(),
+  effectiveDate: realDate,
+  legalRate: finite.gt(0).max(1),
+  economicRate: finite.gt(0).max(1).nullable(),
+  votingRate: finite.min(0).max(1).nullable(),
+  fullyDilutedRate: finite.gt(0).max(1).nullable(),
+  notes: z.string().trim().max(1000).nullable(),
+}).strict();
+
+const businessFinancialSchema = z.object({
+  businessId: z.uuid(), periodEnd: realDate, currency: z.string().trim().length(3).nullable(),
+  revenue: finite.nullable(), grossMargin: finite.nullable(), ebitda: finite.nullable(),
+  ebit: finite.nullable(), netIncome: finite.nullable(), cash: finite.nonnegative().nullable(),
+  grossDebt: finite.nonnegative().nullable(), workingCapital: finite.nullable(),
+  capex: finite.nonnegative().nullable(), freeCashFlow: finite.nullable(),
+  notes: z.string().trim().max(1000).nullable(),
+}).strict();
+
+const businessValuationSchema = z.object({
+  businessId: z.uuid(), valuationDate: realDate, currency: z.string().trim().length(3).nullable(),
+  method: z.enum(BUSINESS_VALUATION_METHODS), enterpriseValue: finite.nullable(),
+  equityValue: finite.nullable(), valuationMultiple: finite.nullable(),
+  notes: z.string().trim().max(1000).nullable(),
+}).strict().superRefine((value, context) => {
+  if (value.enterpriseValue === null && value.equityValue === null) {
+    context.addIssue({ code: "custom", message: "Enterprise Value ou Equity Value requise", path: ["equityValue"] });
+  }
+});
+
+const businessCapitalEventSchema = z.object({
+  businessId: z.uuid(), type: z.enum(BUSINESS_CAPITAL_EVENT_TYPES), eventDate: realDate,
+  amount: finite.nonnegative(), currency: z.string().trim().length(3),
+  ownershipDelta: finite.min(-1).max(1).nullable(), transactionId: z.uuid().nullable(),
+  notes: z.string().trim().max(1000).nullable(),
+}).strict();
+
+const businessHoldingSchema = z.object({
+  parentBusinessId: z.uuid(), childBusinessId: z.uuid(), effectiveDate: realDate,
+  ownershipRate: finite.gt(0).max(1), notes: z.string().trim().max(1000).nullable(),
+}).strict().superRefine((value, context) => {
+  if (value.parentBusinessId === value.childBusinessId) {
+    context.addIssue({ code: "custom", message: "Une société ne peut pas se détenir elle-même", path: ["childBusinessId"] });
+  }
+});
+
 export const mutationSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("save_business"), business: businessSchema }).strict(),
+  z.object({ action: z.literal("archive_business"), businessId: z.uuid() }).strict(),
+  z.object({ action: z.literal("record_business_ownership"), ownership: businessOwnershipSchema }).strict(),
+  z.object({ action: z.literal("record_business_financials"), financials: businessFinancialSchema }).strict(),
+  z.object({ action: z.literal("record_business_valuation"), valuation: businessValuationSchema }).strict(),
+  z.object({ action: z.literal("record_business_capital_event"), event: businessCapitalEventSchema }).strict(),
+  z.object({ action: z.literal("set_business_holding"), holding: businessHoldingSchema }).strict(),
   z.object({ action: z.literal("save_debt_contract"), contract: debtContractSchema }),
   z.object({
     action: z.literal("record_debt_balance"),

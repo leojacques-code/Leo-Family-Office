@@ -30,6 +30,8 @@ const canonicalMigrations = [
   "20260825193606",
   "20260826090117",
   "20260826090347",
+  "20260826145426",
+  "20260826145803",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -214,6 +216,12 @@ const requiredColumns: Record<string, string[]> = {
     "data_kind",
     "confidence",
   ],
+  businesses: ["id","business_type","functional_currency","archived","data_kind","confidence"],
+  business_ownership: ["id","business_id","ownership_rate","economic_rate","voting_rate","fully_diluted_rate","effective_date","data_kind","confidence"],
+  business_financials: ["id","business_id","period_end","currency","revenue","ebitda","cash","debt","ebit","net_income","capex","free_cash_flow","data_kind","confidence"],
+  business_valuations: ["id","business_id","valuation_date","method","currency","enterprise_value","equity_value","valuation_multiple","data_kind","confidence"],
+  business_capital_events: ["id","business_id","event_type","event_date","amount","currency","ownership_delta","transaction_id","data_kind","confidence"],
+  business_holdings: ["id","parent_business_id","child_business_id","effective_date","ownership_rate","data_kind","confidence"],
 };
 
 const userOwnedTables = [
@@ -270,6 +278,8 @@ const userOwnedTables = [
   "real_estate_capital_events",
   "real_estate_operating_terms",
   "real_estate_financing_links",
+  "business_capital_events",
+  "business_holdings",
 ] as const;
 
 /**
@@ -312,6 +322,20 @@ const requiredIndexes = [
   "real_estate_valuations_property_owner_idx",
   "real_estate_capital_events_property_owner_idx",
   "real_estate_operating_terms_property_owner_idx",
+  "businesses_id_user_uidx",
+  "business_ownership_effective_uk",
+  "business_ownership_business_owner_idx",
+  "business_financials_business_owner_idx",
+  "business_valuations_business_owner_idx",
+  "business_capital_events_business_owner_idx",
+  "business_holdings_parent_owner_idx",
+  "business_holdings_child_owner_idx",
+  "business_financials_effective_uk",
+  "business_valuations_effective_uk",
+  "businesses_user_idx",
+  "business_financials_user_idx",
+  "business_valuations_user_idx",
+  "business_capital_events_user_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx"] as const;
 
@@ -393,6 +417,21 @@ const requiredConstraints = [
   "real_estate_financing_links_pair_uk",
   "real_estate_financing_links_share_ck",
   "transactions_property_fk",
+  "business_ownership_business_fk",
+  "business_financials_business_fk",
+  "business_valuations_business_fk",
+  "business_ownership_rates_ck",
+  "business_valuations_value_ck",
+  "business_capital_events_business_fk",
+  "business_capital_events_transaction_fk",
+  "business_capital_events_amount_ck",
+  "business_capital_events_type_ck",
+  "business_capital_events_ownership_delta_ck",
+  "business_holdings_parent_fk",
+  "business_holdings_child_fk",
+  "business_holdings_no_self_ck",
+  "business_holdings_rate_ck",
+  "business_holdings_effective_uk",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
@@ -430,6 +469,13 @@ const requiredRpcs: Record<string, string> = {
   lfo_delete_real_estate_financing_link: "p_user_id uuid, p_link_id uuid",
   lfo_attribute_transaction_to_property:
     "p_user_id uuid, p_transaction_id uuid, p_property_id uuid",
+  lfo_save_business: "p_user_id uuid, p_payload jsonb",
+  lfo_archive_business: "p_user_id uuid, p_business_id uuid",
+  lfo_record_business_ownership: "p_user_id uuid, p_payload jsonb",
+  lfo_record_business_financials: "p_user_id uuid, p_payload jsonb",
+  lfo_record_business_valuation: "p_user_id uuid, p_payload jsonb",
+  lfo_record_business_capital_event: "p_user_id uuid, p_payload jsonb",
+  lfo_set_business_holding: "p_user_id uuid, p_payload jsonb",
 };
 
 const storagePolicies = [

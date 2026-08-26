@@ -1,5 +1,6 @@
 // Contrats de la couche données. Aucun import serveur : ce module est importable
 // depuis un composant client (import type) sans tirer "server-only" dans le bundle.
+import type { BusinessCapitalEventType, BusinessType, BusinessValuationMethod } from "@/lib/engine/business-equity";
 import type {
   CashFlowKind,
   DocumentRecord,
@@ -197,6 +198,72 @@ export interface RealEstateFinancingLinkInput {
   notes: string | null;
 }
 
+export interface BusinessInput {
+  businessId: string | null;
+  name: string;
+  legalForm: string | null;
+  type: BusinessType | null;
+  functionalCurrency: string | null;
+  notes: string | null;
+}
+
+export interface BusinessOwnershipInput {
+  businessId: string;
+  effectiveDate: string;
+  legalRate: number;
+  economicRate: number | null;
+  votingRate: number | null;
+  fullyDilutedRate: number | null;
+  notes: string | null;
+}
+
+export interface BusinessFinancialInput {
+  businessId: string;
+  periodEnd: string;
+  currency: string | null;
+  revenue: number | null;
+  grossMargin: number | null;
+  ebitda: number | null;
+  ebit: number | null;
+  netIncome: number | null;
+  cash: number | null;
+  grossDebt: number | null;
+  workingCapital: number | null;
+  capex: number | null;
+  freeCashFlow: number | null;
+  notes: string | null;
+}
+
+export interface BusinessValuationInput {
+  businessId: string;
+  valuationDate: string;
+  currency: string | null;
+  method: BusinessValuationMethod;
+  enterpriseValue: number | null;
+  equityValue: number | null;
+  valuationMultiple: number | null;
+  notes: string | null;
+}
+
+export interface BusinessCapitalEventInput {
+  businessId: string;
+  type: BusinessCapitalEventType;
+  eventDate: string;
+  amount: number;
+  currency: string;
+  ownershipDelta: number | null;
+  transactionId: string | null;
+  notes: string | null;
+}
+
+export interface BusinessHoldingInput {
+  parentBusinessId: string;
+  childBusinessId: string;
+  effectiveDate: string;
+  ownershipRate: number;
+  notes: string | null;
+}
+
 export type Mutation =
   | { action: "save_debt_contract"; contract: DebtContractInput }
   | {
@@ -297,6 +364,13 @@ export type Mutation =
   | { action: "record_portfolio_event"; event: PortfolioEventInput }
   | { action: "delete_portfolio_event"; eventId: string }
   | { action: "set_portfolio_envelope_policy"; policy: PortfolioEnvelopePolicyInput }
+  | { action: "save_business"; business: BusinessInput }
+  | { action: "archive_business"; businessId: string }
+  | { action: "record_business_ownership"; ownership: BusinessOwnershipInput }
+  | { action: "record_business_financials"; financials: BusinessFinancialInput }
+  | { action: "record_business_valuation"; valuation: BusinessValuationInput }
+  | { action: "record_business_capital_event"; event: BusinessCapitalEventInput }
+  | { action: "set_business_holding"; holding: BusinessHoldingInput }
   | { action: "save_real_estate_asset"; asset: RealEstateAssetInput }
   | { action: "archive_real_estate_asset"; propertyId: string }
   | { action: "record_real_estate_valuation"; valuation: RealEstateValuationInput }
