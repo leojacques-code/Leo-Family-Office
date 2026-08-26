@@ -1,4 +1,4 @@
-name: Business Equity V2 complete and checks
+name: Business Equity V2 final gates
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
     paths: [.github/workflows/business-equity-v2-bootstrap.yml]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify:
@@ -20,18 +20,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: python3 scripts/repair-business-equity-v2.py
-      - run: python3 scripts/complete-business-equity-v2.py
-      - name: Persist completion
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "feat(business): complete Business Equity V2 integration" || true
-          git push
       - run: npm ci
       - run: npm run lint
       - run: npm run test
       - run: npx tsc --noEmit
       - run: npm run build
-# complete-v1
+      - run: npm run gate:local
