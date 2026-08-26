@@ -113,6 +113,12 @@ Le moteur ne persiste aucun rendement. Il produit, enveloppe par enveloppe, gain
 XIRR, PnL réalisé et non réalisé, revenus, frais, taxes, drawdown observé, volatilité annualisée et
 attribution lorsque leur preuve est complète. Chaque métrique porte son propre statut et ses
 blocages : une allocation actuelle peut donc rester exploitable alors que le TWR ne l'est pas.
+Les agrégats monétaires d'une enveloppe sont exprimés dans sa devise : les flux et charges sont
+convertis à leur date d'événement, les produits de cession à la date de cession, les coûts à la
+date d'acquisition et les positions à leur date de valorisation. Cette normalisation utilise
+uniquement le FX Engine ; elle ne consomme jamais directement un PnL ou un coût agrégé en devises
+natives. Si une conversion historique fidèle n'est plus reconstructible, la métrique est
+`NOT_COMPUTABLE` avec un blocage explicite.
 
 L'allocation et la concentration globales consomment exclusivement les expositions du bilan. Une
 poche non exposée est affichée comme telle ; elle n'est ni répartie entre les classes connues ni
