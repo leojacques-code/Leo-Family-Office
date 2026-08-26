@@ -1,4 +1,4 @@
-name: Business Equity V2 repair and checks
+name: Business Equity V2 complete and checks
 
 on:
   push:
@@ -21,16 +21,17 @@ jobs:
           node-version: 24
           cache: npm
       - run: python3 scripts/repair-business-equity-v2.py
-      - name: Persist repair
+      - run: python3 scripts/complete-business-equity-v2.py
+      - name: Persist completion
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/data/contracts.ts
-          git commit -m "fix(business): repair mutation contracts" || true
+          git add -A
+          git commit -m "feat(business): complete Business Equity V2 integration" || true
           git push
       - run: npm ci
       - run: npm run lint
       - run: npm run test
       - run: npx tsc --noEmit
       - run: npm run build
-# repair-v1
+# complete-v1
