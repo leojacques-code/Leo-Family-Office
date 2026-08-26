@@ -9,7 +9,8 @@ for line in lines:
     if not inside and 'String.raw`' in line:
         inside=True
         head, tail=line.split('String.raw`',1)
-        out.append(head+'String.raw`'+escape_generated(tail))
+        # Use a normal template after escaping generated backticks/interpolations.
+        out.append(head+'`'+escape_generated(tail))
         continue
     if inside:
         if line.startswith('`);') or line.startswith('`);\n'):
