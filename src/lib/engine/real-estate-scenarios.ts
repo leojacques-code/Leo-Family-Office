@@ -109,7 +109,12 @@ const add = (...parts: DerivedAmount[]) =>
 const minus = (left: DerivedAmount, right: DerivedAmount) =>
   combine([left, right], ([a, b]) => a - b);
 const times = (amount: DerivedAmount, factor: number) =>
-  amount.value === null ? amount : { value: amount.value * factor, blockers: amount.blockers };
+  amount.value === null
+    ? amount
+    : {
+        value: Object.is(amount.value * factor, -0) ? 0 : amount.value * factor,
+        blockers: amount.blockers,
+      };
 
 /** Série de trésorerie exploitable seulement si TOUS ses termes sont connus. */
 function cashFlowSeries(parts: DerivedAmount[]): number[] | null {
@@ -164,6 +169,13 @@ function financingUnknown(view: RealEstateAssetView): DerivedAmount {
   );
 }
 
+function futureFxUnknown(view: RealEstateAssetView, liability: Liability): DerivedAmount | null {
+  const currency = liability.currency ?? view.reportingCurrency;
+  return currency.toUpperCase() === view.reportingCurrency.toUpperCase()
+    ? null
+    : unknown(`FUTURE_FX_UNAVAILABLE:${currency}/${view.reportingCurrency}:${liability.id}`);
+}
+
 /**
  * Conséquences canoniques d'un ensemble de dettes sur une fenêtre, mises à la quote-part
  * de chaque rattachement. Le Debt Engine est appelé UNE FOIS PAR DETTE, avec sa propre
@@ -187,6 +199,10 @@ function attributedDebtOverWindow(
     return { cashOut: missing, economicCost: missing, principal: missing };
   }
   const parts = view.financing.map((line) => {
+    const fxMissing = futureFxUnknown(view, line.liability);
+    if (fxMissing !== null) {
+      return { cashOut: fxMissing, economicCost: fxMissing, principal: fxMissing };
+    }
     const breakdown = debtServiceBreakdownForPeriod([line.liability], asOfDate, start, end);
     return {
       cashOut: known(breakdown.totalCashOut * line.allocationShare),
@@ -211,8 +227,10 @@ function attributedOutstandingAt(
     return view.asset.isDebtFinanced === false ? known(0) : financingUnknown(view);
   }
   return add(
-    ...view.financing.map((line) =>
-      known(outstandingBalanceAt(line.liability, asOfDate, targetDate) * line.allocationShare),
+    ...view.financing.map(
+      (line) =>
+        futureFxUnknown(view, line.liability) ??
+        known(outstandingBalanceAt(line.liability, asOfDate, targetDate) * line.allocationShare),
     ),
   );
 }
@@ -392,9 +410,11 @@ export function sellScenario(
       : times(attributedSalePrice, input.sellingCostsRate);
   const debtPayoff = view.equity.attributedOutstandingDebt;
   const prepaymentPenalty =
-    input.prepaymentPenalty === null
-      ? unknown(`PREPAYMENT_PENALTY_UNKNOWN:${view.asset.id}`)
-      : known(input.prepaymentPenalty);
+    view.financingState === "DECLARED_NONE"
+      ? known(0)
+      : input.prepaymentPenalty === null
+        ? unknown(`PREPAYMENT_PENALTY_UNKNOWN:${view.asset.id}`)
+        : known(input.prepaymentPenalty);
   if (input.prepaymentPenalty === null && view.financing.length > 0) {
     notes.push(
       "Indemnité de remboursement anticipé inconnue : le produit net reste non calculable. Elle n'est pas supposée nulle.",
@@ -493,6 +513,8 @@ export interface RefinanceScenarioResult extends RealEstateScenarioResult {
   economicSaving: DerivedAmount;
   /** Encours soldé par l'opération, lu sur le Debt Engine. */
   refinancedOutstanding: DerivedAmount;
+  /** Nouveau capital − encours soldé. Positif = trésorerie reçue, négatif = apport requis. */
+  netFinancingProceeds: DerivedAmount;
 }
 
 /**
@@ -555,6 +577,12 @@ export function refinanceScenario(
       ? unknown(`ARRANGEMENT_FEES_UNKNOWN:${view.asset.id}`)
       : known(input.arrangementFees);
   const refinancedOutstanding = view.equity.attributedOutstandingDebt;
+  const newLoanCurrency = loan.currency ?? view.reportingCurrency;
+  const newPrincipal =
+    newLoanCurrency.toUpperCase() === view.reportingCurrency.toUpperCase()
+      ? known(loan.principal)
+      : unknown(`FUTURE_FX_UNAVAILABLE:${newLoanCurrency}/${view.reportingCurrency}:${loan.id}`);
+  const netFinancingProceeds = minus(newPrincipal, refinancedOutstanding);
   const terminalEquity =
     years.at(-1)?.attributedEquity ?? unknown(`HORIZON_EMPTY:${view.asset.id}`);
   const base = finalise({
@@ -563,9 +591,9 @@ export function refinanceScenario(
     assetId: view.asset.id,
     horizonYears: assumptions.horizonYears,
     years,
-    // La trésorerie initiale du refinancement est le décaissement des frais et de
-    // l'indemnité : le nouveau concours solde l'ancien sans passer par la poche.
-    initialCashFlow: times(add(penalty, fees), -1),
+    // Le nouveau concours peut être supérieur ou inférieur à l'encours soldé. La différence
+    // est un flux de trésorerie, jamais une économie économique du financement.
+    initialCashFlow: minus(netFinancingProceeds, add(penalty, fees)),
     terminalCashFlow: terminalEquity,
     economicFinancingCost: refinancedCost,
     principalRepaid: add(...years.map((year) => year.attributedPrincipalRepaid)),
@@ -578,6 +606,7 @@ export function refinanceScenario(
     currentEconomicFinancingCost: currentCost,
     economicSaving: minus(currentCost, add(refinancedCost, penalty, fees)),
     refinancedOutstanding,
+    netFinancingProceeds,
   };
 }
 
@@ -658,10 +687,15 @@ export function worksScenario(
     noiAdjustment: uplift,
   });
   const financedAmount = input.financing?.principal ?? 0;
-  // Seule la part non financée sort de la poche. Un travail financé par le crédit n'est
-  // pas un apport : INV-E-01.
-  // `|| 0` normalise le zéro négatif : `-0` est trompeur dans un montant de trésorerie.
-  const cashOutlay = Math.max(0, input.capexAmount - financedAmount) || 0;
+  const financingCurrency = input.financing?.currency ?? view.reportingCurrency;
+  const cashOutlay: DerivedAmount =
+    financingCurrency.toUpperCase() !== view.reportingCurrency.toUpperCase()
+      ? unknown(
+          `FUTURE_FX_UNAVAILABLE:${financingCurrency}/${view.reportingCurrency}:works:${view.asset.id}`,
+        )
+      : financedAmount > input.capexAmount + 0.01
+        ? unknown(`WORKS_FINANCING_EXCEEDS_CAPEX:${view.asset.id}`)
+        : known(Math.max(0, input.capexAmount - financedAmount));
   const terminalEquity =
     years.at(-1)?.attributedEquity ?? unknown(`HORIZON_EMPTY:${view.asset.id}`);
   const base = finalise({
@@ -670,7 +704,7 @@ export function worksScenario(
     assetId: view.asset.id,
     horizonYears: assumptions.horizonYears,
     years,
-    initialCashFlow: known(cashOutlay === 0 ? 0 : -cashOutlay),
+    initialCashFlow: times(cashOutlay, -1),
     terminalCashFlow: terminalEquity,
     economicFinancingCost: add(...years.map((year) => year.attributedEconomicFinancingCost)),
     principalRepaid: add(...years.map((year) => year.attributedPrincipalRepaid)),
@@ -678,7 +712,7 @@ export function worksScenario(
     notes: [
       "Les travaux augmentent la base de coût du bien : ce n'est pas une charge d'exploitation.",
       "Un euro de travaux ne vaut pas automatiquement un euro de valeur : la hausse de valeur est une hypothèse déclarée, pas un résultat du moteur.",
-      ...(financedAmount > 0
+      ...(financedAmount > 0 && cashOutlay.value !== null
         ? [
             "Part financée par le crédit exclue de l'apport : un coût financé n'est pas une contribution en fonds propres.",
           ]
@@ -740,7 +774,7 @@ export interface ProspectiveRealEstateResult {
    * Trésorerie réellement engagée : coût total − capital emprunté. Un coût financé par le
    * crédit n'est pas un apport en fonds propres.
    */
-  equityEngaged: number;
+  equityEngaged: DerivedAmount;
   /** Mensualité totale du crédit envisagé, produite par le Debt Engine. */
   monthlyPayment: DerivedAmount;
   /** Loyer effectif annuel après vacance déclarée. */
@@ -783,8 +817,24 @@ export function underwriteProspectiveRealEstate(
   const totalProjectCost = input.purchasePrice + input.acquisitionCosts + input.works;
   const loan = input.loan === null ? null : syntheticLoan(input.loan, "prospective-loan");
   const borrowed = loan?.principal ?? 0;
-  const equityEngaged = Math.max(0, totalProjectCost - borrowed);
-  if (borrowed > input.purchasePrice) {
+  const loanCurrency = loan?.currency ?? input.currency;
+  const currenciesMatch = loanCurrency.toUpperCase() === input.currency.toUpperCase();
+  const prospectiveFxBlocker = `FUTURE_FX_UNAVAILABLE:${loanCurrency}/${input.currency}:prospective-loan`;
+  const financingExceedsProject = borrowed > totalProjectCost + 0.01;
+  const equityEngaged = currenciesMatch
+    ? financingExceedsProject
+      ? unknown("FINANCING_EXCEEDS_PROJECT_COST")
+      : known(Math.max(0, totalProjectCost - borrowed))
+    : unknown(prospectiveFxBlocker);
+  if (!currenciesMatch) {
+    notes.push(
+      `Projet en ${input.currency} et crédit en ${loanCurrency} : aucune courbe de change future fiable n'est déclarée. Apport, service de dette, equity et rentabilité restent non calculables.`,
+    );
+  } else if (financingExceedsProject) {
+    notes.push(
+      "Le financement dépasse le coût total du projet : l'excédent n'est pas attribuable sans destination déclarée. Apport et rentabilité restent non calculables.",
+    );
+  } else if (borrowed > input.purchasePrice) {
     notes.push(
       "Le financement dépasse le prix d'achat : il couvre aussi les frais ou les travaux, ce qui réduit l'apport réel sans réduire le coût de revient.",
     );
@@ -799,11 +849,13 @@ export function underwriteProspectiveRealEstate(
   const monthlyPayment =
     loan === null
       ? known(0)
-      : (() => {
-          const { start, end } = monthBounds(loan.firstPaymentDate);
-          const first = debtServiceBreakdownForPeriod([loan], observation, start, end);
-          return known(first.totalCashOut);
-        })();
+      : !currenciesMatch
+        ? unknown(prospectiveFxBlocker)
+        : (() => {
+            const { start, end } = monthBounds(loan.firstPaymentDate);
+            const first = debtServiceBreakdownForPeriod([loan], observation, start, end);
+            return known(first.totalCashOut);
+          })();
 
   const effectiveRent: DerivedAmount =
     input.annualGrossRent === null
@@ -819,6 +871,10 @@ export function underwriteProspectiveRealEstate(
 
   const debtOverWindow = (start: string, end: string) => {
     if (loan === null) return { cashOut: known(0), economicCost: known(0), principal: known(0) };
+    if (!currenciesMatch) {
+      const missing = unknown(prospectiveFxBlocker);
+      return { cashOut: missing, economicCost: missing, principal: missing };
+    }
     const breakdown = debtServiceBreakdownForPeriod([loan], observation, start, end);
     return {
       cashOut: known(breakdown.totalCashOut),
@@ -842,7 +898,11 @@ export function underwriteProspectiveRealEstate(
           ? unknown("VALUE_GROWTH_UNDECLARED")
           : known(input.purchasePrice * Math.pow(1 + input.assumptions.annualValueGrowth, year));
       const outstanding =
-        loan === null ? known(0) : known(outstandingBalanceAt(loan, observation, end));
+        loan === null
+          ? known(0)
+          : !currenciesMatch
+            ? unknown(prospectiveFxBlocker)
+            : known(outstandingBalanceAt(loan, observation, end));
       return {
         year,
         periodStart: start,
@@ -861,7 +921,11 @@ export function underwriteProspectiveRealEstate(
 
   const horizonEnd = years.at(-1)?.periodEnd ?? anchor;
   const outstandingAtHorizon =
-    loan === null ? known(0) : known(outstandingBalanceAt(loan, observation, horizonEnd));
+    loan === null
+      ? known(0)
+      : !currenciesMatch
+        ? unknown(prospectiveFxBlocker)
+        : known(outstandingBalanceAt(loan, observation, horizonEnd));
   const valueAtHorizon = years.at(-1)?.attributedValue ?? unknown("HORIZON_EMPTY");
   const sellingCosts =
     input.assumptions.sellingCostsRate === null
@@ -871,10 +935,12 @@ export function underwriteProspectiveRealEstate(
   const fullTermEconomicFinancingCost =
     loan === null
       ? known(0)
-      : known(
-          debtServiceBreakdownForPeriod([loan], observation, anchor, loan.maturityDate)
-            .economicCost,
-        );
+      : !currenciesMatch
+        ? unknown(prospectiveFxBlocker)
+        : known(
+            debtServiceBreakdownForPeriod([loan], observation, anchor, loan.maturityDate)
+              .economicCost,
+          );
   if (loan !== null && horizonEnd < loan.maturityDate) {
     notes.push(
       "Horizon antérieur à la maturité du crédit : les intérêts postérieurs à la sortie ne sont pas payés. Le coût sur l'horizon et le coût à terme sont deux montants distincts.",
@@ -886,11 +952,12 @@ export function underwriteProspectiveRealEstate(
   const withExit = periodic.map((flow, index) =>
     index === lastIndex ? add(flow, exitProceedsBeforeTax) : flow,
   );
-  const series = cashFlowSeries([known(-equityEngaged), ...withExit]);
+  const series = cashFlowSeries([times(equityEngaged, -1), ...withExit]);
   const firstYearDebtService = years[0]?.attributedCashDebtService ?? known(0);
   const blockers = [
     ...new Set([
       ...netOperatingIncome.blockers,
+      ...equityEngaged.blockers,
       ...exitProceedsBeforeTax.blockers,
       ...periodic.flatMap((flow) => flow.blockers),
     ]),
@@ -936,7 +1003,9 @@ export function underwriteProspectiveRealEstate(
     loanToCost:
       totalProjectCost <= 0
         ? unknown("PROJECT_COST_NOT_POSITIVE")
-        : known(borrowed / totalProjectCost),
+        : !currenciesMatch
+          ? unknown(prospectiveFxBlocker)
+          : known(borrowed / totalProjectCost),
     blockers,
     notes,
   };

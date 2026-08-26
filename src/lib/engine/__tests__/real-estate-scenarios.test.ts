@@ -78,6 +78,18 @@ const capitalEvents: RealEstateCapitalEvent[] = [
     notes: null,
     provenance: actual,
   },
+  {
+    id: "no-capex",
+    propertyId: "prop",
+    type: "CAPEX",
+    eventDate: "2020-06-15",
+    amount: 0,
+    currency: "EUR",
+    label: "Aucun travaux déclaré",
+    transactionId: null,
+    notes: null,
+    provenance: actual,
+  },
 ];
 
 const operatingTerms: RealEstateOperatingTerms = {
@@ -187,6 +199,32 @@ describe("scénario de conservation", () => {
   it("conserver n'engage aucune trésorerie nouvelle", () => {
     const result = holdScenario(view, declaredAssumptions, AS_OF);
     expect(result.initialCashFlow.value).toBe(0);
+  });
+
+  it("ne fige pas le dernier spot pour projeter une dette en devise étrangère", () => {
+    const foreignView = buildRealEstatePortfolio({
+      asOfDate: AS_OF,
+      reportingCurrency: "EUR",
+      assets: [asset],
+      valuations: [valuation],
+      capitalEvents,
+      operatingTerms: [operatingTerms],
+      financingLinks: [financingLink],
+      liabilities: [{ ...mortgage, currency: "CHF" }],
+      currencyRates: [
+        {
+          baseCurrency: "CHF",
+          quoteCurrency: "EUR",
+          rate: 1.05,
+          rateDate: AS_OF,
+          provenance: actual,
+        },
+      ],
+    }).assets[0];
+    const result = holdScenario(foreignView, declaredAssumptions, AS_OF);
+    expect(result.years[0].attributedCashDebtService.value).toBeNull();
+    expect(result.years[0].attributedOutstanding.value).toBeNull();
+    expect(result.blockers).toContain("FUTURE_FX_UNAVAILABLE:CHF/EUR:loan");
   });
 });
 
@@ -311,6 +349,26 @@ describe("scénario de cession", () => {
     expect(result.netProceedsBeforeTax.value).toBeNull();
   });
 
+  it("une cession sans dette n'exige aucune indemnité de remboursement", () => {
+    const debtFree = buildRealEstatePortfolio({
+      asOfDate: AS_OF,
+      reportingCurrency: "EUR",
+      assets: [{ ...asset, isDebtFinanced: false }],
+      valuations: [valuation],
+      capitalEvents,
+      operatingTerms: [operatingTerms],
+      financingLinks: [],
+      liabilities: [],
+    }).assets[0];
+    const result = sellScenario(debtFree, {
+      sellingCostsRate: 0.06,
+      prepaymentPenalty: null,
+      salePrice: null,
+    });
+    expect(result.prepaymentPenalty.value).toBe(0);
+    expect(result.netProceedsBeforeTax.value).not.toBeNull();
+  });
+
   it("accepte un prix de cession déclaré différent de la valorisation", () => {
     const result = sellScenario(view, {
       sellingCostsRate: 0,
@@ -398,6 +456,23 @@ describe("scénario de refinancement", () => {
     expect(current).toBeGreaterThan(0);
     expect(refinanced).toBeGreaterThan(0);
     expect(result.economicSaving.value).toBeCloseTo(current - refinanced - 3_000 - 1_500, 6);
+    expect(result.netFinancingProceeds.value).toBe(0);
+    expect(result.initialCashFlow.value).toBe(-4_500);
+  });
+
+  it("représente la différence entre nouveau capital et encours soldé comme un flux", () => {
+    const result = refinanceScenario(
+      view,
+      {
+        newLoan: { ...newLoan, principal: 130_000 },
+        prepaymentPenalty: 1_000,
+        arrangementFees: 500,
+      },
+      declaredAssumptions,
+      AS_OF,
+    );
+    expect(result.netFinancingProceeds.value).toBe(10_000);
+    expect(result.initialCashFlow.value).toBe(8_500);
   });
 
   it("un taux plus bas réduit le coût économique du financement", () => {
@@ -483,6 +558,28 @@ describe("scénario de travaux", () => {
       withoutFinancing.years[0].attributedCashDebtService.value ?? 0,
     );
   });
+
+  it("refuse un financement de travaux supérieur au capex sans destination déclarée", () => {
+    const result = worksScenario(
+      view,
+      {
+        ...worksInput,
+        financing: {
+          principal: 35_000,
+          annualRate: 0.02,
+          termMonths: 120,
+          firstPaymentDate: AS_OF,
+          currency: "EUR",
+          monthlyInsurance: null,
+          paymentIncludesInsurance: null,
+        },
+      },
+      declaredAssumptions,
+      AS_OF,
+    );
+    expect(result.initialCashFlow.value).toBeNull();
+    expect(result.blockers).toContain("WORKS_FINANCING_EXCEEDS_CAPEX:prop");
+  });
 });
 
 describe("underwriting prospectif", () => {
@@ -510,7 +607,7 @@ describe("underwriting prospectif", () => {
   it("dérive l'apport réel du coût total et du capital emprunté", () => {
     const result = underwriteProspectiveRealEstate(base);
     expect(result.totalProjectCost).toBe(216_000);
-    expect(result.equityEngaged).toBe(36_000);
+    expect(result.equityEngaged.value).toBe(36_000);
     expect(result.loanToCost.value).toBeCloseTo(180_000 / 216_000, 9);
   });
 
@@ -537,7 +634,7 @@ describe("underwriting prospectif", () => {
       loan: { ...base.loan, principal: 216_000 },
     });
     expect(result.totalProjectCost).toBe(216_000);
-    expect(result.equityEngaged).toBe(0);
+    expect(result.equityEngaged.value).toBe(0);
     expect(result.notes.some((note) => note.includes("dépasse le prix d'achat"))).toBe(true);
   });
 
@@ -558,7 +655,7 @@ describe("underwriting prospectif", () => {
     expect(result.monthlyPayment.value).toBe(0);
     expect(result.economicFinancingCost.value).toBe(0);
     expect(result.outstandingAtHorizon.value).toBe(0);
-    expect(result.equityEngaged).toBe(216_000);
+    expect(result.equityEngaged.value).toBe(216_000);
     expect(result.debtServiceCoverage.value).toBeNull();
   });
 
@@ -582,5 +679,27 @@ describe("underwriting prospectif", () => {
   it("ne produit aucune fiscalité", () => {
     const result = underwriteProspectiveRealEstate(base);
     expect(result.notes.some((note) => note.includes("Aucune fiscalité"))).toBe(true);
+  });
+
+  it("refuse de comparer un projet et son crédit dans deux devises sans FX futur", () => {
+    const result = underwriteProspectiveRealEstate({
+      ...base,
+      loan: { ...base.loan, currency: "CHF" },
+    });
+    expect(result.equityEngaged.value).toBeNull();
+    expect(result.monthlyPayment.value).toBeNull();
+    expect(result.outstandingAtHorizon.value).toBeNull();
+    expect(result.equityIrr).toBeNull();
+    expect(result.blockers).toContain("FUTURE_FX_UNAVAILABLE:CHF/EUR:prospective-loan");
+  });
+
+  it("refuse un financement supérieur au coût total sans destination de l'excédent", () => {
+    const result = underwriteProspectiveRealEstate({
+      ...base,
+      loan: { ...base.loan, principal: 220_000 },
+    });
+    expect(result.equityEngaged.value).toBeNull();
+    expect(result.equityIrr).toBeNull();
+    expect(result.blockers).toContain("FINANCING_EXCEEDS_PROJECT_COST");
   });
 });

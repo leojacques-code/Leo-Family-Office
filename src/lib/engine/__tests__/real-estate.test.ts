@@ -139,7 +139,11 @@ function build(overrides: Partial<BuildRealEstateInput> = {}) {
     reportingCurrency: "EUR",
     assets: [asset()],
     valuations: [valuation()],
-    capitalEvents: [capital({}), capital({ id: "cost", type: "ACQUISITION_COST", amount: 16_000 })],
+    capitalEvents: [
+      capital({}),
+      capital({ id: "cost", type: "ACQUISITION_COST", amount: 16_000 }),
+      capital({ id: "no-capex", type: "CAPEX", amount: 0, label: "Aucun travaux déclaré" }),
+    ],
     operatingTerms: [terms()],
     financingLinks: [link()],
     liabilities: [mortgage()],
@@ -205,9 +209,39 @@ describe("real estate — valeur, coût de revient, equity", () => {
   });
 
   it("signale un coût de revient sans frais d'acquisition déclarés", () => {
-    const view = build({ capitalEvents: [capital({})] }).assets[0];
+    const view = build({
+      capitalEvents: [capital({}), capital({ id: "no-capex", type: "CAPEX", amount: 0 })],
+    }).assets[0];
     expect(view.costBasis.acquisitionCostEventCount).toBe(0);
+    expect(view.costBasis.acquisitionCosts.value).toBeNull();
+    expect(view.costBasis.totalCostBasis.value).toBeNull();
     expect(view.flags.map((flag) => flag.code)).toContain("ACQUISITION_COSTS_NOT_DECLARED");
+  });
+
+  it("ne transforme pas l'absence de travaux déclarés en capex nul", () => {
+    const view = build({
+      capitalEvents: [
+        capital({}),
+        capital({ id: "cost", type: "ACQUISITION_COST", amount: 16_000 }),
+      ],
+    }).assets[0];
+    expect(view.costBasis.capex.value).toBeNull();
+    expect(view.costBasis.totalCostBasis.value).toBeNull();
+    expect(view.equity.unrealisedGain.value).toBeNull();
+    expect(view.flags.map((flag) => flag.code)).toContain("CAPEX_NOT_DECLARED");
+  });
+
+  it("ignore défensivement un événement de capital postérieur à la date de lecture", () => {
+    const view = build({
+      capitalEvents: [
+        capital({}),
+        capital({ id: "cost", type: "ACQUISITION_COST", amount: 16_000 }),
+        capital({ id: "no-capex", type: "CAPEX", amount: 0 }),
+        capital({ id: "future-works", type: "CAPEX", amount: 50_000, eventDate: "2027-01-01" }),
+      ],
+    }).assets[0];
+    expect(view.costBasis.totalCostBasis.value).toBe(216_000);
+    expect(view.flags.map((flag) => flag.code)).toContain("CAPITAL_EVENT_FUTURE_IGNORED");
   });
 
   it("les travaux capitalisés augmentent le coût de revient, jamais les charges", () => {
@@ -445,12 +479,25 @@ describe("real estate — financement consommé du Debt Engine", () => {
     // En revanche l'equity du domaine, elle, n'est pas calculable.
     expect(portfolio.equity.value).toBeNull();
     expect(portfolio.attributedDebt.value).toBeNull();
+    expect(portfolio.quality.status).toBe("NOT_COMPUTABLE");
+    expect(portfolio.quality.blockers).toContain("FINANCING_UNDECLARED:prop");
   });
 
   it("signale un rattachement vers une dette absente de l'état", () => {
     const view = build({ liabilities: [] }).assets[0];
     expect(view.financing).toHaveLength(0);
+    expect(view.financingState).toBe("UNKNOWN");
+    expect(view.equity.currentEquity.value).toBeNull();
     expect(view.flags.map((flag) => flag.code)).toContain("FINANCING_LINK_ORPHAN");
+  });
+
+  it("un lien orphelin contredit défensivement une déclaration sans dette", () => {
+    const view = build({
+      assets: [asset({ isDebtFinanced: false })],
+      liabilities: [],
+    }).assets[0];
+    expect(view.financingState).toBe("UNKNOWN");
+    expect(view.equity.attributedOutstandingDebt.blockers).toContain("FINANCING_LINK_ORPHAN:prop");
   });
 
   it("mesure l'apport réel : un coût financé par le crédit n'est pas un apport", () => {
@@ -552,9 +599,11 @@ describe("real estate — devises", () => {
       "FINANCING_ORIGINATION_DATE_UNKNOWN:loan",
     );
     expect(view.flags.map((flag) => flag.code)).toContain("FINANCING_ORIGINATION_DATE_UNKNOWN");
-    // Ce qui ne dépend pas du capital d'origine reste calculable.
+    // L'encours OBSERVÉ reste calculable, mais le service FUTUR requerrait une courbe FX.
     expect(view.equity.currentEquity.value).not.toBeNull();
-    expect(view.debt.economicCost.value).not.toBeNull();
+    expect(view.debt.economicCost.value).toBeNull();
+    expect(view.debt.economicCost.blockers).toContain("FUTURE_FX_UNAVAILABLE:CHF/EUR:loan");
+    expect(view.flags.map((flag) => flag.code)).toContain("FUTURE_FX_UNAVAILABLE");
   });
 
   it("en devise de reporting, le capital emprunté est exact sans conversion", () => {
@@ -663,6 +712,8 @@ describe("real estate — contributions au bilan canonique", () => {
       assets: [asset({ disposalDate: "2026-03-31" })],
       capitalEvents: [
         capital({}),
+        capital({ id: "cost", type: "ACQUISITION_COST", amount: 0 }),
+        capital({ id: "no-capex", type: "CAPEX", amount: 0 }),
         capital({ id: "sale", type: "DISPOSAL_PRICE", amount: 270_000, eventDate: "2026-03-31" }),
         capital({ id: "salecost", type: "DISPOSAL_COST", amount: 12_000, eventDate: "2026-03-31" }),
       ],
@@ -674,6 +725,22 @@ describe("real estate — contributions au bilan canonique", () => {
     // Plus-value RÉALISÉE : prix net de frais moins coût de revient.
     expect(view.equity.realisedGain.value).toBeCloseTo(270_000 - 12_000 - 200_000, 6);
     expect(disposed.grossValue.value).toBe(0);
+  });
+
+  it("ne suppose pas des frais de cession nuls lorsqu'un prix de vente existe", () => {
+    const disposed = build({
+      assets: [asset({ disposalDate: "2026-03-31" })],
+      capitalEvents: [
+        capital({}),
+        capital({ id: "cost", type: "ACQUISITION_COST", amount: 0 }),
+        capital({ id: "no-capex", type: "CAPEX", amount: 0 }),
+        capital({ id: "sale", type: "DISPOSAL_PRICE", amount: 270_000, eventDate: "2026-03-31" }),
+      ],
+    });
+    const view = disposed.assets[0];
+    expect(view.costBasis.disposalCosts.value).toBeNull();
+    expect(view.equity.realisedGain.value).toBeNull();
+    expect(view.flags.map((flag) => flag.code)).toContain("DISPOSAL_COSTS_NOT_DECLARED");
   });
 
   it("un bien à céder plus tard reste au bilan aujourd'hui", () => {
@@ -785,6 +852,45 @@ describe("real estate — flux réels, une seule vérité de trésorerie", () =>
     }).assets[0];
     expect(view.observed.transactionCount).toBe(0);
     expect(view.observed.cashFlow).toBeNull();
+  });
+
+  it("convertit chaque transaction immobilière au FX historique de sa date", () => {
+    const usdTransactions = months.map((month) => ({
+      ...rentTransaction(month),
+      amount: 1_000,
+      currency: "USD",
+    }));
+    const currencyRates: CurrencyRate[] = usdTransactions.map((transaction) => ({
+      baseCurrency: "USD",
+      quoteCurrency: "EUR",
+      rate: 0.9,
+      rateDate: transaction.date,
+      provenance: external,
+    }));
+    const view = build({
+      transactions: usdTransactions,
+      expenseCategories: categories,
+      ledgerCoverageStart: "2020-01-01",
+      currencyRates,
+    }).assets[0];
+    expect(view.observed.cashFlow?.income).toBeCloseTo(10_800, 6);
+    expect(view.observed.observedIncome.value).toBeCloseTo(10_800, 6);
+  });
+
+  it("rend les flux observés non calculables dès qu'un FX historique manque", () => {
+    const view = build({
+      transactions: [
+        ...months.slice(0, -1).map(rentTransaction),
+        { ...rentTransaction(months.at(-1) as string), amount: 1_000, currency: "USD" },
+      ],
+      expenseCategories: categories,
+      ledgerCoverageStart: "2020-01-01",
+      currencyRates: [],
+    }).assets[0];
+    expect(view.observed.cashFlow).toBeNull();
+    expect(view.observed.observedIncome.value).toBeNull();
+    expect(view.observed.observedIncome.blockers[0]).toContain("FX_MISSING:USD/EUR@");
+    expect(view.flags.map((flag) => flag.code)).toContain("FX_MISSING");
   });
 });
 
