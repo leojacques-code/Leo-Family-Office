@@ -1,0 +1,34 @@
+name: Business Equity V2 bootstrap
+
+on:
+  push:
+    branches: [feature/business-equity-v2]
+    paths: [.github/workflows/business-equity-v2-bootstrap.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/business-equity-v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: node scripts/bootstrap-business-equity-v2.mjs
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test -- --run
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(business): Business Equity V2 canonical engine" || exit 0
+          git push
