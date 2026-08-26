@@ -17,12 +17,12 @@ jobs:
           ref: feature/business-equity-v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: node scripts/bootstrap-business-equity-v2.mjs
       - run: npm ci
       - run: npm run lint
-      - run: npm run test -- --run
+      - run: npm run test
       - run: npx tsc --noEmit
       - run: npm run build
       - name: Commit implementation
