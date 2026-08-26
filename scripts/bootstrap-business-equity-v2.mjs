@@ -10,7 +10,7 @@ const patch = (path, needle, replacement) => {
   fs.writeFileSync(path, current.replace(needle, replacement));
 };
 
-write('src/lib/engine/business-equity.ts', String.raw`import type { CanonicalBalanceSheetContribution } from '@/lib/engine/balance-sheet';
+write('src/lib/engine/business-equity.ts', `import type { CanonicalBalanceSheetContribution } from '@/lib/engine/balance-sheet';
 import { resolveFxRate, type CurrencyRate } from '@/lib/engine/fx';
 import type { Provenance } from '@/lib/types';
 
@@ -164,14 +164,14 @@ const latestAt = <T>(rows: T[], date: string, dateOf: (row: T) => string): T | n
 
 function convert(amount: number | null, currency: string | null, date: string, target: string, rates: CurrencyRate[], blocker: string): BusinessMetric {
   if (amount === null) return nc([blocker]);
-  if (!currency) return nc([`${blocker}:CURRENCY_UNKNOWN`]);
+  if (!currency) return nc([\`\${blocker}:CURRENCY_UNKNOWN\`]);
   const fx = resolveFxRate(currency, target, date, rates);
-  if (fx.rate === null) return nc(fx.flags.length ? fx.flags : [`FX_MISSING:${currency}/${target}@${date}`]);
+  if (fx.rate === null) return nc(fx.flags.length ? fx.flags : [\`FX_MISSING:\${currency}/\${target}@\${date}\`]);
   return known(amount * fx.rate, fx.flags);
 }
 
 function daysBetween(a: string, b: string) {
-  return (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000;
+  return (Date.parse(\`\${b}T00:00:00Z\`) - Date.parse(\`\${a}T00:00:00Z\`)) / 86_400_000;
 }
 function xnpv(rate: number, flows: Array<{ date: string; amount: number }>) {
   const start = flows[0].date;
@@ -207,23 +207,23 @@ export function buildBusinessEquityPortfolio(input: BuildBusinessEquityInput): B
 
   const wholeEquity = (businessId: string): BusinessMetric => {
     if (memo.has(businessId)) return memo.get(businessId)!;
-    if (visiting.has(businessId)) return nc([`BUSINESS_HOLDING_CYCLE:${businessId}`]);
+    if (visiting.has(businessId)) return nc([\`BUSINESS_HOLDING_CYCLE:\${businessId}\`]);
     visiting.add(businessId);
     const vals = input.valuations.filter((v) => v.businessId === businessId);
     const val = latestAt(vals, input.asOfDate, (v) => v.valuationDate);
     if (val?.equityValue !== null && val?.equityValue !== undefined) {
-      const result = convert(val.equityValue, val.currency, val.valuationDate, input.reportingCurrency, rates, `EQUITY_VALUE_MISSING:${businessId}`);
+      const result = convert(val.equityValue, val.currency, val.valuationDate, input.reportingCurrency, rates, \`EQUITY_VALUE_MISSING:\${businessId}\`);
       memo.set(businessId, result); visiting.delete(businessId); return result;
     }
     if (val?.enterpriseValue !== null && val?.enterpriseValue !== undefined) {
       const financial = latestAt(input.financials.filter((f) => f.businessId === businessId), val.valuationDate, (f) => f.periodEnd);
       if (!financial || financial.grossDebt === null || financial.cash === null) {
-        const result = nc([`EV_TO_EQUITY_BRIDGE_MISSING:${businessId}`]);
+        const result = nc([\`EV_TO_EQUITY_BRIDGE_MISSING:\${businessId}\`]);
         memo.set(businessId, result); visiting.delete(businessId); return result;
       }
-      const ev = convert(val.enterpriseValue, val.currency, val.valuationDate, input.reportingCurrency, rates, `ENTERPRISE_VALUE_MISSING:${businessId}`);
-      const debt = convert(financial.grossDebt, financial.currency, financial.periodEnd, input.reportingCurrency, rates, `GROSS_DEBT_MISSING:${businessId}`);
-      const cash = convert(financial.cash, financial.currency, financial.periodEnd, input.reportingCurrency, rates, `CASH_MISSING:${businessId}`);
+      const ev = convert(val.enterpriseValue, val.currency, val.valuationDate, input.reportingCurrency, rates, \`ENTERPRISE_VALUE_MISSING:\${businessId}\`);
+      const debt = convert(financial.grossDebt, financial.currency, financial.periodEnd, input.reportingCurrency, rates, \`GROSS_DEBT_MISSING:\${businessId}\`);
+      const cash = convert(financial.cash, financial.currency, financial.periodEnd, input.reportingCurrency, rates, \`CASH_MISSING:\${businessId}\`);
       if (ev.value === null || debt.value === null || cash.value === null) {
         const result = nc([...ev.blockers, ...debt.blockers, ...cash.blockers], [...ev.flags, ...debt.flags, ...cash.flags]);
         memo.set(businessId, result); visiting.delete(businessId); return result;
@@ -239,7 +239,7 @@ export function buildBusinessEquityPortfolio(input: BuildBusinessEquityInput): B
     if (children.length) {
       const financial = latestAt(input.financials.filter((f) => f.businessId === businessId), input.asOfDate, (f) => f.periodEnd);
       if (!financial || financial.grossDebt === null || financial.cash === null) {
-        const result = nc([`HOLDING_STANDALONE_NET_DEBT_MISSING:${businessId}`]);
+        const result = nc([\`HOLDING_STANDALONE_NET_DEBT_MISSING:\${businessId}\`]);
         memo.set(businessId, result); visiting.delete(businessId); return result;
       }
       let total = 0;
@@ -250,8 +250,8 @@ export function buildBusinessEquityPortfolio(input: BuildBusinessEquityInput): B
         if (child.value === null) blockers.push(...child.blockers); else total += child.value * link.ownershipRate;
         flags.push(...child.flags);
       }
-      const debt = convert(financial.grossDebt, financial.currency, financial.periodEnd, input.reportingCurrency, rates, `HOLDING_DEBT_MISSING:${businessId}`);
-      const cash = convert(financial.cash, financial.currency, financial.periodEnd, input.reportingCurrency, rates, `HOLDING_CASH_MISSING:${businessId}`);
+      const debt = convert(financial.grossDebt, financial.currency, financial.periodEnd, input.reportingCurrency, rates, \`HOLDING_DEBT_MISSING:\${businessId}\`);
+      const cash = convert(financial.cash, financial.currency, financial.periodEnd, input.reportingCurrency, rates, \`HOLDING_CASH_MISSING:\${businessId}\`);
       if (debt.value === null || cash.value === null) blockers.push(...debt.blockers, ...cash.blockers);
       if (blockers.length) {
         const result = nc(blockers, [...flags, ...debt.flags, ...cash.flags]); memo.set(businessId, result); visiting.delete(businessId); return result;
@@ -259,7 +259,7 @@ export function buildBusinessEquityPortfolio(input: BuildBusinessEquityInput): B
       const result = known(total - debt.value! + cash.value!, [...flags, ...debt.flags, ...cash.flags]);
       memo.set(businessId, result); visiting.delete(businessId); return result;
     }
-    const result = nc([`BUSINESS_VALUATION_MISSING:${businessId}`]);
+    const result = nc([\`BUSINESS_VALUATION_MISSING:\${businessId}\`]);
     memo.set(businessId, result); visiting.delete(businessId); return result;
   };
 
@@ -268,25 +268,25 @@ export function buildBusinessEquityPortfolio(input: BuildBusinessEquityInput): B
     const financial = latestAt(input.financials.filter((f) => f.businessId === business.id), input.asOfDate, (f) => f.periodEnd);
     const valuation = latestAt(input.valuations.filter((v) => v.businessId === business.id), input.asOfDate, (v) => v.valuationDate);
     const whole = wholeEquity(business.id);
-    const ev = valuation?.enterpriseValue != null ? convert(valuation.enterpriseValue, valuation.currency, valuation.valuationDate, input.reportingCurrency, rates, `ENTERPRISE_VALUE_MISSING:${business.id}`) : nc([`ENTERPRISE_VALUE_NOT_DECLARED:${business.id}`]);
-    let netDebt = nc([`NET_DEBT_MISSING:${business.id}`]);
+    const ev = valuation?.enterpriseValue != null ? convert(valuation.enterpriseValue, valuation.currency, valuation.valuationDate, input.reportingCurrency, rates, \`ENTERPRISE_VALUE_MISSING:\${business.id}\`) : nc([\`ENTERPRISE_VALUE_NOT_DECLARED:\${business.id}\`]);
+    let netDebt = nc([\`NET_DEBT_MISSING:\${business.id}\`]);
     if (financial?.grossDebt != null && financial.cash != null) {
-      const debt = convert(financial.grossDebt, financial.currency, financial.periodEnd, input.reportingCurrency, rates, `GROSS_DEBT_MISSING:${business.id}`);
-      const cash = convert(financial.cash, financial.currency, financial.periodEnd, input.reportingCurrency, rates, `CASH_MISSING:${business.id}`);
+      const debt = convert(financial.grossDebt, financial.currency, financial.periodEnd, input.reportingCurrency, rates, \`GROSS_DEBT_MISSING:\${business.id}\`);
+      const cash = convert(financial.cash, financial.currency, financial.periodEnd, input.reportingCurrency, rates, \`CASH_MISSING:\${business.id}\`);
       if (debt.value !== null && cash.value !== null) netDebt = known(debt.value - cash.value, [...debt.flags, ...cash.flags]);
     }
-    const attributable = !ownership ? nc([`OWNERSHIP_MISSING:${business.id}`]) : ownership.economicRate === null ? nc([`ECONOMIC_OWNERSHIP_MISSING:${business.id}`]) : whole.value === null ? nc(whole.blockers, whole.flags) : known(whole.value * ownership.economicRate, whole.flags);
+    const attributable = !ownership ? nc([\`OWNERSHIP_MISSING:\${business.id}\`]) : ownership.economicRate === null ? nc([\`ECONOMIC_OWNERSHIP_MISSING:\${business.id}\`]) : whole.value === null ? nc(whole.blockers, whole.flags) : known(whole.value * ownership.economicRate, whole.flags);
 
     const events = input.capitalEvents.filter((e) => e.businessId === business.id && e.eventDate <= input.asOfDate).sort((a, b) => a.eventDate.localeCompare(b.eventDate));
     const investedEvents = events.filter((e) => ['OPENING_COST_BASIS', 'ACQUISITION', 'CAPITAL_INJECTION'].includes(e.type));
     const returnedEvents = events.filter((e) => ['SALE', 'DIVIDEND', 'DISTRIBUTION', 'CAPITAL_RETURN'].includes(e.type));
-    const convertEvents = (rows: BusinessCapitalEvent[]) => rows.map((event) => convert(event.amount, event.currency, event.eventDate, input.reportingCurrency, rates, `CAPITAL_EVENT_AMOUNT_MISSING:${event.id}`));
+    const convertEvents = (rows: BusinessCapitalEvent[]) => rows.map((event) => convert(event.amount, event.currency, event.eventDate, input.reportingCurrency, rates, \`CAPITAL_EVENT_AMOUNT_MISSING:\${event.id}\`));
     const sumMetrics = (items: BusinessMetric[], missing: string): BusinessMetric => {
       const blockers = items.flatMap((m) => m.blockers); const flags = items.flatMap((m) => m.flags);
       return blockers.length ? nc(blockers, flags) : items.length ? known(items.reduce((s, m) => s + m.value!, 0), flags) : nc([missing]);
     };
-    const invested = sumMetrics(convertEvents(investedEvents), `COST_BASIS_HISTORY_MISSING:${business.id}`);
-    const cashReturned = returnedEvents.length ? sumMetrics(convertEvents(returnedEvents), `CASH_RETURN_HISTORY_MISSING:${business.id}`) : known(0);
+    const invested = sumMetrics(convertEvents(investedEvents), \`COST_BASIS_HISTORY_MISSING:\${business.id}\`);
+    const cashReturned = returnedEvents.length ? sumMetrics(convertEvents(returnedEvents), \`CASH_RETURN_HISTORY_MISSING:\${business.id}\`) : known(0);
     const unrealisedPnL = invested.value === null || attributable.value === null ? nc([...(invested.blockers ?? []), ...(attributable.blockers ?? [])]) : known(attributable.value + cashReturned.value! - invested.value);
     const moic = invested.value === null || attributable.value === null || invested.value <= 0 ? nc([...(invested.blockers ?? []), ...(attributable.blockers ?? []), ...(invested.value === 0 ? ['ZERO_INVESTED_CAPITAL'] : [])]) : known((attributable.value + cashReturned.value!) / invested.value);
 
@@ -294,15 +294,15 @@ export function buildBusinessEquityPortfolio(input: BuildBusinessEquityInput): B
     let flowBlocked = false;
     for (const event of events) {
       if (!['OPENING_COST_BASIS', 'ACQUISITION', 'CAPITAL_INJECTION', 'SALE', 'DIVIDEND', 'DISTRIBUTION', 'CAPITAL_RETURN'].includes(event.type)) continue;
-      const converted = convert(event.amount, event.currency, event.eventDate, input.reportingCurrency, rates, `CAPITAL_EVENT_AMOUNT_MISSING:${event.id}`);
+      const converted = convert(event.amount, event.currency, event.eventDate, input.reportingCurrency, rates, \`CAPITAL_EVENT_AMOUNT_MISSING:\${event.id}\`);
       if (converted.value === null) { flowBlocked = true; continue; }
       const negative = ['OPENING_COST_BASIS', 'ACQUISITION', 'CAPITAL_INJECTION'].includes(event.type);
       datedFlows.push({ date: event.eventDate, amount: negative ? -converted.value : converted.value });
     }
     if (attributable.value !== null) datedFlows.push({ date: input.asOfDate, amount: attributable.value }); else flowBlocked = true;
     const xirr = flowBlocked ? nc(['XIRR_INPUTS_INCOMPLETE']) : xirrMetric(datedFlows);
-    const ebitdaMargin = financial?.revenue != null && financial.ebitda != null && financial.revenue !== 0 ? known(financial.ebitda / financial.revenue) : nc([`EBITDA_MARGIN_INPUTS_MISSING:${business.id}`]);
-    const leverage = netDebt.value !== null && financial?.ebitda != null && financial.ebitda > 0 && financial.currency === input.reportingCurrency ? known(netDebt.value / financial.ebitda) : nc([`NET_DEBT_TO_EBITDA_INPUTS_MISSING:${business.id}`]);
+    const ebitdaMargin = financial?.revenue != null && financial.ebitda != null && financial.revenue !== 0 ? known(financial.ebitda / financial.revenue) : nc([\`EBITDA_MARGIN_INPUTS_MISSING:\${business.id}\`]);
+    const leverage = netDebt.value !== null && financial?.ebitda != null && financial.ebitda > 0 && financial.currency === input.reportingCurrency ? known(netDebt.value / financial.ebitda) : nc([\`NET_DEBT_TO_EBITDA_INPUTS_MISSING:\${business.id}\`]);
     const flags = [...new Set([...(whole.flags ?? []), ...(valuation && daysBetween(valuation.valuationDate, input.asOfDate) > 365 ? ['VALUATION_STALE_GT_365D'] : [])])];
     const blockers = [...new Set([...(whole.blockers ?? []), ...(attributable.blockers ?? [])])];
     return { business, ownership, latestFinancials: financial, latestValuation: valuation, enterpriseValue: ev, netDebt, wholeEquityValue: whole, attributableValue: attributable, investedCapital: invested, cashReturned, unrealisedPnL, moic, xirr, ebitdaMargin, netDebtToEbitda: leverage, quality: { blockers, flags } };
@@ -318,7 +318,7 @@ export function businessEquityBalanceSheetContributions(portfolio: BusinessEquit
   return portfolio.positions
     .filter((position) => position.ownership !== null && position.ownership.economicRate !== null)
     .map((position) => ({
-      id: `business-equity:${position.business.id}`,
+      id: \`business-equity:\${position.business.id}\`,
       entityId: position.business.id,
       domain: 'BUSINESS_EQUITY' as const,
       side: 'ASSET' as const,
@@ -340,7 +340,7 @@ export function businessEquityBalanceSheetContributions(portfolio: BusinessEquit
 }
 `);
 
-write('src/lib/engine/business-equity-scenarios.ts', String.raw`export interface BusinessHoldScenarioInput { currentEquityValue: number; years: number; annualGrowthRate: number; annualDistributions: number; }
+write('src/lib/engine/business-equity-scenarios.ts', `export interface BusinessHoldScenarioInput { currentEquityValue: number; years: number; annualGrowthRate: number; annualDistributions: number; }
 export interface BusinessSaleScenarioInput { currentEquityValue: number; economicOwnershipRate: number; saleFraction: number; transactionFeeRate: number; effectiveTaxRate: number | null; }
 export interface BusinessRaiseScenarioInput { preMoneyEquityValue: number; primaryNewMoney: number; currentOwnershipRate: number; investorContribution: number; preferredRightsKnown: boolean; }
 export const projectBusinessHold = (input: BusinessHoldScenarioInput) => ({
@@ -362,7 +362,7 @@ export const projectBusinessRaise = (input: BusinessRaiseScenarioInput) => {
 };
 `);
 
-write('src/lib/engine/__tests__/business-equity.test.ts', String.raw`import { describe, expect, it } from 'vitest';
+write('src/lib/engine/__tests__/business-equity.test.ts', `import { describe, expect, it } from 'vitest';
 import { buildBusinessEquityPortfolio } from '@/lib/engine/business-equity';
 const p = { kind: 'ACTUAL' as const, confidence: 'HIGH' as const };
 const base = { asOfDate: '2026-08-26', reportingCurrency: 'EUR', holdings: [], currencyRates: [] };
@@ -398,7 +398,7 @@ describe('Business Equity V2', () => {
 });
 `);
 
-write('supabase/migrations/20260826140000_business_equity_v2.sql', String.raw`-- Business Equity V2 — facts only; valuation/performance remain derived in TypeScript.
+write('supabase/migrations/20260826140000_business_equity_v2.sql', `-- Business Equity V2 — facts only; valuation/performance remain derived in TypeScript.
 alter table public.businesses
   add column if not exists business_type text,
   add column if not exists functional_currency char(3),
@@ -583,71 +583,71 @@ patch('src/lib/data/contracts.ts',
 `import type { BusinessCapitalEventType, BusinessType, BusinessValuationMethod } from "@/lib/engine/business-equity";\nimport type {\n  CashFlowKind,`);
 patch('src/lib/data/contracts.ts',
 `export type Mutation =`,
-String.raw`export interface BusinessInput { businessId: string | null; name: string; legalForm: string | null; type: BusinessType | null; functionalCurrency: string | null; notes: string | null; }
+`export interface BusinessInput { businessId: string | null; name: string; legalForm: string | null; type: BusinessType | null; functionalCurrency: string | null; notes: string | null; }
 export interface BusinessOwnershipInput { businessId: string; effectiveDate: string; legalRate: number; economicRate: number | null; votingRate: number | null; fullyDilutedRate: number | null; notes: string | null; }
 export interface BusinessFinancialInput { businessId: string; periodEnd: string; currency: string | null; revenue: number | null; grossMargin: number | null; ebitda: number | null; ebit: number | null; netIncome: number | null; cash: number | null; grossDebt: number | null; workingCapital: number | null; capex: number | null; freeCashFlow: number | null; notes: string | null; }
 export interface BusinessValuationInput { businessId: string; valuationDate: string; currency: string | null; method: BusinessValuationMethod; enterpriseValue: number | null; equityValue: number | null; valuationMultiple: number | null; notes: string | null; }
 export interface BusinessCapitalEventInput { businessId: string; type: BusinessCapitalEventType; eventDate: string; amount: number; currency: string; ownershipDelta: number | null; transactionId: string | null; notes: string | null; }
 export interface BusinessHoldingInput { parentBusinessId: string; childBusinessId: string; effectiveDate: string; ownershipRate: number; notes: string | null; }
 
-export type Mutation =`);
+export type Mutation =\`);
 patch('src/lib/data/contracts.ts',
-`  | { action: "save_real_estate_asset"; asset: RealEstateAssetInput }`,
-`  | { action: "save_business"; business: BusinessInput }\n  | { action: "archive_business"; businessId: string }\n  | { action: "record_business_ownership"; ownership: BusinessOwnershipInput }\n  | { action: "record_business_financials"; financials: BusinessFinancialInput }\n  | { action: "record_business_valuation"; valuation: BusinessValuationInput }\n  | { action: "record_business_capital_event"; event: BusinessCapitalEventInput }\n  | { action: "set_business_holding"; holding: BusinessHoldingInput }\n  | { action: "save_real_estate_asset"; asset: RealEstateAssetInput }`);
+\`  | { action: "save_real_estate_asset"; asset: RealEstateAssetInput }\`,
+\`  | { action: "save_business"; business: BusinessInput }\n  | { action: "archive_business"; businessId: string }\n  | { action: "record_business_ownership"; ownership: BusinessOwnershipInput }\n  | { action: "record_business_financials"; financials: BusinessFinancialInput }\n  | { action: "record_business_valuation"; valuation: BusinessValuationInput }\n  | { action: "record_business_capital_event"; event: BusinessCapitalEventInput }\n  | { action: "set_business_holding"; holding: BusinessHoldingInput }\n  | { action: "save_real_estate_asset"; asset: RealEstateAssetInput }\`);
 
 patch('src/lib/validation/mutations.ts',
-`import { z } from "zod";`,
-`import { z } from "zod";\nimport { BUSINESS_CAPITAL_EVENT_TYPES, BUSINESS_TYPES, BUSINESS_VALUATION_METHODS } from "@/lib/engine/business-equity";`);
+\`import { z } from "zod";\`,
+\`import { z } from "zod";\nimport { BUSINESS_CAPITAL_EVENT_TYPES, BUSINESS_TYPES, BUSINESS_VALUATION_METHODS } from "@/lib/engine/business-equity";\`);
 patch('src/lib/validation/mutations.ts',
-`export const mutationSchema = z.discriminatedUnion("action", [`,
-String.raw`const businessSchema = z.object({ businessId:z.uuid().nullable(), name:z.string().trim().min(1).max(160), legalForm:z.string().trim().max(80).nullable(), type:z.enum(BUSINESS_TYPES).nullable(), functionalCurrency:z.string().trim().length(3).nullable(), notes:z.string().trim().max(1000).nullable() }).strict();
+\`export const mutationSchema = z.discriminatedUnion("action", [\`,
+String.raw\`const businessSchema = z.object({ businessId:z.uuid().nullable(), name:z.string().trim().min(1).max(160), legalForm:z.string().trim().max(80).nullable(), type:z.enum(BUSINESS_TYPES).nullable(), functionalCurrency:z.string().trim().length(3).nullable(), notes:z.string().trim().max(1000).nullable() }).strict();
 const businessOwnershipSchema = z.object({ businessId:z.uuid(), effectiveDate:realDate, legalRate:finite.gt(0).max(1), economicRate:finite.gt(0).max(1).nullable(), votingRate:finite.min(0).max(1).nullable(), fullyDilutedRate:finite.gt(0).max(1).nullable(), notes:z.string().trim().max(1000).nullable() }).strict();
 const businessFinancialSchema = z.object({ businessId:z.uuid(), periodEnd:realDate, currency:z.string().trim().length(3).nullable(), revenue:finite.nullable(), grossMargin:finite.nullable(), ebitda:finite.nullable(), ebit:finite.nullable(), netIncome:finite.nullable(), cash:finite.nonnegative().nullable(), grossDebt:finite.nonnegative().nullable(), workingCapital:finite.nullable(), capex:finite.nonnegative().nullable(), freeCashFlow:finite.nullable(), notes:z.string().trim().max(1000).nullable() }).strict();
 const businessValuationSchema = z.object({ businessId:z.uuid(), valuationDate:realDate, currency:z.string().trim().length(3).nullable(), method:z.enum(BUSINESS_VALUATION_METHODS), enterpriseValue:finite.nullable(), equityValue:finite.nullable(), valuationMultiple:finite.nullable(), notes:z.string().trim().max(1000).nullable() }).strict().superRefine((v,ctx)=>{ if(v.enterpriseValue===null && v.equityValue===null) ctx.addIssue({code:'custom',message:'EV ou Equity Value requise',path:['equityValue']}); });
 const businessCapitalEventSchema = z.object({ businessId:z.uuid(), type:z.enum(BUSINESS_CAPITAL_EVENT_TYPES), eventDate:realDate, amount:finite.nonnegative(), currency:z.string().trim().length(3), ownershipDelta:finite.min(-1).max(1).nullable(), transactionId:z.uuid().nullable(), notes:z.string().trim().max(1000).nullable() }).strict();
 const businessHoldingSchema = z.object({ parentBusinessId:z.uuid(), childBusinessId:z.uuid(), effectiveDate:realDate, ownershipRate:finite.gt(0).max(1), notes:z.string().trim().max(1000).nullable() }).strict().superRefine((v,ctx)=>{ if(v.parentBusinessId===v.childBusinessId) ctx.addIssue({code:'custom',message:'Une société ne peut pas se détenir elle-même',path:['childBusinessId']}); });
 
-export const mutationSchema = z.discriminatedUnion("action", [`);
+export const mutationSchema = z.discriminatedUnion("action", [\`);
 patch('src/lib/validation/mutations.ts',
-`  // Les mutations immobilières sont STRICTES de bout en bout`,
-`  z.object({ action:z.literal("save_business"), business:businessSchema }).strict(),\n  z.object({ action:z.literal("archive_business"), businessId:z.uuid() }).strict(),\n  z.object({ action:z.literal("record_business_ownership"), ownership:businessOwnershipSchema }).strict(),\n  z.object({ action:z.literal("record_business_financials"), financials:businessFinancialSchema }).strict(),\n  z.object({ action:z.literal("record_business_valuation"), valuation:businessValuationSchema }).strict(),\n  z.object({ action:z.literal("record_business_capital_event"), event:businessCapitalEventSchema }).strict(),\n  z.object({ action:z.literal("set_business_holding"), holding:businessHoldingSchema }).strict(),\n  // Les mutations immobilières sont STRICTES de bout en bout`);
+\`  // Les mutations immobilières sont STRICTES de bout en bout\`,
+\`  z.object({ action:z.literal("save_business"), business:businessSchema }).strict(),\n  z.object({ action:z.literal("archive_business"), businessId:z.uuid() }).strict(),\n  z.object({ action:z.literal("record_business_ownership"), ownership:businessOwnershipSchema }).strict(),\n  z.object({ action:z.literal("record_business_financials"), financials:businessFinancialSchema }).strict(),\n  z.object({ action:z.literal("record_business_valuation"), valuation:businessValuationSchema }).strict(),\n  z.object({ action:z.literal("record_business_capital_event"), event:businessCapitalEventSchema }).strict(),\n  z.object({ action:z.literal("set_business_holding"), holding:businessHoldingSchema }).strict(),\n  // Les mutations immobilières sont STRICTES de bout en bout\`);
 
 patch('src/lib/data/supabase-repository.ts',
-`import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";`,
-`import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";\nimport { buildBusinessEquityPortfolio, businessEquityBalanceSheetContributions, BUSINESS_CAPITAL_EVENT_TYPES, BUSINESS_TYPES, BUSINESS_VALUATION_METHODS, type BusinessEntity, type BusinessOwnership, type BusinessFinancialSnapshot, type BusinessValuation, type BusinessCapitalEvent, type BusinessHoldingLink } from "@/lib/engine/business-equity";`);
+\`import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";\`,
+\`import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";\nimport { buildBusinessEquityPortfolio, businessEquityBalanceSheetContributions, BUSINESS_CAPITAL_EVENT_TYPES, BUSINESS_TYPES, BUSINESS_VALUATION_METHODS, type BusinessEntity, type BusinessOwnership, type BusinessFinancialSnapshot, type BusinessValuation, type BusinessCapitalEvent, type BusinessHoldingLink } from "@/lib/engine/business-equity";\`);
 patch('src/lib/data/supabase-repository.ts',
-`      realEstateFinancingLinkRows,\n    ] = await Promise.all([`,
-`      realEstateFinancingLinkRows,\n      businessRows,\n      businessOwnershipRows,\n      businessFinancialRows,\n      businessValuationRows,\n      businessCapitalEventRows,\n      businessHoldingRows,\n    ] = await Promise.all([`);
+\`      realEstateFinancingLinkRows,\n    ] = await Promise.all([\`,
+\`      realEstateFinancingLinkRows,\n      businessRows,\n      businessOwnershipRows,\n      businessFinancialRows,\n      businessValuationRows,\n      businessCapitalEventRows,\n      businessHoldingRows,\n    ] = await Promise.all([\`);
 patch('src/lib/data/supabase-repository.ts',
-`      mine("real_estate_financing_links"),\n    ]).then`,
-`      mine("real_estate_financing_links"),\n      mine("businesses"),\n      fetchAllPages("business_ownership", "effective_date"),\n      fetchAllPages("business_financials", "period_end"),\n      fetchAllPages("business_valuations", "valuation_date"),\n      fetchAllPages("business_capital_events", "event_date"),\n      fetchAllPages("business_holdings", "effective_date"),\n    ]).then`);
+\`      mine("real_estate_financing_links"),\n    ]).then\`,
+\`      mine("real_estate_financing_links"),\n      mine("businesses"),\n      fetchAllPages("business_ownership", "effective_date"),\n      fetchAllPages("business_financials", "period_end"),\n      fetchAllPages("business_valuations", "valuation_date"),\n      fetchAllPages("business_capital_events", "event_date"),\n      fetchAllPages("business_holdings", "effective_date"),\n    ]).then\`);
 
 patch('src/lib/data/supabase-repository.ts',
-`    const latestLiabilityObservations = latestBy(`,
-String.raw`    // ── Business Equity V2 ───────────────────────────────────────────────────────────
-    const businesses: BusinessEntity[] = businessRows.filter((r)=>r.archived!==true).map((row)=>({ id:str(row.id), name:str(row.name), legalForm:row.legal_form?str(row.legal_form):null, type:row.business_type ? enumValue(str(row.business_type), BUSINESS_TYPES, `businesses[id=${str(row.id)}].business_type`) : null, functionalCurrency:row.functional_currency?str(row.functional_currency).toUpperCase():null, archived:bool(row.archived), notes:row.notes?str(row.notes):null, provenance:provenance(row) })).sort((a,b)=>a.name.localeCompare(b.name));
+\`    const latestLiabilityObservations = latestBy(\`,
+String.raw\`    // ── Business Equity V2 ───────────────────────────────────────────────────────────
+    const businesses: BusinessEntity[] = businessRows.filter((r)=>r.archived!==true).map((row)=>({ id:str(row.id), name:str(row.name), legalForm:row.legal_form?str(row.legal_form):null, type:row.business_type ? enumValue(str(row.business_type), BUSINESS_TYPES, \`businesses[id=\${str(row.id)}].business_type\`) : null, functionalCurrency:row.functional_currency?str(row.functional_currency).toUpperCase():null, archived:bool(row.archived), notes:row.notes?str(row.notes):null, provenance:provenance(row) })).sort((a,b)=>a.name.localeCompare(b.name));
     const liveBusinessIds = new Set(businesses.map((b)=>b.id));
-    const businessOwnership: BusinessOwnership[] = businessOwnershipRows.filter((r)=>liveBusinessIds.has(str(r.business_id))).map((row)=>({ id:str(row.id), businessId:str(row.business_id), effectiveDate:str(row.effective_date), legalRate:finiteNumber(row.ownership_rate,`business_ownership[id=${str(row.id)}].ownership_rate`), economicRate:nullableFiniteNumber(row.economic_rate,`business_ownership[id=${str(row.id)}].economic_rate`), votingRate:nullableFiniteNumber(row.voting_rate,`business_ownership[id=${str(row.id)}].voting_rate`), fullyDilutedRate:nullableFiniteNumber(row.fully_diluted_rate,`business_ownership[id=${str(row.id)}].fully_diluted_rate`), notes:row.notes?str(row.notes):null, provenance:provenance(row) }));
-    const businessFinancials: BusinessFinancialSnapshot[] = businessFinancialRows.filter((r)=>liveBusinessIds.has(str(r.business_id))).map((row)=>({ id:str(row.id), businessId:str(row.business_id), periodEnd:str(row.period_end), currency:row.currency?str(row.currency).toUpperCase():null, revenue:nullableFiniteNumber(row.revenue,`business_financials[id=${str(row.id)}].revenue`), grossMargin:nullableFiniteNumber(row.gross_margin,`business_financials[id=${str(row.id)}].gross_margin`), ebitda:nullableFiniteNumber(row.ebitda,`business_financials[id=${str(row.id)}].ebitda`), ebit:nullableFiniteNumber(row.ebit,`business_financials[id=${str(row.id)}].ebit`), netIncome:nullableFiniteNumber(row.net_income,`business_financials[id=${str(row.id)}].net_income`), cash:nullableFiniteNumber(row.cash,`business_financials[id=${str(row.id)}].cash`), grossDebt:nullableFiniteNumber(row.debt,`business_financials[id=${str(row.id)}].debt`), workingCapital:nullableFiniteNumber(row.working_capital,`business_financials[id=${str(row.id)}].working_capital`), capex:nullableFiniteNumber(row.capex,`business_financials[id=${str(row.id)}].capex`), freeCashFlow:nullableFiniteNumber(row.free_cash_flow,`business_financials[id=${str(row.id)}].free_cash_flow`), notes:row.notes?str(row.notes):null, provenance:provenance(row) }));
-    const businessValuations: BusinessValuation[] = businessValuationRows.filter((r)=>liveBusinessIds.has(str(r.business_id))).map((row)=>({ id:str(row.id), businessId:str(row.business_id), valuationDate:str(row.valuation_date), currency:row.currency?str(row.currency).toUpperCase():null, method:enumValue(str(row.method), BUSINESS_VALUATION_METHODS,`business_valuations[id=${str(row.id)}].method`), enterpriseValue:nullableFiniteNumber(row.enterprise_value,`business_valuations[id=${str(row.id)}].enterprise_value`), equityValue:nullableFiniteNumber(row.equity_value,`business_valuations[id=${str(row.id)}].equity_value`), valuationMultiple:nullableFiniteNumber(row.valuation_multiple,`business_valuations[id=${str(row.id)}].valuation_multiple`), notes:row.notes?str(row.notes):null, provenance:provenance(row) }));
-    const businessCapitalEvents: BusinessCapitalEvent[] = businessCapitalEventRows.filter((r)=>liveBusinessIds.has(str(r.business_id))).map((row)=>({ id:str(row.id), businessId:str(row.business_id), type:enumValue(str(row.event_type),BUSINESS_CAPITAL_EVENT_TYPES,`business_capital_events[id=${str(row.id)}].event_type`), eventDate:str(row.event_date), amount:finiteNumber(row.amount,`business_capital_events[id=${str(row.id)}].amount`), currency:str(row.currency).toUpperCase(), ownershipDelta:nullableFiniteNumber(row.ownership_delta,`business_capital_events[id=${str(row.id)}].ownership_delta`), transactionId:row.transaction_id?str(row.transaction_id):null, notes:row.notes?str(row.notes):null, provenance:provenance(row) }));
-    const businessHoldings: BusinessHoldingLink[] = businessHoldingRows.filter((r)=>liveBusinessIds.has(str(r.parent_business_id))&&liveBusinessIds.has(str(r.child_business_id))).map((row)=>({ id:str(row.id), parentBusinessId:str(row.parent_business_id), childBusinessId:str(row.child_business_id), effectiveDate:str(row.effective_date), ownershipRate:finiteNumber(row.ownership_rate,`business_holdings[id=${str(row.id)}].ownership_rate`), notes:row.notes?str(row.notes):null, provenance:provenance(row) }));
+    const businessOwnership: BusinessOwnership[] = businessOwnershipRows.filter((r)=>liveBusinessIds.has(str(r.business_id))).map((row)=>({ id:str(row.id), businessId:str(row.business_id), effectiveDate:str(row.effective_date), legalRate:finiteNumber(row.ownership_rate,\`business_ownership[id=\${str(row.id)}].ownership_rate\`), economicRate:nullableFiniteNumber(row.economic_rate,\`business_ownership[id=\${str(row.id)}].economic_rate\`), votingRate:nullableFiniteNumber(row.voting_rate,\`business_ownership[id=\${str(row.id)}].voting_rate\`), fullyDilutedRate:nullableFiniteNumber(row.fully_diluted_rate,\`business_ownership[id=\${str(row.id)}].fully_diluted_rate\`), notes:row.notes?str(row.notes):null, provenance:provenance(row) }));
+    const businessFinancials: BusinessFinancialSnapshot[] = businessFinancialRows.filter((r)=>liveBusinessIds.has(str(r.business_id))).map((row)=>({ id:str(row.id), businessId:str(row.business_id), periodEnd:str(row.period_end), currency:row.currency?str(row.currency).toUpperCase():null, revenue:nullableFiniteNumber(row.revenue,\`business_financials[id=\${str(row.id)}].revenue\`), grossMargin:nullableFiniteNumber(row.gross_margin,\`business_financials[id=\${str(row.id)}].gross_margin\`), ebitda:nullableFiniteNumber(row.ebitda,\`business_financials[id=\${str(row.id)}].ebitda\`), ebit:nullableFiniteNumber(row.ebit,\`business_financials[id=\${str(row.id)}].ebit\`), netIncome:nullableFiniteNumber(row.net_income,\`business_financials[id=\${str(row.id)}].net_income\`), cash:nullableFiniteNumber(row.cash,\`business_financials[id=\${str(row.id)}].cash\`), grossDebt:nullableFiniteNumber(row.debt,\`business_financials[id=\${str(row.id)}].debt\`), workingCapital:nullableFiniteNumber(row.working_capital,\`business_financials[id=\${str(row.id)}].working_capital\`), capex:nullableFiniteNumber(row.capex,\`business_financials[id=\${str(row.id)}].capex\`), freeCashFlow:nullableFiniteNumber(row.free_cash_flow,\`business_financials[id=\${str(row.id)}].free_cash_flow\`), notes:row.notes?str(row.notes):null, provenance:provenance(row) }));
+    const businessValuations: BusinessValuation[] = businessValuationRows.filter((r)=>liveBusinessIds.has(str(r.business_id))).map((row)=>({ id:str(row.id), businessId:str(row.business_id), valuationDate:str(row.valuation_date), currency:row.currency?str(row.currency).toUpperCase():null, method:enumValue(str(row.method), BUSINESS_VALUATION_METHODS,\`business_valuations[id=\${str(row.id)}].method\`), enterpriseValue:nullableFiniteNumber(row.enterprise_value,\`business_valuations[id=\${str(row.id)}].enterprise_value\`), equityValue:nullableFiniteNumber(row.equity_value,\`business_valuations[id=\${str(row.id)}].equity_value\`), valuationMultiple:nullableFiniteNumber(row.valuation_multiple,\`business_valuations[id=\${str(row.id)}].valuation_multiple\`), notes:row.notes?str(row.notes):null, provenance:provenance(row) }));
+    const businessCapitalEvents: BusinessCapitalEvent[] = businessCapitalEventRows.filter((r)=>liveBusinessIds.has(str(r.business_id))).map((row)=>({ id:str(row.id), businessId:str(row.business_id), type:enumValue(str(row.event_type),BUSINESS_CAPITAL_EVENT_TYPES,\`business_capital_events[id=\${str(row.id)}].event_type\`), eventDate:str(row.event_date), amount:finiteNumber(row.amount,\`business_capital_events[id=\${str(row.id)}].amount\`), currency:str(row.currency).toUpperCase(), ownershipDelta:nullableFiniteNumber(row.ownership_delta,\`business_capital_events[id=\${str(row.id)}].ownership_delta\`), transactionId:row.transaction_id?str(row.transaction_id):null, notes:row.notes?str(row.notes):null, provenance:provenance(row) }));
+    const businessHoldings: BusinessHoldingLink[] = businessHoldingRows.filter((r)=>liveBusinessIds.has(str(r.parent_business_id))&&liveBusinessIds.has(str(r.child_business_id))).map((row)=>({ id:str(row.id), parentBusinessId:str(row.parent_business_id), childBusinessId:str(row.child_business_id), effectiveDate:str(row.effective_date), ownershipRate:finiteNumber(row.ownership_rate,\`business_holdings[id=\${str(row.id)}].ownership_rate\`), notes:row.notes?str(row.notes):null, provenance:provenance(row) }));
 
-    const latestLiabilityObservations = latestBy(`);
-
-patch('src/lib/data/supabase-repository.ts',
-`    const balanceSheet = buildCanonicalBalanceSheet({\n      asOfDate: AS_OF_DATE,\n      reportingCurrency,\n      accounts,\n      positions,\n      liabilities,\n      contributions: realEstateBalanceSheetContributions(realEstate),\n      currencyRates,\n    });`,
-`    const businessEquity = buildBusinessEquityPortfolio({ asOfDate:AS_OF_DATE, reportingCurrency, businesses, ownership:businessOwnership, financials:businessFinancials, valuations:businessValuations, capitalEvents:businessCapitalEvents, holdings:businessHoldings, currencyRates });\n    const balanceSheet = buildCanonicalBalanceSheet({\n      asOfDate: AS_OF_DATE,\n      reportingCurrency,\n      accounts,\n      positions,\n      liabilities,\n      contributions: [...realEstateBalanceSheetContributions(realEstate), ...businessEquityBalanceSheetContributions(businessEquity)],\n      currencyRates,\n    });`);
-patch('src/lib/data/supabase-repository.ts',
-`      realEstateFinancingLinks,\n      liabilities,`,
-`      realEstateFinancingLinks,\n      businesses,\n      businessOwnership,\n      businessFinancials,\n      businessValuations,\n      businessCapitalEvents,\n      businessHoldings,\n      liabilities,`);
-patch('src/lib/data/supabase-repository.ts',
-`      realEstate,\n      metrics: composeDashboardMetrics`,
-`      realEstate,\n      businessEquity,\n      metrics: composeDashboardMetrics`);
+    const latestLiabilityObservations = latestBy(\`);
 
 patch('src/lib/data/supabase-repository.ts',
-`      case "save_real_estate_asset": {`,
-String.raw`      case "save_business": {
+\`    const balanceSheet = buildCanonicalBalanceSheet({\n      asOfDate: AS_OF_DATE,\n      reportingCurrency,\n      accounts,\n      positions,\n      liabilities,\n      contributions: realEstateBalanceSheetContributions(realEstate),\n      currencyRates,\n    });\`,
+\`    const businessEquity = buildBusinessEquityPortfolio({ asOfDate:AS_OF_DATE, reportingCurrency, businesses, ownership:businessOwnership, financials:businessFinancials, valuations:businessValuations, capitalEvents:businessCapitalEvents, holdings:businessHoldings, currencyRates });\n    const balanceSheet = buildCanonicalBalanceSheet({\n      asOfDate: AS_OF_DATE,\n      reportingCurrency,\n      accounts,\n      positions,\n      liabilities,\n      contributions: [...realEstateBalanceSheetContributions(realEstate), ...businessEquityBalanceSheetContributions(businessEquity)],\n      currencyRates,\n    });\`);
+patch('src/lib/data/supabase-repository.ts',
+\`      realEstateFinancingLinks,\n      liabilities,\`,
+\`      realEstateFinancingLinks,\n      businesses,\n      businessOwnership,\n      businessFinancials,\n      businessValuations,\n      businessCapitalEvents,\n      businessHoldings,\n      liabilities,\`);
+patch('src/lib/data/supabase-repository.ts',
+\`      realEstate,\n      metrics: composeDashboardMetrics\`,
+\`      realEstate,\n      businessEquity,\n      metrics: composeDashboardMetrics\`);
+
+patch('src/lib/data/supabase-repository.ts',
+\`      case "save_real_estate_asset": {\`,
+String.raw\`      case "save_business": {
         unwrap(await db.rpc("lfo_save_business", { p_user_id:user, p_payload:{ business_id:mutation.business.businessId, name:mutation.business.name, legal_form:mutation.business.legalForm, business_type:mutation.business.type, functional_currency:mutation.business.functionalCurrency, notes:mutation.business.notes, source:"Saisie Business Equity" } }), "enregistrement société"); break;
       }
       case "archive_business": { unwrap(await db.rpc("lfo_archive_business", { p_user_id:user, p_business_id:mutation.businessId }), "archivage société"); break; }
@@ -656,9 +656,9 @@ String.raw`      case "save_business": {
       case "record_business_valuation": { const v=mutation.valuation; unwrap(await db.rpc("lfo_record_business_valuation", { p_user_id:user, p_payload:{ business_id:v.businessId,valuation_date:v.valuationDate,currency:v.currency,method:v.method,enterprise_value:v.enterpriseValue,equity_value:v.equityValue,valuation_multiple:v.valuationMultiple,notes:v.notes,source:"Saisie Business Equity",data_kind:v.method==="USER_ESTIMATE"?"USER_ASSUMPTION":"EXTERNAL_DATA",confidence:v.method==="USER_ESTIMATE"?"LOW":"MEDIUM",assumptions:{} } }), "enregistrement valorisation business"); break; }
       case "record_business_capital_event": { const e=mutation.event; unwrap(await db.rpc("lfo_record_business_capital_event", { p_user_id:user, p_payload:{ business_id:e.businessId,event_type:e.type,event_date:e.eventDate,amount:e.amount,currency:e.currency,ownership_delta:e.ownershipDelta,transaction_id:e.transactionId,notes:e.notes,source:"Saisie Business Equity",data_kind:"ACTUAL",confidence:"HIGH" } }), "enregistrement événement business"); break; }
       case "set_business_holding": { const h=mutation.holding; unwrap(await db.rpc("lfo_set_business_holding", { p_user_id:user, p_payload:{ parent_business_id:h.parentBusinessId,child_business_id:h.childBusinessId,effective_date:h.effectiveDate,ownership_rate:h.ownershipRate,notes:h.notes,source:"Saisie Business Equity" } }), "rattachement holding"); break; }
-      case "save_real_estate_asset": {`);
+      case "save_real_estate_asset": {\`);
 
-write('src/components/pages/business-equity/business-forms.tsx', String.raw`"use client";
+write('src/components/pages/business-equity/business-forms.tsx', String.raw\`"use client";
 import { useState } from 'react';
 import type { Mutate } from '@/components/pages/shared';
 import type { BusinessEntity } from '@/lib/engine/business-equity';
@@ -681,7 +681,7 @@ export function BusinessForms({ businesses, mutate, busy }:{ businesses:Business
 }
 `);
 
-write('src/components/pages/business-equity/page.tsx', String.raw`"use client";
+write('src/components/pages/business-equity/page.tsx', `"use client";
 import { Callout, Currency, MetricCard, Percent, SectionHeader } from '@/components/ui';
 import { BusinessForms } from './business-forms';
 import type { SectionProps } from '@/components/pages/shared';
@@ -691,7 +691,7 @@ export default function BusinessPage({ state, mutate, busy }:SectionProps) {
   return <div className="page-stack"><SectionHeader eyebrow="Private assets" title="Business Equity" description="Participations privées : valeur, bridge EV → Equity, détention, capital investi et performance — sans confondre dette corporate et dette personnelle." />
   {!portfolio || state.businesses.length===0 ? <Callout title="Aucune participation déclarée">Ajoute une société puis renseigne sa détention. Une dette corporate à 0 doit être saisie comme 0 si elle est réellement nulle ; une dette inconnue reste vide.</Callout> : <>
     <section className="metrics-grid four"><MetricCard label="Valeur attribuable" value={<Metric value={portfolio.totalAttributableValue.value}/>} tone="positive"/><MetricCard label="Sociétés" value={portfolio.positions.filter(p=>p.ownership).length}/><MetricCard label="Qualité" value={portfolio.quality.blockers.length===0?'Calculable':'Partielle'}/></section>
-    <div className="results-stack">{portfolio.positions.map(p=><article className="panel" key={p.business.id}><div className="panel-header"><div><span className="eyebrow">{p.business.type??'TYPE NON DÉCLARÉ'}</span><h2>{p.business.name}</h2></div></div><section className="metrics-grid four"><MetricCard label="Equity Value" value={<Metric value={p.wholeEquityValue.value}/>}/><MetricCard label="Valeur personnelle" value={<Metric value={p.attributableValue.value}/>}/><MetricCard label="Dette nette corporate" value={<Metric value={p.netDebt.value}/>}/><MetricCard label="Détention économique" value={<Metric value={p.ownership?.economicRate??null} percent/>}/><MetricCard label="Capital investi" value={<Metric value={p.investedCapital.value}/>}/><MetricCard label="Cash retourné" value={<Metric value={p.cashReturned.value}/>}/><MetricCard label="MOIC" value={p.moic.value===null?'Non calculable':`${p.moic.value.toFixed(2)}×`}/><MetricCard label="XIRR" value={<Metric value={p.xirr.value} percent/>}/></section>{p.quality.blockers.length>0&&<p className="warning-text">Bloquants : {p.quality.blockers.join(' · ')}</p>}{p.quality.flags.length>0&&<p className="muted">{p.quality.flags.join(' · ')}</p>}</article>)}</div>
+    <div className="results-stack">{portfolio.positions.map(p=><article className="panel" key={p.business.id}><div className="panel-header"><div><span className="eyebrow">{p.business.type??'TYPE NON DÉCLARÉ'}</span><h2>{p.business.name}</h2></div></div><section className="metrics-grid four"><MetricCard label="Equity Value" value={<Metric value={p.wholeEquityValue.value}/>}/><MetricCard label="Valeur personnelle" value={<Metric value={p.attributableValue.value}/>}/><MetricCard label="Dette nette corporate" value={<Metric value={p.netDebt.value}/>}/><MetricCard label="Détention économique" value={<Metric value={p.ownership?.economicRate??null} percent/>}/><MetricCard label="Capital investi" value={<Metric value={p.investedCapital.value}/>}/><MetricCard label="Cash retourné" value={<Metric value={p.cashReturned.value}/>}/><MetricCard label="MOIC" value={p.moic.value===null?'Non calculable':\`\${p.moic.value.toFixed(2)}×\`}/><MetricCard label="XIRR" value={<Metric value={p.xirr.value} percent/>}/></section>{p.quality.blockers.length>0&&<p className="warning-text">Bloquants : {p.quality.blockers.join(' · ')}</p>}{p.quality.flags.length>0&&<p className="muted">{p.quality.flags.join(' · ')}</p>}</article>)}</div>
   </>}
   <BusinessForms businesses={state.businesses} mutate={mutate} busy={busy}/></div>;
 }
