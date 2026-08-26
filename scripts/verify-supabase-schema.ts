@@ -30,7 +30,8 @@ const canonicalMigrations = [
   "20260825193606",
   "20260826090117",
   "20260826090347",
-  "20260826140000",
+  "20260826145426",
+  "20260826145803",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -329,6 +330,12 @@ const requiredIndexes = [
   "business_capital_events_business_owner_idx",
   "business_holdings_parent_owner_idx",
   "business_holdings_child_owner_idx",
+  "business_financials_effective_uk",
+  "business_valuations_effective_uk",
+  "businesses_user_idx",
+  "business_financials_user_idx",
+  "business_valuations_user_idx",
+  "business_capital_events_user_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx"] as const;
 
