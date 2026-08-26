@@ -13,7 +13,11 @@
 - scoring institutionnel complet et expliqué ;
 - PDF patrimonial, rapport mensuel/annuel et Investment Committee Memo ;
 - analyse automatique des documents ;
-- business cap table, dilution, DCF et scénarios d’exit persistants ;
+- import de liasses fiscales et de comptes annuels, transactions comparables et benchmarks de multiples ;
+- export Excel Business Equity (la structure existe déjà côté moteur, la génération reste à écrire) ;
+- garantie personnelle déclenchée sur une dette corporate, seul chemin qui la ferait entrer au passif personnel ;
+- fiscalité de cession de titres, tant qu'aucun Tax Engine ne sait la produire ;
+- trajectoire Business Equity dans le modèle mensuel personnel : la valeur y serait portée constante, donc trompeuse ;
 - comparaison active des autres cas du Decision Lab ;
 - AI Advisor, après stabilisation de la couche de données.
 
