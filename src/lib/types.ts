@@ -835,12 +835,12 @@ export interface DashboardState {
   /** Rattachements bien ↔ dette. Ne portent aucun passif. */
   realEstateFinancingLinks: RealEstateFinancingLink[];
   /** Business Equity V2 — faits canoniques, puis lecture dérivée. */
-  businesses: import("@/lib/engine/business-equity").BusinessEntity[];
-  businessOwnership: import("@/lib/engine/business-equity").BusinessOwnership[];
-  businessFinancials: import("@/lib/engine/business-equity").BusinessFinancialSnapshot[];
-  businessValuations: import("@/lib/engine/business-equity").BusinessValuation[];
-  businessCapitalEvents: import("@/lib/engine/business-equity").BusinessCapitalEvent[];
-  businessHoldings: import("@/lib/engine/business-equity").BusinessHoldingLink[];
+  businesses?: import("@/lib/engine/business-equity").BusinessEntity[];
+  businessOwnership?: import("@/lib/engine/business-equity").BusinessOwnership[];
+  businessFinancials?: import("@/lib/engine/business-equity").BusinessFinancialSnapshot[];
+  businessValuations?: import("@/lib/engine/business-equity").BusinessValuation[];
+  businessCapitalEvents?: import("@/lib/engine/business-equity").BusinessCapitalEvent[];
+  businessHoldings?: import("@/lib/engine/business-equity").BusinessHoldingLink[];
   liabilities: Liability[];
   incomes: IncomeSource[];
   expenseCategories: ExpenseCategory[];
