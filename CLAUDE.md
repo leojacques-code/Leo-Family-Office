@@ -113,10 +113,12 @@ réservées à `service_role`, qui persistent des résultats déjà calculés.
 Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.md`, elle
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`. La divergence des deux index de
-`net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026, dépôt et production
-ont ensuite été alignés sur 17 versions : Portfolio Data Foundation puis ses index
-couvrant les clés étrangères. Les deux dernières migrations ont été appliquées en
-production et contrôlées par assertions SQL transactionnelles et advisors Supabase.
+`net_worth_snapshot_items` a été clôturée ainsi le 25 août 2026. Dépôt et production sont
+alignés sur 19 versions : Portfolio Data Foundation et ses index couvrant les clés
+étrangères, puis Real Estate V2 et les siens. Chaque paire suit le même schéma, une
+migration de fond puis une migration d'index révélée par les advisors, et chacune a été
+appliquée en production puis contrôlée par assertions SQL transactionnelles, advisors
+Supabase et test d'isolation sous le rôle `authenticated` réel.
 
 ## 6. Tests et gates
 

@@ -28,7 +28,8 @@ const canonicalMigrations = [
   "20260825063831",
   "20260825193427",
   "20260825193606",
-  "20260826080000",
+  "20260826090117",
+  "20260826090347",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -292,6 +293,12 @@ const requiredIndexes = [
   "real_estate_financing_links_property_idx",
   "real_estate_capital_events_transaction_idx",
   "transactions_property_owner_idx",
+  // Index dans l'ORDRE de la FK composite `(property_id, user_id)`. Ceux de Real Estate V2
+  // sont en `(user_id, property_id)` : PostgreSQL ne peut pas s'en servir pour vérifier la
+  // clé étrangère ni la cascader, et chaque suppression de bien balayait la table.
+  "real_estate_valuations_property_owner_idx",
+  "real_estate_capital_events_property_owner_idx",
+  "real_estate_operating_terms_property_owner_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx"] as const;
 
