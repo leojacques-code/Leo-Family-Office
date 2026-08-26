@@ -42,7 +42,20 @@ const requiredColumns: Record<string, string[]> = {
     "monthly_savings",
   ],
   expense_categories: ["id", "cash_flow_kind", "essentiality", "expense_behavior", "archived"],
-  transactions: ["id", "kind_override", "transfer_group_id"],
+  transactions: ["id", "kind_override", "transfer_group_id", "property_id"],
+  // Colonnes réellement lues par la pagination de l'historique de change. Leur absence
+  // faisait échouer `getDashboardState` en production sans qu'aucun gate ne le voie : le
+  // verifier ne contrôlait pas cette table.
+  currency_rates: [
+    "id",
+    "user_id",
+    "base_currency",
+    "quote_currency",
+    "rate",
+    "rate_date",
+    "source",
+    "data_kind",
+  ],
   liabilities: [
     "id",
     "monthly_insurance",

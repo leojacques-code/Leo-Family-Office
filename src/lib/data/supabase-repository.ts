@@ -181,6 +181,20 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
    * temporel, et la pagination garantit que la fenêtre est lue en entier.
    */
   /** Lecture intégrale d'une table du propriétaire. Une troncature échoue, elle ne se tait pas. */
+  /**
+   * Lecture paginée d'une table de l'utilisateur, dans un ordre TOTAL.
+   *
+   * Une pagination par `range` n'est déterministe que si le tri distingue toutes les
+   * lignes : à égalité sur la clé de tri, PostgreSQL peut renvoyer deux pages qui se
+   * chevauchent ou qui sautent une ligne, et le ledger serait alors faux sans que rien ne
+   * le dise. Le départage se fait donc sur `id`, la clé primaire : elle existe sur toutes
+   * les tables et elle est UNIQUE, ce qui garantit un ordre strict.
+   *
+   * `created_at` remplissait ce rôle auparavant. C'était deux fois insuffisant : la colonne
+   * n'est pas unique, donc elle ne garantissait pas l'ordre total qu'on lui demandait, et
+   * elle n'existe pas sur toutes les tables paginées — `currency_rates` n'en a pas, ce qui
+   * faisait échouer la lecture de l'historique de change et, avec elle, tout le cockpit.
+   */
   function fetchAllPages(
     table: string,
     orderColumn: string,
@@ -191,7 +205,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         .select("*")
         .eq("user_id", user)
         .order(orderColumn, { ascending: true })
-        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
         .range(from, to);
       return { data: (result.data ?? null) as Row[] | null, error: result.error };
     });
@@ -211,7 +225,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         .eq("user_id", user)
         .gte("transaction_date", since)
         .order("transaction_date", { ascending: false })
-        .order("created_at", { ascending: false })
+        // Départage sur la clé primaire, pour la même raison que `fetchAllPages` : seule
+        // une colonne UNIQUE rend la pagination déterministe. `created_at` ne l'est pas.
+        .order("id", { ascending: false })
         .range(from, to);
       return { data: (result.data ?? null) as Row[] | null, error: result.error };
     });
