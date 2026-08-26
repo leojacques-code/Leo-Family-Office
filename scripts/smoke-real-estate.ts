@@ -116,6 +116,17 @@ try {
              240, date '2020-08-05', date '2040-07-05', 'ACTUAL', 'HIGH')`,
     [liabilityId, userId],
   );
+  // Second concours, sans aucune quote-part : il sert à tester le plafond de cumul de
+  // façon indépendante du premier, dont les parts servent déjà d'autres assertions.
+  const secondLiabilityId = randomUUID();
+  await client.query(
+    `insert into public.liabilities
+       (id, user_id, lender, name, principal, current_balance, annual_rate, monthly_payment,
+        payment_count, first_payment_date, maturity_date, data_kind, confidence)
+     values ($1, $2, 'Banque smoke', 'Second crédit smoke', 90000, 70000, 0.018, 480,
+             240, date '2021-03-05', date '2041-02-05', 'ACTUAL', 'HIGH')`,
+    [secondLiabilityId, userId],
+  );
   const institutionId = randomUUID();
   const accountId = randomUUID();
   await client.query("insert into public.institutions (id, user_id, name) values ($1, $2, $3)", [
@@ -155,6 +166,7 @@ try {
       surface_sqm: 62,
       property_usage: "RENTAL",
       ownership_share: 1,
+      debt_financed: true,
       acquisition_date: "2020-06-15",
     },
     userId,
@@ -167,9 +179,10 @@ try {
     status: string | null;
     property_usage: string;
     ownership_share: string;
+    debt_financed: boolean | null;
     archived: boolean;
   }>(
-    `select property_type, status, property_usage, ownership_share, archived
+    `select property_type, status, property_usage, ownership_share, debt_financed, archived
        from public.properties where id = $1`,
     [propertyId],
   );
@@ -178,6 +191,7 @@ try {
   assert(identity.rows[0].status === null, "status hérité rempli par une invention");
   assert(identity.rows[0].property_usage === "RENTAL", "Usage non enregistré");
   assert(Number(identity.rows[0].ownership_share) === 1, "Quote-part non enregistrée");
+  assert(identity.rows[0].debt_financed === true, "Déclaration de financement non enregistrée");
 
   // Une quote-part transmise `null` efface la déclaration : c'est une valeur, pas un oubli.
   await rpc(
@@ -188,9 +202,18 @@ try {
   const cleared = await client.query<{
     ownership_share: string | null;
     property_usage: string | null;
-  }>("select ownership_share, property_usage from public.properties where id = $1", [propertyId]);
+    debt_financed: boolean | null;
+  }>("select ownership_share, property_usage, debt_financed from public.properties where id = $1", [
+    propertyId,
+  ]);
   assert(cleared.rows[0].ownership_share === null, "Quote-part null non effacée");
   assert(cleared.rows[0].property_usage === null, "Usage null non effacé");
+  // « Non déclaré » doit pouvoir être RÉTABLI : sans cela, une correction laisserait une
+  // déclaration périmée derrière elle et le moteur croirait savoir.
+  assert(
+    cleared.rows[0].debt_financed === null,
+    "Déclaration de financement null non effacée : « non déclaré » n'est pas rétablissable",
+  );
   await rpc(
     "lfo_save_real_estate_asset",
     {
@@ -198,6 +221,32 @@ try {
       name: "Appartement smoke",
       property_usage: "RENTAL",
       ownership_share: 1,
+      debt_financed: true,
+    },
+    userId,
+  );
+  // `false` est une valeur, distincte de `null` : elle doit se persister comme telle.
+  await rpc(
+    "lfo_save_real_estate_asset",
+    { property_id: propertyId, name: "Appartement smoke", debt_financed: false },
+    userId,
+  );
+  const debtFree = await client.query<{ debt_financed: boolean | null }>(
+    "select debt_financed from public.properties where id = $1",
+    [propertyId],
+  );
+  assert(
+    debtFree.rows[0].debt_financed === false,
+    "Déclaration « sans dette » non distinguée de « non déclaré »",
+  );
+  await rpc(
+    "lfo_save_real_estate_asset",
+    {
+      property_id: propertyId,
+      name: "Appartement smoke",
+      property_usage: "RENTAL",
+      ownership_share: 1,
+      debt_financed: true,
     },
     userId,
   );
@@ -497,6 +546,47 @@ try {
     "Un rattachement a pu viser le bien d'un autre propriétaire",
     "real_estate_financing_links_property_fk",
   );
+  // ── 5 bis. Le plafond de cumul est un invariant de la BASE ────────────────────────
+  // Ce n'est pas un contrôle applicatif : `authenticated` détient des droits d'écriture
+  // directs sur cette table, et une écriture hors RPC contournerait toute vérification
+  // faite dans la fonction. Le trigger est ce qui rend la règle vraie.
+  await client.query(
+    `insert into public.real_estate_financing_links
+       (user_id, property_id, liability_id, allocation_share, data_kind, confidence)
+     values ($1, $2, $3, 0.7, 'USER_ASSUMPTION', 'HIGH')`,
+    [userId, propertyId, secondLiabilityId],
+  );
+  await rejects(
+    `insert into public.real_estate_financing_links
+       (user_id, property_id, liability_id, allocation_share, data_kind, confidence)
+     values ($1, $2, $3, 0.5, 'USER_ASSUMPTION', 'HIGH')`,
+    [userId, secondPropertyId, secondLiabilityId],
+    "Une insertion directe hors RPC a pu porter le cumul de quote-parts au-delà de 1",
+    "comptée deux fois",
+  );
+  // Le contrôle porte sur le CUMUL réel : une part qui tient dans la marge restante passe.
+  await client.query(
+    `insert into public.real_estate_financing_links
+       (user_id, property_id, liability_id, allocation_share, data_kind, confidence)
+     values ($1, $2, $3, 0.3, 'USER_ASSUMPTION', 'HIGH')`,
+    [userId, secondPropertyId, secondLiabilityId],
+  );
+  const secondTotal = await client.query<{ total: string }>(
+    `select sum(allocation_share)::text as total
+       from public.real_estate_financing_links where liability_id = $1`,
+    [secondLiabilityId],
+  );
+  assert(Number(secondTotal.rows[0].total) === 1, "Cumul du second concours incorrect");
+  // Une mise à jour directe est gardée par le même trigger. Sans le `update of` du
+  // déclencheur, un simple UPDATE rouvrirait la porte que l'INSERT ferme.
+  await rejects(
+    `update public.real_estate_financing_links
+        set allocation_share = 0.95
+      where user_id = $1 and property_id = $2 and liability_id = $3`,
+    [userId, propertyId, secondLiabilityId],
+    "Une mise à jour directe hors RPC a pu porter le cumul de quote-parts au-delà de 1",
+    "comptée deux fois",
+  );
   await client.query("select public.lfo_delete_real_estate_financing_link($1::uuid, $2::uuid)", [
     userId,
     linkId,
@@ -579,7 +669,7 @@ try {
     `Le smoke a persisté des lignes : before=${JSON.stringify(before)} after=${JSON.stringify(after)}`,
   );
   console.log(
-    "Smoke Real Estate V2 vert : identité upsert et effaçable, colonnes héritées laissées nulles, valorisations historisées, prix d’achat et de cession uniques, montants positifs, null écrit null, frais de gestion exclusifs, quote-part de dette plafonnée à 1, cloisonnement par propriétaire, attribution de flux sans effet de bord, bien supprimé sans perte de flux, archivage, rollback intégral.",
+    "Smoke Real Estate V2 vert : identité upsert et effaçable, financement tri-état persisté sans confondre « sans dette » et « non déclaré », colonnes héritées laissées nulles, valorisations historisées, prix d’achat et de cession uniques, montants positifs, null écrit null, frais de gestion exclusifs, quote-part de dette plafonnée à 1, cloisonnement par propriétaire, quote-part refusée hors RPC en insertion comme en mise à jour, attribution de flux sans effet de bord, bien supprimé sans perte de flux, archivage, rollback intégral.",
   );
 } catch (error) {
   await client.query("rollback").catch(() => undefined);

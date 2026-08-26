@@ -38,6 +38,7 @@ function asset(overrides: Partial<RealEstateAsset> = {}): RealEstateAsset {
     surfaceSqm: 62,
     usage: "RENTAL",
     ownershipShare: 1,
+    isDebtFinanced: true,
     acquisitionDate: "2020-06-15",
     disposalDate: null,
     archived: false,
@@ -367,13 +368,83 @@ describe("real estate — financement consommé du Debt Engine", () => {
     expect(ALLOCATION_TOLERANCE).toBeLessThan(1e-6);
   });
 
-  it("un bien sans dette rattachée est lu comme non financé, et le dit", () => {
-    const view = build({ financingLinks: [] }).assets[0];
+  it("un bien DÉCLARÉ sans dette a bien un financement nul", () => {
+    const view = build({
+      assets: [asset({ isDebtFinanced: false })],
+      financingLinks: [],
+    }).assets[0];
+    expect(view.financingState).toBe("DECLARED_NONE");
     expect(view.debt.cashDebtService.value).toBe(0);
     expect(view.equity.attributedOutstandingDebt.value).toBe(0);
     expect(view.equity.currentEquity.value).toBe(260_000);
-    expect(view.flags.map((flag) => flag.code)).toContain("DEBT_NOT_ATTRIBUTED");
+    expect(view.flags.map((flag) => flag.code)).toContain("DEBT_FREE_DECLARED");
+    // Sans dette, l'apport réel est le coût de revient entier : il reste calculable.
+    expect(view.returns.equityEngaged.value).toBeCloseTo(216_000, 6);
+    // Aucun service de dette à couvrir : le ratio n'existe pas, il ne vaut pas l'infini.
     expect(view.returns.debtServiceCoverage.value).toBeNull();
+  });
+
+  it("une dette déclarée mais non rattachée n'est PAS une dette nulle", () => {
+    const view = build({
+      assets: [asset({ isDebtFinanced: true })],
+      financingLinks: [],
+    }).assets[0];
+    expect(view.financingState).toBe("UNKNOWN");
+    // C'est le cœur du point : zéro serait un mensonge de 120 000 € sur le patrimoine.
+    expect(view.equity.attributedOutstandingDebt.value).toBeNull();
+    expect(view.equity.currentEquity.value).toBeNull();
+    expect(view.debt.cashDebtService.value).toBeNull();
+    expect(view.debt.economicCost.value).toBeNull();
+    expect(view.returns.equityEngaged.value).toBeNull();
+    expect(view.returns.cashOnCashOnEquityEngaged.value).toBeNull();
+    expect(view.returns.preTaxCashFlow.value).toBeNull();
+    expect(view.returns.loanToValue.value).toBeNull();
+    expect(view.flags.map((flag) => flag.code)).toContain("DEBT_DECLARED_NOT_LINKED");
+    expect(view.equity.attributedOutstandingDebt.blockers).toContain(
+      "DEBT_DECLARED_NOT_LINKED:prop",
+    );
+    // L'ignorance ne se propage pas au-delà de sa dépendance : valeur, coût de revient et
+    // rendements d'exploitation restent parfaitement connus.
+    expect(view.valuation.ownerValue.value).toBe(260_000);
+    expect(view.equity.unrealisedGain.value).toBe(44_000);
+    expect(view.operating.netOperatingIncome.value).toBeCloseTo(7_800, 6);
+    expect(view.returns.netYieldOnValue.value).toBeCloseTo(7_800 / 260_000, 9);
+  });
+
+  it("un financement NON DÉCLARÉ ne vaut pas non plus zéro", () => {
+    const view = build({
+      assets: [asset({ isDebtFinanced: null })],
+      financingLinks: [],
+    }).assets[0];
+    expect(view.financingState).toBe("UNKNOWN");
+    expect(view.equity.currentEquity.value).toBeNull();
+    expect(view.flags.map((flag) => flag.code)).toContain("FINANCING_UNDECLARED");
+    expect(view.equity.attributedOutstandingDebt.blockers).toContain("FINANCING_UNDECLARED:prop");
+  });
+
+  it("un rattachement l'emporte sur une déclaration d'achat comptant, et la contredit", () => {
+    const view = build({ assets: [asset({ isDebtFinanced: false })] }).assets[0];
+    expect(view.financingState).toBe("LINKED");
+    // Le fait prime sur l'affirmation : ignorer un concours réellement rattaché
+    // sous-estimerait la dette du bien.
+    expect(view.equity.attributedOutstandingDebt.value).toBe(120_000);
+    expect(view.flags.map((flag) => flag.code)).toContain("FINANCING_DECLARATION_CONTRADICTED");
+  });
+
+  it("un financement non déclaré n'empêche pas le bien d'entrer au bilan", () => {
+    // La valeur du bien ne dépend pas de son financement : elle reste au bilan, et c'est
+    // le passif de `liabilities` qui porte la dette, connue ou non rattachée.
+    const portfolio = build({
+      assets: [asset({ isDebtFinanced: null })],
+      financingLinks: [],
+    });
+    const contributions = realEstateBalanceSheetContributions(portfolio);
+    expect(contributions).toHaveLength(1);
+    expect(contributions[0].nativeValue).toBe(260_000);
+    expect(portfolio.grossValue.value).toBe(260_000);
+    // En revanche l'equity du domaine, elle, n'est pas calculable.
+    expect(portfolio.equity.value).toBeNull();
+    expect(portfolio.attributedDebt.value).toBeNull();
   });
 
   it("signale un rattachement vers une dette absente de l'état", () => {
@@ -453,6 +524,44 @@ describe("real estate — devises", () => {
     }).assets[0];
     expect(view.valuation.grossValue.value).toBeNull();
     expect(view.flags.map((flag) => flag.code)).toContain("FX_MISSING");
+  });
+
+  it("refuse de convertir le capital emprunté sans date de décaissement connue", () => {
+    const view = build({
+      liabilities: [mortgage({ currency: "CHF" })],
+      currencyRates: [
+        ...rates,
+        {
+          baseCurrency: "CHF",
+          quoteCurrency: "EUR",
+          rate: 1.05,
+          rateDate: "2020-08-05",
+          provenance: external,
+        },
+      ],
+    }).assets[0];
+    // L'encours OBSERVÉ est daté par le contrat : il se convertit.
+    expect(view.equity.attributedOutstandingDebt.value).toBeCloseTo(120_000 * 1.05, 6);
+    // Le capital EMPRUNTÉ est historique et sa date de décaissement n'existe pas dans le
+    // modèle de dette. Même avec un taux disponible à la première échéance, le moteur ne
+    // substitue aucune date approchée : l'apport réel reste non calculable.
+    expect(view.equity.attributedOriginalPrincipal.value).toBeNull();
+    expect(view.returns.equityEngaged.value).toBeNull();
+    expect(view.returns.cashOnCashOnEquityEngaged.value).toBeNull();
+    expect(view.equity.attributedOriginalPrincipal.blockers).toContain(
+      "FINANCING_ORIGINATION_DATE_UNKNOWN:loan",
+    );
+    expect(view.flags.map((flag) => flag.code)).toContain("FINANCING_ORIGINATION_DATE_UNKNOWN");
+    // Ce qui ne dépend pas du capital d'origine reste calculable.
+    expect(view.equity.currentEquity.value).not.toBeNull();
+    expect(view.debt.economicCost.value).not.toBeNull();
+  });
+
+  it("en devise de reporting, le capital emprunté est exact sans conversion", () => {
+    const view = build().assets[0];
+    expect(view.equity.attributedOriginalPrincipal.value).toBe(160_000);
+    expect(view.returns.equityEngaged.value).toBeCloseTo(56_000, 6);
+    expect(view.flags.map((flag) => flag.code)).not.toContain("FINANCING_ORIGINATION_DATE_UNKNOWN");
   });
 
   it("signale des faits libellés en devises différentes sans les additionner en natif", () => {
@@ -630,8 +739,30 @@ describe("real estate — flux réels, une seule vérité de trésorerie", () =>
     expect(view.observed.transactionCount).toBe(12);
     expect(view.observed.cashFlow?.income).toBeCloseTo(950 * 12, 6);
     expect(view.observed.cashFlow?.coverage.status).toBe("COMPLETE");
-    // Écart entre loyer effectif déclaré et revenus réellement observés.
-    expect(view.observed.rentVariance.value).toBeCloseTo(11_400 - 11_400, 6);
+    expect(view.observed.observedIncome.value).toBeCloseTo(950 * 12, 6);
+    // Écart entre loyer effectif DÉCLARÉ et revenus OBSERVÉS : deux grandeurs de nature
+    // différente, et le moteur le signale plutôt que de présenter l'un pour l'autre.
+    expect(view.observed.declaredRentVsObservedIncome.value).toBeCloseTo(11_400 - 11_400, 6);
+    expect(view.flags.map((flag) => flag.code)).toContain("OBSERVED_INCOME_NOT_RENT_QUALIFIED");
+  });
+
+  it("ne présente jamais un revenu non locatif comme un loyer observé", () => {
+    const insurancePayout: Transaction = {
+      ...rentTransaction("2026-04"),
+      id: "tx-indemnite",
+      label: "Indemnité sinistre",
+      amount: 4_000,
+    };
+    const view = build({
+      transactions: [...months.map(rentTransaction), insurancePayout],
+      expenseCategories: categories,
+      ledgerCoverageStart: "2020-01-01",
+    }).assets[0];
+    // Le moteur additionne ce qu'il sait classer : 12 loyers PLUS l'indemnité. Il ne peut
+    // pas les distinguer sans nature de revenu locatif, et il ne prétend pas le faire.
+    expect(view.observed.observedIncome.value).toBeCloseTo(950 * 12 + 4_000, 6);
+    expect(view.observed.declaredRentVsObservedIncome.value).toBeCloseTo(11_400 - 15_400, 6);
+    expect(view.flags.map((flag) => flag.code)).toContain("OBSERVED_INCOME_NOT_RENT_QUALIFIED");
   });
 
   it("ne compare pas au déclaré une fenêtre observée non couverte", () => {
@@ -641,7 +772,8 @@ describe("real estate — flux réels, une seule vérité de trésorerie", () =>
       ledgerCoverageStart: null,
     }).assets[0];
     expect(view.observed.cashFlow?.coverage.status).toBe("INSUFFICIENT");
-    expect(view.observed.rentVariance.value).toBeNull();
+    expect(view.observed.observedIncome.value).toBeNull();
+    expect(view.observed.declaredRentVsObservedIncome.value).toBeNull();
     expect(view.flags.map((flag) => flag.code)).toContain("OBSERVED_LEDGER_NOT_COVERED");
   });
 

@@ -70,7 +70,14 @@ Corollaires appliqués dans le code existant, à préserver :
 - une quote-part détenue non déclarée ne vaut pas 100 % : la valeur attribuable au
   patrimoine devient non calculable ;
 - la quote-part d'un concours affectée à des biens ne dépasse jamais 1, sans quoi la même
-  dette serait comptée deux fois ;
+  dette serait comptée deux fois : c'est un invariant de la base, garanti sous concurrence,
+  pas un contrôle applicatif ;
+- l'absence de dette rattachée à un bien n'est pas une absence de dette : seul un zéro
+  DÉCLARÉ autorise à calculer une equity, sans quoi le patrimoine serait surévalué du
+  montant entier du crédit non saisi ;
+- un capital emprunté est un montant historique : sans date de décaissement connue, sa
+  contre-valeur en devise de reporting n'est pas calculable, et la première échéance n'en
+  tient pas lieu ;
 - une charge d'exploitation déclarée à zéro est une information, une charge non déclarée n'en
   est pas une : le rendement net qui en dépend reste non calculable.
 

@@ -67,7 +67,7 @@ npm run build
 npm run check
 ```
 
-`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 53 tables, colonnes, contraintes, 24 RPC, permissions, RLS, policies, bucket Storage ou l'historique de migration divergent du code. Le contrôle des migrations est symétrique : une version attendue absente échoue, et une version appliquée hors du dépôt échoue aussi.
+`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les 53 tables, colonnes, contraintes, 24 RPC, triggers d'invariant, permissions, RLS, policies, bucket Storage ou l'historique de migration divergent du code. Le contrôle des migrations est symétrique : une version attendue absente échoue, et une version appliquée hors du dépôt échoue aussi.
 
 Le même contrôle s'exécute sans aucun credential, sur un PostgreSQL local jetable reconstruit depuis les seules migrations du dépôt :
 
@@ -115,7 +115,7 @@ La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persis
 Les migrations Canonical Balance Sheet V2 enrichissent et versionnent les snapshots, sans supprimer ni écraser les données historiques ; toutes les formules restent dans les engines TypeScript.
 La migration 16 ajoute le ledger portefeuille (`portfolio_events`, `portfolio_envelope_policies`) et ses RPC. Aucun lot ni coût de revient n'y est persisté : ces grandeurs sont dérivées par `src/lib/engine/portfolio.ts`. La migration 17 couvre les clés étrangères du ledger avec leurs index dédiés.
 Les migrations 14 et 15 ne portent que des index de `net_worth_snapshot_items` : la 15 remplace l'index de la 14, l'état final couvrant la FK composite `(snapshot_id, user_id)`.
-La migration 18 installe Real Estate V2 : quatre tables de faits (`real_estate_valuations`, `real_estate_capital_events`, `real_estate_operating_terms`, `real_estate_financing_links`), les colonnes canoniques de `properties`, la colonne d'attribution `transactions.property_id` et neuf RPC. Elle ne crée AUCUNE seconde vérité : la dette immobilière reste une ligne de `liabilities` à laquelle le bien se rattache par une quote-part, et les flux réels restent des lignes de `transactions` simplement rattachées à un bien. Rendement, equity, plus-value et coût économique du financement sont dérivés par `src/lib/engine/real-estate.ts`. Les tables héritées `mortgages` et `real_estate_cashflows` y sont marquées obsolètes et ne sont ni lues ni écrites.
+La migration 18 installe Real Estate V2 : quatre tables de faits (`real_estate_valuations`, `real_estate_capital_events`, `real_estate_operating_terms`, `real_estate_financing_links`), les colonnes canoniques de `properties`, la colonne d'attribution `transactions.property_id`, neuf RPC et le trigger `real_estate_financing_links_allocation_guard`. Ce trigger est le seul endroit où la règle « la somme des quote-parts d'un même concours ne dépasse jamais 1 » est réellement garantie : il verrouille la ligne de dette, donc il tient sous concurrence et sur une écriture directe hors RPC. Elle ne crée AUCUNE seconde vérité : la dette immobilière reste une ligne de `liabilities` à laquelle le bien se rattache par une quote-part, et les flux réels restent des lignes de `transactions` simplement rattachées à un bien. Rendement, equity, plus-value et coût économique du financement sont dérivés par `src/lib/engine/real-estate.ts`. Les tables héritées `mortgages` et `real_estate_cashflows` y sont marquées obsolètes et ne sont ni lues ni écrites.
 
 ## Sécurité
 

@@ -268,6 +268,7 @@ function RealEstatePage({ state, mutate, busy, setExplanation }: SectionProps) {
               {view.asset.name}
               <span>
                 {view.usage === null ? "usage non déclaré" : USAGE_LABELS[view.usage]}
+                {view.financingState === "UNKNOWN" ? " · financement inconnu" : ""}
                 {view.isOnBalanceSheet ? "" : " · hors bilan"}
               </span>
             </button>
@@ -621,11 +622,28 @@ function AssetEconomics({
       </dl>
 
       <h3>Financement, consommé du Debt Engine</h3>
-      {view.financing.length === 0 ? (
-        <Callout title="Aucune dette rattachée">
-          Le bien est lu comme non financé. Si un crédit le finance, il est bien au bilan mais son
-          coût n’est pas imputé à ce bien : rattacher le concours rend l’equity et le cash flow du
-          bien calculables.
+      {view.financingState === "DECLARED_NONE" ? (
+        <Callout tone="success" title="Bien déclaré sans dette">
+          Aucune dette ne finance ce bien, et c’est une information déclarée, pas une lacune.
+          L’equity du bien vaut donc sa valeur attribuable, et son apport réel son coût de revient
+          entier.
+        </Callout>
+      ) : view.financingState === "UNKNOWN" ? (
+        <Callout
+          tone="warning"
+          title={
+            view.asset.isDebtFinanced === true
+              ? "Dette déclarée, mais aucun concours rattaché"
+              : "Financement non déclaré"
+          }
+        >
+          {view.asset.isDebtFinanced === true
+            ? "Une dette finance ce bien sans qu’un concours lui soit rattaché : la dette attribuée est inconnue, elle n’est pas nulle."
+            : "Ni concours rattaché, ni déclaration d’achat sans dette. Le moteur refuse de trancher entre les deux."}{" "}
+          Tant que la situation n’est pas connue, equity, apport réel, cash flow et rendements sur
+          fonds propres restent non calculables : les afficher à zéro surévaluerait le patrimoine du
+          montant entier de la dette. Rattacher le concours, ou déclarer le bien sans dette dans son
+          identité.
         </Callout>
       ) : (
         <>
@@ -737,9 +755,16 @@ function AssetEconomics({
           </dd>
         </div>
         <div>
+          <dt>Revenus observés rattachés</dt>
+          <dd>
+            <Derived amount={view.observed.observedIncome} />
+          </dd>
+        </div>
+        <div>
           <dt>Écart loyer déclaré − revenus observés</dt>
           <dd>
-            <Derived amount={view.observed.rentVariance} sign />
+            <Derived amount={view.observed.declaredRentVsObservedIncome} sign />
+            <small> · deux grandeurs de nature différente</small>
           </dd>
         </div>
       </dl>

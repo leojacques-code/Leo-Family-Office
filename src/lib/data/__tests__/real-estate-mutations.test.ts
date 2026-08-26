@@ -17,6 +17,7 @@ const asset = {
   surfaceSqm: 62,
   usage: "RENTAL" as const,
   ownershipShare: 1,
+  isDebtFinanced: true,
   acquisitionDate: "2020-06-15",
   disposalDate: null,
   notes: null,
@@ -50,6 +51,30 @@ describe("mutations Real Estate V2 — identité du bien", () => {
     // Le `null` traverse la validation intact : « non déclaré » n'est pas remplacé.
     expect(result.data.asset.usage).toBeNull();
     expect(result.data.asset.ownershipShare).toBeNull();
+  });
+
+  it("préserve les trois états du financement, dont le non déclaré", () => {
+    for (const declared of [true, false, null]) {
+      const result = parse({
+        action: "save_real_estate_asset",
+        asset: { ...asset, isDebtFinanced: declared },
+      });
+      expect(result.success).toBe(true);
+      if (!result.success || result.data.action !== "save_real_estate_asset") return;
+      // Le `null` traverse intact : le convertir en `false` ferait passer un crédit non
+      // encore saisi pour un achat comptant, et surévaluerait le patrimoine.
+      expect(result.data.asset.isDebtFinanced).toBe(declared);
+    }
+  });
+
+  it("refuse une déclaration de financement qui n'est pas un booléen", () => {
+    expect(
+      parse({ action: "save_real_estate_asset", asset: { ...asset, isDebtFinanced: "oui" } })
+        .success,
+    ).toBe(false);
+    expect(
+      parse({ action: "save_real_estate_asset", asset: { ...asset, isDebtFinanced: 1 } }).success,
+    ).toBe(false);
   });
 
   it("refuse une quote-part nulle ou supérieure à 1", () => {

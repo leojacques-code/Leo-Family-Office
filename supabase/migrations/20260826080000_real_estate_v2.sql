@@ -48,6 +48,18 @@ alter table public.properties
   -- principale et un locatif n'ont ni le même rendement ni la même fiscalité, et supposer
   -- l'un à la place de l'autre fausserait les deux.
   add column if not exists property_usage text,
+  -- Le bien est-il financé par une dette ? TRI-ÉTAT, et c'est tout l'enjeu :
+  --
+  --   false → l'utilisateur DÉCLARE que le bien n'est financé par aucune dette. Zéro est
+  --           alors une valeur, et l'equity du bien vaut sa valeur attribuable.
+  --   true  → une dette le finance. Tant qu'aucun concours n'est rattaché, la dette
+  --           attribuée reste INCONNUE : elle n'est pas nulle.
+  --   null  → non déclaré. Aucune métrique dépendant du financement n'est calculable.
+  --
+  -- Sans cette colonne, « je n'ai pas encore rattaché le crédit » et « j'ai acheté
+  -- comptant » produiraient le même chiffre : une equity égale à la valeur du bien. La
+  -- première situation surévaluerait alors le patrimoine du montant entier de la dette.
+  add column if not exists debt_financed boolean,
   -- Quote-part réellement détenue, entre 0 exclu et 1. `null` = non déclarée : le moteur
   -- déclare alors la valeur attribuable NON CALCULABLE plutôt que de supposer 100 %.
   add column if not exists ownership_share numeric(9,8),
@@ -122,6 +134,8 @@ comment on column public.properties.property_usage is
   'Usage économique déclaré. null = non déclaré, jamais OTHER.';
 comment on column public.properties.ownership_share is
   'Quote-part détenue, dans ]0,1]. null = non déclarée : la valeur attribuable devient NOT_COMPUTABLE.';
+comment on column public.properties.debt_financed is
+  'Le bien est-il financé par une dette ? false = déclaré sans dette, true = financé, null = non déclaré. Absence de rattachement n''est PAS absence de dette.';
 comment on column public.properties.purchase_price is
   'HÉRITÉ, non consommé par Real Estate V2. Le prix d''achat canonique est l''événement ACQUISITION_PRICE de real_estate_capital_events, qui porte sa date, sa devise et sa provenance.';
 comment on column public.properties.inputs is
@@ -358,6 +372,81 @@ create table if not exists public.real_estate_financing_links (
   )
 );
 
+-- ---------------------------------------------------------------------------
+-- 4 bis. Garde-fou TRANSACTIONNEL de la quote-part
+-- ---------------------------------------------------------------------------
+-- La règle « la somme des quote-parts d'un même concours ne dépasse jamais 1 » protège
+-- contre le double comptage d'une dette. Une vérification faite dans la RPC ne suffit pas
+-- à la garantir, pour deux raisons :
+--
+--   1. `authenticated` détient des droits d'écriture directs sur cette table. Une écriture
+--      hors RPC contournerait entièrement le contrôle applicatif.
+--   2. Même via la RPC, deux transactions concurrentes liraient le même total AVANT leurs
+--      insertions respectives, puis dépasseraient 1 ensemble sans qu'aucune ne le voie.
+--
+-- Le contrôle vit donc dans la BASE, et il se sérialise. Le verrou porte sur la ligne du
+-- concours : c'est l'objet réellement partagé entre deux écritures qui pourraient se
+-- contredire, et le verrouiller force la seconde à attendre la première puis à relire un
+-- total à jour. En READ COMMITTED, la somme qui suit le verrou ouvre un nouvel instantané
+-- et voit donc la ligne validée par la transaction précédente ; sous un niveau plus
+-- strict, la tentative de verrou échoue en erreur de sérialisation. Les deux issues sont
+-- correctes : aucune ne laisse passer un cumul supérieur à 1.
+--
+-- Le contrôle de la RPC est CONSERVÉ : il produit un message utilisable par l'interface.
+-- C'est ce trigger, et lui seul, qui constitue l'invariant.
+-- Le préfixe `lfo_` est réservé aux RPC appelables par `service_role`. Ce n'est pas une
+-- RPC : c'est une fonction de trigger, que personne n'appelle directement. Elle porte donc
+-- un nom distinct, et son droit d'exécution est retiré à tous : PostgreSQL n'exige pas le
+-- privilège EXECUTE pour déclencher un trigger, seul le privilège TRIGGER sur la table
+-- compte.
+create or replace function public.real_estate_allocation_guard()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_total numeric;
+begin
+  -- Verrou sérialisant. `perform` suffit : la valeur lue n'intéresse pas, seul le verrou
+  -- compte. La clé étrangère garantit déjà l'existence de la ligne.
+  perform 1
+    from public.liabilities
+   where id = new.liability_id and user_id = new.user_id
+     for update;
+
+  select coalesce(sum(allocation_share), 0) into v_total
+    from public.real_estate_financing_links
+   where user_id = new.user_id and liability_id = new.liability_id;
+
+  -- Même tolérance que `ALLOCATION_TOLERANCE` du moteur : deux quote-parts saisies à
+  -- 60 % et 40 % doivent passer malgré l'arithmétique décimale.
+  if v_total > 1.00000001 then
+    raise exception
+      'Quote-part totale du concours à % : la même dette serait comptée deux fois',
+      v_total
+      using errcode = 'check_violation';
+  end if;
+
+  return new;
+end;
+$$;
+
+-- AFTER, et non BEFORE : la somme doit inclure la ligne qui vient d'être écrite. Un
+-- BEFORE la manquerait et laisserait passer exactement le dépassement qu'il doit refuser.
+drop trigger if exists real_estate_financing_links_allocation_guard
+  on public.real_estate_financing_links;
+create trigger real_estate_financing_links_allocation_guard
+  after insert or update of allocation_share, liability_id, property_id, user_id
+  on public.real_estate_financing_links
+  for each row
+  execute function public.real_estate_allocation_guard();
+
+revoke all on function public.real_estate_allocation_guard() from public, anon, authenticated;
+
+comment on function public.real_estate_allocation_guard() is
+  'Invariant de non double comptage : Σ allocation_share par concours <= 1, garanti sous concurrence par un verrou de la ligne de dette, y compris hors RPC.';
+
 create index if not exists real_estate_financing_links_liability_idx
   on public.real_estate_financing_links(liability_id, user_id);
 create index if not exists real_estate_financing_links_property_idx
@@ -471,14 +560,16 @@ begin
     v_property_id := gen_random_uuid();
     insert into public.properties (
       id, user_id, name, location, surface_sqm, property_usage, ownership_share,
-      acquisition_date, disposal_date, archived, data_kind, confidence, source, notes,
-      inputs, updated_at
+      debt_financed, acquisition_date, disposal_date, archived, data_kind, confidence,
+      source, notes, inputs, updated_at
     ) values (
       v_property_id, p_user_id, p_payload ->> 'name',
       nullif(p_payload ->> 'location', ''),
       (nullif(p_payload ->> 'surface_sqm', ''))::numeric,
       nullif(p_payload ->> 'property_usage', ''),
       (nullif(p_payload ->> 'ownership_share', ''))::numeric,
+      -- `null` reste `null` : « je n'ai pas déclaré » ne devient jamais « pas de dette ».
+      (nullif(p_payload ->> 'debt_financed', ''))::boolean,
       (nullif(p_payload ->> 'acquisition_date', ''))::date,
       (nullif(p_payload ->> 'disposal_date', ''))::date,
       false, 'USER_ASSUMPTION', 'HIGH',
@@ -498,6 +589,7 @@ begin
            surface_sqm = (nullif(p_payload ->> 'surface_sqm', ''))::numeric,
            property_usage = nullif(p_payload ->> 'property_usage', ''),
            ownership_share = (nullif(p_payload ->> 'ownership_share', ''))::numeric,
+           debt_financed = (nullif(p_payload ->> 'debt_financed', ''))::boolean,
            acquisition_date = (nullif(p_payload ->> 'acquisition_date', ''))::date,
            disposal_date = (nullif(p_payload ->> 'disposal_date', ''))::date,
            source = nullif(p_payload ->> 'source', ''),
@@ -717,9 +809,11 @@ $$;
 
 -- Rattache un bien à une dette EXISTANTE. Aucun passif n'est créé ici.
 --
--- Garde-fou central : la somme des quote-parts d'un même concours ne peut pas dépasser 1.
--- Sans lui, le même capital restant dû pourrait être attribué intégralement à deux biens
--- et l'equity immobilière totale serait surévaluée d'un montant égal à la dette.
+-- Le contrôle de quote-part fait ici est un CONFORT D'INTERFACE : il produit un message
+-- lisible. Il ne constitue pas l'invariant, qui est porté par le trigger
+-- `real_estate_financing_links_allocation_guard` : une vérification faite dans cette
+-- fonction serait contournée par une écriture directe et ne résisterait pas à deux
+-- écritures concurrentes.
 create or replace function public.lfo_set_real_estate_financing_link(
   p_user_id uuid,
   p_payload jsonb

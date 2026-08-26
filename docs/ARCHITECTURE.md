@@ -158,6 +158,34 @@ sont pas la même grandeur. Aucune fiscalité n'est produite sans taux effectif 
 l'utilisateur, et l'assiette à laquelle ce taux s'applique est nommée dans le résultat
 (`REAL_ESTATE_TAX_BASE_CONVENTION`) plutôt que laissée implicite.
 
+### Absence de rattachement n'est pas absence de dette
+
+`RealEstateFinancingState` distingue trois situations, et cette distinction est la plus
+coûteuse du domaine :
+
+- `LINKED` — un concours est rattaché : les conséquences viennent du Debt Engine ;
+- `DECLARED_NONE` — l'utilisateur a DÉCLARÉ que le bien n'est financé par aucune dette. Zéro
+  est alors une valeur, et l'equity du bien vaut sa valeur attribuable ;
+- `UNKNOWN` — rien n'est rattaché et rien n'est déclaré, ou une dette est déclarée sans être
+  rattachée. Dette attribuée, equity, apport réel, cash flow et rendements sur fonds propres
+  sont tous `NOT_COMPUTABLE`.
+
+Sans cette distinction, un bien dont le crédit n'a pas encore été saisi afficherait la même
+equity qu'un bien acheté comptant, et le patrimoine serait surévalué du montant entier de la
+dette. Un rattachement contredisant une déclaration d'achat comptant l'emporte, parce qu'il
+pointe une dette réelle, et la contradiction est signalée.
+
+Le capital emprunté d'origine est un montant HISTORIQUE dont la date de décaissement
+n'existe pas dans le modèle de dette : la première échéance la suit, parfois de plusieurs
+mois. En devise de reporting il est exact ; dans toute autre devise il reste
+`NOT_COMPUTABLE`, comme l'apport réel qui en dépend. Aucune date approchée n'est substituée.
+
+Les revenus observés d'un bien sont la somme des flux rattachés que le Cash Flow Engine
+classe en revenu. Ce n'est pas « le loyer observé » : LFO ne porte aucune nature de revenu
+locatif, et un flux rattaché peut être une indemnité, une régularisation ou une subvention.
+L'écart avec le loyer déclaré est donc un écart entre deux grandeurs de nature différente,
+utile pour repérer un décrochage, jamais une mesure de manque de loyer.
+
 `real-estate-scenarios.ts` est la couche de projection, strictement séparée des faits :
 conservation, cession, refinancement, travaux et étude d'un projet non détenu. Un crédit
 hypothétique y passe par `syntheticLoan`, qui construit une `Liability` confiée au Debt Engine :

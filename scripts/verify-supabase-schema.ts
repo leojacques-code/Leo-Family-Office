@@ -147,6 +147,7 @@ const requiredColumns: Record<string, string[]> = {
   properties: [
     "id",
     "property_usage",
+    "debt_financed",
     "ownership_share",
     "acquisition_date",
     "disposal_date",
@@ -293,6 +294,19 @@ const requiredIndexes = [
   "transactions_property_owner_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx"] as const;
+
+/**
+ * Triggers dont l'absence supprimerait un invariant financier, et non une commodité.
+ *
+ * `real_estate_financing_links_allocation_guard` est le SEUL endroit où la règle « la
+ * somme des quote-parts d'un même concours ne dépasse jamais 1 » est réellement garantie :
+ * `authenticated` détient des droits d'écriture directs sur la table, et deux écritures
+ * concurrentes contourneraient tout contrôle applicatif. Une base qui l'aurait perdu
+ * accepterait de compter la même dette deux fois sans rien signaler.
+ */
+const requiredTriggers = ["real_estate_financing_links_allocation_guard"] as const;
+/** Fonction portée par ce trigger. Hors nomenclature `lfo_` : ce n'est pas une RPC. */
+const requiredTriggerFunctions = ["real_estate_allocation_guard"] as const;
 
 const requiredConstraints = [
   "scenarios_investment_allocation_rate_ck",
@@ -496,6 +510,33 @@ try {
     if (indexNames.has(index)) failures.push(`Index remplacé toujours présent : public.${index}`);
   }
 
+  const triggers = await client.query<{ tgname: string }>(`
+    select tg.tgname
+      from pg_catalog.pg_trigger tg
+      join pg_catalog.pg_class rel on rel.oid = tg.tgrelid
+      join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace
+     where ns.nspname = 'public' and not tg.tgisinternal
+  `);
+  addMissing(
+    failures,
+    "Trigger(s)",
+    requiredTriggers,
+    triggers.rows.map((row) => row.tgname),
+  );
+
+  const triggerFunctions = await client.query<{ proname: string }>(`
+    select pr.proname
+      from pg_catalog.pg_proc pr
+      join pg_catalog.pg_namespace ns on ns.oid = pr.pronamespace
+     where ns.nspname = 'public' and pr.prorettype = 'pg_catalog.trigger'::regtype
+  `);
+  addMissing(
+    failures,
+    "Fonction(s) de trigger",
+    requiredTriggerFunctions,
+    triggerFunctions.rows.map((row) => row.proname),
+  );
+
   const rls = await client.query<{ relname: string; relrowsecurity: boolean }>(`
     select rel.relname, rel.relrowsecurity
       from pg_catalog.pg_class rel
@@ -650,5 +691,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Schéma Supabase vérifié en lecture seule : ${userOwnedTables.length} tables, ${requiredConstraints.length} contraintes, ${Object.keys(requiredRpcs).length} RPC, RLS/policies, Storage, index de snapshot et ${canonicalMigrations.length} migrations conformes.`,
+  `Schéma Supabase vérifié en lecture seule : ${userOwnedTables.length} tables, ${requiredConstraints.length} contraintes, ${Object.keys(requiredRpcs).length} RPC, ${requiredTriggers.length} trigger(s) d'invariant, RLS/policies, Storage, index de snapshot et ${canonicalMigrations.length} migrations conformes.`,
 );

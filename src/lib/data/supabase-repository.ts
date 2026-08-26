@@ -28,6 +28,7 @@ import type { CurrencyRate } from "@/lib/engine/fx";
 import {
   enumValue,
   finiteNumber,
+  nullableBoolean,
   nullableFiniteNumber,
   requiredField,
 } from "@/lib/data/row-validation";
@@ -474,6 +475,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             row.ownership_share ?? null,
             `${context}.ownership_share`,
           ),
+          // Tri-état lu tel quel : `null` reste « non déclaré ». Le convertir en `false`
+          // ferait passer un crédit non encore saisi pour un achat comptant.
+          isDebtFinanced: nullableBoolean(row.debt_financed ?? null, `${context}.debt_financed`),
           acquisitionDate: row.acquisition_date ? str(row.acquisition_date) : null,
           disposalDate: row.disposal_date ? str(row.disposal_date) : null,
           archived: bool(row.archived),
@@ -1489,6 +1493,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
               surface_sqm: mutation.asset.surfaceSqm,
               property_usage: mutation.asset.usage,
               ownership_share: mutation.asset.ownershipShare,
+              debt_financed: mutation.asset.isDebtFinanced,
               acquisition_date: mutation.asset.acquisitionDate,
               disposal_date: mutation.asset.disposalDate,
               notes: mutation.asset.notes,

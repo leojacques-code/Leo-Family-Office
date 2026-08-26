@@ -702,6 +702,20 @@ export interface RealEstateAsset {
    * patrimoine devient alors NON CALCULABLE, elle n'est jamais supposée entière.
    */
   ownershipShare: number | null;
+  /**
+   * Le bien est-il financé par une dette ? TRI-ÉTAT, et la distinction est financière :
+   *
+   *   `false` → l'utilisateur DÉCLARE que le bien n'est financé par aucune dette. Zéro est
+   *             alors une valeur, et l'equity du bien vaut sa valeur attribuable.
+   *   `true`  → une dette le finance. Tant qu'aucun concours n'est rattaché, la dette
+   *             attribuée reste INCONNUE ; elle n'est jamais nulle.
+   *   `null`  → non déclaré. Aucune métrique dépendant du financement n'est calculable.
+   *
+   * ABSENCE DE RATTACHEMENT ≠ ABSENCE DE DETTE. Sans ce champ, un bien dont le crédit n'a
+   * pas encore été saisi afficherait la même equity qu'un bien acheté comptant, et le
+   * patrimoine serait surévalué du montant entier de la dette.
+   */
+  isDebtFinanced: boolean | null;
   acquisitionDate: string | null;
   /** Date de cession effective. Un bien cédé quitte le bilan à cette date. */
   disposalDate: string | null;

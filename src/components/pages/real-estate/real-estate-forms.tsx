@@ -117,6 +117,7 @@ export function RealEstateAssetForm({
     surfaceSqm: asset?.surfaceSqm ?? null,
     usage: asset?.usage ?? null,
     ownershipShare: asset?.ownershipShare ?? null,
+    isDebtFinanced: asset?.isDebtFinanced ?? null,
     acquisitionDate: asset?.acquisitionDate ?? null,
     disposalDate: asset?.disposalDate ?? null,
     notes: asset?.notes ?? null,
@@ -131,7 +132,7 @@ export function RealEstateAssetForm({
         event.preventDefault();
         if (await onSave(form)) onCancel();
       }}
-      notice="Aucun montant n’est saisi ici. Prix d’achat, valeur et loyers sont des faits datés, enregistrés séparément avec leur propre provenance."
+      notice="Aucun montant n’est saisi ici : prix d’achat, valeur et loyers sont des faits datés, enregistrés séparément avec leur propre provenance. Le financement demande une réponse explicite : tant qu’il n’est pas déclaré, ni l’equity du bien ni le rendement sur fonds propres ne sont calculables. Ne rien déclarer n’équivaut pas à déclarer un achat comptant."
     >
       <label>
         Nom du bien
@@ -182,6 +183,23 @@ export function RealEstateAssetForm({
           />
           <span>%</span>
         </div>
+      </label>
+      <label>
+        Financement du bien
+        <select
+          className="text-input"
+          value={form.isDebtFinanced === null ? "" : form.isDebtFinanced ? "true" : "false"}
+          onChange={(event) =>
+            setForm({
+              ...form,
+              isDebtFinanced: event.target.value === "" ? null : event.target.value === "true",
+            })
+          }
+        >
+          <option value="">Non déclaré</option>
+          <option value="false">Aucune dette ne finance ce bien</option>
+          <option value="true">Une dette finance ce bien</option>
+        </select>
       </label>
       <label>
         Surface

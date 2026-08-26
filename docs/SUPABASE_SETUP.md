@@ -52,6 +52,8 @@ La migration 005 ajoute des RPC transactionnelles réservées au rôle serveur. 
 
 La migration `20260826080000_real_estate_v2` installe Real Estate V2. Elle complète `properties` (usage, quote-part détenue, dates d'acquisition et de cession, `archived`, provenance), relâche le `NOT NULL` des colonnes héritées `property_type` et `status` plutôt que de les remplir d'une valeur fabriquée, crée quatre tables de faits et neuf RPC (`lfo_save_real_estate_asset`, `lfo_archive_real_estate_asset`, `lfo_record_real_estate_valuation`, `lfo_record_real_estate_capital_event`, `lfo_delete_real_estate_capital_event`, `lfo_set_real_estate_operating_terms`, `lfo_set_real_estate_financing_link`, `lfo_delete_real_estate_financing_link`, `lfo_attribute_transaction_to_property`), ajoute la colonne d'attribution `transactions.property_id` et les index uniques `(id, user_id)` sur `properties` et `liabilities` qui servent de cibles aux clés étrangères composites. Elle ne crée aucune seconde vérité : le passif immobilier reste porté par `liabilities`, les flux réels par `transactions`. **Elle n'est pas encore appliquée en production** au moment de son commit.
 
+Elle installe aussi le trigger `real_estate_financing_links_allocation_guard`, porté par la fonction `real_estate_allocation_guard` (hors nomenclature `lfo_`, qui reste réservée aux RPC appelables par `service_role`). Ce trigger est l'INVARIANT de non double comptage de dette : `authenticated` détient des droits d'écriture directs sur la table, et deux écritures concurrentes liraient le même total avant leurs insertions respectives. Le trigger verrouille la ligne du concours avant de resommer, ce qui sérialise les écrivains ; le contrôle équivalent dans la RPC n'est conservé que pour son message d'erreur lisible. Le verifier refuse une base qui aurait perdu ce trigger ou sa fonction.
+
 La migration `20260825193427_portfolio_data_foundation` ajoute le ledger portefeuille et ses trois RPC (`lfo_record_portfolio_event`, `lfo_delete_portfolio_event`, `lfo_set_portfolio_envelope_policy`). Elle crée aussi trois index uniques `(id, user_id)` sur `financial_accounts`, `securities` et `transactions` : ce sont les cibles des clés étrangères composites qui empêchent un événement de référencer l'objet d'un autre utilisateur. La migration `20260825193606_portfolio_fk_covering_indexes` couvre le côté référençant des deux clés étrangères signalées par l'advisor Postgres. Les deux sont appliquées en production et vérifiées par assertions SQL transactionnelles.
 
 ### Registre des divergences de schéma
@@ -90,7 +92,7 @@ npm run db:verify
 supabase db advisors
 ```
 
-`db:verify` ouvre une transaction PostgreSQL `READ ONLY` via `SUPABASE_DB_URL`. Il contrôle les 53 tables et colonnes structurantes, contraintes, 24 RPC et leurs permissions, RLS, policies `owner_all`, bucket et policies Storage, ainsi que les versions de migration.
+`db:verify` ouvre une transaction PostgreSQL `READ ONLY` via `SUPABASE_DB_URL`. Il contrôle les 53 tables et colonnes structurantes, contraintes, 24 RPC et leurs permissions, les triggers qui portent un invariant financier, RLS, policies `owner_all`, bucket et policies Storage, ainsi que les versions de migration.
 
 Le contrôle des migrations est symétrique : une version attendue absente échoue, **et** une version appliquée hors du dépôt échoue également. Une base en avance sur le dépôt signifie que `supabase/migrations/` ne reproduit plus la base, donc que le code a cessé d'être la source de vérité du schéma. Les autres inventaires restent des contrôles d'inclusion : une base peut légitimement porter des objets d'infrastructure inconnus du code applicatif.
 
@@ -102,6 +104,8 @@ Le schéma est vérifiable sans aucun accès distant, sur un PostgreSQL local je
 npm run db:local:up     # installe et démarre PostgreSQL, crée la base jetable
 npm run gate:local      # reset depuis les migrations + db:verify:local + smokes
 ```
+
+`gate:local` enchaîne le reset, `db:verify:local`, les smokes en rollback intégral, puis `smoke:local:concurrency`. Ce dernier est le seul à VALIDER des écritures avant de les nettoyer : prouver qu'une contrainte résiste à la concurrence demande deux transactions simultanées dont l'une doit être visible de l'autre. Il refuse donc tout hôte non local, et reste hors de `smoke:local`, qui doit demeurer exécutable contre une base réelle.
 
 `db:local:reset` détruit sa base cible, la reconstruit à partir des seules migrations du dépôt, y inscrit l'historique correspondant et crée un propriétaire local minimal pour les smokes. Il ne lit jamais `SUPABASE_DB_URL` et refuse tout hôte non local : pointer la production est impossible.
 

@@ -292,6 +292,9 @@ const realEstateAssetSchema = z
     usage: z.enum(REAL_ESTATE_USAGES).nullable(),
     // Une quote-part nulle n'existe pas : détenir 0 % d'un bien, c'est ne pas le détenir.
     ownershipShare: finite.gt(0).max(1).nullable(),
+    // Tri-état : `null` traverse la validation intact. Le remplacer par `false` ferait
+    // passer un crédit non encore saisi pour un achat comptant.
+    isDebtFinanced: z.boolean().nullable(),
     acquisitionDate: realDate.nullable(),
     disposalDate: realDate.nullable(),
     notes: z.string().trim().max(1000).nullable(),

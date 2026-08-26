@@ -104,7 +104,11 @@ export type RealEstateFlagCode =
   | "RENT_DECLARED_ON_NON_RENTAL"
   | "USAGE_UNDECLARED"
   | "DEBT_OVER_ALLOCATED"
-  | "DEBT_NOT_ATTRIBUTED"
+  | "DEBT_FREE_DECLARED"
+  | "DEBT_DECLARED_NOT_LINKED"
+  | "FINANCING_UNDECLARED"
+  | "FINANCING_DECLARATION_CONTRADICTED"
+  | "FINANCING_ORIGINATION_DATE_UNKNOWN"
   | "FINANCING_LINK_ORPHAN"
   | "CURRENCY_MIXED"
   | "FX_MISSING"
@@ -113,12 +117,23 @@ export type RealEstateFlagCode =
   | "TAX_RATE_UNDECLARED"
   | "DISPOSED"
   | "EQUITY_ENGAGED_NOT_POSITIVE"
-  | "OBSERVED_LEDGER_NOT_COVERED";
+  | "OBSERVED_LEDGER_NOT_COVERED"
+  | "OBSERVED_INCOME_NOT_RENT_QUALIFIED";
 
 export interface RealEstateFlag {
   code: RealEstateFlagCode;
   detail: string;
 }
+
+/**
+ * État du financement d'un bien. Trois situations, jamais deux.
+ *
+ * `DECLARED_NONE` est la SEULE qui autorise un zéro : l'utilisateur a déclaré que le bien
+ * n'est financé par aucune dette. `UNKNOWN` couvre les deux cas où le moteur ne sait pas,
+ * et il refuse alors de trancher : ni concours rattaché ni déclaration, ou bien une dette
+ * déclarée mais pas encore rattachée.
+ */
+export type RealEstateFinancingState = "LINKED" | "DECLARED_NONE" | "UNKNOWN";
 
 /**
  * Grandeur monétaire dérivée. `value === null` signifie « non calculable », et `blockers`
@@ -406,6 +421,8 @@ export interface RealEstateAssetView {
   valuation: RealEstateValuationView;
   costBasis: RealEstateCostBasisView;
   financing: RealEstateFinancingLineView[];
+  /** D'où vient — ou ne vient pas — la dette attribuée. Voir `RealEstateFinancingState`. */
+  financingState: RealEstateFinancingState;
   debt: RealEstateDebtConsequences;
   operating: RealEstateOperatingView;
   returns: RealEstateReturnsView;
@@ -426,8 +443,25 @@ export interface RealEstateObservedView {
   /** Rendu tel quel par `computeObservedCashFlow`. Aucun agrégat recalculé ici. */
   cashFlow: ObservedCashFlow | null;
   transactionCount: number;
-  /** Écart loyer déclaré − revenus observés sur 12 mois. `null` si l'un des deux manque. */
-  rentVariance: DerivedAmount;
+  /**
+   * Σ des flux classés `INCOME` rattachés au bien sur la fenêtre.
+   *
+   * Ce n'est PAS « le loyer observé ». LFO ne porte aucune nature de revenu locatif : un
+   * flux rattaché à un bien et classé en revenu peut être un loyer, mais aussi une
+   * indemnité d'assurance, une régularisation de charges, une subvention ou un
+   * remboursement. Le moteur additionne ce qu'il sait classer et refuse de le requalifier.
+   */
+  observedIncome: DerivedAmount;
+  /**
+   * Loyer effectif DÉCLARÉ − revenus OBSERVÉS rattachés.
+   *
+   * Écart entre deux grandeurs de NATURE DIFFÉRENTE, et c'est volontaire : il sert à
+   * repérer un décrochage à examiner, pas à mesurer un manque de loyer. Un écart non nul
+   * peut venir d'une vacance réelle, d'un impayé, d'un revenu non locatif encaissé, ou
+   * d'un rattachement incomplet. Le drapeau `OBSERVED_INCOME_NOT_RENT_QUALIFIED` le
+   * rappelle partout où cette valeur est lue.
+   */
+  declaredRentVsObservedIncome: DerivedAmount;
 }
 
 export interface RealEstatePortfolio {
@@ -783,13 +817,26 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
           input.reportingCurrency,
           rates,
         ).amount;
-        const principalWhole = convert(
-          liability.principal,
-          currency,
-          liability.firstPaymentDate || balanceDate,
-          input.reportingCurrency,
-          rates,
-        ).amount;
+        // Le capital emprunté est un montant HISTORIQUE : sa contre-valeur dépend du taux
+        // de change à la date du DÉCAISSEMENT, que le contrat de dette ne porte pas. La
+        // première échéance n'est pas cette date : elle la suit, parfois de plusieurs mois
+        // en cas de différé. L'utiliser comme approximation serait une hypothèse
+        // silencieuse, invisible dans le résultat, qui fausserait l'apport réel puis le
+        // rendement sur trésorerie engagée.
+        //
+        // En devise de reporting, aucune conversion n'est nécessaire et le montant est
+        // exact. Dans toute autre devise, il reste NON CALCULABLE jusqu'à ce que le Debt
+        // Engine porte une véritable date d'origination.
+        const sameCurrency = currency.toUpperCase() === input.reportingCurrency.toUpperCase();
+        const principalWhole = sameCurrency
+          ? known(liability.principal)
+          : unknown(`FINANCING_ORIGINATION_DATE_UNKNOWN:${liability.id}`);
+        if (!sameCurrency) {
+          flags.push({
+            code: "FINANCING_ORIGINATION_DATE_UNKNOWN",
+            detail: `Concours « ${liability.name} » libellé en ${currency} : le capital emprunté est un montant historique et sa date de décaissement n'est pas connue du contrat de dette. Sa contre-valeur en ${input.reportingCurrency} n'est donc pas calculable, ni l'apport réel qui en dépend. Aucune date approchée n'est substituée.`,
+          });
+        }
         const scale = (amount: DerivedAmount): DerivedAmount => {
           if (overAllocated)
             return {
@@ -839,21 +886,92 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
       })
       .filter((line): line is RealEstateFinancingLineView => line !== null);
 
-    if (financing.length === 0) {
+    // ── État du financement : trois situations, jamais deux ─────────────────────────
+    //
+    // ABSENCE DE RATTACHEMENT ≠ ABSENCE DE DETTE. C'est la distinction la plus coûteuse du
+    // domaine : traiter « je n'ai pas encore saisi le crédit » comme « j'ai acheté
+    // comptant » donnerait une equity égale à la valeur du bien et surévaluerait le
+    // patrimoine du montant entier de la dette. Le zéro n'est légitime que DÉCLARÉ.
+    //
+    //   LINKED       un concours est rattaché : les conséquences viennent du Debt Engine ;
+    //   DECLARED_NONE l'utilisateur déclare le bien sans dette : zéro est une valeur ;
+    //   UNKNOWN      rien n'est rattaché et rien n'est déclaré, ou une dette est déclarée
+    //                sans être rattachée : la dette attribuée est INCONNUE.
+    const financingState: RealEstateFinancingState =
+      financing.length > 0
+        ? "LINKED"
+        : asset.isDebtFinanced === false
+          ? "DECLARED_NONE"
+          : "UNKNOWN";
+
+    if (financingState === "LINKED" && asset.isDebtFinanced === false) {
+      // Un rattachement est un FAIT qui pointe une dette réelle ; la déclaration n'est
+      // qu'une affirmation. Le fait l'emporte, et la contradiction est signalée : ignorer
+      // le concours rattaché sous-estimerait la dette du bien.
       flags.push({
-        code: "DEBT_NOT_ATTRIBUTED",
+        code: "FINANCING_DECLARATION_CONTRADICTED",
         detail:
-          "Aucune dette rattachée. Le bien est lu comme non financé : si un crédit existe, il est bien au bilan mais son coût n'est pas imputé à ce bien.",
+          "Le bien est déclaré sans dette alors qu'un concours lui est rattaché. Le rattachement est retenu, car c'est un fait ; la déclaration est à corriger.",
       });
     }
+    if (financingState === "DECLARED_NONE") {
+      flags.push({
+        code: "DEBT_FREE_DECLARED",
+        detail:
+          "Bien déclaré sans dette : l'absence de financement est une information, pas une lacune. L'equity du bien vaut sa valeur attribuable.",
+      });
+    }
+    if (financingState === "UNKNOWN") {
+      flags.push(
+        asset.isDebtFinanced === true
+          ? {
+              code: "DEBT_DECLARED_NOT_LINKED",
+              detail:
+                "Une dette finance ce bien mais aucun concours ne lui est rattaché : la dette attribuée est inconnue, elle n'est pas nulle. Equity, apport réel et rendements sur fonds propres restent non calculables.",
+            }
+          : {
+              code: "FINANCING_UNDECLARED",
+              detail:
+                "Financement non déclaré : ni concours rattaché, ni déclaration d'achat sans dette. Le moteur refuse de trancher entre les deux, et toute métrique dépendant du financement reste non calculable.",
+            },
+      );
+    }
 
-    const debt = addDebtConsequences(financing.map((line) => line.attributedDebtService12m));
-    const attributedOutstandingDebt = sumAll(
-      financing.length ? financing.map((line) => line.attributedOutstanding) : [known(0)],
-    );
-    const attributedOriginalPrincipal = sumAll(
-      financing.length ? financing.map((line) => line.attributedOriginalPrincipal) : [known(0)],
-    );
+    /** `null` de financement inconnu, avec le motif qui dit laquelle des deux situations. */
+    const financingUnknown = (): DerivedAmount =>
+      unknown(
+        asset.isDebtFinanced === true
+          ? `DEBT_DECLARED_NOT_LINKED:${asset.id}`
+          : `FINANCING_UNDECLARED:${asset.id}`,
+      );
+
+    const debt: RealEstateDebtConsequences =
+      financingState === "LINKED"
+        ? addDebtConsequences(financing.map((line) => line.attributedDebtService12m))
+        : financingState === "DECLARED_NONE"
+          ? EMPTY_DEBT_CONSEQUENCES
+          : {
+              cashDebtService: financingUnknown(),
+              principalPaid: financingUnknown(),
+              interestPaid: financingUnknown(),
+              capitalisedInterest: financingUnknown(),
+              insurancePaid: financingUnknown(),
+              feesPaid: financingUnknown(),
+              economicCost: financingUnknown(),
+              dataKind: "MISSING",
+            };
+    const attributedOutstandingDebt =
+      financingState === "LINKED"
+        ? sumAll(financing.map((line) => line.attributedOutstanding))
+        : financingState === "DECLARED_NONE"
+          ? known(0)
+          : financingUnknown();
+    const attributedOriginalPrincipal =
+      financingState === "LINKED"
+        ? sumAll(financing.map((line) => line.attributedOriginalPrincipal))
+        : financingState === "DECLARED_NONE"
+          ? known(0)
+          : financingUnknown();
 
     // ── Exploitation ────────────────────────────────────────────────────────────────
     const assetTerms = input.operatingTerms.filter((item) => item.propertyId === asset.id);
@@ -1070,16 +1188,27 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
         detail: `Fenêtre observée couverte sur ${cashFlow.coverage.completeCoveredMonths} des ${cashFlow.coverage.requestedMonths} mois : les flux réels sont incomplets et ne peuvent pas être comparés terme à terme aux termes déclarés.`,
       });
     }
-    const observedRent =
+    // Revenus OBSERVÉS, pas « loyer observé ». Sans nature de revenu locatif dans le
+    // ledger, le moteur ne peut pas affirmer que ces encaissements sont des loyers : il
+    // livre la somme qu'il sait classer et signale ce qu'elle ne prouve pas.
+    const observedIncome =
       cashFlow === null || cashFlow.coverage.status !== "COMPLETE"
         ? unknown(`OBSERVED_LEDGER_NOT_COVERED:${asset.id}`)
         : known(cashFlow.income);
+    if (observedIncome.value !== null) {
+      flags.push({
+        code: "OBSERVED_INCOME_NOT_RENT_QUALIFIED",
+        detail:
+          "Les revenus observés regroupent tous les flux rattachés au bien et classés en revenu : ce ne sont pas nécessairement des loyers. L'écart avec le loyer déclaré signale un point à examiner, il ne mesure pas un manque de loyer.",
+      });
+    }
     const observed: RealEstateObservedView = {
       periodStart: observedStart,
       periodEnd: observedEnd,
       cashFlow,
       transactionCount: attachedTransactions.length,
-      rentVariance: subtract(effectiveRent, observedRent),
+      observedIncome,
+      declaredRentVsObservedIncome: subtract(effectiveRent, observedIncome),
     };
 
     return {
@@ -1091,6 +1220,7 @@ export function buildRealEstatePortfolio(input: BuildRealEstateInput): RealEstat
       valuation,
       costBasis,
       financing,
+      financingState,
       debt,
       operating,
       returns,

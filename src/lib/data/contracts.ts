@@ -132,6 +132,12 @@ export interface RealEstateAssetInput {
   usage: RealEstateUsage | null;
   /** Dans ]0,1]. `null` = non déclarée : la valeur attribuable devient non calculable. */
   ownershipShare: number | null;
+  /**
+   * Le bien est-il financé par une dette ? `false` = déclaré sans dette, `true` = financé,
+   * `null` = non déclaré. Absence de rattachement n'est PAS absence de dette : sans
+   * déclaration, aucune métrique dépendant du financement n'est calculable.
+   */
+  isDebtFinanced: boolean | null;
   acquisitionDate: string | null;
   disposalDate: string | null;
   notes: string | null;

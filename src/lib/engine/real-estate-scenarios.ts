@@ -153,9 +153,25 @@ function scenarioYearWindow(anchor: string, year: number, anchorIsObservation = 
 }
 
 /**
+ * `null` de financement inconnu, avec son motif. Un scénario ne remplace jamais un
+ * financement non déclaré par zéro : il refuse de produire les grandeurs qui en dépendent.
+ */
+function financingUnknown(view: RealEstateAssetView): DerivedAmount {
+  return unknown(
+    view.asset.isDebtFinanced === true
+      ? `DEBT_DECLARED_NOT_LINKED:${view.asset.id}`
+      : `FINANCING_UNDECLARED:${view.asset.id}`,
+  );
+}
+
+/**
  * Conséquences canoniques d'un ensemble de dettes sur une fenêtre, mises à la quote-part
  * de chaque rattachement. Le Debt Engine est appelé UNE FOIS PAR DETTE, avec sa propre
  * quote-part : agréger d'abord puis répartir ensuite mélangerait des parts différentes.
+ *
+ * Sans rattachement, la réponse dépend de ce que l'utilisateur a DÉCLARÉ. Un bien déclaré
+ * sans dette a bien un service de dette nul ; un bien dont le financement n'est pas
+ * déclaré a un service de dette INCONNU, et le scénario le dit au lieu de le supposer nul.
  */
 function attributedDebtOverWindow(
   view: RealEstateAssetView,
@@ -164,7 +180,11 @@ function attributedDebtOverWindow(
   end: string,
 ) {
   if (view.financing.length === 0) {
-    return { cashOut: known(0), economicCost: known(0), principal: known(0) };
+    if (view.asset.isDebtFinanced === false) {
+      return { cashOut: known(0), economicCost: known(0), principal: known(0) };
+    }
+    const missing = financingUnknown(view);
+    return { cashOut: missing, economicCost: missing, principal: missing };
   }
   const parts = view.financing.map((line) => {
     const breakdown = debtServiceBreakdownForPeriod([line.liability], asOfDate, start, end);
@@ -187,7 +207,9 @@ function attributedOutstandingAt(
   asOfDate: string,
   targetDate: string,
 ): DerivedAmount {
-  if (view.financing.length === 0) return known(0);
+  if (view.financing.length === 0) {
+    return view.asset.isDebtFinanced === false ? known(0) : financingUnknown(view);
+  }
   return add(
     ...view.financing.map((line) =>
       known(outstandingBalanceAt(line.liability, asOfDate, targetDate) * line.allocationShare),

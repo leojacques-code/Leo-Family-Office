@@ -34,6 +34,7 @@ const asset: RealEstateAsset = {
   surfaceSqm: null,
   usage: "RENTAL",
   ownershipShare: 1,
+  isDebtFinanced: true,
   acquisitionDate: "2020-06-15",
   disposalDate: null,
   archived: false,
@@ -186,6 +187,91 @@ describe("scénario de conservation", () => {
   it("conserver n'engage aucune trésorerie nouvelle", () => {
     const result = holdScenario(view, declaredAssumptions, AS_OF);
     expect(result.initialCashFlow.value).toBe(0);
+  });
+});
+
+describe("scénarios et financement non déclaré", () => {
+  /** Le même bien, sans concours rattaché, dans les trois états de financement. */
+  const withoutLinks = (isDebtFinanced: boolean | null) =>
+    buildRealEstatePortfolio({
+      asOfDate: AS_OF,
+      reportingCurrency: "EUR",
+      assets: [{ ...asset, isDebtFinanced }],
+      valuations: [valuation],
+      capitalEvents,
+      operatingTerms: [operatingTerms],
+      financingLinks: [],
+      liabilities: [mortgage],
+    }).assets[0];
+
+  it("un bien déclaré sans dette se projette avec un service de dette nul", () => {
+    const result = holdScenario(withoutLinks(false), declaredAssumptions, AS_OF);
+    expect(result.years[0].attributedCashDebtService.value).toBe(0);
+    expect(result.economicFinancingCost.value).toBe(0);
+    expect(result.principalRepaid.value).toBe(0);
+    expect(result.years.at(-1)?.attributedOutstanding.value).toBe(0);
+    // L'equity terminale égale la valeur projetée : sans dette, rien ne s'en retranche.
+    expect(result.years.at(-1)?.attributedEquity.value).toBeCloseTo(
+      result.years.at(-1)?.attributedValue.value ?? 0,
+      6,
+    );
+    // Le scénario est entièrement calculable : la VAN existe.
+    expect(result.equityNpv.value).not.toBeNull();
+    // Le TRI, non : conserver un bien non financé n'engage aucune trésorerie à l'origine,
+    // la série n'a donc aucun flux négatif et aucun taux ne l'annule. Ce n'est pas une
+    // donnée manquante, c'est une grandeur qui n'existe pas pour cette série.
+    expect(result.equityIrr).toBeNull();
+    expect(result.blockers).toHaveLength(0);
+  });
+
+  it("un financement non déclaré rend le scénario de conservation incalculable", () => {
+    const result = holdScenario(withoutLinks(null), declaredAssumptions, AS_OF);
+    expect(result.years[0].attributedCashDebtService.value).toBeNull();
+    expect(result.years[0].equityCashFlow.value).toBeNull();
+    expect(result.years.at(-1)?.attributedEquity.value).toBeNull();
+    expect(result.equityIrr).toBeNull();
+    expect(result.blockers).toContain("FINANCING_UNDECLARED:prop");
+    // Le loyer projeté, lui, ne dépend pas du financement.
+    expect(result.years[0].attributedNetOperatingIncome.value).not.toBeNull();
+  });
+
+  it("une dette déclarée mais non rattachée bloque aussi la cession", () => {
+    const result = sellScenario(withoutLinks(true), {
+      sellingCostsRate: 0.06,
+      prepaymentPenalty: 0,
+      salePrice: null,
+    });
+    expect(result.debtPayoff.value).toBeNull();
+    expect(result.netProceedsBeforeTax.value).toBeNull();
+    expect(result.blockers).toContain("DEBT_DECLARED_NOT_LINKED:prop");
+    // La plus-value réalisée ne dépend pas de la dette : elle reste calculable.
+    expect(result.realisedGainBeforeTax.value).not.toBeNull();
+  });
+
+  it("un refinancement compare à un coût actuel inconnu sans le supposer nul", () => {
+    const result = refinanceScenario(
+      withoutLinks(null),
+      {
+        newLoan: {
+          principal: 120_000,
+          annualRate: 0.012,
+          termMonths: 180,
+          firstPaymentDate: AS_OF,
+          currency: "EUR",
+          monthlyInsurance: null,
+          paymentIncludesInsurance: null,
+        },
+        prepaymentPenalty: 0,
+        arrangementFees: 0,
+      },
+      declaredAssumptions,
+      AS_OF,
+    );
+    // Le coût du concours refinancé est connu : c'est un prêt entièrement décrit.
+    expect(result.economicFinancingCost.value).not.toBeNull();
+    // Le coût ACTUEL ne l'est pas : annoncer une économie serait inventer une comparaison.
+    expect(result.currentEconomicFinancingCost.value).toBeNull();
+    expect(result.economicSaving.value).toBeNull();
   });
 });
 
