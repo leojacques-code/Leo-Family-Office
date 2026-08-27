@@ -238,6 +238,14 @@ La piste d'audit est en lecture seule pour `authenticated` : le brut est immuabl
 
 Détail complet, formats supportés et limites : `docs/DATA_ACQUISITION.md`.
 
+## Career + Tax V2
+
+Career produit des conséquences brutes datées ; Tax les consomme et sépare cotisations,
+assiette, liability, retenues, paiements et remboursements ; Cash Flow ne consomme que le net
+cash et préfère toujours une transaction réelle au forecast. Les résultats ne sont jamais
+persistés. Le modèle complet, les statuts et les invariants sont documentés dans
+[`CAREER_TAX_ARCHITECTURE.md`](CAREER_TAX_ARCHITECTURE.md).
+
 ## Lecture paginée des ledgers
 
 `readAllPages` (`src/lib/data/pagination.ts`) lit une source page par page et **refuse** de
