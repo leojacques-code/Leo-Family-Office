@@ -12,6 +12,7 @@ import TaxPage from "@/components/pages/tax/page";
 import ScenariosPage from "@/components/pages/scenarios/page";
 import DecisionLabPage from "@/components/pages/decision-lab/page";
 import GoalsPage from "@/components/pages/goals/page";
+import ImportsPage from "@/components/pages/imports/page";
 import DocumentsPage from "@/components/pages/documents/page";
 import TimelinePage from "@/components/pages/timeline/page";
 import SettingsPage from "@/components/pages/settings/page";
@@ -41,6 +42,8 @@ export function SectionContent(props: SectionProps) {
       return <DecisionLabPage {...props} />;
     case "goals":
       return <GoalsPage {...props} />;
+    case "imports":
+      return <ImportsPage {...props} />;
     case "documents":
       return <DocumentsPage {...props} />;
     case "timeline":

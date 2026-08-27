@@ -214,6 +214,30 @@ projection, comme il porte déjà les passifs sans échéancier, avec le drapeau
 `NON_FINANCIAL_ASSET_PROJECTION_TERMS_MISSING`. Les faire disparaître au mois 1 traiterait un
 inconnu comme un zéro ; leur appliquer une croissance inventerait un rendement immobilier.
 
+## Data Acquisition Foundation
+
+`src/lib/acquisition/` lit une source. C'est une couche PURE — aucun accès base, aucun React — et elle ne calcule aucune finance : elle produit des CANDIDATS de faits, avec leurs ambiguïtés déclarées.
+
+```text
+FICHIER → RAW (immuable) → NORMALISÉ (staging) → DÉDUPLIQUÉ → PREVIEW → CANONIQUE
+```
+
+Six tables portent cette chaîne : `import_sources`, `import_sessions`, `import_raw_records`, `import_normalized_records`, `import_record_links`, `import_column_mappings`. Elles sont lues par `src/lib/data/import-repository.ts`, VOLONTAIREMENT séparé de `FamilyOfficeRepository` : le staging d'un import est volumineux et ne concerne aucun écran financier, le charger dans `getDashboardState()` ferait payer à tout le cockpit une donnée que seule la page Imports consomme.
+
+Ce que cette couche ne fait jamais : classer un flux, recalculer un solde, rapprocher un transfert interne, déclarer une profondeur d'historique. Une transaction importée naît avec `category_id` nul et le Cash Flow Engine la compte comme non classée — c'est la vérité, pas un défaut.
+
+Deux ambiguïtés sont structurelles et changent le résultat financier : la convention décimale (`1,234` vaut 1,234 ou 1 234) et l'ordre jour/mois (`03/04/2026`). Elles se résolvent au niveau de la COLONNE quand une valeur la tranche, et bloquent les lignes concernées sinon. Les conventions retenues sont persistées sur la session, de sorte qu'un montant relu plus tard reste confrontable à la règle qui l'a produit.
+
+La déduplication repose sur un principe unique : L'IDENTITÉ SE DÉMONTRE. Une égalité de tuple `compte / date / montant / devise / libellé` ne prouve rien entre deux fichiers distincts — un relevé partiel contenant un troisième achat identique ne dit pas qu'il s'agit d'un des deux déjà connus. Deux preuves seulement autorisent un rejet automatique : l'empreinte du FICHIER déjà validé, et un identifiant de transaction dont la stabilité est DÉCLARÉE pour la session. Le nom d'un en-tête n'en est jamais une, d'où la séparation entre `externalTransactionId` et `reference`. Tout le reste est une ressemblance signalée, exclue par défaut et écrite sur décision explicite.
+
+L'identité se cherche dans TOUT l'historique, la ressemblance dans une fenêtre de dates : `ExistingTransactionFact` ne porte donc aucune clé d'identité, et le type rend la confusion impossible. Borner l'identité produisait un verdict « nouvelle » suivi d'une violation d'index au commit.
+
+La date d'observation d'un import est distincte d'`AS_OF_DATE` : une opération bookée hier est un fait même si le reporting est arrêté le mois précédent, et c'est aux moteurs aval de l'écarter d'une lecture à leur date.
+
+La piste d'audit est en lecture seule pour `authenticated` : le brut est immuable, la provenance d'un fait écrit est gelée, et la clé étrangère du lien de provenance est en `restrict`. Une transaction importée ne peut donc pas perdre son origine, même par écriture directe.
+
+Détail complet, formats supportés et limites : `docs/DATA_ACQUISITION.md`.
+
 ## Lecture paginée des ledgers
 
 `readAllPages` (`src/lib/data/pagination.ts`) lit une source page par page et **refuse** de

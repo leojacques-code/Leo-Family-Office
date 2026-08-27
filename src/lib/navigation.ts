@@ -26,7 +26,8 @@ export const NAV_ITEMS: readonly NavigationItem[] = [
   { id: "scenarios", label: "Scenarios", href: "/scenarios", break: true },
   { id: "decision-lab", label: "Decision Lab", href: "/decision-lab" },
   { id: "goals", label: "Goals", href: "/goals" },
-  { id: "documents", label: "Documents", href: "/documents", break: true },
+  { id: "imports", label: "Imports", href: "/imports", break: true },
+  { id: "documents", label: "Documents", href: "/documents" },
   { id: "timeline", label: "Timeline", href: "/timeline" },
   { id: "settings", label: "Settings", href: "/settings" },
 ];

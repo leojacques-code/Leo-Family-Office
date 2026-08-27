@@ -42,7 +42,7 @@ supabase db push
 ```
 
 Ordre attendu : celui du tri alphabétique de `supabase/migrations/`, soit à ce jour les
-24 fichiers du dossier. La liste canonique vit dans le dépôt et dans
+25 fichiers du dossier. La liste canonique vit dans le dépôt et dans
 `canonicalMigrations` du verifier ; ne pas la dupliquer ici pour éviter une troisième
 vérité qui se périme.
 
@@ -71,6 +71,34 @@ La migration `20260826194605_business_equity_v2_1_indexes` porte les index couvr
 La migration `20260826194644_business_equity_v2_1_blocking_invariants` ferme les quatre incohérences bloquantes identifiées en revue : changements de détention atomiques avec l'événement de capital ; Quick Start strictement calculable ; complétude explicite des autres éléments du bridge EV → Equity via `business_bridge_declarations` (`UNKNOWN`, `DECLARED_NONE`, `PARTIAL`, `COMPLETE`) ; maintien strict de `NULL ≠ ZERO` sur les hypothèses, notamment DCF.
 
 Les trois migrations Business Equity V2.1 ont été appliquées en production le 26 août 2026. Le gate distant a vérifié : 24 migrations exactes ; nouvelles tables et contraintes présentes ; RLS `owner_all` ; `anon` sans accès ; RPC Business réservées à `service_role` ; smoke transactionnel rollbacké couvrant Quick Start, cession 100 % → 70 %, acquisition, sortie totale → 0 %, origine de l'ownership ; rejet du Quick Start sans cash ; DCF à taux fiscal 0 % explicitement accepté et taux manquant rejeté ; tentative inter-utilisateurs refusée ; aucune fixture persistée. L'advisor sécurité ne remonte aucun nouveau finding Business, uniquement le warning Auth historique `Leaked Password Protection Disabled`. L'advisor performance ne remonte aucun nouveau FK Business V2.1 non indexé. Le dernier `gate:local` complet n'a pas pu être rejoué sur la machine Claude faute de PostgreSQL local ; le gate PostgreSQL réel de production et les smokes rollbackés couvrent le blocage de livraison.
+
+La migration `20260827155134_data_acquisition_foundation` installe la couche d'acquisition. Elle ajoute six tables — `import_sources`, `import_sessions`, `import_raw_records`, `import_normalized_records`, `import_record_links`, `import_column_mappings` — l'index unique `(id, user_id)` sur `documents` qui sert de cible à une clé étrangère composite, le trigger `import_raw_records_immutable` porté par `import_raw_record_immutable`, et quatre RPC (`lfo_analyze_import_session`, `lfo_commit_import_session`, `lfo_discard_import_session`, `lfo_save_import_mapping`).
+
+Elle ne touche à AUCUN domaine financier : aucune colonne ajoutée à `transactions`, aucune contrainte modifiée, aucune RPC existante remplacée. Le seul point de contact est l'écriture de `public.transactions` par `lfo_commit_import_session`, avec `category_id` nul, `data_kind = 'ACTUAL'` et `manual_override = false` : une transaction importée reste NON CLASSÉE, et le Cash Flow Engine la compte comme telle sans modification.
+
+La piste d'audit est en LECTURE SEULE : `authenticated` ne reçoit que le `SELECT` sur les six tables, et toutes les écritures passent par les RPC réservées à `service_role`. Le verifier contrôle cet état — une migration ultérieure qui referait un `grant ... on all tables in schema public` rouvrirait la brèche en silence, et le gate la refuse.
+
+Les invariants portés par la BASE, pas par l'application :
+
+* un enregistrement brut ne se **modifie** jamais, et ne se **supprime** que par l'abandon d'une session encore analysée — protéger seulement l'`UPDATE` laissait un `DELETE` cascader vers la ligne normalisée et son lien, en laissant survivre une transaction étiquetée « importée » sans origine ;
+* une ligne normalisée **committée** est gelée (`import_normalized_records_frozen`), et le gel est EXHAUSTIF : la comparaison porte sur `to_jsonb(new) - 'matched_transaction_id'` contre son équivalent sur `old`, donc sur la ligne entière et sur les colonnes futures. Seule exception, explicite : le jumeau désigné peut passer à `null` si rien d'autre ne change — une liste manuelle de colonnes laissait réécrire `reference`, `value_date`, `counterparty`, `balance_after` et `confidence` sous couvert d'un détachement ;
+* un lien de provenance est **immuable en `UPDATE` comme en `DELETE`**, et sa clé étrangère vers `transactions` est en `restrict` : ne refuser que l'`UPDATE` laissait le rôle serveur supprimer le lien, ce qui désarmait la clé étrangère et rendait la transaction supprimable sans trace ;
+* un contenu de fichier ne peut être validé qu'une fois par source — `import_sessions_committed_file_uidx`, partiel sur le statut `COMMITTED`, de sorte qu'une analyse abandonnée ne bloque rien ;
+* une identité DÉMONTRÉE ne s'écrit qu'une fois — `import_normalized_records_committed_external_uidx`.
+
+Aucune unicité ne pèse sur `match_key`, et c'est un choix. Une contrainte sur `(compte, date, montant, devise, libellé)` refuserait un troisième achat réellement identique, et le refus viendrait de la base : message opaque, aucune décision possible. L'index correspondant existe pour la lecture, non pour l'unicité.
+
+`documents_owner_storage_path_uidx` complète la conservation : le fichier d'un import validé est stocké à un chemin dérivé de son SHA-256, et cette unicité garantit qu'un objet Storage n'est décrit que par une ligne `documents`. `lfo_attach_import_document` sérialise le rattachement par un verrou consultatif sur (propriétaire, empreinte).
+
+`import_normalized_records_ready_shape_ck` complète l'ensemble : une ligne déclarée prête ou signalée doit porter sa date, son libellé, son montant, sa devise et son compte. `READY` signifie committable ; une ligne prête incomplète produirait une transaction incomplète.
+
+Cette migration a été corrigée EN PLACE à deux reprises après revue, **avant** son premier push. La doctrine « ne jamais modifier une migration déjà appliquée » protège un historique réel : tant que rien n'avait touché la production, empiler des correctifs aurait figé dans le schéma une sémantique de déduplication reconnue fausse et laissé au dépôt trois fichiers pour un seul état voulu. Cette latitude est désormais CLOSE : la migration est appliquée, son contenu est gelé, et toute évolution passe par un nouveau fichier.
+
+**Cette migration a été appliquée en production le 27 août 2026**, sous la version `20260827155134`. La version du dépôt a été renommée pour correspondre exactement à l'historique réel : `supabase_migrations.schema_migrations` et `supabase/migrations/` doivent porter les mêmes 25 versions, et le verifier échoue dans les deux sens si ce n'est pas le cas. Aucune ligne de SQL n'a été modifiée par ce renommage.
+
+Contrôles passés en production après application : six tables d'acquisition présentes ; RLS actif sur les six ; `anon` sans aucun accès ; `authenticated` en SELECT seul, sans INSERT, UPDATE ni DELETE ; cinq RPC d'acquisition réservées à `service_role` ; triggers d'immuabilité présents ; smoke analyse → validation réussi puis intégralement rollbacké ; UPDATE et DELETE d'un enregistrement brut refusés ; modification d'une ligne normalisée committée refusée ; DELETE d'un lien de provenance refusé ; suppression d'une transaction liée refusée ; isolation RLS vérifiée sous claim `authenticated` réel — propriétaire visible, autre UUID invisible. Aucune fixture persistée. L'advisor sécurité ne remonte que le warning Auth historique `Leaked Password Protection Disabled` ; l'advisor performance ne remonte aucune clé étrangère d'acquisition non indexée.
+
+C'est le seul contrôle que le gate local ne peut pas produire : `auth.uid()` y reste nul.
 
 La migration `20260825193427_portfolio_data_foundation` ajoute le ledger portefeuille et ses trois RPC (`lfo_record_portfolio_event`, `lfo_delete_portfolio_event`, `lfo_set_portfolio_envelope_policy`). Elle crée aussi trois index uniques `(id, user_id)` sur `financial_accounts`, `securities` et `transactions` : ce sont les cibles des clés étrangères composites qui empêchent un événement de référencer l'objet d'un autre utilisateur. La migration `20260825193606_portfolio_fk_covering_indexes` couvre le côté référençant des deux clés étrangères signalées par l'advisor Postgres. Les deux sont appliquées en production et vérifiées par assertions SQL transactionnelles.
 

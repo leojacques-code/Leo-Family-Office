@@ -18,7 +18,8 @@ explicabilité, adaptabilité, intelligence de décision.
 ## 2. Architecture en couches
 
 ```text
-SOURCE → NORMALISATION → DONNÉE CANONIQUE → MOTEURS DE DOMAINE
+SOURCE → RAW → NORMALISATION → VALIDATION → DÉDUPLICATION → PREVIEW
+       → DONNÉE CANONIQUE → MOTEURS DE DOMAINE
        → CONSÉQUENCES ÉCONOMIQUES CANONIQUES → BILAN / CASH FLOW
        → MODÈLE MENSUEL → ÉVÉNEMENTS → SCÉNARIOS → OBJECTIFS / DÉCISION → REPORTING
 ```
@@ -27,6 +28,9 @@ Règle unique et non négociable : **une couche aval ne recalcule jamais la logi
 couche amont**. Un domaine possède sa vérité, les autres la consomment.
 
 - `src/lib/engine/` : fonctions TypeScript pures, sans React ni accès base.
+- `src/lib/acquisition/` : lecture d'une source. Fonctions pures aussi, sans React ni accès
+  base. Elle ne calcule AUCUNE finance : elle produit des candidats de faits, avec leurs
+  ambiguïtés déclarées, et refuse de transporter ce qu'elle n'a pas compris.
 - `src/lib/data/` : `FamilyOfficeRepository`, unique implémentation `supabase-repository.ts`.
 - `supabase/migrations/` : source de vérité du schéma PostgreSQL.
 - `src/components/` : affichage. Aucune formule financière dans un composant. Si un
@@ -43,6 +47,8 @@ tests passent.
 
 ```text
 NULL ≠ ZERO                          ACTUAL ≠ USER_ASSUMPTION ≠ MODEL_ASSUMPTION
+SOURCE DATA ≠ CANONICAL DATA         RAW DATA ≠ NORMALIZED DATA
+DUPLICATE ≠ NEW EVENT                RESSEMBLANCE ≠ DOUBLON
 OBSERVED ≠ CONTRACTUAL ≠ PROJECTED   ASSET ≠ LIABILITY
 CASH FLOW ≠ COÛT ÉCONOMIQUE          PRINCIPAL ≠ CHARGE
 TRANSFERT ≠ DÉPENSE                  CONTRIBUTION ≠ PERFORMANCE
@@ -120,11 +126,12 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Production alignée sur **24 migrations** au 26 août 2026. Les dernières versions sont :
+Production alignée sur **25 migrations** au 27 août 2026. Les dernières versions sont :
 
 - `20260826194551_business_equity_v2_1` ;
 - `20260826194605_business_equity_v2_1_indexes` ;
-- `20260826194644_business_equity_v2_1_blocking_invariants`.
+- `20260826194644_business_equity_v2_1_blocking_invariants` ;
+- `20260827155134_data_acquisition_foundation`.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
@@ -161,6 +168,7 @@ Correctness → données → intégration → calculs → tests → produit → 
 ```text
 faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données + analytics)
                Real Estate (faits + scénarios) · Business Equity (faits + valorisation dérivée)
+               Data Acquisition (staging + provenance + relevé bancaire CSV)
 en cours       vérité de schéma · vérité des consommateurs
 suivant        Career + Tax
 puis           Event Engine → Scenarios V2 → Goals → Decision Lab
@@ -193,6 +201,33 @@ via une holding entre au patrimoine par la holding et par elle seule.
 Les mutations qui modifient la quote-part (acquisition, cession, rachat, tour de table)
 écrivent l'événement et la détention résultante atomiquement ; elles ne demandent jamais à
 l'utilisateur de maintenir deux vérités indépendantes.
+
+La couche d'acquisition ALIMENTE les moteurs, elle ne les remplace jamais. Elle ne classe
+aucun flux, ne recalcule aucun solde, ne rapproche aucun transfert interne et ne déclare
+aucune profondeur d'historique : une transaction importée naît sans catégorie, et le Cash
+Flow Engine la compte comme non classée. Une ambiguïté de convention décimale ou d'ordre
+jour/mois se résout au niveau de la COLONNE quand une valeur la tranche, et bloque les
+lignes concernées sinon : choisir entre 1,234 et 1 234 sur 800 lignes n'est pas une
+décision de présentation. Un enregistrement brut est immuable et sa piste
+d'audit est en LECTURE SEULE pour le client : corriger une lecture modifie le fait
+canonique, jamais ce que la source a écrit, et une transaction importée n'est pas
+supprimable en laissant sa provenance orpheline.
+
+L'IDENTITÉ SE DÉMONTRE, elle ne se présume pas. Une égalité de tuple — compte, date,
+montant, devise, libellé — ne prouve rien entre deux fichiers distincts : un relevé partiel
+contenant un troisième café identique ne dit pas qu'il s'agit d'un des deux déjà connus, et
+l'écarter d'office supprimerait une dépense réelle. Seules deux preuves autorisent un rejet
+automatique : l'empreinte du FICHIER déjà validé, et un identifiant de transaction dont la
+stabilité est DÉCLARÉE — cherché dans TOUT l'historique, sans filtre de date, là où la
+ressemblance seule se cherche dans une fenêtre. Le nom d'un en-tête n'en est jamais une : « Référence » peut être un
+motif répété chaque mois. Tout le reste est une ressemblance signalée, exclue par défaut et
+écrite sur décision explicite — un double comptage fausse le patrimoine sans laisser de
+trace, là où une opération manquante laisse un trou visible. Aucune contrainte d'unicité ne
+s'appuie donc sur une clé de ressemblance.
+
+La date d'observation d'un import n'est pas `AS_OF_DATE` : une opération bookée hier est un
+fait, même si le reporting est arrêté le mois précédent. L'acquisition ingère, les moteurs
+aval arbitrent à leur date. Détail dans `docs/DATA_ACQUISITION.md`.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

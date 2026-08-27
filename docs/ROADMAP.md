@@ -3,7 +3,8 @@
 ## Différé volontairement
 
 - migration ultérieure de l'accès temporaire vers Supabase Auth SSR ;
-- imports CSV mappés pour banques et courtiers ;
+- imports CSV de courtiers (le relevé bancaire CSV est livré, voir `docs/DATA_ACQUISITION.md`) ;
+- XLSX, OFX/QFX, CAMT et FEC : la fondation d'acquisition existe, les adaptateurs restent à écrire ;
 - connecteurs Open Banking / PSD2 en lecture seule ;
 - market data, FX et inflation externes avec fallback manuel ;
 - ventilation réelle du CTO, allocation cible datée et benchmark de marché ;
