@@ -126,14 +126,12 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Production alignée sur **24 migrations** au 26 août 2026. Le dépôt en porte **25** : la
-25e, `20260827093000_data_acquisition_foundation`, est verte au gate local et n'a PAS été
-poussée. Les dernières versions du dépôt sont :
+Production alignée sur **25 migrations** au 27 août 2026. Les dernières versions sont :
 
 - `20260826194551_business_equity_v2_1` ;
 - `20260826194605_business_equity_v2_1_indexes` ;
 - `20260826194644_business_equity_v2_1_blocking_invariants` ;
-- `20260827093000_data_acquisition_foundation` (dépôt seulement).
+- `20260827155134_data_acquisition_foundation`.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,

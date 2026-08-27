@@ -76,7 +76,7 @@ npm run db:local:up
 npm run gate:local
 ```
 
-Le dépôt porte **25 migrations** ; la production en compte **24**. La 25e, `20260827093000_data_acquisition_foundation`, est verte au gate local et **n'a pas encore été poussée** : le push distant et `npm run db:verify` restent des étapes humaines, et aucun gate distant n'est déclaré vert sans avoir été exécuté. Les migrations 16 et 17 installent la fondation Portfolio puis les index couvrant ses clés étrangères. Les migrations 18 et 19 installent Real Estate V2 puis les index couvrant ses clés étrangères composites. Les migrations 20 et 21 installent Business Equity V2. Les migrations 22 à 24 installent Business Equity V2.1, ses index et ses invariants bloquants ; elles ont été appliquées en production le 26 août 2026 puis contrôlées par smokes transactionnels rollbackés, isolation `authenticated`, permissions RPC, RLS et advisors Supabase. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
+La production et le dépôt sont alignés sur **25 migrations**. La 25e, `20260827155134_data_acquisition_foundation`, installe la Data Acquisition Foundation ; elle a été appliquée en production le 27 août 2026 puis contrôlée par assertions SQL, smoke analyse → validation intégralement rollbacké, refus effectifs des écritures d'audit sous rôle `authenticated`, test d'isolation RLS sous claim réel, permissions RPC et advisors Supabase. Les migrations 16 et 17 installent la fondation Portfolio puis les index couvrant ses clés étrangères. Les migrations 18 et 19 installent Real Estate V2 puis les index couvrant ses clés étrangères composites. Les migrations 20 et 21 installent Business Equity V2. Les migrations 22 à 24 installent Business Equity V2.1, ses index et ses invariants bloquants ; elles ont été appliquées en production le 26 août 2026 puis contrôlées par smokes transactionnels rollbackés, isolation `authenticated`, permissions RPC, RLS et advisors Supabase. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
 
 ## Fonctionnalités
 
@@ -117,7 +117,7 @@ Les migrations sont appliquées dans cet ordre, sans modification rétroactive :
 22. `20260826194551_business_equity_v2_1.sql`
 23. `20260826194605_business_equity_v2_1_indexes.sql`
 24. `20260826194644_business_equity_v2_1_blocking_invariants.sql`
-25. `20260827093000_data_acquisition_foundation.sql`
+25. `20260827155134_data_acquisition_foundation.sql`
 
 La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persistance. Elle ne déplace aucune formule financière dans la base.
 Les migrations Canonical Balance Sheet V2 enrichissent et versionnent les snapshots, sans supprimer ni écraser les données historiques ; toutes les formules restent dans les engines TypeScript.
