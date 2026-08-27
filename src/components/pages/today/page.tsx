@@ -47,6 +47,7 @@ import {
   formatDate,
   liquidityExplanation,
   netWorthExplanation,
+  OptionalCurrency,
   projectionExplanation,
 } from "@/components/pages/shared";
 
@@ -194,8 +195,14 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
         />
         <MetricCard
           label="Cash flow mensuel connu"
-          value={<Currency value={state.metrics.freeCashFlow} sign />}
-          tone={state.metrics.freeCashFlow >= 0 ? "positive" : "negative"}
+          value={<OptionalCurrency value={state.metrics.freeCashFlow} sign />}
+          tone={
+            state.metrics.freeCashFlow === null
+              ? "warning"
+              : state.metrics.freeCashFlow >= 0
+                ? "positive"
+                : "negative"
+          }
           detail={
             state.metrics.monthlyDebtService > 0
               ? "Service de dette du mois déduit · dépenses incomplètes"
@@ -391,7 +398,7 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
                 Revenus actifs
               </span>
               <strong>
-                <Currency value={state.metrics.monthlyIncome} />
+                <OptionalCurrency value={state.metrics.monthlyIncome} />
               </strong>
             </div>
             <div>
@@ -421,7 +428,7 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           <div className="flow-total">
             <span>Disponible ce mois</span>
             <strong>
-              <Currency value={state.metrics.freeCashFlow} sign />
+              <OptionalCurrency value={state.metrics.freeCashFlow} sign />
             </strong>
           </div>
           <p className="muted-copy">

@@ -141,6 +141,18 @@ describe("deriveFlowMetrics", () => {
     expect(metrics.monthlyExpenses).toBeCloseTo(800, 2);
   });
 
+  it("ne transforme jamais une source active inconnue en zéro", () => {
+    const unknown = deriveFlowMetrics(
+      liabilities,
+      [...incomes, { ...incomes[0], id: "unknown", monthlyNet: null, active: true }],
+      expenses,
+      [],
+      AS_OF,
+    );
+    expect(unknown.monthlyIncome).toBeNull();
+    expect(unknown.freeCashFlow).toBeNull();
+  });
+
   it("n'expose aucune grandeur de bilan : elles appartiennent au bilan canonique", () => {
     // Aucune somme de soldes natifs ne subsiste dans cette dérivation : c'est la seule
     // garantie qu'il ne reste pas une seconde vérité patrimoniale à côté du bilan.

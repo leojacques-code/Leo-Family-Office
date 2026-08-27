@@ -860,7 +860,196 @@ const businessFundingRoundSchema = z
   })
   .strict();
 
+const careerDataKind = z.enum(["ACTUAL", "CONTRACTUAL", "USER_ASSUMPTION", "PROJECTED"]);
+const confidence = z.enum(["LOW", "MEDIUM", "HIGH", "UNKNOWN"]);
+const nullableCareerMoney = finite.nonnegative().nullable();
+const careerCompensationSchema = z
+  .object({
+    baseSalary: nullableCareerMoney,
+    frequency: z.enum(["MONTHLY", "ANNUAL", "DAILY", "HOURLY"]),
+    guaranteedBonus: nullableCareerMoney,
+    targetBonus: nullableCareerMoney,
+    targetBonusRate: finite.min(0).max(10).nullable(),
+    discretionaryBonus: nullableCareerMoney,
+    commissions: nullableCareerMoney,
+    profitSharing: nullableCareerMoney,
+    participation: nullableCareerMoney,
+    employerBenefits: nullableCareerMoney,
+    allowances: nullableCareerMoney,
+    otherTaxableCompensation: nullableCareerMoney,
+    otherNonTaxableCompensation: nullableCareerMoney,
+    workingTime: finite.positive().nullable(),
+    effectiveFrom: realDate,
+    effectiveTo: realDate.nullable(),
+    dataKind: careerDataKind,
+    confidence,
+    source: z.string().trim().max(300).nullable(),
+    notes: z.string().trim().max(2000).nullable(),
+  })
+  .strict()
+  .refine((value) => value.effectiveTo === null || value.effectiveTo >= value.effectiveFrom, {
+    message: "La fin des termes doit suivre leur date d’effet",
+    path: ["effectiveTo"],
+  });
+const careerPackageSchema = z
+  .object({
+    roleId: z.uuid().nullable(),
+    employer: z.string().trim().max(200).nullable(),
+    jobTitle: z.string().trim().max(200).nullable(),
+    employmentType: z.enum([
+      "EMPLOYEE",
+      "INTERN",
+      "FREELANCE",
+      "CONTRACTOR",
+      "ENTREPRENEUR",
+      "CORPORATE_OFFICER",
+      "UNEMPLOYED",
+      "OTHER",
+    ]),
+    industry: z.string().trim().max(160).nullable(),
+    country: z.string().trim().length(2).nullable(),
+    currency: z.string().trim().length(3),
+    startDate: realDate,
+    endDate: realDate.nullable(),
+    status: z.enum(["ACTIVE", "ENDED", "FUTURE"]),
+    dataKind: careerDataKind,
+    confidence,
+    source: z.string().trim().max(300).nullable(),
+    notes: z.string().trim().max(2000).nullable(),
+    compensation: careerCompensationSchema.nullable(),
+  })
+  .strict()
+  .refine((value) => value.endDate === null || value.endDate >= value.startDate, {
+    message: "La fin du rôle doit suivre son début",
+    path: ["endDate"],
+  });
+const careerEventSchema = z
+  .object({
+    roleId: z.uuid().nullable(),
+    type: z.enum([
+      "JOB_START",
+      "JOB_END",
+      "PROMOTION",
+      "SALARY_CHANGE",
+      "BONUS_TARGET_CHANGE",
+      "BONUS_EARNED",
+      "BONUS_PAID",
+      "COMMISSION",
+      "UNEMPLOYMENT",
+      "SABBATICAL",
+      "FREELANCE_START",
+      "FREELANCE_END",
+      "EQUITY_GRANT",
+      "EQUITY_VEST",
+      "OTHER",
+    ]),
+    eventDate: realDate,
+    amount: nullableCareerMoney,
+    currency: z.string().trim().length(3).nullable(),
+    variableState: z.enum(["TARGET", "CONTRACTUAL", "EARNED", "PAID", "PROJECTED"]).nullable(),
+    paidDate: realDate.nullable(),
+    label: z.string().trim().max(200).nullable(),
+    dataKind: careerDataKind,
+    confidence,
+    source: z.string().trim().max(300).nullable(),
+    notes: z.string().trim().max(2000).nullable(),
+  })
+  .strict()
+  .refine((value) => value.variableState !== "PAID" || value.paidDate !== null, {
+    message: "Un variable payé exige une date de paiement",
+    path: ["paidDate"],
+  });
+const taxProfileSchema = z
+  .object({
+    id: z.uuid().nullable(),
+    residencyCountry: z.string().trim().length(2),
+    householdStatus: z.string().trim().min(1).max(120),
+    jurisdiction: z.string().trim().max(120).nullable(),
+    maritalStatus: z.string().trim().max(120).nullable(),
+    dependants: z.number().int().nonnegative().nullable(),
+    taxShares: finite.positive().nullable(),
+    withholdingSettings: z.record(z.string(), z.unknown()),
+    socialContributionRegime: z.string().trim().max(160).nullable(),
+    professionalStatus: z.string().trim().max(160).nullable(),
+    specialRegime: z.string().trim().max(160).nullable(),
+    effectiveFrom: realDate,
+    effectiveTo: realDate.nullable(),
+    source: z.string().trim().max(300).nullable(),
+    confidence,
+    notes: z.string().trim().max(2000).nullable(),
+  })
+  .strict()
+  .refine((value) => value.effectiveTo === null || value.effectiveTo >= value.effectiveFrom, {
+    message: "La fin du profil doit suivre sa date d’effet",
+    path: ["effectiveTo"],
+  });
+const taxRuleSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    taxType: z.enum([
+      "PAYROLL_CONTRIBUTION",
+      "TAXABLE_DEDUCTION",
+      "INCOME_TAX_BRACKETS",
+      "WITHHOLDING_RATE",
+    ]),
+    incomeCategory: z.enum(["EMPLOYMENT", "PROFESSIONAL", "OTHER"]),
+    parameters: z.record(z.string(), z.unknown()),
+    effectiveFrom: realDate,
+    effectiveTo: realDate.nullable(),
+    verifiedAt: realDate.nullable(),
+    confidence,
+    legalNote: z.string().trim().max(1000).nullable(),
+    notes: z.string().trim().max(2000).nullable(),
+  })
+  .strict()
+  .refine((value) => value.effectiveTo === null || value.effectiveTo >= value.effectiveFrom, {
+    message: "La fin de la règle doit suivre sa date d’effet",
+    path: ["effectiveTo"],
+  });
+const taxRuleSetSchema = z
+  .object({
+    id: z.uuid().nullable(),
+    jurisdiction: z.string().trim().min(1).max(120),
+    taxYear: z.number().int().min(2000).max(2200),
+    name: z.string().trim().min(1).max(200),
+    effectiveFrom: realDate,
+    effectiveTo: realDate.nullable(),
+    source: z.string().trim().min(1).max(500),
+    sourceDate: realDate,
+    confidence,
+    status: z.enum(["DRAFT", "DECLARED", "VERIFIED", "STALE"]),
+    legalReference: z.string().trim().max(1000).nullable(),
+    notes: z.string().trim().max(2000).nullable(),
+    rules: z.array(taxRuleSchema).max(100),
+  })
+  .strict()
+  .refine((value) => value.effectiveTo === null || value.effectiveTo >= value.effectiveFrom, {
+    message: "La fin du jeu doit suivre sa date d’effet",
+    path: ["effectiveTo"],
+  });
+const taxObservationSchema = z
+  .object({
+    type: z.enum(["LIABILITY", "WITHHELD", "PAID", "REFUND", "BALANCE_DUE"]),
+    observedDate: realDate,
+    taxYear: z.number().int().min(2000).max(2200),
+    amount: finite.nonnegative(),
+    currency: z.string().trim().length(3),
+    transactionId: z.uuid().nullable(),
+    documentId: z.uuid().nullable(),
+    confidence,
+    source: z.string().trim().max(300).nullable(),
+    notes: z.string().trim().max(2000).nullable(),
+  })
+  .strict();
+
 export const mutationSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("save_career_package"), career: careerPackageSchema }).strict(),
+  z.object({ action: z.literal("record_career_event"), event: careerEventSchema }).strict(),
+  z.object({ action: z.literal("set_tax_profile"), profile: taxProfileSchema }).strict(),
+  z.object({ action: z.literal("save_tax_rule_set"), ruleSet: taxRuleSetSchema }).strict(),
+  z
+    .object({ action: z.literal("record_tax_observation"), observation: taxObservationSchema })
+    .strict(),
   z
     .object({
       action: z.literal("create_business_quick_start"),
