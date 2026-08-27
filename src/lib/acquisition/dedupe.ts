@@ -44,6 +44,7 @@
 
 import { issue, labelFingerprintForm } from "@/lib/acquisition/normalization";
 import type {
+  ExistingIdentity,
   ExistingTransactionFact,
   ImportDedupeVerdict,
   ImportIssue,
@@ -162,7 +163,18 @@ function dayDistance(left: string, right: string): number {
 
 export interface DedupeInput {
   candidates: readonly DedupeCandidate[];
+  /**
+   * Faits canoniques servant à la RESSEMBLANCE. Bornés dans le temps par l'appelant : une
+   * ressemblance de date, de montant et de libellé ne se cherche que près du fichier.
+   */
   existing: readonly ExistingTransactionFact[];
+  /**
+   * Identités déjà écrites, cherchées dans TOUT l'historique et sans filtre de date.
+   *
+   * Une identité stable ne se périme pas : une opération réimportée dont la banque a corrigé
+   * la date de deux mois reste la même opération, et son identifiant doit la retrouver.
+   */
+  identities: readonly ExistingIdentity[];
   /** Préfixe des clés d'identité : identifiant de la source, jamais celui de la session. */
   sourceKey: string;
   /**
@@ -181,13 +193,15 @@ export interface DedupeInput {
 export function classifyCandidates(input: DedupeInput): DedupeOutcome[] {
   const window = input.dayWindow ?? PROBABLE_DUPLICATE_DAY_WINDOW;
 
-  const byExternalKey = new Map<string, string>();
+  // Index d'IDENTITÉ : global, sans date. Index de RESSEMBLANCE : borné par l'appelant.
+  const byExternalKey = new Map<string, string>(
+    input.identities.map((identity) => [identity.externalKey, identity.transactionId]),
+  );
   const exactBuckets = new Map<string, string[]>();
   const looseBuckets = new Map<string, Array<{ id: string; date: string }>>();
   const amountDateBuckets = new Map<string, Array<{ id: string; label: string }>>();
 
   for (const fact of input.existing) {
-    if (fact.externalKey) byExternalKey.set(fact.externalKey, fact.id);
     const exact = exactKeyOf(fact);
     const bucket = exactBuckets.get(exact) ?? [];
     bucket.push(fact.id);

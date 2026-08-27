@@ -34,6 +34,7 @@ import type {
   BankColumnMapping,
   BankCsvAnalysis,
   DateConvention,
+  ExistingIdentity,
   ExistingTransactionFact,
   ImportIssue,
   ImportRowCounts,
@@ -61,8 +62,10 @@ export interface BankCsvAnalysisInput {
    * déclaration explicite de l'utilisateur, pas une déduction du compte cible.
    */
   declaredCurrency: string | null;
-  /** Faits canoniques déjà présents, servant à la déduplication. */
+  /** Faits canoniques déjà présents, servant à la RESSEMBLANCE. Bornés dans le temps. */
   existing: readonly ExistingTransactionFact[];
+  /** Identités déjà écrites, cherchées dans TOUT l'historique. */
+  identities: readonly ExistingIdentity[];
   /** Préfixe des clés d'identité : identifiant de la source. */
   sourceKey: string;
   /**
@@ -556,6 +559,7 @@ export function analyzeBankCsv(input: BankCsvAnalysisInput): BankCsvAnalysis {
     accountId: input.accountId,
     sourceKey: input.sourceKey,
     existing: input.existing,
+    identities: input.identities,
     stableIdentifiers: input.stableIdentifiers,
   });
 }
@@ -582,7 +586,10 @@ const DEDUPE_ISSUE_CODES = new Set([
 export interface DedupeContext {
   accountId: string;
   sourceKey: string;
+  /** Ressemblance : borné dans le temps. */
   existing: readonly ExistingTransactionFact[];
+  /** Identité : global, sans filtre de date. */
+  identities: readonly ExistingIdentity[];
   /** Voir `BankCsvAnalysisInput.stableIdentifiers`. */
   stableIdentifiers: boolean;
 }
@@ -620,6 +627,7 @@ export function applyDedupe(analysis: BankCsvAnalysis, context: DedupeContext): 
     classifyCandidates({
       candidates,
       existing: context.existing,
+      identities: context.identities,
       sourceKey: context.sourceKey,
       stableIdentifiers: context.stableIdentifiers,
     }).map((outcome) => [outcome.rowNumber, outcome]),

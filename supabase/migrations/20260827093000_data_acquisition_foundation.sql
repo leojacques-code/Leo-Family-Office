@@ -54,6 +54,13 @@
 create unique index if not exists documents_id_user_uidx
   on public.documents(id, user_id);
 
+-- Un objet Storage ne doit être décrit que par UNE ligne `documents`. La conservation d'un
+-- relevé importé est adressée par le contenu (`<user>/imports/<sha256>`) : sans cette
+-- unicité, deux analyses simultanées du même fichier créeraient deux lignes pointant le
+-- même objet, et le coffre afficherait deux fois le même relevé.
+create unique index if not exists documents_owner_storage_path_uidx
+  on public.documents(user_id, storage_path);
+
 -- ---------------------------------------------------------------------------
 -- 1. Registre des sources
 -- ---------------------------------------------------------------------------
@@ -162,6 +169,11 @@ create table if not exists public.import_sessions (
   -- identifiant unique et stable ? `false` par défaut : aucun nom d'en-tête ne le prouve,
   -- et seule une identité démontrée autorise un rejet automatique de doublon.
   stable_transaction_id_declared boolean not null default false,
+  -- L'utilisateur a-t-il demandé la conservation du fichier ? L'INTENTION est enregistrée à
+  -- l'analyse, mais le fichier n'est déposé au coffre qu'à la VALIDATION : une analyse
+  -- abandonnée, réanalysée après correction de mapping ou refusée ne doit laisser aucune
+  -- copie derrière elle.
+  retain_file_requested boolean not null default false,
   -- Période que l'utilisateur DÉCLARE avoir exportée. Distincte de la période observée, et
   -- volontairement non branchée sur `profiles.ledger_coverage_start`.
   declared_period_start date,
@@ -546,25 +558,17 @@ begin
 
   -- Seule exception au gel : le JUMEAU DÉSIGNÉ a disparu. `matched_transaction_id` ne
   -- décrit pas le fait produit par cette ligne, seulement l'opération à laquelle elle
-  -- ressemblait ; sa suppression est un fait, pas une falsification. Tout le reste doit
-  -- être inchangé, sinon c'est une réécriture de provenance déguisée.
+  -- ressemblait ; sa suppression est un fait, pas une falsification.
+  --
+  -- La comparaison est EXHAUSTIVE, par différence de représentation jsonb de la ligne
+  -- entière. Une liste manuelle de colonnes était le mauvais choix : `value_date`,
+  -- `reference`, `counterparty`, `balance_after`, `confidence` et les colonnes futures y
+  -- manquaient, et pouvaient donc être réécrites en même temps que le détachement.
   if
     tg_op = 'UPDATE'
     and new.matched_transaction_id is null
     and old.matched_transaction_id is not null
-    and new.session_id = old.session_id
-    and new.raw_record_id = old.raw_record_id
-    and new.commit_state = old.commit_state
-    and new.status = old.status
-    and new.account_id is not distinct from old.account_id
-    and new.transaction_date is not distinct from old.transaction_date
-    and new.label is not distinct from old.label
-    and new.amount is not distinct from old.amount
-    and new.currency is not distinct from old.currency
-    and new.dedupe_verdict is not distinct from old.dedupe_verdict
-    and new.match_key is not distinct from old.match_key
-    and new.external_key is not distinct from old.external_key
-    and new.issues is not distinct from old.issues
+    and (to_jsonb(new) - 'matched_transaction_id') = (to_jsonb(old) - 'matched_transaction_id')
   then
     return new;
   end if;
@@ -578,9 +582,16 @@ create trigger import_normalized_records_frozen
   before update or delete on public.import_normalized_records
   for each row execute function public.import_normalized_record_frozen();
 
--- Un lien de provenance est créé une fois, à la validation, et ne change jamais. Le
--- modifier permettrait de faire pointer une transaction existante vers une autre ligne
--- source, donc de falsifier l'audit sans rien supprimer.
+-- Un lien de provenance est créé une fois, à la validation, et ne change plus.
+--
+-- L'UPDATE et le DELETE sont tous deux refusés, y compris pour le rôle serveur. Ne protéger
+-- que l'UPDATE laissait un trou réel : l'application travaille précisément sous un rôle
+-- privilégié, un DELETE direct du lien était donc possible, et la clé étrangère `restrict`
+-- vers `transactions` ne protégeait plus rien ensuite.
+--
+-- Aucune exception n'est prévue : il n'existe aujourd'hui aucun chemin de correction d'une
+-- provenance écrite. Le jour où il en faudra un, il devra être explicite et nommé, pas
+-- obtenu par un DELETE silencieux.
 create or replace function public.import_record_link_immutable()
 returns trigger
 language plpgsql
@@ -588,13 +599,13 @@ security invoker
 set search_path = ''
 as $$
 begin
-  raise exception 'Un lien de provenance est immuable';
+  raise exception 'Un lien de provenance est immuable : ni modifiable, ni supprimable';
 end;
 $$;
 
 drop trigger if exists import_record_links_immutable on public.import_record_links;
 create trigger import_record_links_immutable
-  before update on public.import_record_links
+  before update or delete on public.import_record_links
   for each row execute function public.import_record_link_immutable();
 
 -- ---------------------------------------------------------------------------
@@ -723,7 +734,7 @@ begin
     user_id, source_id, file_name, file_hash, file_size_bytes, content_type,
     encoding, delimiter, parser, parser_version, mapping, conventions,
     declared_currency, observation_date, stable_transaction_id_declared,
-    declared_period_start, declared_period_end,
+    retain_file_requested, declared_period_start, declared_period_end,
     observed_period_start, observed_period_end, status,
     row_count, ready_count, warning_count, blocked_count, duplicate_count, ignored_count,
     document_id, issues
@@ -742,6 +753,7 @@ begin
     upper(nullif(v_session ->> 'declared_currency', '')),
     nullif(v_session ->> 'observation_date', '')::date,
     coalesce((v_session ->> 'stable_transaction_id_declared')::boolean, false),
+    coalesce((v_session ->> 'retain_file_requested')::boolean, false),
     nullif(v_session ->> 'declared_period_start', '')::date,
     nullif(v_session ->> 'declared_period_end', '')::date,
     nullif(v_session ->> 'observed_period_start', '')::date,
@@ -976,6 +988,70 @@ begin
 end;
 $$;
 
+-- Rattache le fichier conservé à sa session.
+--
+-- Le fichier n'est déposé au coffre qu'APRÈS la validation : une analyse abandonnée,
+-- réanalysée ou refusée ne laisse donc aucune copie. Cette RPC est le point de
+-- sérialisation de la conservation.
+--
+-- Idempotente et convergente : si la session porte déjà un document, il est conservé tel
+-- quel ; si un autre document décrit déjà le même contenu, c'est LUI qui est rattaché. Le
+-- verrou consultatif porte sur (propriétaire, empreinte) : deux validations simultanées du
+-- même contenu ne peuvent pas conclure toutes les deux qu'aucun document n'existe.
+--
+-- Retourne l'identifiant du document RÉELLEMENT rattaché, qui peut différer de celui
+-- proposé : l'appelant sait alors que sa copie est en trop.
+create or replace function public.lfo_attach_import_document(
+  p_user_id uuid,
+  p_payload jsonb
+) returns uuid
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_session_id uuid := (p_payload ->> 'session_id')::uuid;
+  v_document_id uuid := nullif(p_payload ->> 'document_id', '')::uuid;
+  v_file_hash text := nullif(p_payload ->> 'file_hash', '');
+  v_existing uuid;
+  v_current uuid;
+begin
+  if v_document_id is null or v_file_hash is null then
+    raise exception 'Rattachement de document incomplet : document et empreinte obligatoires';
+  end if;
+  if not exists (
+    select 1 from public.documents where id = v_document_id and user_id = p_user_id
+  ) then
+    raise exception 'Document introuvable';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended(p_user_id::text || ':' || v_file_hash, 0));
+
+  select document_id into v_current
+    from public.import_sessions
+   where id = v_session_id and user_id = p_user_id
+     for update;
+  if not found then
+    raise exception 'Session d''import introuvable';
+  end if;
+  if v_current is not null then
+    return v_current;
+  end if;
+
+  select s.document_id into v_existing
+    from public.import_sessions s
+   where s.user_id = p_user_id and s.file_hash = v_file_hash and s.document_id is not null
+   order by s.created_at
+   limit 1;
+
+  update public.import_sessions
+     set document_id = coalesce(v_existing, v_document_id)
+   where id = v_session_id and user_id = p_user_id;
+
+  return coalesce(v_existing, v_document_id);
+end;
+$$;
+
 -- Mémorise un mapping validé pour une signature de format. Une nouvelle validation
 -- incrémente la version : un mapping n'est jamais supposé éternel.
 create or replace function public.lfo_save_import_mapping(
@@ -1016,8 +1092,10 @@ $$;
 revoke all on function public.lfo_analyze_import_session(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.lfo_commit_import_session(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.lfo_discard_import_session(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.lfo_attach_import_document(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.lfo_save_import_mapping(uuid, jsonb) from public, anon, authenticated;
 grant execute on function public.lfo_analyze_import_session(uuid, jsonb) to service_role;
 grant execute on function public.lfo_commit_import_session(uuid, jsonb) to service_role;
 grant execute on function public.lfo_discard_import_session(uuid, uuid) to service_role;
+grant execute on function public.lfo_attach_import_document(uuid, jsonb) to service_role;
 grant execute on function public.lfo_save_import_mapping(uuid, jsonb) to service_role;

@@ -32,6 +32,7 @@ function analyze(
     accountId: ACCOUNT,
     declaredCurrency: "EUR",
     existing: [],
+    identities: [],
     sourceKey: SOURCE,
     observationDate: OBSERVED_AT,
     stableIdentifiers: false,
@@ -53,7 +54,6 @@ function commit(analysis: BankCsvAnalysis, from = 0): ExistingTransactionFact[] 
       label: row.label!,
       amount: row.amount!,
       currency: row.currency!,
-      externalKey: row.externalKey,
     }));
 }
 
@@ -307,7 +307,6 @@ describe("idempotence", () => {
         label: row.label!,
         amount: row.amount!,
         currency: row.currency!,
-        externalKey: row.externalKey,
       }));
 
     const second = analyze(utf8(FR_SIGNED), { existing });
@@ -344,9 +343,15 @@ describe("idempotence", () => {
 
   it("un identifiant DÉCLARÉ stable rend le réimport idempotent sans ambiguïté", () => {
     const first = analyze(utf8(EN_SIGNED), { stableIdentifiers: true });
+    // Les identités écrites sont réinjectées telles que le repository les relit : par clé,
+    // sans aucun filtre de date.
+    const identities = first.rows
+      .filter((row) => row.externalKey !== null)
+      .map((row, index) => ({ externalKey: row.externalKey!, transactionId: `t${index}` }));
     const second = analyze(utf8(EN_SIGNED), {
       stableIdentifiers: true,
       existing: commit(first),
+      identities,
     });
     expect(second.counts.duplicate).toBe(3);
     expect(second.verdicts.exactDuplicate).toBe(3);
@@ -437,7 +442,13 @@ describe("passe de déduplication rejouable", () => {
   it("remplace le verdict précédent au lieu de l'empiler", () => {
     const first = analyze(utf8(FR_SIGNED));
     const existing = commit(first);
-    const context = { accountId: ACCOUNT, sourceKey: SOURCE, existing, stableIdentifiers: false };
+    const context = {
+      accountId: ACCOUNT,
+      sourceKey: SOURCE,
+      existing,
+      identities: [],
+      stableIdentifiers: false,
+    };
     const second = applyDedupe(first, context);
     const third = applyDedupe(second, context);
     expect(third.counts).toEqual(second.counts);

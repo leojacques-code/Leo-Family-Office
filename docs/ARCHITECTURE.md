@@ -230,6 +230,8 @@ Deux ambiguïtés sont structurelles et changent le résultat financier : la con
 
 La déduplication repose sur un principe unique : L'IDENTITÉ SE DÉMONTRE. Une égalité de tuple `compte / date / montant / devise / libellé` ne prouve rien entre deux fichiers distincts — un relevé partiel contenant un troisième achat identique ne dit pas qu'il s'agit d'un des deux déjà connus. Deux preuves seulement autorisent un rejet automatique : l'empreinte du FICHIER déjà validé, et un identifiant de transaction dont la stabilité est DÉCLARÉE pour la session. Le nom d'un en-tête n'en est jamais une, d'où la séparation entre `externalTransactionId` et `reference`. Tout le reste est une ressemblance signalée, exclue par défaut et écrite sur décision explicite.
 
+L'identité se cherche dans TOUT l'historique, la ressemblance dans une fenêtre de dates : `ExistingTransactionFact` ne porte donc aucune clé d'identité, et le type rend la confusion impossible. Borner l'identité produisait un verdict « nouvelle » suivi d'une violation d'index au commit.
+
 La date d'observation d'un import est distincte d'`AS_OF_DATE` : une opération bookée hier est un fait même si le reporting est arrêté le mois précédent, et c'est aux moteurs aval de l'écarter d'une lecture à leur date.
 
 La piste d'audit est en lecture seule pour `authenticated` : le brut est immuable, la provenance d'un fait écrit est gelée, et la clé étrangère du lien de provenance est en `restrict`. Une transaction importée ne peut donc pas perdre son origine, même par écriture directe.

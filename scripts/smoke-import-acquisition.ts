@@ -71,6 +71,7 @@ async function rpc(name: string, payload: unknown): Promise<string> {
 }
 
 type Counts = {
+  documents: string;
   sources: string;
   sessions: string;
   raw: string;
@@ -83,6 +84,7 @@ type Counts = {
 async function counts(): Promise<Counts> {
   const result = await client.query<Counts>(`
     select
+      (select count(*) from public.documents)::text as documents,
       (select count(*) from public.import_sources)::text as sources,
       (select count(*) from public.import_sessions)::text as sessions,
       (select count(*) from public.import_raw_records)::text as raw,
@@ -474,6 +476,29 @@ try {
     "Une ligne normalisée committée a pu être réécrite",
     "gelée",
   );
+
+  // Le gel doit être EXHAUSTIF. Une liste manuelle de colonnes laissait passer une
+  // réécriture masquée derrière un détachement de jumeau : ces cinq colonnes n'y figuraient
+  // pas. La comparaison porte désormais sur la ligne entière.
+  for (const [column, value] of [
+    ["reference", "'REF-FALSIFIEE'"],
+    ["value_date", "date '2020-01-01'"],
+    ["confidence", "'LOW'"],
+    ["counterparty", "'TIERS INVENTE'"],
+    ["external_transaction_id", "'TX-INVENTE'"],
+    ["balance_after", "999999"],
+    ["data_kind", "'USER_ASSUMPTION'"],
+    ["source", "'SOURCE REECRITE'"],
+  ] as const) {
+    await rejects(
+      `update public.import_normalized_records
+          set matched_transaction_id = null, ${column} = ${value}
+        where session_id = $1 and commit_state = 'COMMITTED'`,
+      [full],
+      `Le gel de la provenance laisse réécrire ${column} sous couvert d'un détachement`,
+      "gelée",
+    );
+  }
   await rejects(
     `delete from public.import_normalized_records where session_id = $1 and commit_state = 'COMMITTED'`,
     [full],
@@ -484,6 +509,15 @@ try {
     `update public.import_record_links set transaction_id = null where session_id = $1`,
     [full],
     "Un lien de provenance a pu être modifié",
+    "immuable",
+  );
+  // Le DELETE aussi, et sous `service_role` : c'est le rôle sous lequel tourne le serveur,
+  // donc le seul refus qui protège réellement quelque chose. Sans lui, supprimer le lien
+  // désarmait la clé étrangère `restrict` et la transaction devenait supprimable sans trace.
+  await rejects(
+    `delete from public.import_record_links where session_id = $1`,
+    [full],
+    "Un lien de provenance a pu être supprimé sous service_role",
     "immuable",
   );
   await rejects(
@@ -687,6 +721,83 @@ try {
     "Une transaction a survécu à l'échec de son lien de provenance",
   );
 
+  // ── 13 bis. Rattachement du fichier conservé : convergent ─────────────────────────
+  //
+  // Le fichier n'est déposé qu'à la validation. Cette RPC est le point de sérialisation :
+  // deux validations simultanées du même contenu ne peuvent pas conclure toutes les deux
+  // qu'aucun document n'existe, et la seconde rattache celui de la première.
+  const documentA = randomUUID();
+  const documentB = randomUUID();
+  await client.query("reset role");
+  await client.query(
+    `insert into public.documents (id, user_id, name, category, storage_path, size_bytes, status)
+     values ($1, $2, 'releve.csv', 'bank', $3, 512, 'INBOX'),
+            ($4, $2, 'releve.csv', 'bank', $5, 512, 'INBOX')`,
+    [documentA, userId, `${userId}/imports/${FILE_HASH_B}.csv`, documentB, `${userId}/imports/autre.csv`],
+  );
+  await client.query("set local role service_role");
+
+  const attachSession = await rpc("lfo_analyze_import_session", {
+    source: sourcePayload,
+    session: {
+      file_name: "releve-conserve.csv",
+      file_hash: "e".repeat(64),
+      parser: "bank-csv",
+      parser_version: "1",
+      declared_currency: "EUR",
+      observation_date: "2026-08-27",
+      retain_file_requested: true,
+      row_count: 1,
+    },
+    raw: [rawRow(2)],
+    normalized: [normalizedRow(2, { match_key: "v2|smoke-e|~1" })],
+  });
+  const attached = await rpc("lfo_attach_import_document", {
+    session_id: attachSession,
+    document_id: documentA,
+    file_hash: "e".repeat(64),
+  });
+  assert(attached === documentA, "Le document proposé n'a pas été rattaché");
+  const reattached = await rpc("lfo_attach_import_document", {
+    session_id: attachSession,
+    document_id: documentB,
+    file_hash: "e".repeat(64),
+  });
+  assert(
+    reattached === documentA,
+    "Un second rattachement a remplacé le document déjà conservé au lieu de converger",
+  );
+  const singleDocument = await client.query<{ count: string }>(
+    "select count(*)::text from public.import_sessions where document_id = $1",
+    [documentA],
+  );
+  assert(singleDocument.rows[0].count === "1", "Le rattachement n'est pas idempotent");
+  await rejects(
+    "select public.lfo_attach_import_document($1::uuid, $2::jsonb)",
+    [
+      userId,
+      JSON.stringify({
+        session_id: attachSession,
+        document_id: randomUUID(),
+        file_hash: "e".repeat(64),
+      }),
+    ],
+    "Un document inexistant a pu être rattaché",
+    "Document introuvable",
+  );
+
+  // Un chemin de stockage ne décrit qu'un document : deux lignes pour le même objet
+  // afficheraient deux fois le même relevé au coffre.
+  await client.query("reset role");
+  await rejects(
+    `insert into public.documents (user_id, name, category, storage_path, size_bytes, status)
+     values ($1, 'doublon.csv', 'bank', $2, 512, 'INBOX')`,
+    [userId, `${userId}/imports/${FILE_HASH_B}.csv`],
+    "Deux documents ont pu décrire le même objet Storage",
+    "documents_owner_storage_path_uidx",
+  );
+  await client.query("set local role service_role");
+
   // ── 14. Mémorisation d'un mapping : upsert versionné ───────────────────────────────
   const mappingPayload = {
     signature: "csv:;:DATE OPERATION|LIBELLE|MONTANT|DEVISE",
@@ -732,7 +843,7 @@ try {
   }
   if (succeeded) {
     console.log(
-      "Smoke Data Acquisition Foundation : staging atomique, brut immuable et non supprimable, piste d'audit en lecture seule sous authenticated, provenance gelée, transaction importée non supprimable sans sa provenance, jumeau détachable, commit sélectif, idempotence applicative et de base, cloisonnement, atomicité du lien. Aucune donnée persistée.",
+      "Smoke Data Acquisition Foundation : staging atomique, brut immuable et non supprimable, piste d'audit en lecture seule sous authenticated, provenance gelée de façon exhaustive, lien immuable en UPDATE et DELETE sous service_role, transaction importée non supprimable sans sa provenance, jumeau détachable seul, commit sélectif, idempotence applicative et de base, cloisonnement, atomicité du lien, rattachement de document convergent. Aucune donnée persistée.",
     );
   }
 }

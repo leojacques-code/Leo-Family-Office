@@ -314,7 +314,15 @@ export interface BankCsvAnalysis {
   observedPeriod: { start: string; end: string } | null;
 }
 
-/** Transaction déjà canonique, telle que la déduplication a besoin de la lire. */
+/**
+ * Transaction déjà canonique, telle que la RECHERCHE DE RESSEMBLANCE a besoin de la lire.
+ *
+ * Ce type ne porte VOLONTAIREMENT aucune clé d'identité. La ressemblance se cherche dans une
+ * fenêtre de dates ; l'identité se cherche dans tout l'historique. Mélanger les deux dans un
+ * même objet avait une conséquence concrète : une identité stable dont la transaction était
+ * hors fenêtre disparaissait de l'index, le moteur annonçait « nouvelle », et l'index unique
+ * de la base faisait échouer le commit entier au lieu d'un verdict explicable.
+ */
 export interface ExistingTransactionFact {
   id: string;
   accountId: string;
@@ -322,9 +330,15 @@ export interface ExistingTransactionFact {
   label: string;
   amount: number;
   currency: string;
-  /**
-   * Clé d'identité si la transaction vient d'un import qui en portait une DÉCLARÉE stable.
-   * `null` pour une saisie manuelle comme pour un import sans identifiant démontré.
-   */
-  externalKey: string | null;
+}
+
+/**
+ * Identité déjà écrite : une clé d'identité et la transaction qu'elle désigne.
+ *
+ * Cet index est GLOBAL — aucun filtre de date, aucun filtre de compte. Une identité stable
+ * vaut pour toute l'histoire, sans quoi ce n'est pas une identité.
+ */
+export interface ExistingIdentity {
+  externalKey: string;
+  transactionId: string;
 }

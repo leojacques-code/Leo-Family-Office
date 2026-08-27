@@ -229,6 +229,48 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
     expect(normalized.every((row) => row.external_key === null)).toBe(true);
   });
 
+  it("cherche les identités SANS filtre de date, contrairement aux ressemblances", async () => {
+    // Une identité stable ne se périme pas : la borner à la fenêtre du fichier laissait le
+    // moteur annoncer « nouvelle » avant que l'index unique de la base fasse échouer le
+    // commit entier.
+    const builders = withTables({
+      financial_accounts: activeAccount,
+      transactions: { data: [], error: null },
+      import_column_mappings: { data: [], error: null },
+      import_sessions: { data: [{ source_id: "source-1" }], error: null },
+      import_normalized_records: { data: [], error: null },
+    });
+    const repository = createImportRepository();
+    await repository.analyze({ ...analyzeRequest, stableTransactionIdDeclared: true }, file);
+
+    const identityCalls = builders.get("import_normalized_records")!.calls as Array<
+      [string, unknown[]]
+    >;
+    const filters = identityCalls.filter(([method]) => ["gte", "lte"].includes(method));
+    expect(filters).toHaveLength(0);
+    expect(identityCalls.filter(([method]) => method === "eq")).toEqual(
+      expect.arrayContaining([
+        ["eq", ["user_id", OWNER]],
+        ["eq", ["commit_state", "COMMITTED"]],
+      ]),
+    );
+  });
+
+  it("ne lit aucune identité quand la stabilité n'est pas déclarée", async () => {
+    const builders = withTables({
+      financial_accounts: activeAccount,
+      transactions: { data: [], error: null },
+      import_column_mappings: { data: [], error: null },
+      import_sessions: { data: [{ source_id: "source-1" }], error: null },
+      import_normalized_records: { data: [], error: null },
+    });
+    const repository = createImportRepository();
+    await repository.analyze(analyzeRequest, file);
+    const calls = builders.get("import_normalized_records")!.calls as Array<[string, unknown[]]>;
+    // La seule lecture de cette table reste celle des identifiants de staging du preview.
+    expect(calls.filter(([, args]) => args[0] === "commit_state")).toHaveLength(0);
+  });
+
   it("lit les transactions à dédupliquer sur le seul compte cible du propriétaire", async () => {
     const builders = withTables({
       financial_accounts: activeAccount,
@@ -257,7 +299,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
   });
 });
 
-describe("acquisition — conservation idempotente du fichier", () => {
+describe("acquisition — conservation du fichier à la validation seulement", () => {
   const retaining = { ...analyzeRequest, retainFile: true };
 
   beforeEach(() => {
@@ -265,24 +307,21 @@ describe("acquisition — conservation idempotente du fichier", () => {
     mocks.rpc.mockResolvedValue({ data: "session-1", error: null });
   });
 
-  it("réutilise le document déjà conservé pour la même empreinte de fichier", async () => {
-    // Corriger un mapping puis relire republie le même contenu : sans réutilisation,
-    // l'utilisateur retrouverait cinq copies de son relevé au coffre pour un seul import.
+  it("l'ANALYSE ne dépose jamais de fichier, même quand la conservation est demandée", async () => {
+    // Correction STRUCTURELLE : réanalyser après correction de mapping, ou voir l'analyse
+    // échouer, ne peut plus laisser une copie du relevé au coffre — rien n'y est déposé.
     withTables({
       financial_accounts: activeAccount,
       transactions: { data: [], error: null },
-      import_record_links: { data: [], error: null },
       import_column_mappings: { data: [], error: null },
-      import_sessions: {
-        data: [{ document_id: "doc-existant", source_id: "source-1" }],
-        error: null,
-      },
+      import_sessions: { data: [{ source_id: "source-1" }], error: null },
       import_normalized_records: { data: [], error: null },
     });
     const repository = createImportRepository();
     await repository.analyze(retaining, file);
     expect(mocks.storageFrom).not.toHaveBeenCalled();
-    expect((analysisPayload().session as Record<string, unknown>).document_id).toBe("doc-existant");
+    // L'INTENTION est enregistrée ; elle sera honorée à la validation.
+    expect((analysisPayload().session as Record<string, unknown>).retain_file_requested).toBe(true);
   });
 
   it("refuse un fichier déjà validé AVANT de déposer une copie au coffre", async () => {
@@ -313,6 +352,84 @@ describe("acquisition — conservation idempotente du fichier", () => {
     });
     const repository = createImportRepository();
     await expect(repository.analyze(analyzeRequest, file)).resolves.toBeTruthy();
+  });
+});
+
+describe("acquisition — conservation adressée par le contenu", () => {
+  const upload = vi.fn();
+  const sessionAfterCommit = (overrides: Record<string, unknown> = {}) => ({
+    data: [
+      {
+        committed_count: 2,
+        retain_file_requested: true,
+        document_id: null,
+        file_hash: "a".repeat(64),
+        ...overrides,
+      },
+    ],
+    error: null,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    upload.mockResolvedValue({ data: { path: "object" }, error: null });
+    mocks.storageFrom.mockReturnValue({ upload });
+    mocks.rpc.mockResolvedValue({ data: "session-1", error: null });
+  });
+
+  it("écrit l'objet à un chemin dérivé de l'empreinte du contenu", async () => {
+    // Deux validations simultanées du même contenu visent le MÊME chemin : la
+    // sérialisation vient de Storage, pas d'une lecture préalable qui pourrait passer
+    // entre les deux.
+    withTables({
+      import_sessions: sessionAfterCommit(),
+      documents: { data: [{ id: "doc-1" }], error: null },
+    });
+    const repository = createImportRepository();
+    await repository.commit("session-1", [], file);
+    expect(upload).toHaveBeenCalledWith(
+      `${OWNER}/imports/${"a".repeat(64)}.csv`,
+      expect.anything(),
+      expect.objectContaining({ upsert: true }),
+    );
+  });
+
+  it("rattache le document par une RPC, jamais par une écriture directe de session", async () => {
+    withTables({
+      import_sessions: sessionAfterCommit(),
+      documents: { data: [{ id: "doc-1" }], error: null },
+    });
+    const repository = createImportRepository();
+    await repository.commit("session-1", [], file);
+    expect(mocks.rpc).toHaveBeenCalledWith("lfo_attach_import_document", {
+      p_user_id: OWNER,
+      p_payload: {
+        session_id: "session-1",
+        document_id: "doc-1",
+        file_hash: "a".repeat(64),
+      },
+    });
+  });
+
+  it("ne conserve rien quand la session ne l'a pas demandé", async () => {
+    withTables({ import_sessions: sessionAfterCommit({ retain_file_requested: false }) });
+    const repository = createImportRepository();
+    await repository.commit("session-1", [], file);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("ne conserve rien quand la session porte déjà un document", async () => {
+    withTables({ import_sessions: sessionAfterCommit({ document_id: "doc-deja-la" }) });
+    const repository = createImportRepository();
+    await repository.commit("session-1", [], file);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("ne conserve rien si le fichier n'accompagne pas la validation", async () => {
+    withTables({ import_sessions: sessionAfterCommit() });
+    const repository = createImportRepository();
+    await repository.commit("session-1", []);
+    expect(upload).not.toHaveBeenCalled();
   });
 });
 

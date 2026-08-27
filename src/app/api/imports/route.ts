@@ -97,11 +97,41 @@ export async function POST(request: Request) {
   }
 }
 
-/** Validation ou abandon d'une session analysée. Seul endroit qui écrit des faits. */
+/**
+ * Validation ou abandon d'une session analysée. Seul endroit qui écrit des faits.
+ *
+ * La validation accepte le fichier en multipart lorsque la session a demandé sa
+ * conservation : la copie au coffre n'a lieu qu'après l'écriture des faits, de sorte qu'une
+ * analyse abandonnée ou refusée ne laisse jamais de copie derrière elle.
+ */
 export async function PATCH(request: Request) {
   try {
     await requireAuthenticated();
-    const parsed = importCommandSchema.safeParse(await request.json().catch(() => null));
+    const contentType = request.headers.get("content-type") ?? "";
+    let command: unknown;
+    let file: { name: string; contentType: string; size: number; bytes: Uint8Array } | undefined;
+
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      const raw = formData.get("command");
+      command = typeof raw === "string" ? JSON.parse(raw) : null;
+      const upload = formData.get("file");
+      if (upload instanceof File && upload.size > 0) {
+        if (upload.size > MAX_IMPORT_FILE_BYTES) {
+          return NextResponse.json({ error: "Fichier trop volumineux." }, { status: 400 });
+        }
+        file = {
+          name: upload.name,
+          contentType: "text/csv",
+          size: upload.size,
+          bytes: new Uint8Array(await upload.arrayBuffer()),
+        };
+      }
+    } else {
+      command = await request.json().catch(() => null);
+    }
+
+    const parsed = importCommandSchema.safeParse(command);
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Commande d'import invalide", issues: parsed.error.flatten() },
@@ -111,7 +141,7 @@ export async function PATCH(request: Request) {
     const repository = getImportRepository();
     if (parsed.data.action === "commit") {
       return NextResponse.json(
-        await repository.commit(parsed.data.sessionId, parsed.data.includeRecordIds),
+        await repository.commit(parsed.data.sessionId, parsed.data.includeRecordIds, file),
       );
     }
     return NextResponse.json({ sessionId: await repository.discard(parsed.data.sessionId) });

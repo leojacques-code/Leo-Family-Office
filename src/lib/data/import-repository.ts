@@ -10,8 +10,10 @@ import {
   bankCsvSignature,
   MAX_ROWS_PER_SESSION,
 } from "@/lib/acquisition/bank-csv";
+import { civilDateIn, resolveTimeZone } from "@/lib/acquisition/clock";
 import type {
   BankCsvAnalysis,
+  ExistingIdentity,
   ExistingTransactionFact,
   ImportRowCounts,
   ImportSessionStatus,
@@ -26,9 +28,8 @@ import type {
   ImportSessionSummary,
 } from "@/lib/data/import-contracts";
 import { readAllPages } from "@/lib/data/pagination";
-import { getRepository } from "@/lib/data/repository";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
-import { ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { DOCUMENTS_BUCKET, ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
 
 type Row = Record<string, unknown>;
 
@@ -53,14 +54,16 @@ const PREVIEW_READY_LIMIT = 200;
  * DÉLIBÉRÉMENT distincte de `AS_OF_DATE`, qui est la date d'arrêté du reporting. Une
  * opération bancaire bookée hier est un fait réel même si le cockpit arrête ses comptes le
  * mois précédent : l'acquisition l'ingère, et les moteurs aval décident ensuite s'ils la
- * retiennent à leur propre date d'analyse. Utiliser `AS_OF_DATE` ici demanderait une
- * intervention humaine sur des faits parfaitement valides.
+ * retiennent à leur propre date d'analyse.
  *
- * Lue ici, jamais dans le moteur : les fonctions pures reçoivent la date en paramètre et
- * restent déterministes.
+ * Elle est CIVILE et dans le fuseau du produit, pas en UTC : un relevé porte des dates
+ * locales, et à 00 h 30 à Paris l'UTC est encore la veille — une opération du jour serait
+ * alors signalée « après le jour de l'import ».
+ *
+ * Lue ici, jamais dans le moteur : les fonctions pures reçoivent la date en paramètre.
  */
 function observationDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  return civilDateIn(new Date(), resolveTimeZone(process.env.LFO_TIME_ZONE));
 }
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
@@ -104,7 +107,15 @@ function countsOf(row: Row): ImportRowCounts {
 export interface ImportRepository {
   readonly adapter: "supabase";
   analyze(request: ImportAnalyzeRequest, file: ImportFileInput): Promise<ImportPreview>;
-  commit(sessionId: string, includeRecordIds: readonly string[]): Promise<ImportCommitResult>;
+  /**
+   * Valide une session. `file` n'est nécessaire que si la session a demandé la conservation
+   * du fichier : la copie au coffre n'a lieu qu'ICI, après l'écriture des faits.
+   */
+  commit(
+    sessionId: string,
+    includeRecordIds: readonly string[],
+    file?: ImportFileInput,
+  ): Promise<ImportCommitResult>;
   discard(sessionId: string): Promise<string>;
   listSessions(limit?: number): Promise<ImportSessionSummary[]>;
   getSessionRows(sessionId: string): Promise<ImportPreviewRow[]>;
@@ -140,13 +151,13 @@ export function createImportRepository(): ImportRepository {
   }
 
   /**
-   * Faits canoniques déjà présents sur l'enveloppe, dans la fenêtre observée du fichier.
+   * RESSEMBLANCE — faits canoniques de l'enveloppe, dans la fenêtre observée du fichier.
    *
-   * La clé externe ne vit pas sur `transactions` : elle est portée par la ligne normalisée
-   * qui a produit la transaction. Elle est donc rapportée par jointure, ce qui évite
-   * d'ajouter une colonne à une table du domaine Cash Flow pour un besoin d'acquisition.
+   * La borne temporelle est légitime ICI et seulement ici : une ressemblance de date, de
+   * montant et de libellé ne se cherche qu'au voisinage du fichier. Elle serait fausse pour
+   * une identité, qui ne se périme pas — d'où la fonction séparée ci-dessous.
    */
-  async function existingFacts(
+  async function similarityFacts(
     accountId: string,
     period: { start: string; end: string } | null,
   ): Promise<ExistingTransactionFact[]> {
@@ -174,25 +185,6 @@ export function createImportRepository(): ImportRepository {
       "lecture des transactions pour déduplication",
     );
 
-    const linkRows = unwrap(
-      await db
-        .from("import_record_links")
-        .select("transaction_id, import_normalized_records!inner(external_key, commit_state)")
-        .eq("user_id", user)
-        .not("transaction_id", "is", null),
-      "lecture des clés externes déjà importées",
-    ) as Row[];
-
-    const externalKeyByTransaction = new Map<string, string>();
-    for (const link of linkRows) {
-      const nested = link.import_normalized_records as Row | Row[] | null;
-      const record = Array.isArray(nested) ? nested[0] : nested;
-      if (!record) continue;
-      if (str(record.commit_state) !== "COMMITTED") continue;
-      const key = nullableStr(record.external_key);
-      if (key) externalKeyByTransaction.set(str(link.transaction_id), key);
-    }
-
     return transactionRows.map((row) => ({
       id: str(row.id),
       accountId: str(row.account_id),
@@ -200,8 +192,48 @@ export function createImportRepository(): ImportRepository {
       label: str(row.label),
       amount: finiteNumber(row.amount, `transactions[id=${str(row.id)}].amount`),
       currency: str(row.currency),
-      externalKey: externalKeyByTransaction.get(str(row.id)) ?? null,
     }));
+  }
+
+  /**
+   * IDENTITÉ — clés d'identité déjà écrites, dans TOUT l'historique.
+   *
+   * AUCUN filtre de date, et c'est le point : une identité stable ne se périme pas. Une
+   * opération dont la banque a corrigé la date de deux mois reste la même opération, et son
+   * identifiant doit la retrouver. La chercher dans la fenêtre de ressemblance produisait un
+   * verdict « nouvelle » suivi d'une violation de l'index unique au commit — donc un échec
+   * global et opaque là où le moteur devait rendre un verdict lisible.
+   *
+   * La clé porte déjà le préfixe de sa source : lire tout l'historique du propriétaire ne
+   * mélange pas deux banques.
+   */
+  async function existingIdentities(): Promise<ExistingIdentity[]> {
+    const rows = unwrap(
+      await readAllPages<Row, PostgrestError>("identités déjà importées", async (from, to) => {
+        const result = await db
+          .from("import_normalized_records")
+          .select("external_key, import_record_links!inner(transaction_id)")
+          .eq("user_id", user)
+          .eq("commit_state", "COMMITTED")
+          .not("external_key", "is", null)
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data: (result.data ?? null) as Row[] | null, error: result.error };
+      }),
+      "lecture des identités déjà importées",
+    );
+
+    const identities: ExistingIdentity[] = [];
+    for (const row of rows) {
+      const nested = row.import_record_links as Row | Row[] | null;
+      const link = Array.isArray(nested) ? nested[0] : nested;
+      const externalKey = nullableStr(row.external_key);
+      if (!link || !externalKey) continue;
+      const transactionId = nullableStr(link.transaction_id);
+      if (!transactionId) continue;
+      identities.push({ externalKey, transactionId });
+    }
+    return identities;
   }
 
   /** Mapping déjà validé pour cette signature exacte, s'il existe. */
@@ -295,27 +327,6 @@ export function createImportRepository(): ImportRepository {
     }
   }
 
-  /**
-   * Document déjà conservé pour ce contenu, s'il existe.
-   *
-   * La clé est l'empreinte du FICHIER, pas la session : réanalyser, corriger un mapping ou
-   * redéposer le même relevé ne doit produire qu'une seule copie au coffre.
-   */
-  async function retainedDocumentFor(fileHash: string): Promise<string | null> {
-    const rows = unwrap(
-      await db
-        .from("import_sessions")
-        .select("document_id")
-        .eq("user_id", user)
-        .eq("file_hash", fileHash)
-        .not("document_id", "is", null)
-        .limit(1),
-      "recherche d'un fichier déjà conservé",
-    ) as Row[];
-    const documentId = rows[0]?.document_id;
-    return documentId === null || documentId === undefined ? null : str(documentId);
-  }
-
   async function analyze(
     request: ImportAnalyzeRequest,
     file: ImportFileInput,
@@ -350,6 +361,7 @@ export function createImportRepository(): ImportRepository {
       accountId: account.id,
       declaredCurrency: request.declaredCurrency,
       existing: [],
+      identities: [],
       sourceKey: `${PROVIDER}:${account.id}`,
       observationDate: observedAt,
       stableIdentifiers: request.stableTransactionIdDeclared,
@@ -357,35 +369,21 @@ export function createImportRepository(): ImportRepository {
       maxRows: MAX_ROWS_PER_SESSION,
     });
 
-    const existing = await existingFacts(account.id, parsed.observedPeriod);
+    // Deux lectures DISTINCTES, aux portées distinctes : la ressemblance est bornée dans le
+    // temps, l'identité ne l'est jamais.
+    const [existing, identities] = await Promise.all([
+      similarityFacts(account.id, parsed.observedPeriod),
+      request.stableTransactionIdDeclared ? existingIdentities() : Promise.resolve([]),
+    ]);
 
     // Déduplication : seule passe qui dépend de la base. Le fichier n'est pas relu.
     const analysis = applyDedupe(parsed, {
       accountId: account.id,
       sourceKey: `${PROVIDER}:${account.id}`,
       existing,
+      identities,
       stableIdentifiers: request.stableTransactionIdDeclared,
     });
-
-    // Conservation IDEMPOTENTE par empreinte de fichier. Corriger un mapping puis relire
-    // republie le même contenu : sans cette réutilisation, chaque tentative déposerait une
-    // copie du même relevé au coffre, et l'utilisateur y trouverait cinq fois son fichier
-    // pour une seule opération d'import.
-    let documentId: string | null = null;
-    if (request.retainFile) {
-      documentId = await retainedDocumentFor(fileHash);
-      if (!documentId) {
-        const repository = await getRepository();
-        const document = await repository.storeDocument({
-          name: file.name.slice(0, 180),
-          category: "bank",
-          contentType: file.contentType,
-          size: file.size,
-          bytes: file.bytes,
-        });
-        documentId = document.id;
-      }
-    }
 
     const sessionId = unwrap(
       await db.rpc("lfo_analyze_import_session", {
@@ -424,7 +422,7 @@ export function createImportRepository(): ImportRepository {
             blocked_count: analysis.counts.blocked,
             duplicate_count: analysis.counts.duplicate,
             ignored_count: analysis.counts.ignored,
-            document_id: documentId,
+            retain_file_requested: request.retainFile,
             issues: analysis.issues,
           },
           // Le brut est persisté TEL QUEL : c'est lui qui répond plus tard à « qu'est-ce
@@ -505,9 +503,95 @@ export function createImportRepository(): ImportRepository {
     };
   }
 
+  /**
+   * Conserve le fichier d'une session VALIDÉE, une fois et une seule.
+   *
+   * Deux propriétés, et elles sont structurelles plutôt que vérifiées après coup :
+   *
+   *   * la conservation n'a lieu qu'APRÈS la validation. Une analyse abandonnée, réanalysée
+   *     après correction de mapping, ou refusée parce que le contenu était déjà importé, ne
+   *     peut donc laisser aucune copie derrière elle : elle ne dépose jamais rien ;
+   *   * l'objet Storage est ADRESSÉ PAR SON CONTENU (`<user>/imports/<sha256>`). Deux
+   *     validations simultanées du même fichier écrivent donc le même chemin, et c'est
+   *     Storage qui refuse la seconde — la sérialisation ne repose pas sur une lecture
+   *     préalable qui pourrait passer entre les deux.
+   *
+   * Best-effort assumé : un échec de conservation n'annule pas des faits déjà écrits. Il est
+   * remonté, et la session porte alors son intention sans document.
+   */
+  async function retainSessionFile(
+    sessionId: string,
+    fileHash: string,
+    file: ImportFileInput,
+  ): Promise<void> {
+    const extension = file.name.includes(".")
+      ? `.${file.name
+          .split(".")
+          .pop()!
+          .replace(/[^a-zA-Z0-9]/g, "")
+          .slice(0, 7)}`
+      : "";
+    const storagePath = `${user}/imports/${fileHash}${extension}`;
+
+    // `upsert: true` est SÛR ici, et seulement ici : le chemin est dérivé de l'empreinte du
+    // contenu, donc réécrire ce chemin ne peut réécrire que des octets identiques. C'est ce
+    // qui évite de classer un message d'erreur de collision — un test de chaîne aurait pu
+    // prendre une vraie panne pour un doublon et enregistrer un document sans objet.
+    const uploaded = await db.storage.from(DOCUMENTS_BUCKET).upload(storagePath, file.bytes, {
+      contentType: file.contentType,
+      upsert: true,
+    });
+    if (uploaded.error) throw new Error(`Supabase stockage : ${uploaded.error.message}`);
+
+    const existing = unwrap(
+      await db.from("documents").select("id").eq("user_id", user).eq("storage_path", storagePath),
+      "recherche du document conservé",
+    ) as Row[];
+
+    let documentId = existing[0] ? str(existing[0].id) : null;
+    if (!documentId) {
+      const inserted = await db
+        .from("documents")
+        .insert({
+          user_id: user,
+          name: file.name.slice(0, 180),
+          category: "bank",
+          storage_path: storagePath,
+          size_bytes: file.size,
+          status: "INBOX",
+        })
+        .select("id");
+      if (inserted.error) {
+        // `documents_owner_storage_path_uidx` a tranché : un autre écrivain a gagné.
+        const raced = unwrap(
+          await db
+            .from("documents")
+            .select("id")
+            .eq("user_id", user)
+            .eq("storage_path", storagePath),
+          "relecture du document conservé",
+        ) as Row[];
+        if (!raced[0])
+          throw new Error(`Supabase enregistrement de document : ${inserted.error.message}`);
+        documentId = str(raced[0].id);
+      } else {
+        documentId = str((inserted.data as Row[])[0].id);
+      }
+    }
+
+    unwrap(
+      await db.rpc("lfo_attach_import_document", {
+        p_user_id: user,
+        p_payload: { session_id: sessionId, document_id: documentId, file_hash: fileHash },
+      }),
+      "rattachement du fichier conservé",
+    );
+  }
+
   async function commit(
     sessionId: string,
     includeRecordIds: readonly string[],
+    file?: ImportFileInput,
   ): Promise<ImportCommitResult> {
     unwrap(
       await db.rpc("lfo_commit_import_session", {
@@ -519,15 +603,27 @@ export function createImportRepository(): ImportRepository {
     const rows = unwrap(
       await db
         .from("import_sessions")
-        .select("committed_count")
+        .select("committed_count, retain_file_requested, document_id, file_hash")
         .eq("user_id", user)
         .eq("id", sessionId),
       "lecture du résultat d'import",
     ) as Row[];
+    const session = rows[0];
+
+    if (
+      session &&
+      file &&
+      session.retain_file_requested === true &&
+      session.document_id === null &&
+      nullableStr(session.file_hash)
+    ) {
+      await retainSessionFile(sessionId, str(session.file_hash), file);
+    }
+
     return {
       sessionId,
-      committedCount: rows[0]
-        ? finiteNumber(rows[0].committed_count, "import_sessions.committed_count")
+      committedCount: session
+        ? finiteNumber(session.committed_count, "import_sessions.committed_count")
         : 0,
     };
   }

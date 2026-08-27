@@ -75,7 +75,21 @@ démontrent :
 | Preuve | Portée |
 | ------ | ------ |
 | l'empreinte SHA-256 du **fichier**, au niveau session | un contenu déjà validé pour cette source est refusé avant même d'arriver à la déduplication |
-| un identifiant de transaction dont la **stabilité est déclarée** | la ligne est reconnue comme déjà écrite |
+| un identifiant de transaction dont la **stabilité est déclarée** | la ligne est reconnue comme déjà écrite, **quelle que soit la date** de la transaction historique |
+
+### Deux recherches, deux portées
+
+C'est la distinction la plus importante de cette couche, et le type du moteur la rend
+inévitable : `ExistingTransactionFact` ne porte aucune clé d'identité.
+
+| Recherche | Portée | Pourquoi |
+| --------- | ------ | -------- |
+| identité (`identities`) | **tout l'historique**, aucun filtre de date | une identité stable ne se périme pas. Une opération dont la banque a corrigé la date de deux mois reste la même opération |
+| ressemblance (`existing`) | fenêtre observée du fichier ± 7 jours | une ressemblance de date, montant et libellé ne se cherche qu'au voisinage du fichier |
+
+Borner l'identité à la fenêtre de ressemblance avait une conséquence concrète : le moteur
+annonçait « nouvelle », puis l'index unique de la base faisait échouer **tout** le commit —
+un échec global et opaque là où le moteur devait rendre un verdict lisible.
 
 Tout le reste est une **ressemblance**, signalée et non écrite par défaut.
 
@@ -163,6 +177,12 @@ Seule une date postérieure au **jour de l'import** est signalée. La date d'obs
 persistée sur la session, et injectée dans le moteur en paramètre — les fonctions pures ne
 lisent jamais l'horloge.
 
+Elle est **civile et dans le fuseau du produit**, pas en UTC. À 00 h 30 à Paris, l'UTC est
+encore la veille : une opération datée du jour aurait été signalée « après le jour de
+l'import ». Le fuseau est déclaré (`LFO_TIME_ZONE`, défaut `Europe/Paris`) et un fuseau
+inconnu **échoue** — se replier en silence sur l'UTC réintroduirait exactement le décalage
+que la primitive existe pour éviter.
+
 ## 7. Idempotence : deux garanties, aux deux seuls endroits démontrables
 
 | Garantie | Portée |
@@ -170,6 +190,7 @@ lisent jamais l'horloge.
 | `import_sessions_committed_file_uidx` sur `(user_id, source_id, file_hash)` où le statut est `COMMITTED` | un contenu de fichier ne se valide qu'une fois par source ; le repository refuse en plus **avant** tout dépôt au coffre |
 | `import_normalized_records_committed_external_uidx` sur `(user_id, external_key)` | une identité démontrée ne s'écrit qu'une fois |
 | `lfo_commit_import_session` sur une session déjà validée | retourne l'identifiant sans rien réécrire |
+| conservation du fichier au **commit** seulement, à un chemin dérivé du SHA-256 | une analyse abandonnée, réanalysée ou refusée ne dépose rien ; deux validations simultanées du même contenu visent le même objet |
 
 Il n'existe **délibérément aucune** contrainte d'unicité sur la clé de rapprochement. Ce
 n'est pas un manque : une unicité sur `(compte, date, montant, devise, libellé)` refuserait
@@ -228,17 +249,24 @@ cascaderait vers la ligne normalisée et son lien, et laisserait survivre une tr
 étiquetée « importée » dont l'origine aurait disparu. Le gate de schéma refuse une base où
 ces tables auraient reçu `INSERT`, `UPDATE` ou `DELETE`.
 
-Quatre invariants complètent les privilèges, portés par la base :
+Quatre invariants complètent les privilèges, portés par la base et vérifiés **sous le rôle
+serveur** — c'est le seul niveau qui protège quelque chose, puisque l'application travaille
+précisément sous un rôle privilégié :
 
 - un enregistrement brut ne se **modifie** jamais ;
 - un enregistrement brut ne se **supprime** que par l'abandon d'une session encore
   analysée, qui n'a produit aucun fait ;
-- une ligne normalisée **committée** est gelée. Seule exception, explicite : le jumeau
-  désigné (`matched_transaction_id`) peut être détaché s'il disparaît — il décrit
-  l'opération à laquelle la ligne ressemblait, pas le fait qu'elle a produit ;
-- un lien de provenance est **immuable**, et la clé étrangère vers `transactions` est en
-  `restrict` : une transaction importée ne peut pas être supprimée en laissant sa
-  provenance orpheline.
+- une ligne normalisée **committée** est gelée, et le gel est **exhaustif** : la comparaison
+  porte sur la représentation `jsonb` de la ligne entière, pas sur une liste de colonnes.
+  Seule exception, explicite : le jumeau désigné (`matched_transaction_id`) peut passer à
+  `null` **si rien d'autre ne change** — il décrit l'opération à laquelle la ligne
+  ressemblait, pas le fait qu'elle a produit. Une liste manuelle laissait réécrire
+  `reference`, `value_date`, `counterparty`, `balance_after` ou `confidence` sous couvert
+  d'un détachement ;
+- un lien de provenance est **immuable en `UPDATE` comme en `DELETE`**, et la clé étrangère
+  vers `transactions` est en `restrict`. Ne refuser que l'`UPDATE` laissait un trou réel :
+  supprimer le lien désarmait la clé étrangère, et la transaction devenait supprimable sans
+  laisser de trace.
 
 ## 9. Formats réellement supportés
 
@@ -265,6 +293,30 @@ Pas encore lus, et volontairement hors de cette couche : XLSX, OFX/QFX, CAMT, FE
 documents PDF, connecteurs bancaires. La fondation existe pour qu'ils s'y branchent sans
 refonte — un adaptateur produit des `NormalizedBankRow` ou l'équivalent de son domaine, et
 réutilise le staging, la déduplication, l'historique et l'audit.
+
+## 9 bis. Conservation du fichier
+
+L'intention est enregistrée à l'**analyse** ; la copie n'est déposée qu'à la **validation**.
+Cette inversion n'est pas cosmétique : elle rend structurellement impossibles deux défauts
+que des vérifications successives ne fermaient qu'imparfaitement.
+
+- une analyse abandonnée, relancée après correction du mapping, ou refusée parce que le
+  contenu était déjà importé, **ne dépose rien** : il n'y a plus de copie à réutiliser ni de
+  document orphelin à retrouver ;
+- l'objet Storage est **adressé par son contenu** (`<user>/imports/<sha256>`). Deux
+  validations simultanées du même fichier écrivent donc le même chemin, et `documents`
+  porte une unicité sur `(user_id, storage_path)` : un objet, une ligne. La sérialisation
+  vient du stockage lui-même, pas d'une lecture préalable qui pourrait passer entre les
+  deux.
+
+`lfo_attach_import_document` est convergente : elle prend un verrou consultatif sur
+`(propriétaire, empreinte)`, conserve le document déjà rattaché s'il existe, et retourne
+celui qui l'est réellement.
+
+Limite assumée : la conservation est **best-effort**. Un échec de dépôt après une validation
+réussie n'annule pas les faits écrits — la session porte alors son intention sans document,
+et l'erreur est remontée. Un fait financier correctement écrit ne doit pas être annulé parce
+qu'une copie d'archive a échoué.
 
 ## 10. Ce qui reste manuel
 

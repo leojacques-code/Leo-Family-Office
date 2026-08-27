@@ -234,14 +234,24 @@ function ImportsPage({ state, refresh }: SectionProps) {
     if (!preview) return;
     setBusy(true);
     setError("");
+    const request =
+      action === "commit"
+        ? { action, sessionId: preview.sessionId, includeRecordIds: [...included] }
+        : { action, sessionId: preview.sessionId };
+
+    // Le fichier accompagne la VALIDATION, pas l'analyse : sa copie au coffre n'a lieu
+    // qu'après l'écriture des faits, donc une analyse abandonnée n'en laisse aucune.
+    const sendsFile = action === "commit" && retainFile && pendingFile !== null;
+    const body = sendsFile ? new FormData() : JSON.stringify(request);
+    if (body instanceof FormData) {
+      body.set("command", JSON.stringify(request));
+      body.set("file", pendingFile!);
+    }
     const response = await fetch("/api/imports", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        action === "commit"
-          ? { action, sessionId: preview.sessionId, includeRecordIds: [...included] }
-          : { action, sessionId: preview.sessionId },
-      ),
+      ...(body instanceof FormData
+        ? { body }
+        : { headers: { "Content-Type": "application/json" }, body }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) setError(payload.error ?? "Commande impossible");
@@ -338,6 +348,10 @@ function ImportsPage({ state, refresh }: SectionProps) {
             />
             Conserver le fichier au coffre privé
           </label>
+          <small className="field-hint">
+            La copie n’est déposée qu’à la validation : une analyse abandonnée ou relancée après
+            correction du mapping ne laisse aucun fichier derrière elle.
+          </small>
           <label className="checkbox-row">
             <input
               type="checkbox"

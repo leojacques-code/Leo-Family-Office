@@ -81,12 +81,14 @@ La piste d'audit est en LECTURE SEULE : `authenticated` ne reçoit que le `SELEC
 Les invariants portés par la BASE, pas par l'application :
 
 * un enregistrement brut ne se **modifie** jamais, et ne se **supprime** que par l'abandon d'une session encore analysée — protéger seulement l'`UPDATE` laissait un `DELETE` cascader vers la ligne normalisée et son lien, en laissant survivre une transaction étiquetée « importée » sans origine ;
-* une ligne normalisée **committée** est gelée (`import_normalized_records_frozen`). Seule exception, explicite dans le trigger : le jumeau désigné peut être détaché s'il disparaît, parce qu'il décrit l'opération à laquelle la ligne ressemblait et non le fait qu'elle a produit ;
-* un lien de provenance est **immuable**, et sa clé étrangère vers `transactions` est en `restrict` : une transaction importée ne peut pas être supprimée en laissant sa provenance orpheline ;
+* une ligne normalisée **committée** est gelée (`import_normalized_records_frozen`), et le gel est EXHAUSTIF : la comparaison porte sur `to_jsonb(new) - 'matched_transaction_id'` contre son équivalent sur `old`, donc sur la ligne entière et sur les colonnes futures. Seule exception, explicite : le jumeau désigné peut passer à `null` si rien d'autre ne change — une liste manuelle de colonnes laissait réécrire `reference`, `value_date`, `counterparty`, `balance_after` et `confidence` sous couvert d'un détachement ;
+* un lien de provenance est **immuable en `UPDATE` comme en `DELETE`**, et sa clé étrangère vers `transactions` est en `restrict` : ne refuser que l'`UPDATE` laissait le rôle serveur supprimer le lien, ce qui désarmait la clé étrangère et rendait la transaction supprimable sans trace ;
 * un contenu de fichier ne peut être validé qu'une fois par source — `import_sessions_committed_file_uidx`, partiel sur le statut `COMMITTED`, de sorte qu'une analyse abandonnée ne bloque rien ;
 * une identité DÉMONTRÉE ne s'écrit qu'une fois — `import_normalized_records_committed_external_uidx`.
 
 Aucune unicité ne pèse sur `match_key`, et c'est un choix. Une contrainte sur `(compte, date, montant, devise, libellé)` refuserait un troisième achat réellement identique, et le refus viendrait de la base : message opaque, aucune décision possible. L'index correspondant existe pour la lecture, non pour l'unicité.
+
+`documents_owner_storage_path_uidx` complète la conservation : le fichier d'un import validé est stocké à un chemin dérivé de son SHA-256, et cette unicité garantit qu'un objet Storage n'est décrit que par une ligne `documents`. `lfo_attach_import_document` sérialise le rattachement par un verrou consultatif sur (propriétaire, empreinte).
 
 `import_normalized_records_ready_shape_ck` complète l'ensemble : une ligne déclarée prête ou signalée doit porter sa date, son libellé, son montant, sa devise et son compte. `READY` signifie committable ; une ligne prête incomplète produirait une transaction incomplète.
 

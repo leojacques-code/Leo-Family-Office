@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { classifyCandidates, externalKeyOf, type DedupeCandidate } from "@/lib/acquisition/dedupe";
-import type { ExistingTransactionFact } from "@/lib/acquisition/types";
+import type { ExistingIdentity, ExistingTransactionFact } from "@/lib/acquisition/types";
 
 const ACCOUNT = "account-1";
 const OTHER_ACCOUNT = "account-2";
@@ -28,19 +28,24 @@ function existing(
     label: "COFFEE SHOP",
     amount: -3.2,
     currency: "EUR",
-    externalKey: null,
     ...partial,
   };
+}
+
+function identity(externalKey: string, transactionId: string): ExistingIdentity {
+  return { externalKey, transactionId };
 }
 
 function verdicts(
   candidates: DedupeCandidate[],
   existingFacts: ExistingTransactionFact[] = [],
   stableIdentifiers = false,
+  identities: ExistingIdentity[] = [],
 ): string[] {
   return classifyCandidates({
     candidates,
     existing: existingFacts,
+    identities,
     sourceKey: SOURCE,
     stableIdentifiers,
   }).map((outcome) => outcome.verdict);
@@ -53,6 +58,7 @@ describe("une égalité de tuple ne démontre pas une identité", () => {
     const outcomes = classifyCandidates({
       candidates: [candidate({ rowNumber: 2 })],
       existing: [existing({ id: "t1" }), existing({ id: "t2" })],
+      identities: [],
       sourceKey: SOURCE,
       stableIdentifiers: false,
     });
@@ -85,10 +91,11 @@ describe("une égalité de tuple ne démontre pas une identité", () => {
   });
 
   it("E — une saisie manuelle identique devient un rapprochement conservateur, pas une disparition", () => {
-    const manual = existing({ id: "manuelle", externalKey: null });
+    const manual = existing({ id: "manuelle" });
     const outcomes = classifyCandidates({
       candidates: [candidate({ rowNumber: 2 })],
       existing: [manual],
+      identities: [],
       sourceKey: SOURCE,
       stableIdentifiers: false,
     });
@@ -118,6 +125,7 @@ describe("une égalité de tuple ne démontre pas une identité", () => {
     const outcomes = classifyCandidates({
       candidates: [candidate({ rowNumber: 2 }), candidate({ rowNumber: 3 })],
       existing: [],
+      identities: [],
       sourceKey: SOURCE,
       stableIdentifiers: false,
     });
@@ -130,10 +138,10 @@ describe("une égalité de tuple ne démontre pas une identité", () => {
 
 describe("identifiant stable — seulement quand la stabilité est déclarée", () => {
   it("sans déclaration, une référence ne décide JAMAIS d'une identité", () => {
-    const already = existing({ id: "t1", externalKey: externalKeyOf(SOURCE, "REF-42") });
     const outcomes = classifyCandidates({
       candidates: [candidate({ rowNumber: 2, externalTransactionId: "REF-42", amount: -19.99 })],
-      existing: [already],
+      existing: [],
+      identities: [identity(externalKeyOf(SOURCE, "REF-42"), "t1")],
       sourceKey: SOURCE,
       stableIdentifiers: false,
     });
@@ -142,15 +150,34 @@ describe("identifiant stable — seulement quand la stabilité est déclarée", 
   });
 
   it("avec déclaration, un identifiant déjà vu écarte la ligne", () => {
-    const already = existing({ id: "t1", externalKey: externalKeyOf(SOURCE, "TX-0001") });
     const outcomes = classifyCandidates({
       candidates: [candidate({ rowNumber: 2, externalTransactionId: "TX-0001" })],
-      existing: [already],
+      existing: [],
+      identities: [identity(externalKeyOf(SOURCE, "TX-0001"), "t1")],
       sourceKey: SOURCE,
       stableIdentifiers: true,
     });
     expect(outcomes[0].verdict).toBe("EXACT_DUPLICATE");
     expect(outcomes[0].matchedTransactionId).toBe("t1");
+  });
+
+  it("une identité est retrouvée quelle que soit la DATE de la transaction historique", () => {
+    // La transaction connue est datée du 01/01 ; le nouveau relevé porte le même
+    // identifiant avec une date du 01/03. L'index d'identité est global : la fenêtre de
+    // ressemblance ne le borne pas. Sans cela, le moteur annonçait « nouvelle » et l'index
+    // unique de la base faisait échouer tout le commit.
+    const outcomes = classifyCandidates({
+      candidates: [
+        candidate({ rowNumber: 2, date: "2026-03-01", externalTransactionId: "TX-0001" }),
+      ],
+      // Aucun fait de ressemblance : la transaction du 01/01 est hors fenêtre.
+      existing: [],
+      identities: [identity(externalKeyOf(SOURCE, "TX-0001"), "t-janvier")],
+      sourceKey: SOURCE,
+      stableIdentifiers: true,
+    });
+    expect(outcomes[0].verdict).toBe("EXACT_DUPLICATE");
+    expect(outcomes[0].matchedTransactionId).toBe("t-janvier");
   });
 
   it("avec déclaration, deux identifiants distincts restent deux opérations", () => {
@@ -173,6 +200,7 @@ describe("identifiant stable — seulement quand la stabilité est déclarée", 
         candidate({ rowNumber: 3, externalTransactionId: "TX-0001", amount: -12 }),
       ],
       existing: [],
+      identities: [],
       sourceKey: SOURCE,
       stableIdentifiers: true,
     });
@@ -180,9 +208,10 @@ describe("identifiant stable — seulement quand la stabilité est déclarée", 
   });
 
   it("la même chaîne d'identifiant dans deux sources distinctes n'entre pas en collision", () => {
-    const already = existing({ id: "t1", externalKey: externalKeyOf("autre-source", "TX-0001") });
     expect(
-      verdicts([candidate({ rowNumber: 2, externalTransactionId: "TX-0001" })], [already], true),
+      verdicts([candidate({ rowNumber: 2, externalTransactionId: "TX-0001" })], [], true, [
+        identity(externalKeyOf("autre-source", "TX-0001"), "t1"),
+      ]),
     ).toEqual(["NEW"]);
   });
 
@@ -221,6 +250,7 @@ describe("ressemblances de second ordre", () => {
     const outcomes = classifyCandidates({
       candidates: [candidate({ rowNumber: 2, date: "2026-08-15" })],
       existing: [existing({ id: "t1", date: "2026-08-13" })],
+      identities: [],
       sourceKey: SOURCE,
       stableIdentifiers: false,
     });

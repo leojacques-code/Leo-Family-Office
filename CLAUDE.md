@@ -220,7 +220,8 @@ montant, devise, libellé — ne prouve rien entre deux fichiers distincts : un 
 contenant un troisième café identique ne dit pas qu'il s'agit d'un des deux déjà connus, et
 l'écarter d'office supprimerait une dépense réelle. Seules deux preuves autorisent un rejet
 automatique : l'empreinte du FICHIER déjà validé, et un identifiant de transaction dont la
-stabilité est DÉCLARÉE. Le nom d'un en-tête n'en est jamais une : « Référence » peut être un
+stabilité est DÉCLARÉE — cherché dans TOUT l'historique, sans filtre de date, là où la
+ressemblance seule se cherche dans une fenêtre. Le nom d'un en-tête n'en est jamais une : « Référence » peut être un
 motif répété chaque mois. Tout le reste est une ressemblance signalée, exclue par défaut et
 écrite sur décision explicite — un double comptage fausse le patrimoine sans laisser de
 trace, là où une opération manquante laisse un trou visible. Aucune contrainte d'unicité ne
