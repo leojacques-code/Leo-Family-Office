@@ -21,7 +21,7 @@ import {
 
 const ACCOUNT = "11111111-1111-4111-8111-111111111111";
 const SOURCE = "22222222-2222-4222-8222-222222222222";
-const AS_OF = "2026-08-27";
+const OBSERVED_AT = "2026-08-27";
 
 function analyze(
   bytes: Uint8Array,
@@ -33,7 +33,8 @@ function analyze(
     declaredCurrency: "EUR",
     existing: [],
     sourceKey: SOURCE,
-    asOfDate: AS_OF,
+    observationDate: OBSERVED_AT,
+    stableIdentifiers: false,
     ...overrides,
   });
 }
@@ -146,10 +147,20 @@ describe("format international", () => {
     expect(analysis.rows.every((row) => row.currency === "EUR")).toBe(true);
   });
 
-  it("deux références distinctes restent deux opérations, même identiques par ailleurs", () => {
+  it("une colonne d'identifiant NE devient PAS une identité sans déclaration", () => {
+    // Deux lignes rigoureusement identiques sauf leur Transaction ID. Sans déclaration de
+    // stabilité, l'identifiant est conservé mais ne produit aucune clé d'identité.
     expect(analysis.rows.slice(0, 2).map((row) => row.verdict)).toEqual(["NEW", "NEW"]);
-    expect(analysis.rows[0].externalKey).not.toBe(analysis.rows[1].externalKey);
+    expect(analysis.rows.every((row) => row.externalKey === null)).toBe(true);
+    expect(analysis.rows[0].externalTransactionId).toBe("TX-0001");
     expect(analysis.counts.ready).toBe(3);
+  });
+
+  it("la déclaration de stabilité produit une identité par ligne", () => {
+    const declared = analyze(utf8(EN_SIGNED), { stableIdentifiers: true });
+    expect(declared.rows[0].externalKey).not.toBe(declared.rows[1].externalKey);
+    expect(declared.rows.every((row) => row.externalKey !== null)).toBe(true);
+    expect(declared.counts.ready).toBe(3);
   });
 });
 
@@ -211,7 +222,7 @@ describe("fichier désordonné", () => {
   it("deux lignes identiques du même fichier restent deux opérations", () => {
     const identical = analysis.rows.filter((row) => row.label === "CARTE 1208 AMAZON EU");
     expect(identical.map((row) => row.verdict)).toEqual(["NEW", "NEW"]);
-    expect(new Set(identical.map((row) => row.fingerprint)).size).toBe(2);
+    expect(new Set(identical.map((row) => row.matchKey)).size).toBe(2);
   });
 
   it("aucune ligne bloquée n'est committable", () => {
@@ -261,6 +272,15 @@ describe("mapping impossible ou imposé", () => {
     expect(analysis.rows[0].amount).toBe(-10);
   });
 
+  it("une même colonne source ne peut pas alimenter deux champs", () => {
+    const analysis = analyze(utf8(FR_SIGNED), {
+      mappingOverride: { transactionDate: 0, label: 1, reference: 1, amount: 2 },
+    });
+    expect(analysis.mappingConfidence).toBe("INCOMPLETE");
+    expect(analysis.rows).toHaveLength(0);
+    expect(analysis.issues.map((entry) => entry.code)).toContain("MAPPING_DUPLICATE_COLUMN");
+  });
+
   it("un mapping imposé faux échoue au lieu de déplacer les colonnes", () => {
     const analysis = analyze(utf8(FR_SIGNED), {
       mappingOverride: { transactionDate: 2, label: 1, amount: 0 },
@@ -271,7 +291,10 @@ describe("mapping impossible ou imposé", () => {
 });
 
 describe("idempotence", () => {
-  it("le même fichier importé deux fois ne crée rien la seconde fois", () => {
+  it("le même fichier relu n'écrit RIEN par défaut, sans prétendre à une identité", () => {
+    // Le réimport du fichier identique est refusé en amont par l'empreinte du fichier
+    // (invariant de base). Même si on force la relecture, aucune ligne n'est prête : les
+    // trois sont reconnues comme probablement déjà présentes et attendent une décision.
     const first = analyze(utf8(FR_SIGNED));
     expect(first.counts.ready + first.counts.warning).toBe(3);
 
@@ -288,9 +311,10 @@ describe("idempotence", () => {
       }));
 
     const second = analyze(utf8(FR_SIGNED), { existing });
-    expect(second.counts.duplicate).toBe(3);
     expect(second.counts.ready).toBe(0);
-    expect(second.rows.every((row) => row.verdict === "EXACT_DUPLICATE")).toBe(true);
+    expect(second.verdicts.probableDuplicate).toBe(3);
+    // Aucune ligne n'est déclarée doublon d'identité : rien ne le prouve.
+    expect(second.verdicts.exactDuplicate).toBe(0);
   });
 
   it("un recouvrement partiel n'écrit que le delta", () => {
@@ -311,15 +335,101 @@ describe("idempotence", () => {
     const first = analyze(january);
     expect(first.counts.ready).toBe(2);
     const second = analyze(overlapping, { existing: commit(first) });
-    expect(second.counts.duplicate).toBe(1);
+    // La ligne commune est RAPPROCHÉE et attend une confirmation ; seule la nouvelle est
+    // prête. Aucune occurrence supplémentaire n'est éliminée d'office.
+    expect(second.verdicts.probableDuplicate).toBe(1);
     expect(second.counts.ready).toBe(1);
-    expect(second.rows[1].label).toBe("OPERATION C");
+    expect(second.rows.filter((row) => row.status === "READY")[0].label).toBe("OPERATION C");
   });
 
-  it("un import identifié par référence externe est idempotent sans empreinte", () => {
-    const first = analyze(utf8(EN_SIGNED));
-    const second = analyze(utf8(EN_SIGNED), { existing: commit(first) });
+  it("un identifiant DÉCLARÉ stable rend le réimport idempotent sans ambiguïté", () => {
+    const first = analyze(utf8(EN_SIGNED), { stableIdentifiers: true });
+    const second = analyze(utf8(EN_SIGNED), {
+      stableIdentifiers: true,
+      existing: commit(first),
+    });
     expect(second.counts.duplicate).toBe(3);
+    expect(second.verdicts.exactDuplicate).toBe(3);
+    expect(second.counts.ready).toBe(0);
+  });
+});
+
+describe("date d'observation de l'import ≠ date d'arrêté du reporting", () => {
+  // Le cockpit arrête ses comptes au 19/08 ; l'import est réalisé le 27/08. Une opération
+  // bookée le 26/08 est un fait réel : l'acquisition l'ingère, et c'est au moteur financier
+  // de décider s'il la retient dans une lecture au 19/08.
+  const statement = utf8(
+    [
+      "Date operation;Libelle;Montant;Devise",
+      "26/08/2026;OPERATION VEILLE;-10,00;EUR",
+      "27/08/2026;OPERATION DU JOUR;-20,00;EUR",
+      "28/08/2026;OPERATION DEMAIN;-30,00;EUR",
+    ].join("\n"),
+  );
+
+  it("n'exige aucune intervention humaine sur un fait postérieur à la date d'arrêté", () => {
+    const analysis = analyze(statement, { observationDate: "2026-08-27" });
+    const byRow = new Map(analysis.rows.map((row) => [row.rowNumber, row]));
+    expect(byRow.get(2)!.status).toBe("READY");
+    expect(byRow.get(3)!.status).toBe("READY");
+    expect(byRow.get(4)!.status).toBe("WARNING");
+    expect(byRow.get(4)!.issues.map((entry) => entry.code)).toContain("DATE_IN_FUTURE");
+  });
+
+  it("ne signale une date future que par rapport au jour de l'import", () => {
+    const earlier = analyze(statement, { observationDate: "2026-08-19" });
+    // Au 19/08, les trois lignes sont bien postérieures : le signalement est cohérent avec
+    // la date d'observation réelle, quelle qu'elle soit.
+    expect(earlier.rows.filter((row) => row.status === "WARNING")).toHaveLength(3);
+    expect(earlier.counts.ready).toBe(0);
+  });
+});
+
+describe("fidélité des champs facultatifs", () => {
+  // ABSENT ≠ PRÉSENT MAIS ILLISIBLE. Aucun calcul ne consomme ces champs en V1, mais une
+  // valeur renseignée que le parseur n'a pas comprise est une information perdue.
+  const withOptionals = (valueDate: string, balance: string) =>
+    utf8(
+      [
+        "Date operation;Date de valeur;Libelle;Montant;Solde",
+        `13/08/2026;${valueDate};OPERATION;-10,00;${balance}`,
+        "20/08/2026;21/08/2026;AUTRE OPERATION;-20,00;1 480,00",
+      ].join("\n"),
+    );
+
+  it("une cellule facultative VIDE reste null sans anomalie", () => {
+    const analysis = analyze(withOptionals("", ""));
+    const row = analysis.rows[0];
+    expect(row.valueDate).toBeNull();
+    expect(row.balanceAfter).toBeNull();
+    expect(row.status).toBe("READY");
+    // Aucune anomalie ne porte sur les champs facultatifs vides. La seule information
+    // émise concerne la devise, absente du fichier et reprise de la déclaration de session.
+    expect(row.issues.filter((entry) => entry.field === "valueDate")).toHaveLength(0);
+    expect(row.issues.filter((entry) => entry.field === "balanceAfter")).toHaveLength(0);
+    expect(row.issues.every((entry) => entry.severity === "INFO")).toBe(true);
+  });
+
+  it("une date de valeur renseignée mais illisible est SIGNALÉE", () => {
+    const analysis = analyze(withOptionals("pas-une-date", "1 500,00"));
+    const row = analysis.rows[0];
+    expect(row.valueDate).toBeNull();
+    expect(row.status).toBe("WARNING");
+    expect(row.issues.map((entry) => entry.code)).toContain("VALUE_DATE_UNPARSEABLE");
+  });
+
+  it("un solde renseigné mais illisible est SIGNALÉ", () => {
+    const analysis = analyze(withOptionals("14/08/2026", "illisible"));
+    const row = analysis.rows[0];
+    expect(row.balanceAfter).toBeNull();
+    expect(row.status).toBe("WARNING");
+    expect(row.issues.map((entry) => entry.code)).toContain("BALANCE_AFTER_UNPARSEABLE");
+  });
+
+  it("un champ facultatif illisible ne bloque jamais la ligne", () => {
+    const analysis = analyze(withOptionals("pas-une-date", "illisible"));
+    expect(analysis.counts.blocked).toBe(0);
+    expect(analysis.rows[0].amount).toBe(-10);
   });
 });
 
@@ -327,8 +437,9 @@ describe("passe de déduplication rejouable", () => {
   it("remplace le verdict précédent au lieu de l'empiler", () => {
     const first = analyze(utf8(FR_SIGNED));
     const existing = commit(first);
-    const second = applyDedupe(first, { accountId: ACCOUNT, sourceKey: SOURCE, existing });
-    const third = applyDedupe(second, { accountId: ACCOUNT, sourceKey: SOURCE, existing });
+    const context = { accountId: ACCOUNT, sourceKey: SOURCE, existing, stableIdentifiers: false };
+    const second = applyDedupe(first, context);
+    const third = applyDedupe(second, context);
     expect(third.counts).toEqual(second.counts);
     expect(third.rows.map((row) => row.verdict)).toEqual(second.rows.map((row) => row.verdict));
     // Une même anomalie de déduplication n'apparaît jamais deux fois sur la même ligne.
@@ -341,7 +452,7 @@ describe("passe de déduplication rejouable", () => {
   it("ne dépend pas d'un premier appel à vide pour attribuer les empreintes", () => {
     const analysis = analyze(utf8(FR_SIGNED));
     expect(analysis.rows.every((row) => row.verdict !== null)).toBe(true);
-    expect(analysis.rows.every((row) => row.fingerprint !== null)).toBe(true);
+    expect(analysis.rows.every((row) => row.matchKey !== null)).toBe(true);
   });
 });
 
@@ -351,7 +462,7 @@ describe("volume", () => {
     expect(analysis.counts.total).toBe(5_000);
     expect(analysis.counts.blocked).toBe(0);
     expect(analysis.counts.ready + analysis.counts.warning).toBe(5_000);
-    expect(new Set(analysis.rows.map((row) => row.fingerprint)).size).toBe(5_000);
+    expect(new Set(analysis.rows.map((row) => row.matchKey)).size).toBe(5_000);
   });
 
   it("refuse explicitement un fichier au-delà du plafond", () => {

@@ -76,13 +76,21 @@ La migration `20260827093000_data_acquisition_foundation` installe la couche d'a
 
 Elle ne touche à AUCUN domaine financier : aucune colonne ajoutée à `transactions`, aucune contrainte modifiée, aucune RPC existante remplacée. Le seul point de contact est l'écriture de `public.transactions` par `lfo_commit_import_session`, avec `category_id` nul, `data_kind = 'ACTUAL'` et `manual_override = false` : une transaction importée reste NON CLASSÉE, et le Cash Flow Engine la compte comme telle sans modification.
 
-Trois invariants sont portés par la BASE, pas par l'application :
+La piste d'audit est en LECTURE SEULE : `authenticated` ne reçoit que le `SELECT` sur les six tables, et toutes les écritures passent par les RPC réservées à `service_role`. Le verifier contrôle cet état — une migration ultérieure qui referait un `grant ... on all tables in schema public` rouvrirait la brèche en silence, et le gate la refuse.
 
-* un enregistrement brut est immuable — le trigger refuse toute mise à jour, parce que corriger une lecture ne réécrit jamais ce que la source a dit ;
+Les invariants portés par la BASE, pas par l'application :
+
+* un enregistrement brut ne se **modifie** jamais, et ne se **supprime** que par l'abandon d'une session encore analysée — protéger seulement l'`UPDATE` laissait un `DELETE` cascader vers la ligne normalisée et son lien, en laissant survivre une transaction étiquetée « importée » sans origine ;
+* une ligne normalisée **committée** est gelée (`import_normalized_records_frozen`). Seule exception, explicite dans le trigger : le jumeau désigné peut être détaché s'il disparaît, parce qu'il décrit l'opération à laquelle la ligne ressemblait et non le fait qu'elle a produit ;
+* un lien de provenance est **immuable**, et sa clé étrangère vers `transactions` est en `restrict` : une transaction importée ne peut pas être supprimée en laissant sa provenance orpheline ;
 * un contenu de fichier ne peut être validé qu'une fois par source — `import_sessions_committed_file_uidx`, partiel sur le statut `COMMITTED`, de sorte qu'une analyse abandonnée ne bloque rien ;
-* une empreinte de déduplication ou un identifiant stable de source ne s'écrit qu'une fois — `import_normalized_records_committed_fingerprint_uidx` et `import_normalized_records_committed_external_uidx`, tous deux partiels sur `commit_state = 'COMMITTED'`.
+* une identité DÉMONTRÉE ne s'écrit qu'une fois — `import_normalized_records_committed_external_uidx`.
+
+Aucune unicité ne pèse sur `match_key`, et c'est un choix. Une contrainte sur `(compte, date, montant, devise, libellé)` refuserait un troisième achat réellement identique, et le refus viendrait de la base : message opaque, aucune décision possible. L'index correspondant existe pour la lecture, non pour l'unicité.
 
 `import_normalized_records_ready_shape_ck` complète l'ensemble : une ligne déclarée prête ou signalée doit porter sa date, son libellé, son montant, sa devise et son compte. `READY` signifie committable ; une ligne prête incomplète produirait une transaction incomplète.
+
+La migration a été CORRIGÉE en place après revue, avant tout push distant. La doctrine « ne jamais modifier une migration déjà appliquée » protège un historique réel : cette migration n'ayant jamais touché la production, empiler une migration corrective aurait figé dans le schéma une sémantique de déduplication reconnue fausse, et laissé au dépôt deux fichiers pour un seul état voulu.
 
 **Cette migration n'est PAS appliquée en production à ce jour.** Le gate local est vert — base reconstruite depuis zéro (25 migrations), `db:verify:local` conforme, smoke transactionnel `smoke-import-acquisition` intégralement rollbacké. Le push distant et `npm run db:verify` contre la production restent des étapes humaines, et l'état de production reste donc aligné sur 24 migrations tant qu'elles n'ont pas été faites.
 

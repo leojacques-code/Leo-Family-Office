@@ -76,6 +76,7 @@ const analyzeRequest = {
   declaredPeriodStart: null,
   declaredPeriodEnd: null,
   mapping: null,
+  stableTransactionIdDeclared: false,
   rememberMapping: false,
   retainFile: false,
 };
@@ -143,7 +144,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
       transactions: { data: [], error: null },
       import_record_links: { data: [], error: null },
       import_column_mappings: { data: [], error: null },
-      import_sessions: { data: [{ source_id: "source-1" }], error: null },
+      import_sessions: { data: [], error: null },
       import_normalized_records: { data: [], error: null },
     });
     mocks.rpc.mockResolvedValue({ data: "session-1", error: null });
@@ -191,13 +192,13 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
     expect(String(session.file_hash)).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("transmet une empreinte de déduplication par ligne, distincte à chaque ligne", async () => {
+  it("transmet une clé de rapprochement par ligne, distincte à chaque ligne", async () => {
     const repository = createImportRepository();
     await repository.analyze(analyzeRequest, file);
     const normalized = analysisPayload().normalized as Array<Record<string, unknown>>;
-    const fingerprints = normalized.map((row) => row.dedupe_fingerprint);
-    expect(fingerprints.every((value) => typeof value === "string" && value.length > 0)).toBe(true);
-    expect(new Set(fingerprints).size).toBe(fingerprints.length);
+    const keys = normalized.map((row) => row.match_key);
+    expect(keys.every((value) => typeof value === "string" && value.length > 0)).toBe(true);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it("ne transmet aucune catégorie de flux", async () => {
@@ -205,6 +206,27 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
     await repository.analyze(analyzeRequest, file);
     const serialised = JSON.stringify(analysisPayload());
     expect(serialised).not.toContain("category");
+  });
+
+  it("transmet une date d'observation de l'import, jamais la date d'arrêté du reporting", async () => {
+    const repository = createImportRepository();
+    await repository.analyze(analyzeRequest, file);
+    const session = analysisPayload().session as Record<string, unknown>;
+    const today = new Date().toISOString().slice(0, 10);
+    expect(session.observation_date).toBe(today);
+    // AS_OF_DATE est la date d'arrêté du cockpit : elle n'a rien à faire ici.
+    expect(session.observation_date).not.toBe("2026-08-19");
+  });
+
+  it("transmet la déclaration de stabilité, fausse par défaut", async () => {
+    const repository = createImportRepository();
+    await repository.analyze(analyzeRequest, file);
+    expect(
+      (analysisPayload().session as Record<string, unknown>).stable_transaction_id_declared,
+    ).toBe(false);
+    const normalized = analysisPayload().normalized as Array<Record<string, unknown>>;
+    // Sans déclaration, aucune identité n'est produite.
+    expect(normalized.every((row) => row.external_key === null)).toBe(true);
   });
 
   it("lit les transactions à dédupliquer sur le seul compte cible du propriétaire", async () => {
@@ -232,6 +254,65 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
       "lte",
       ["transaction_date", "2026-09-05"],
     ]);
+  });
+});
+
+describe("acquisition — conservation idempotente du fichier", () => {
+  const retaining = { ...analyzeRequest, retainFile: true };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.rpc.mockResolvedValue({ data: "session-1", error: null });
+  });
+
+  it("réutilise le document déjà conservé pour la même empreinte de fichier", async () => {
+    // Corriger un mapping puis relire republie le même contenu : sans réutilisation,
+    // l'utilisateur retrouverait cinq copies de son relevé au coffre pour un seul import.
+    withTables({
+      financial_accounts: activeAccount,
+      transactions: { data: [], error: null },
+      import_record_links: { data: [], error: null },
+      import_column_mappings: { data: [], error: null },
+      import_sessions: {
+        data: [{ document_id: "doc-existant", source_id: "source-1" }],
+        error: null,
+      },
+      import_normalized_records: { data: [], error: null },
+    });
+    const repository = createImportRepository();
+    await repository.analyze(retaining, file);
+    expect(mocks.storageFrom).not.toHaveBeenCalled();
+    expect((analysisPayload().session as Record<string, unknown>).document_id).toBe("doc-existant");
+  });
+
+  it("refuse un fichier déjà validé AVANT de déposer une copie au coffre", async () => {
+    withTables({
+      financial_accounts: activeAccount,
+      import_sessions: {
+        data: [{ status: "COMMITTED", import_sources: { target_account_id: ACCOUNT } }],
+        error: null,
+      },
+    });
+    const repository = createImportRepository();
+    await expect(repository.analyze(retaining, file)).rejects.toThrow(/déjà été importé/);
+    expect(mocks.storageFrom).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("un fichier validé sur une AUTRE enveloppe ne bloque pas l'import", async () => {
+    withTables({
+      financial_accounts: activeAccount,
+      transactions: { data: [], error: null },
+      import_record_links: { data: [], error: null },
+      import_column_mappings: { data: [], error: null },
+      import_sessions: {
+        data: [{ status: "COMMITTED", import_sources: { target_account_id: FOREIGN_ACCOUNT } }],
+        error: null,
+      },
+      import_normalized_records: { data: [], error: null },
+    });
+    const repository = createImportRepository();
+    await expect(repository.analyze(analyzeRequest, file)).resolves.toBeTruthy();
   });
 });
 

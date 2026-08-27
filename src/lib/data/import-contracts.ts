@@ -10,6 +10,7 @@ import type {
   ImportRowCounts,
   ImportRowStatus,
   ImportSessionStatus,
+  ImportVerdictCounts,
   MappingConfidence,
   SourceConventions,
   SourceEncoding,
@@ -23,6 +24,7 @@ export type {
   ImportRowCounts,
   ImportRowStatus,
   ImportSessionStatus,
+  ImportVerdictCounts,
   MappingConfidence,
   SourceConventions,
 } from "@/lib/acquisition/types";
@@ -44,6 +46,13 @@ export interface ImportAnalyzeRequest {
   declaredPeriodEnd: string | null;
   /** Mapping confirmé, imposé au parseur. `null` = laisser le parseur proposer. */
   mapping: BankColumnMapping | null;
+  /**
+   * L'utilisateur DÉCLARE que la colonne d'identifiant de ce format porte un identifiant
+   * unique et stable. `false` par défaut, et c'est le bon défaut : aucun nom d'en-tête ne
+   * prouve la stabilité, et une référence bancaire répétée chaque mois écarterait des
+   * opérations réelles si elle était prise pour une identité.
+   */
+  stableTransactionIdDeclared: boolean;
   /** Mémoriser ce mapping pour cette signature de format. */
   rememberMapping: boolean;
   /** Conserver le fichier dans le coffre privé. */
@@ -83,6 +92,8 @@ export interface ImportPreview {
   conventions: SourceConventions;
   signature: string;
   counts: ImportRowCounts;
+  /** Décompte par verdict de déduplication, distinct du décompte par statut. */
+  verdicts: ImportVerdictCounts;
   /** Anomalies de FICHIER, distinctes des anomalies de ligne. */
   issues: ImportIssue[];
   observedPeriod: { start: string; end: string } | null;
@@ -110,6 +121,8 @@ export interface ImportSessionSummary {
   encoding: string | null;
   delimiter: string | null;
   declaredCurrency: string | null;
+  observationDate: string | null;
+  stableTransactionIdDeclared: boolean;
   observedPeriodStart: string | null;
   observedPeriodEnd: string | null;
   declaredPeriodStart: string | null;

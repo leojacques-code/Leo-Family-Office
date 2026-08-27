@@ -77,9 +77,9 @@ const requiredColumns: Record<string, string[]> = {
   business_dcf_assumptions: ["id", "user_id", "business_id", "valuation_date", "currency", "wacc", "tax_rate", "terminal_method", "terminal_growth", "terminal_exit_multiple", "terminal_exit_metric", "discount_convention"],
   business_dcf_periods: ["id", "user_id", "dcf_id", "year_index", "revenue", "ebitda", "ebit", "depreciation_amortisation", "capex", "working_capital_change"],
   import_sources: ["id", "user_id", "kind", "domain", "provider", "label", "target_account_id", "status", "adapter_version", "coverage_start", "coverage_end", "last_attempt_at", "last_success_at", "last_error", "data_kind", "confidence"],
-  import_sessions: ["id", "user_id", "source_id", "file_name", "file_hash", "file_size_bytes", "content_type", "encoding", "delimiter", "parser", "parser_version", "mapping", "conventions", "declared_currency", "declared_period_start", "declared_period_end", "observed_period_start", "observed_period_end", "status", "row_count", "ready_count", "warning_count", "blocked_count", "duplicate_count", "ignored_count", "committed_count", "document_id", "issues", "analyzed_at", "committed_at", "discarded_at"],
+  import_sessions: ["id", "user_id", "source_id", "file_name", "file_hash", "file_size_bytes", "content_type", "encoding", "delimiter", "parser", "parser_version", "mapping", "conventions", "declared_currency", "observation_date", "stable_transaction_id_declared", "declared_period_start", "declared_period_end", "observed_period_start", "observed_period_end", "status", "row_count", "ready_count", "warning_count", "blocked_count", "duplicate_count", "ignored_count", "committed_count", "document_id", "issues", "analyzed_at", "committed_at", "discarded_at"],
   import_raw_records: ["id", "user_id", "session_id", "row_number", "raw_line", "cells"],
-  import_normalized_records: ["id", "user_id", "session_id", "raw_record_id", "target_domain", "account_id", "transaction_date", "value_date", "label", "amount", "currency", "external_reference", "counterparty", "balance_after", "status", "dedupe_verdict", "dedupe_fingerprint", "external_key", "matched_transaction_id", "issues", "commit_state", "committed_at", "data_kind", "confidence"],
+  import_normalized_records: ["id", "user_id", "session_id", "raw_record_id", "target_domain", "account_id", "transaction_date", "value_date", "label", "amount", "currency", "external_transaction_id", "reference", "counterparty", "balance_after", "status", "dedupe_verdict", "match_key", "external_key", "matched_transaction_id", "issues", "commit_state", "committed_at", "data_kind", "confidence"],
   import_record_links: ["id", "user_id", "session_id", "normalized_record_id", "target_domain", "transaction_id"],
   import_column_mappings: ["id", "user_id", "signature", "provider", "label", "headers", "mapping", "conventions", "version", "confirmed_at"],
 };
@@ -91,11 +91,11 @@ const userOwnedTables = [
 
 const requiredIndexes = [
   "net_worth_snapshot_items_snapshot_owner_idx", "financial_accounts_id_user_uidx", "securities_id_user_uidx", "transactions_id_user_uidx", "portfolio_events_opening_cash_uk", "portfolio_events_opening_position_uk", "portfolio_events_account_owner_idx", "portfolio_events_matched_lot_covering_idx", "properties_id_user_uidx", "liabilities_id_user_uidx", "real_estate_capital_events_acquisition_uk", "real_estate_capital_events_disposal_uk", "real_estate_financing_links_liability_idx", "real_estate_financing_links_property_idx", "real_estate_capital_events_transaction_idx", "transactions_property_owner_idx", "real_estate_valuations_property_owner_idx", "real_estate_capital_events_property_owner_idx", "real_estate_operating_terms_property_owner_idx", "businesses_id_user_uidx", "business_ownership_effective_uk", "business_ownership_business_owner_idx", "business_financials_business_owner_idx", "business_valuations_business_owner_idx", "business_capital_events_business_owner_idx", "business_holdings_parent_owner_idx", "business_holdings_child_owner_idx", "business_financials_effective_uk", "business_valuations_effective_method_uk", "businesses_user_idx", "business_financials_user_idx", "business_valuations_user_idx", "business_capital_events_user_idx", "business_capital_events_id_user_uidx", "business_ownership_origin_event_idx", "business_ebitda_adjustments_business_owner_idx", "business_bridge_items_business_owner_idx", "business_bridge_declarations_business_owner_idx", "business_bridge_declarations_owner_date_idx", "business_capital_events_ownership_change_uk", "business_dcf_assumptions_business_owner_idx", "business_dcf_periods_dcf_idx", "business_ebitda_adjustments_user_idx", "business_bridge_items_user_idx", "business_dcf_assumptions_user_idx", "business_dcf_periods_user_idx", "business_holdings_user_idx", "business_ownership_user_idx",
-  "documents_id_user_uidx", "import_sources_account_provider_uidx", "import_sources_id_user_uidx", "import_sources_user_idx", "import_sources_account_idx", "import_sessions_committed_file_uidx", "import_sessions_id_user_uidx", "import_sessions_source_idx", "import_sessions_user_idx", "import_sessions_document_idx", "import_raw_records_id_user_uidx", "import_raw_records_session_idx", "import_normalized_records_committed_fingerprint_uidx", "import_normalized_records_committed_external_uidx", "import_normalized_records_id_user_uidx", "import_normalized_records_session_idx", "import_normalized_records_raw_idx", "import_normalized_records_account_idx", "import_normalized_records_matched_idx", "import_normalized_records_user_idx", "import_record_links_session_idx", "import_record_links_normalized_idx", "import_record_links_transaction_idx", "import_record_links_user_idx", "import_column_mappings_user_idx",
+  "documents_id_user_uidx", "import_sources_account_provider_uidx", "import_sources_id_user_uidx", "import_sources_user_idx", "import_sources_account_idx", "import_sessions_committed_file_uidx", "import_sessions_id_user_uidx", "import_sessions_source_idx", "import_sessions_user_idx", "import_sessions_document_idx", "import_raw_records_id_user_uidx", "import_raw_records_session_idx", "import_normalized_records_match_key_idx", "import_normalized_records_committed_external_uidx", "import_normalized_records_id_user_uidx", "import_normalized_records_session_idx", "import_normalized_records_raw_idx", "import_normalized_records_account_idx", "import_normalized_records_matched_idx", "import_normalized_records_user_idx", "import_record_links_session_idx", "import_record_links_normalized_idx", "import_record_links_transaction_idx", "import_record_links_user_idx", "import_column_mappings_user_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx", "business_valuations_effective_uk"] as const;
-const requiredTriggers = ["real_estate_financing_links_allocation_guard", "import_raw_records_immutable"] as const;
-const requiredTriggerFunctions = ["real_estate_allocation_guard", "import_raw_record_immutable"] as const;
+const requiredTriggers = ["real_estate_financing_links_allocation_guard", "import_raw_records_immutable", "import_normalized_records_frozen", "import_record_links_immutable"] as const;
+const requiredTriggerFunctions = ["real_estate_allocation_guard", "import_raw_record_immutable", "import_normalized_record_frozen", "import_record_link_immutable"] as const;
 
 const requiredConstraints = [
   "scenarios_investment_allocation_rate_ck", "expense_categories_cash_flow_kind_ck", "expense_categories_essentiality_ck", "expense_categories_behavior_ck", "transactions_kind_override_ck", "recurring_rules_frequency_ck", "recurring_rules_day_ck", "profiles_ledger_coverage_source_ck", "liabilities_deferral_kind_ck", "liabilities_deferral_months_ck", "liabilities_deferral_interest_ck", "loan_early_repayments_outcome_ck", "loan_early_repayments_amount_ck", "liabilities_amortisation_profile_ck", "liabilities_payment_frequency_ck", "liabilities_interest_convention_ck", "liabilities_rate_type_ck", "loan_rate_changes_kind_ck", "loan_payment_changes_kind_ck", "loan_payment_changes_amount_ck", "net_worth_snapshots_version_ck", "net_worth_snapshots_completeness_ck", "net_worth_snapshot_items_owner_fk", "portfolio_events_type_ck", "portfolio_events_security_shape_ck", "portfolio_events_quantity_shape_ck", "portfolio_events_matched_lot_ck", "portfolio_events_counterparty_ck", "portfolio_events_data_kind_ck", "portfolio_events_settlement_ck", "portfolio_events_account_fk", "portfolio_events_security_fk", "portfolio_events_counterparty_fk", "portfolio_events_transaction_fk", "portfolio_events_lot_target_uk", "portfolio_events_matched_lot_fk", "portfolio_envelope_policies_method_ck", "portfolio_envelope_policies_coverage_source_ck", "portfolio_envelope_policies_coverage_pair_ck", "portfolio_envelope_policies_account_fk", "portfolio_envelope_policies_account_uk", "properties_usage_ck", "properties_ownership_share_ck", "properties_disposal_after_acquisition_ck", "real_estate_valuations_property_fk", "real_estate_valuations_value_ck", "real_estate_valuations_method_ck", "real_estate_valuations_data_kind_ck", "real_estate_capital_events_property_fk", "real_estate_capital_events_transaction_fk", "real_estate_capital_events_amount_ck", "real_estate_capital_events_type_ck", "real_estate_capital_events_data_kind_ck", "real_estate_operating_terms_property_fk", "real_estate_operating_terms_effective_uk", "real_estate_operating_terms_amounts_ck", "real_estate_operating_terms_rates_ck", "real_estate_operating_terms_management_exclusive_ck", "real_estate_operating_terms_data_kind_ck", "real_estate_financing_links_property_fk", "real_estate_financing_links_liability_fk", "real_estate_financing_links_pair_uk", "real_estate_financing_links_share_ck", "transactions_property_fk", "business_ownership_business_fk", "business_financials_business_fk", "business_valuations_business_fk", "business_ownership_rates_v2_ck", "business_ownership_shares_ck", "business_ownership_origin_event_fk", "business_valuations_basis_v2_ck", "business_valuations_method_ck", "business_valuations_multiple_ck", "business_valuations_metric_basis_ck", "business_valuations_round_ck", "businesses_capital_history_source_ck", "businesses_capital_history_start_ck", "business_financials_period_kind_ck", "business_financials_period_order_ck", "business_financials_non_negative_ck", "business_capital_events_business_fk", "business_capital_events_transaction_fk", "business_capital_events_amount_ck", "business_capital_events_type_v2_ck", "business_capital_events_amount_scope_ck", "business_capital_events_scope_domain_ck", "business_capital_events_fees_ck", "business_capital_events_ownership_after_ck", "business_capital_events_ownership_delta_ck", "business_ebitda_adjustments_business_fk", "business_ebitda_adjustments_category_ck", "business_ebitda_adjustments_data_kind_ck", "business_ebitda_adjustments_label_uk", "business_bridge_items_business_fk", "business_bridge_items_category_ck", "business_bridge_items_data_kind_ck", "business_bridge_items_label_uk", "business_bridge_declarations_business_fk", "business_bridge_declarations_status_ck", "business_bridge_declarations_effective_uk", "business_dcf_assumptions_business_fk", "business_dcf_assumptions_wacc_ck", "business_dcf_assumptions_tax_ck", "business_dcf_assumptions_terminal_ck", "business_dcf_assumptions_convention_ck", "business_dcf_assumptions_effective_uk", "business_dcf_periods_year_ck", "business_dcf_periods_non_negative_ck", "business_dcf_periods_year_uk", "business_holdings_parent_fk", "business_holdings_child_fk", "business_holdings_no_self_ck", "business_holdings_rate_ck", "business_holdings_effective_uk",
@@ -158,6 +158,25 @@ const requiredRpcs: Record<string, string> = {
   lfo_save_import_mapping: "p_user_id uuid, p_payload jsonb",
 };
 
+/**
+ * Tables de la piste d'audit d'acquisition. `authenticated` n'y a que le SELECT : toute
+ * écriture passe par une RPC réservée à `service_role`.
+ *
+ * Ce contrôle n'est pas cosmétique. Une piste d'audit sur laquelle le client peut écrire
+ * n'est pas une piste d'audit : un DELETE direct sur un enregistrement brut ou sur un lien
+ * de provenance laisserait survivre une transaction étiquetée « importée » dont l'origine
+ * aurait disparu. Une migration ultérieure qui referait un `grant ... on all tables`
+ * rouvrirait la brèche en silence ; le gate la refuse.
+ */
+const readOnlyAuditTables = [
+  "import_sources",
+  "import_sessions",
+  "import_raw_records",
+  "import_normalized_records",
+  "import_record_links",
+  "import_column_mappings",
+] as const;
+
 const storagePolicies = ["documents_owner_select", "documents_owner_insert", "documents_owner_update", "documents_owner_delete"] as const;
 
 function addMissing(failures: string[], label: string, expected: readonly string[], actual: Iterable<string>): void {
@@ -214,6 +233,25 @@ try {
     else if (policy.cmd !== "ALL" || !policy.roles.includes("authenticated") || !ownerPredicate(policy.qual) || !ownerPredicate(policy.with_check)) failures.push(`Policy owner_all invalide : public.${table}`);
   }
 
+  const auditGrants = await client.query<{ table_name: string; privilege_type: string }>(`
+    select table_name, privilege_type
+      from information_schema.role_table_grants
+     where table_schema = 'public' and grantee = 'authenticated'`);
+  const grantsByTable = new Map<string, Set<string>>();
+  for (const row of auditGrants.rows) {
+    const grants = grantsByTable.get(row.table_name) ?? new Set<string>();
+    grants.add(row.privilege_type);
+    grantsByTable.set(row.table_name, grants);
+  }
+  for (const table of readOnlyAuditTables) {
+    const grants = grantsByTable.get(table) ?? new Set<string>();
+    if (!grants.has("SELECT")) failures.push(`Piste d'audit illisible par authenticated : public.${table}`);
+    const writes = ["INSERT", "UPDATE", "DELETE", "TRUNCATE"].filter((privilege) => grants.has(privilege));
+    if (writes.length > 0) {
+      failures.push(`Piste d'audit inscriptible par authenticated : public.${table} (${writes.join(", ")})`);
+    }
+  }
+
   const rpcs = await client.query<{ name: string; arguments: string; result_type: string; security_definer: boolean; settings: string[] | null; anon_execute: boolean; authenticated_execute: boolean; service_role_execute: boolean }>(`
     select proc.proname as name,
            pg_catalog.pg_get_function_identity_arguments(proc.oid) as arguments,
@@ -265,4 +303,4 @@ if (failures.length > 0) {
   throw new Error(`Schéma Supabase non conforme (${failures.length} contrôle(s) en échec) :\n- ${failures.join("\n- ")}`);
 }
 
-console.log(`Schéma Supabase vérifié en lecture seule : ${userOwnedTables.length} tables, ${requiredConstraints.length} contraintes, ${Object.keys(requiredRpcs).length} RPC, ${requiredTriggers.length} trigger(s) d'invariant, RLS/policies, Storage, index de snapshot et ${canonicalMigrations.length} migrations conformes.`);
+console.log(`Schéma Supabase vérifié en lecture seule : ${userOwnedTables.length} tables, ${requiredConstraints.length} contraintes, ${Object.keys(requiredRpcs).length} RPC, ${requiredTriggers.length} trigger(s) d'invariant, ${readOnlyAuditTables.length} tables d'audit en lecture seule, RLS/policies, Storage, index de snapshot et ${canonicalMigrations.length} migrations conformes.`);

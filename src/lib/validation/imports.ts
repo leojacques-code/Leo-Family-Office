@@ -49,6 +49,12 @@ export const importAnalyzeSchema = z
     declaredPeriodStart: date.nullable(),
     declaredPeriodEnd: date.nullable(),
     mapping: mappingSchema.nullable(),
+    /**
+     * Déclaration explicite de stabilité de l'identifiant. Elle n'est jamais déduite d'un
+     * nom de colonne : c'est ce qui empêche une simple référence bancaire de faire
+     * disparaître une opération réelle.
+     */
+    stableTransactionIdDeclared: z.boolean(),
     rememberMapping: z.boolean(),
     retainFile: z.boolean(),
   })

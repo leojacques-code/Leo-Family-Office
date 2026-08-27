@@ -228,7 +228,11 @@ Ce que cette couche ne fait jamais : classer un flux, recalculer un solde, rappr
 
 Deux ambiguïtés sont structurelles et changent le résultat financier : la convention décimale (`1,234` vaut 1,234 ou 1 234) et l'ordre jour/mois (`03/04/2026`). Elles se résolvent au niveau de la COLONNE quand une valeur la tranche, et bloquent les lignes concernées sinon. Les conventions retenues sont persistées sur la session, de sorte qu'un montant relu plus tard reste confrontable à la règle qui l'a produit.
 
-La déduplication a trois rangs : identifiant stable de la source, puis empreinte déterministe `compte / date / montant / devise / libellé` assortie d'un RANG D'OCCURRENCE, puis ressemblance. Le rang d'occurrence distingue « deux fois la même ligne » de « deux opérations réellement identiques ». Seul un doublon strict est écarté d'office. L'idempotence est garantie deux fois : par le moteur qui classe, et par trois index uniques partiels que la base oppose même à une écriture directe.
+La déduplication repose sur un principe unique : L'IDENTITÉ SE DÉMONTRE. Une égalité de tuple `compte / date / montant / devise / libellé` ne prouve rien entre deux fichiers distincts — un relevé partiel contenant un troisième achat identique ne dit pas qu'il s'agit d'un des deux déjà connus. Deux preuves seulement autorisent un rejet automatique : l'empreinte du FICHIER déjà validé, et un identifiant de transaction dont la stabilité est DÉCLARÉE pour la session. Le nom d'un en-tête n'en est jamais une, d'où la séparation entre `externalTransactionId` et `reference`. Tout le reste est une ressemblance signalée, exclue par défaut et écrite sur décision explicite.
+
+La date d'observation d'un import est distincte d'`AS_OF_DATE` : une opération bookée hier est un fait même si le reporting est arrêté le mois précédent, et c'est aux moteurs aval de l'écarter d'une lecture à leur date.
+
+La piste d'audit est en lecture seule pour `authenticated` : le brut est immuable, la provenance d'un fait écrit est gelée, et la clé étrangère du lien de provenance est en `restrict`. Une transaction importée ne peut donc pas perdre son origine, même par écriture directe.
 
 Détail complet, formats supportés et limites : `docs/DATA_ACQUISITION.md`.
 

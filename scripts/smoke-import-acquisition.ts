@@ -6,7 +6,13 @@
  *
  *   * l'analyse écrit source, session, lignes brutes et lignes normalisées ATOMIQUEMENT,
  *     et ne crée AUCUNE transaction canonique ;
- *   * un enregistrement brut est immuable, refus porté par la base ;
+ *   * un enregistrement brut est immuable ET non supprimable dès que sa session a produit
+ *     un fait, refus porté par la base ;
+ *   * les tables d'audit ne sont accessibles à `authenticated` qu'en LECTURE : un DELETE
+ *     direct sur un brut ou sur un lien de provenance est refusé par les privilèges ;
+ *   * une ligne normalisée committée est gelée, et un lien de provenance est immuable ;
+ *   * une transaction importée ne peut pas être supprimée en laissant sa provenance
+ *     orpheline ;
  *   * le commit n'écrit que READY, plus les WARNING nommément inclus, et jamais un
  *     doublon, une ligne bloquée ou une ligne ignorée ;
  *   * la transaction créée naît SANS catégorie et sans toucher aux soldes observés ;
@@ -107,7 +113,7 @@ function normalizedRow(
     currency: "EUR",
     status: "READY",
     dedupe_verdict: "NEW",
-    dedupe_fingerprint: `v1|smoke|#${rowNumber}`,
+    match_key: `v2|smoke|~${rowNumber}`,
     issues: [],
     ...overrides,
   };
@@ -203,6 +209,7 @@ try {
       mapping: { transactionDate: 0, label: 1, amount: 2, currency: 3 },
       conventions: { amount: "DECIMAL_COMMA", date: "DAY_FIRST", valueDate: null },
       declared_currency: "EUR",
+      observation_date: "2026-08-27",
       observed_period_start: "2026-08-13",
       observed_period_end: "2026-08-20",
       row_count: 5,
@@ -226,7 +233,7 @@ try {
         status: "BLOCKED",
         amount: null,
         dedupe_verdict: null,
-        dedupe_fingerprint: null,
+        match_key: null,
         issues: [{ code: "AMOUNT_UNPARSEABLE", severity: "ERROR" }],
       }),
       normalizedRow(6, { status: "DUPLICATE", dedupe_verdict: "EXACT_DUPLICATE" }),
@@ -321,23 +328,23 @@ try {
     },
     raw: [rawRow(2), rawRow(3), rawRow(4), rawRow(5)],
     normalized: [
-      normalizedRow(2, { dedupe_fingerprint: "v1|smoke-b|#1" }),
+      normalizedRow(2, { match_key: "v2|smoke-b|~1" }),
       normalizedRow(3, {
         transaction_date: "2026-08-22",
         status: "WARNING",
         dedupe_verdict: "POSSIBLE_MATCH",
-        dedupe_fingerprint: "v1|smoke-b|#2",
+        match_key: "v2|smoke-b|~2",
       }),
       normalizedRow(4, {
         status: "WARNING",
         dedupe_verdict: "PROBABLE_DUPLICATE",
-        dedupe_fingerprint: "v1|smoke-b|#3",
+        match_key: "v2|smoke-b|~3",
       }),
       normalizedRow(5, {
         status: "BLOCKED",
         amount: null,
         dedupe_verdict: null,
-        dedupe_fingerprint: null,
+        match_key: null,
       }),
     ],
   });
@@ -432,23 +439,144 @@ try {
     "déjà été importé",
   );
 
-  // ── 8. Une empreinte committée ne peut pas l'être deux fois, même en direct ────────
-  const secondRaw = (
+  // ── 8. Piste d'audit : lecture seule pour authenticated ───────────────────────────
+  //
+  // Une piste d'audit sur laquelle le client peut écrire n'est pas une piste d'audit. Ces
+  // refus sont portés par les PRIVILÈGES, pas par une convention applicative : ils tiennent
+  // donc même pour une requête directe qui contournerait toute la couche TypeScript.
+  await client.query("reset role");
+  await client.query("set local role authenticated");
+  for (const [table, statement] of [
+    ["import_raw_records", "delete from public.import_raw_records"],
+    ["import_normalized_records", "delete from public.import_normalized_records"],
+    ["import_record_links", "delete from public.import_record_links"],
+    ["import_sessions", "update public.import_sessions set status = 'DISCARDED'"],
+    ["import_sources", "delete from public.import_sources"],
+  ] as const) {
+    await rejects(
+      statement,
+      [],
+      `La piste d'audit public.${table} est inscriptible par authenticated`,
+      "permission denied",
+    );
+  }
+  const readable = await client.query<{ count: string }>(
+    "select count(*)::text from public.import_sessions",
+  );
+  assert(readable.rows[0], "La piste d'audit doit rester LISIBLE par authenticated");
+  await client.query("reset role");
+  await client.query("set local role service_role");
+
+  // ── 8 bis. La provenance d'un fait écrit est gelée ─────────────────────────────────
+  await rejects(
+    `update public.import_normalized_records set amount = -1 where session_id = $1 and commit_state = 'COMMITTED'`,
+    [full],
+    "Une ligne normalisée committée a pu être réécrite",
+    "gelée",
+  );
+  await rejects(
+    `delete from public.import_normalized_records where session_id = $1 and commit_state = 'COMMITTED'`,
+    [full],
+    "Une ligne normalisée committée a pu être supprimée",
+    "gelée",
+  );
+  await rejects(
+    `update public.import_record_links set transaction_id = null where session_id = $1`,
+    [full],
+    "Un lien de provenance a pu être modifié",
+    "immuable",
+  );
+  await rejects(
+    "delete from public.import_raw_records where session_id = $1",
+    [full],
+    "Le brut d'une session committée a pu être supprimé",
+    "ne se supprime pas",
+  );
+
+  // ── 8 ter. Une transaction importée ne perd pas sa provenance en silence ───────────
+  //
+  // La suppression est REFUSÉE tant que le lien existe : une transaction étiquetée
+  // « importée » sans origine consultable serait une provenance perdue, pas une donnée
+  // corrigée. Le jour où un chemin de suppression existera, il devra retirer la provenance.
+  const linkedTransaction = (
     await client.query<{ id: string }>(
-      `insert into public.import_raw_records (user_id, session_id, row_number, raw_line, cells)
-       values ($1, $2, 99, 'ligne de controle', '[]'::jsonb) returning id`,
-      [userId, full],
+      "select transaction_id as id from public.import_record_links where session_id = $1 limit 1",
+      [full],
     )
   ).rows[0].id;
   await rejects(
-    `insert into public.import_normalized_records
-       (user_id, session_id, raw_record_id, target_domain, account_id, transaction_date, label,
-        amount, currency, status, dedupe_fingerprint, commit_state, committed_at)
-     values ($1, $2, $3, 'CASH_FLOW_TRANSACTION', $4, date '2026-08-13', 'DOUBLON',
-             -54.28, 'EUR', 'READY', 'v1|smoke-b|#1', 'COMMITTED', now())`,
-    [userId, full, secondRaw, accountId],
-    "La même empreinte a pu être committée deux fois",
-    "import_normalized_records_committed_fingerprint_uidx",
+    "delete from public.transactions where id = $1 and user_id = $2",
+    [linkedTransaction, userId],
+    "Une transaction importée a pu être supprimée en laissant sa provenance orpheline",
+    "import_record_links_transaction_fk",
+  );
+
+  // ── 8 quater. Le jumeau désigné peut disparaître sans falsifier la provenance ──────
+  //
+  // `matched_transaction_id` ne décrit pas le fait produit, seulement l'opération à
+  // laquelle la ligne ressemblait. Sa disparition est un fait, pas une réécriture.
+  const twin = randomUUID();
+  await client.query(
+    `insert into public.transactions
+       (id, user_id, account_id, transaction_date, label, amount, currency, data_kind, confidence)
+     values ($1, $2, $3, date '2026-08-13', 'JUMEAU', -54.28, 'EUR', 'ACTUAL', 'HIGH')`,
+    [twin, userId, accountId],
+  );
+
+  // Le pointeur est posé AVANT la validation : le poser après serait bien une réécriture de
+  // provenance, et le gel doit le refuser — ce que vérifie le contrôle précédent.
+  await rejects(
+    `update public.import_normalized_records set matched_transaction_id = $1
+      where session_id = $2 and commit_state = 'COMMITTED'`,
+    [twin, full],
+    "Un jumeau a pu être DÉSIGNÉ après coup sur une ligne committée",
+    "gelée",
+  );
+
+  const twinSession = await rpc("lfo_analyze_import_session", {
+    source: sourcePayload,
+    session: {
+      file_name: "releve-jumeau.csv",
+      file_hash: "d".repeat(64),
+      parser: "bank-csv",
+      parser_version: "1",
+      declared_currency: "EUR",
+      observation_date: "2026-08-27",
+      row_count: 1,
+      ready_count: 1,
+    },
+    raw: [rawRow(2)],
+    normalized: [
+      normalizedRow(2, {
+        label: "LIGNE AVEC JUMEAU",
+        match_key: "v2|smoke-d|~1",
+        matched_transaction_id: twin,
+      }),
+    ],
+  });
+  await rpc("lfo_commit_import_session", { session_id: twinSession, include_record_ids: [] });
+  const designated = await client.query<{ count: string }>(
+    "select count(*)::text from public.import_normalized_records where matched_transaction_id = $1",
+    [twin],
+  );
+  assert(designated.rows[0].count === "1", "Le jumeau désigné n'a pas été persisté");
+
+  await client.query("delete from public.transactions where id = $1", [twin]);
+  const cleared = await client.query<{ count: string }>(
+    "select count(*)::text from public.import_normalized_records where matched_transaction_id = $1",
+    [twin],
+  );
+  assert(
+    cleared.rows[0].count === "0",
+    "La disparition du jumeau désigné doit détacher le lien sans être bloquée par le gel",
+  );
+  const survived = await client.query<{ count: string }>(
+    "select count(*)::text from public.import_normalized_records where session_id = $1 and commit_state = 'COMMITTED'",
+    [twinSession],
+  );
+  assert(
+    survived.rows[0].count === "1",
+    "Le détachement du jumeau ne doit pas emporter la ligne de provenance",
   );
 
   // ── 9. Une ligne bloquée ne peut pas être marquée committée ────────────────────────
@@ -507,6 +635,12 @@ try {
   );
 
   // ── 13. Atomicité : l'échec du lien annule la transaction qu'il devait tracer ──────
+  const beforeAtomic = (
+    await client.query<{ count: string }>(
+      "select count(*)::text from public.transactions where user_id = $1",
+      [userId],
+    )
+  ).rows[0].count;
   const atomic = await rpc("lfo_analyze_import_session", {
     source: sourcePayload,
     session: {
@@ -518,7 +652,7 @@ try {
       row_count: 1,
     },
     raw: [rawRow(2)],
-    normalized: [normalizedRow(2, { dedupe_fingerprint: "v1|smoke-c|#1" })],
+    normalized: [normalizedRow(2, { match_key: "v2|smoke-c|~1" })],
   });
   await client.query("reset role");
   await client.query(`
@@ -544,12 +678,12 @@ try {
   await client.query("drop trigger lfo_smoke_reject_link on public.import_record_links");
   await client.query("drop function public.lfo_smoke_reject_link()");
   await client.query("set local role service_role");
-  const stillTwo = await client.query<{ count: string }>(
+  const afterAtomic = await client.query<{ count: string }>(
     "select count(*)::text from public.transactions where user_id = $1",
     [userId],
   );
   assert(
-    stillTwo.rows[0].count === "2",
+    afterAtomic.rows[0].count === beforeAtomic,
     "Une transaction a survécu à l'échec de son lien de provenance",
   );
 
@@ -598,7 +732,7 @@ try {
   }
   if (succeeded) {
     console.log(
-      "Smoke Data Acquisition Foundation : staging atomique, brut immuable, commit sélectif, idempotence applicative et de base, cloisonnement, atomicité du lien de provenance. Aucune donnée persistée.",
+      "Smoke Data Acquisition Foundation : staging atomique, brut immuable et non supprimable, piste d'audit en lecture seule sous authenticated, provenance gelée, transaction importée non supprimable sans sa provenance, jumeau détachable, commit sélectif, idempotence applicative et de base, cloisonnement, atomicité du lien. Aucune donnée persistée.",
     );
   }
 }

@@ -11,10 +11,10 @@ function candidate(partial: Partial<DedupeCandidate> & { rowNumber: number }): D
   return {
     accountId: ACCOUNT,
     date: "2026-08-13",
-    label: "CARTE 1208 AMAZON EU",
-    amount: -54.28,
+    label: "COFFEE SHOP",
+    amount: -3.2,
     currency: "EUR",
-    externalReference: null,
+    externalTransactionId: null,
     ...partial,
   };
 }
@@ -25,8 +25,8 @@ function existing(
   return {
     accountId: ACCOUNT,
     date: "2026-08-13",
-    label: "CARTE 1208 AMAZON EU",
-    amount: -54.28,
+    label: "COFFEE SHOP",
+    amount: -3.2,
     currency: "EUR",
     externalKey: null,
     ...partial,
@@ -36,109 +36,193 @@ function existing(
 function verdicts(
   candidates: DedupeCandidate[],
   existingFacts: ExistingTransactionFact[] = [],
+  stableIdentifiers = false,
 ): string[] {
   return classifyCandidates({
     candidates,
     existing: existingFacts,
     sourceKey: SOURCE,
+    stableIdentifiers,
   }).map((outcome) => outcome.verdict);
 }
 
-describe("identifiant stable de la source", () => {
-  it("tranche seul, dans les deux sens", () => {
-    const already = existing({ id: "t1", externalKey: externalKeyOf(SOURCE, "TX-0001") });
+describe("une égalité de tuple ne démontre pas une identité", () => {
+  it("A — un relevé partiel contenant un troisième achat identique n'est PAS un doublon exact", () => {
+    // Deux cafés réels déjà connus. Le fichier partiel n'en contient qu'un : rien ne dit
+    // s'il s'agit d'un des deux ou d'un troisième. Le supprimer serait perdre une dépense.
     const outcomes = classifyCandidates({
-      candidates: [
-        candidate({ rowNumber: 2, externalReference: "TX-0001" }),
-        candidate({ rowNumber: 3, externalReference: "TX-0002", amount: -3.2 }),
-      ],
-      existing: [already],
+      candidates: [candidate({ rowNumber: 2 })],
+      existing: [existing({ id: "t1" }), existing({ id: "t2" })],
       sourceKey: SOURCE,
+      stableIdentifiers: false,
     });
-    expect(outcomes[0].verdict).toBe("EXACT_DUPLICATE");
-    expect(outcomes[0].matchedTransactionId).toBe("t1");
-    expect(outcomes[1].verdict).toBe("NEW");
+    expect(outcomes[0].verdict).toBe("PROBABLE_DUPLICATE");
+    expect(outcomes[0].verdict).not.toBe("EXACT_DUPLICATE");
+    expect(outcomes[0].issues.map((entry) => entry.code)).toContain("MATCH_WITHOUT_STABLE_ID");
+    // Signalée, donc écrivable sur décision : la ligne n'est jamais perdue en silence.
+    expect(outcomes[0].issues.every((entry) => entry.severity === "WARNING")).toBe(true);
   });
 
-  it("qualifie la clé externe par sa source : deux banques peuvent partager une référence", () => {
-    const already = existing({ id: "t1", externalKey: externalKeyOf("autre-source", "TX-0001") });
-    expect(
-      verdicts([candidate({ rowNumber: 2, externalReference: "TX-0001" })], [already]),
-    ).toEqual(["NEW"]);
-  });
-});
-
-describe("empreinte déterministe et rang d'occurrence", () => {
-  it("un doublon strict est reconnu", () => {
-    expect(verdicts([candidate({ rowNumber: 2 })], [existing({ id: "t1" })])).toEqual([
-      "EXACT_DUPLICATE",
-    ]);
-  });
-
-  it("deux opérations réellement identiques ne se réduisent pas à une", () => {
-    expect(verdicts([candidate({ rowNumber: 2 }), candidate({ rowNumber: 3 })])).toEqual([
-      "NEW",
-      "NEW",
-    ]);
-  });
-
-  it("recouvrement partiel : la ligne déjà écrite est un doublon, la seconde est nouvelle", () => {
+  it("C — un recouvrement rapproche les lignes communes sans éliminer d'occurrence supplémentaire", () => {
+    // Trois lignes identiques face à deux opérations connues : les deux premières se
+    // rapprochent, la troisième reste nouvelle car aucune opération connue ne l'explique.
     expect(
       verdicts(
-        [candidate({ rowNumber: 2 }), candidate({ rowNumber: 3 })],
-        [existing({ id: "t1" })],
-      ),
-    ).toEqual(["EXACT_DUPLICATE", "NEW"]);
-  });
-
-  it("un réimport complet ne produit plus aucune nouveauté", () => {
-    expect(
-      verdicts(
-        [candidate({ rowNumber: 2 }), candidate({ rowNumber: 3 })],
+        [candidate({ rowNumber: 2 }), candidate({ rowNumber: 3 }), candidate({ rowNumber: 4 })],
         [existing({ id: "t1" }), existing({ id: "t2" })],
       ),
-    ).toEqual(["EXACT_DUPLICATE", "EXACT_DUPLICATE"]);
+    ).toEqual(["PROBABLE_DUPLICATE", "PROBABLE_DUPLICATE", "NEW"]);
   });
 
-  it("les rangs d'occurrence sont distincts et lisibles", () => {
+  it("D — trois paiements identiques le même jour restent trois transactions possibles", () => {
+    expect(
+      verdicts([
+        candidate({ rowNumber: 2 }),
+        candidate({ rowNumber: 3 }),
+        candidate({ rowNumber: 4 }),
+      ]),
+    ).toEqual(["NEW", "NEW", "NEW"]);
+  });
+
+  it("E — une saisie manuelle identique devient un rapprochement conservateur, pas une disparition", () => {
+    const manual = existing({ id: "manuelle", externalKey: null });
     const outcomes = classifyCandidates({
-      candidates: [candidate({ rowNumber: 2 }), candidate({ rowNumber: 3 })],
-      existing: [],
+      candidates: [candidate({ rowNumber: 2 })],
+      existing: [manual],
       sourceKey: SOURCE,
+      stableIdentifiers: false,
     });
-    expect(outcomes[0].fingerprint).toContain("|#1");
-    expect(outcomes[1].fingerprint).toContain("|#2");
-    expect(outcomes[0].fingerprint).not.toBe(outcomes[1].fingerprint);
+    expect(outcomes[0].verdict).toBe("PROBABLE_DUPLICATE");
+    expect(outcomes[0].matchedTransactionId).toBe("manuelle");
   });
 
-  it("même date et même montant sous un libellé différent : deux opérations distinctes", () => {
+  it("chaque opération connue n'est revendiquée qu'une fois", () => {
     expect(
       verdicts(
-        [candidate({ rowNumber: 2, label: "CARTE 1208 LIBRAIRIE" })],
+        [candidate({ rowNumber: 2 }), candidate({ rowNumber: 3 })],
         [existing({ id: "t1" })],
       ),
-    ).toEqual(["POSSIBLE_MATCH"]);
+    ).toEqual(["PROBABLE_DUPLICATE", "NEW"]);
   });
 
-  it("un compte différent n'est jamais le même flux", () => {
+  it("un compte ou une devise différents ne sont jamais le même flux", () => {
     expect(
       verdicts([candidate({ rowNumber: 2, accountId: OTHER_ACCOUNT })], [existing({ id: "t1" })]),
     ).toEqual(["NEW"]);
-  });
-
-  it("une devise différente n'est jamais le même flux", () => {
     expect(
       verdicts([candidate({ rowNumber: 2, currency: "USD" })], [existing({ id: "t1" })]),
     ).toEqual(["NEW"]);
   });
+
+  it("la clé de rapprochement est lisible et ne prétend pas être une identité", () => {
+    const outcomes = classifyCandidates({
+      candidates: [candidate({ rowNumber: 2 }), candidate({ rowNumber: 3 })],
+      existing: [],
+      sourceKey: SOURCE,
+      stableIdentifiers: false,
+    });
+    expect(outcomes[0].matchKey).toContain("COFFEE SHOP");
+    expect(outcomes[0].matchKey).not.toBe(outcomes[1].matchKey);
+    // Aucune identité n'est produite sans identifiant stable déclaré.
+    expect(outcomes.every((outcome) => outcome.externalKey === null)).toBe(true);
+  });
 });
 
-describe("ressemblances", () => {
-  it("même montant et même libellé à deux jours d'écart : doublon PROBABLE, pas certain", () => {
+describe("identifiant stable — seulement quand la stabilité est déclarée", () => {
+  it("sans déclaration, une référence ne décide JAMAIS d'une identité", () => {
+    const already = existing({ id: "t1", externalKey: externalKeyOf(SOURCE, "REF-42") });
+    const outcomes = classifyCandidates({
+      candidates: [candidate({ rowNumber: 2, externalTransactionId: "REF-42", amount: -19.99 })],
+      existing: [already],
+      sourceKey: SOURCE,
+      stableIdentifiers: false,
+    });
+    expect(outcomes[0].verdict).toBe("NEW");
+    expect(outcomes[0].externalKey).toBeNull();
+  });
+
+  it("avec déclaration, un identifiant déjà vu écarte la ligne", () => {
+    const already = existing({ id: "t1", externalKey: externalKeyOf(SOURCE, "TX-0001") });
+    const outcomes = classifyCandidates({
+      candidates: [candidate({ rowNumber: 2, externalTransactionId: "TX-0001" })],
+      existing: [already],
+      sourceKey: SOURCE,
+      stableIdentifiers: true,
+    });
+    expect(outcomes[0].verdict).toBe("EXACT_DUPLICATE");
+    expect(outcomes[0].matchedTransactionId).toBe("t1");
+  });
+
+  it("avec déclaration, deux identifiants distincts restent deux opérations", () => {
+    expect(
+      verdicts(
+        [
+          candidate({ rowNumber: 2, externalTransactionId: "TX-0001" }),
+          candidate({ rowNumber: 3, externalTransactionId: "TX-0002" }),
+        ],
+        [],
+        true,
+      ),
+    ).toEqual(["NEW", "NEW"]);
+  });
+
+  it("un identifiant stable répété dans le même fichier ne peut pas désigner deux opérations", () => {
+    const outcomes = classifyCandidates({
+      candidates: [
+        candidate({ rowNumber: 2, externalTransactionId: "TX-0001" }),
+        candidate({ rowNumber: 3, externalTransactionId: "TX-0001", amount: -12 }),
+      ],
+      existing: [],
+      sourceKey: SOURCE,
+      stableIdentifiers: true,
+    });
+    expect(outcomes.map((outcome) => outcome.verdict)).toEqual(["NEW", "EXACT_DUPLICATE"]);
+  });
+
+  it("la même chaîne d'identifiant dans deux sources distinctes n'entre pas en collision", () => {
+    const already = existing({ id: "t1", externalKey: externalKeyOf("autre-source", "TX-0001") });
+    expect(
+      verdicts([candidate({ rowNumber: 2, externalTransactionId: "TX-0001" })], [already], true),
+    ).toEqual(["NEW"]);
+  });
+
+  it("une référence descriptive répétée chaque mois reste plusieurs opérations valides", () => {
+    // Sans déclaration de stabilité, le motif « LOYER » revient tous les mois sans jamais
+    // faire disparaître une échéance.
+    const monthly = [
+      candidate({
+        rowNumber: 2,
+        date: "2026-06-05",
+        label: "LOYER",
+        amount: -950,
+        externalTransactionId: "LOYER",
+      }),
+      candidate({
+        rowNumber: 3,
+        date: "2026-07-05",
+        label: "LOYER",
+        amount: -950,
+        externalTransactionId: "LOYER",
+      }),
+      candidate({
+        rowNumber: 4,
+        date: "2026-08-05",
+        label: "LOYER",
+        amount: -950,
+        externalTransactionId: "LOYER",
+      }),
+    ];
+    expect(verdicts(monthly)).toEqual(["NEW", "NEW", "NEW"]);
+  });
+});
+
+describe("ressemblances de second ordre", () => {
+  it("même montant et même libellé à deux jours d'écart : doublon PROBABLE", () => {
     const outcomes = classifyCandidates({
       candidates: [candidate({ rowNumber: 2, date: "2026-08-15" })],
       existing: [existing({ id: "t1", date: "2026-08-13" })],
       sourceKey: SOURCE,
+      stableIdentifiers: false,
     });
     expect(outcomes[0].verdict).toBe("PROBABLE_DUPLICATE");
     expect(outcomes[0].issues.map((entry) => entry.code)).toContain("DUPLICATE_PROBABLE");
@@ -153,23 +237,18 @@ describe("ressemblances", () => {
     ).toEqual(["NEW"]);
   });
 
-  it("une même transaction existante n'est revendiquée qu'une fois", () => {
-    const outcomes = verdicts(
-      [
-        candidate({ rowNumber: 2, date: "2026-08-14" }),
-        candidate({ rowNumber: 3, date: "2026-08-15" }),
-      ],
-      [existing({ id: "t1", date: "2026-08-13" })],
-    );
-    expect(outcomes).toEqual(["PROBABLE_DUPLICATE", "NEW"]);
+  it("même date et même montant sous un libellé différent : rapprochement possible", () => {
+    expect(
+      verdicts([candidate({ rowNumber: 2, label: "LIBRAIRIE" })], [existing({ id: "t1" })]),
+    ).toEqual(["POSSIBLE_MATCH"]);
   });
 
-  it("l'empreinte ignore accents et ponctuation du libellé", () => {
+  it("l'accent et la ponctuation du libellé ne créent pas un faux nouveau flux", () => {
     expect(
       verdicts(
         [candidate({ rowNumber: 2, label: "Prélèvement N°42" })],
         [existing({ id: "t1", label: "PRELEVEMENT N 42" })],
       ),
-    ).toEqual(["EXACT_DUPLICATE"]);
+    ).toEqual(["PROBABLE_DUPLICATE"]);
   });
 });

@@ -48,7 +48,6 @@ const SYNONYMS: Record<BankTargetField, readonly string[]> = {
     "description",
     "detail",
     "designation",
-    "communication",
     "narrative",
     "wording",
     "label",
@@ -57,15 +56,34 @@ const SYNONYMS: Record<BankTargetField, readonly string[]> = {
   debit: ["debit", "montant debit", "debits", "sortie", "sorties", "withdrawal", "paid out"],
   credit: ["credit", "montant credit", "credits", "entree", "entrees", "deposit", "paid in"],
   currency: ["devise", "monnaie", "currency", "ccy"],
-  externalReference: [
+  /**
+   * En-têtes qui PRÉTENDENT porter un identifiant de transaction. La liste est
+   * volontairement étroite, et surtout : y figurer ne prouve RIEN. Cette colonne ne devient
+   * une identité que si l'utilisateur déclare sa stabilité pour la session.
+   */
+  externalTransactionId: [
+    "transaction id",
+    "id transaction",
+    "identifiant transaction",
+    "identifiant unique",
+    "unique id",
+    "unique reference",
+  ],
+  /**
+   * Références descriptives. Une banque peut les répéter, les partager entre les lignes
+   * d'un lot ou les réutiliser chaque mois : elles ne décident jamais d'une identité.
+   */
+  reference: [
     "reference",
     "reference operation",
     "reference bancaire",
     "numero d operation",
-    "transaction id",
-    "id operation",
+    "no operation",
     "end to end",
     "identifiant",
+    "motif",
+    "communication",
+    "communication structuree",
   ],
   counterparty: [
     "beneficiaire",
@@ -228,6 +246,27 @@ function shapeIssues(mapping: BankColumnMapping, headers: readonly string[]): Im
         ),
       );
     }
+  }
+
+  // Une colonne source ne peut pas alimenter deux faits. Le laisser passer produirait un
+  // libellé qui est aussi une référence, ou une date d'opération qui est aussi une date de
+  // valeur : deux vérités tirées de la même observation, sans qu'aucune ne soit fausse
+  // isolément. L'inférence l'évite par construction ; un mapping manuel doit être refusé.
+  const fieldsByIndex = new Map<number, string[]>();
+  for (const [field, index] of Object.entries(mapping)) {
+    if (index === undefined) continue;
+    fieldsByIndex.set(index, [...(fieldsByIndex.get(index) ?? []), field]);
+  }
+  for (const [index, fields] of fieldsByIndex) {
+    if (fields.length < 2) continue;
+    issues.push(
+      issue(
+        "MAPPING_DUPLICATE_COLUMN",
+        "ERROR",
+        `La colonne « ${headers[index] ?? index} » est associée à ${fields.length} champs (${fields.join(", ")}). Une colonne source n'alimente qu'un seul fait.`,
+        fields[0],
+      ),
+    );
   }
   return issues;
 }

@@ -210,11 +210,25 @@ aucune profondeur d'historique : une transaction importée naît sans catégorie
 Flow Engine la compte comme non classée. Une ambiguïté de convention décimale ou d'ordre
 jour/mois se résout au niveau de la COLONNE quand une valeur la tranche, et bloque les
 lignes concernées sinon : choisir entre 1,234 et 1 234 sur 800 lignes n'est pas une
-décision de présentation. Un enregistrement brut est immuable ; corriger une lecture
-modifie le fait canonique, jamais ce que la source a écrit. Seul un doublon STRICT est
-écarté d'office : une ressemblance est signalée et n'est écrite que sur décision explicite,
-parce qu'un double comptage fausse le patrimoine sans laisser de trace là où une opération
-manquante laisse un trou visible. Détail dans `docs/DATA_ACQUISITION.md`.
+décision de présentation. Un enregistrement brut est immuable et sa piste
+d'audit est en LECTURE SEULE pour le client : corriger une lecture modifie le fait
+canonique, jamais ce que la source a écrit, et une transaction importée n'est pas
+supprimable en laissant sa provenance orpheline.
+
+L'IDENTITÉ SE DÉMONTRE, elle ne se présume pas. Une égalité de tuple — compte, date,
+montant, devise, libellé — ne prouve rien entre deux fichiers distincts : un relevé partiel
+contenant un troisième café identique ne dit pas qu'il s'agit d'un des deux déjà connus, et
+l'écarter d'office supprimerait une dépense réelle. Seules deux preuves autorisent un rejet
+automatique : l'empreinte du FICHIER déjà validé, et un identifiant de transaction dont la
+stabilité est DÉCLARÉE. Le nom d'un en-tête n'en est jamais une : « Référence » peut être un
+motif répété chaque mois. Tout le reste est une ressemblance signalée, exclue par défaut et
+écrite sur décision explicite — un double comptage fausse le patrimoine sans laisser de
+trace, là où une opération manquante laisse un trou visible. Aucune contrainte d'unicité ne
+s'appuie donc sur une clé de ressemblance.
+
+La date d'observation d'un import n'est pas `AS_OF_DATE` : une opération bookée hier est un
+fait, même si le reporting est arrêté le mois précédent. L'acquisition ingère, les moteurs
+aval arbitrent à leur date. Détail dans `docs/DATA_ACQUISITION.md`.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

@@ -17,7 +17,6 @@ import type {
   ImportSessionStatus,
   NormalizedBankRow,
 } from "@/lib/acquisition/types";
-import { AS_OF_DATE } from "@/lib/data/shared";
 import type {
   BankColumnMapping,
   ImportAnalyzeRequest,
@@ -47,6 +46,22 @@ const DEDUPE_MARGIN_DAYS = 7;
 
 /** Plafond d'AFFICHAGE des lignes prêtes. Le staging en contient toujours l'intégralité. */
 const PREVIEW_READY_LIMIT = 200;
+
+/**
+ * Date à laquelle l'import est réellement effectué.
+ *
+ * DÉLIBÉRÉMENT distincte de `AS_OF_DATE`, qui est la date d'arrêté du reporting. Une
+ * opération bancaire bookée hier est un fait réel même si le cockpit arrête ses comptes le
+ * mois précédent : l'acquisition l'ingère, et les moteurs aval décident ensuite s'ils la
+ * retiennent à leur propre date d'analyse. Utiliser `AS_OF_DATE` ici demanderait une
+ * intervention humaine sur des faits parfaitement valides.
+ *
+ * Lue ici, jamais dans le moteur : les fonctions pures reçoivent la date en paramètre et
+ * restent déterministes.
+ */
+function observationDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
   if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
@@ -241,16 +256,64 @@ export function createImportRepository(): ImportRepository {
       label: row.label,
       amount: row.amount,
       currency: row.currency,
-      external_reference: row.externalReference,
+      external_transaction_id: row.externalTransactionId,
+      reference: row.reference,
       counterparty: row.counterparty,
       balance_after: row.balanceAfter,
       status: row.status,
       dedupe_verdict: row.verdict,
-      dedupe_fingerprint: row.fingerprint,
+      match_key: row.matchKey,
       external_key: row.externalKey,
       matched_transaction_id: row.matchedTransactionId,
       issues: row.issues,
     };
+  }
+
+  /**
+   * Refuse tôt un contenu déjà validé pour cette enveloppe.
+   *
+   * La RPC porte la garantie ; ce contrôle sert à ne pas déposer un document au coffre
+   * juste avant un refus. Il lit les sessions par empreinte et retient celles dont la
+   * source visait le même compte.
+   */
+  async function refuseAlreadyCommitted(accountId: string, fileHash: string): Promise<void> {
+    const rows = unwrap(
+      await db
+        .from("import_sessions")
+        .select("status, import_sources!inner(target_account_id)")
+        .eq("user_id", user)
+        .eq("file_hash", fileHash)
+        .eq("status", "COMMITTED"),
+      "contrôle d'un fichier déjà importé",
+    ) as Row[];
+    for (const row of rows) {
+      const nested = row.import_sources as Row | Row[] | null;
+      const source = Array.isArray(nested) ? nested[0] : nested;
+      if (source && str(source.target_account_id) === accountId) {
+        throw new Error("Ce fichier a déjà été importé et validé pour cette source");
+      }
+    }
+  }
+
+  /**
+   * Document déjà conservé pour ce contenu, s'il existe.
+   *
+   * La clé est l'empreinte du FICHIER, pas la session : réanalyser, corriger un mapping ou
+   * redéposer le même relevé ne doit produire qu'une seule copie au coffre.
+   */
+  async function retainedDocumentFor(fileHash: string): Promise<string | null> {
+    const rows = unwrap(
+      await db
+        .from("import_sessions")
+        .select("document_id")
+        .eq("user_id", user)
+        .eq("file_hash", fileHash)
+        .not("document_id", "is", null)
+        .limit(1),
+      "recherche d'un fichier déjà conservé",
+    ) as Row[];
+    const documentId = rows[0]?.document_id;
+    return documentId === null || documentId === undefined ? null : str(documentId);
   }
 
   async function analyze(
@@ -273,6 +336,13 @@ export function createImportRepository(): ImportRepository {
       }
     }
 
+    // Refus AVANT tout dépôt au coffre : un fichier déjà validé pour cette source ne sera
+    // pas réimporté, et il ne doit donc pas laisser une copie derrière lui. La RPC répète
+    // ce contrôle — c'est elle qui le garantit sous concurrence.
+    await refuseAlreadyCommitted(account.id, fileHash);
+
+    const observedAt = observationDate();
+
     // Lecture PURE du fichier, sans base. Elle donne la période observée, donc la fenêtre
     // de transactions à relire.
     const parsed = analyzeBankCsv({
@@ -281,7 +351,8 @@ export function createImportRepository(): ImportRepository {
       declaredCurrency: request.declaredCurrency,
       existing: [],
       sourceKey: `${PROVIDER}:${account.id}`,
-      asOfDate: AS_OF_DATE,
+      observationDate: observedAt,
+      stableIdentifiers: request.stableTransactionIdDeclared,
       mappingOverride,
       maxRows: MAX_ROWS_PER_SESSION,
     });
@@ -293,22 +364,27 @@ export function createImportRepository(): ImportRepository {
       accountId: account.id,
       sourceKey: `${PROVIDER}:${account.id}`,
       existing,
+      stableIdentifiers: request.stableTransactionIdDeclared,
     });
 
-    // Fichier conservé AVANT l'écriture de la session, pour que celle-ci puisse le citer.
-    // Si l'écriture échoue ensuite, le fichier reste dans le coffre comme n'importe quel
-    // document bancaire déposé : rien d'invisible n'est créé.
+    // Conservation IDEMPOTENTE par empreinte de fichier. Corriger un mapping puis relire
+    // republie le même contenu : sans cette réutilisation, chaque tentative déposerait une
+    // copie du même relevé au coffre, et l'utilisateur y trouverait cinq fois son fichier
+    // pour une seule opération d'import.
     let documentId: string | null = null;
     if (request.retainFile) {
-      const repository = await getRepository();
-      const document = await repository.storeDocument({
-        name: file.name.slice(0, 180),
-        category: "bank",
-        contentType: file.contentType,
-        size: file.size,
-        bytes: file.bytes,
-      });
-      documentId = document.id;
+      documentId = await retainedDocumentFor(fileHash);
+      if (!documentId) {
+        const repository = await getRepository();
+        const document = await repository.storeDocument({
+          name: file.name.slice(0, 180),
+          category: "bank",
+          contentType: file.contentType,
+          size: file.size,
+          bytes: file.bytes,
+        });
+        documentId = document.id;
+      }
     }
 
     const sessionId = unwrap(
@@ -336,6 +412,8 @@ export function createImportRepository(): ImportRepository {
             mapping: analysis.mapping,
             conventions: analysis.conventions,
             declared_currency: request.declaredCurrency,
+            observation_date: observedAt,
+            stable_transaction_id_declared: request.stableTransactionIdDeclared,
             declared_period_start: request.declaredPeriodStart,
             declared_period_end: request.declaredPeriodEnd,
             observed_period_start: analysis.observedPeriod?.start ?? null,
@@ -419,6 +497,7 @@ export function createImportRepository(): ImportRepository {
       signature: analysis.signature,
       counts: analysis.counts,
       issues: analysis.issues,
+      verdicts: analysis.verdicts,
       observedPeriod: analysis.observedPeriod,
       rows: rendered.rows,
       readyRowsTruncated: rendered.truncated,
@@ -498,6 +577,8 @@ export function createImportRepository(): ImportRepository {
         encoding: nullableStr(row.encoding),
         delimiter: nullableStr(row.delimiter),
         declaredCurrency: nullableStr(row.declared_currency),
+        observationDate: nullableStr(row.observation_date),
+        stableTransactionIdDeclared: row.stable_transaction_id_declared === true,
         observedPeriodStart: nullableStr(row.observed_period_start),
         observedPeriodEnd: nullableStr(row.observed_period_end),
         declaredPeriodStart: nullableStr(row.declared_period_start),

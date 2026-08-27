@@ -67,55 +67,122 @@ sûre, et en choisir une fabriquerait des montants.
 Les conventions retenues sont persistées sur la session. Un montant relu dans six mois est
 donc confrontable à la règle qui l'a produit.
 
-## 5. Déduplication : trois rangs
+## 5. Déduplication : l'identité se démontre, elle ne se présume pas
 
-| Rang | Clé                                                                                                        | Verdict possible                                |
-| ---- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| 1    | identifiant stable de la source, préfixé par la source                                                     | `EXACT_DUPLICATE` ou `NEW`, sans autre contrôle |
-| 2    | empreinte `compte / date / montant / devise / libellé` + **rang d'occurrence**                             | `EXACT_DUPLICATE` ou passage au rang 3          |
-| 3    | ressemblance : même montant et libellé à quelques jours, ou même date et montant sous un libellé différent | `PROBABLE_DUPLICATE`, `POSSIBLE_MATCH`          |
+`EXACT_DUPLICATE` signifie **identité démontrée**, et rien d'autre. Deux choses seulement la
+démontrent :
 
-Le **rang d'occurrence** est ce qui distingue « deux fois la même ligne » de « deux
-opérations réellement identiques ». Deux cafés à 3,20 € le même jour sont deux dépenses :
-la première porte le rang 1, la seconde le rang 2. Un réimport retrouve les deux rangs déjà
-écrits et n'en crée aucun.
+| Preuve | Portée |
+| ------ | ------ |
+| l'empreinte SHA-256 du **fichier**, au niveau session | un contenu déjà validé pour cette source est refusé avant même d'arriver à la déduplication |
+| un identifiant de transaction dont la **stabilité est déclarée** | la ligne est reconnue comme déjà écrite |
 
-L'empreinte est **lisible** et non hachée :
+Tout le reste est une **ressemblance**, signalée et non écrite par défaut.
+
+### Pourquoi une égalité de tuple ne suffit pas
+
+Historique canonique :
 
 ```text
-v1|<compte>|2026-08-13|-54.280000|EUR|CARTE 1208 AMAZON EU|#1
+13/08  COFFEE SHOP  -3,20 €
+13/08  COFFEE SHOP  -3,20 €
 ```
 
-Un utilisateur qui demande pourquoi une ligne est un doublon doit pouvoir lire la réponse.
+Deux opérations réelles. Plus tard, un relevé partiel contient une seule ligne identique.
+S'agit-il d'une des deux déjà connues, ou d'un **troisième** café réel ? Rien dans le
+fichier ne permet de le savoir, et un rang d'occurrence calculé sur le fichier candidat ne
+le dit pas non plus : il compte les lignes de ce fichier, pas les opérations du compte.
 
-Seul `EXACT_DUPLICATE` est écarté sans demander. Une ressemblance est **signalée** et
-n'est écrite que si l'utilisateur l'inclut nommément : à égalité de doute, la couche
-préfère ne pas écrire, parce qu'un double comptage fausse le patrimoine sans laisser de
-trace visible, là où une opération manquante laisse un trou que l'utilisateur voit.
+Conclure `EXACT_DUPLICATE` supprimerait une dépense réelle en silence. Cette égalité produit
+donc `PROBABLE_DUPLICATE` : visible, exclue par défaut, écrivable sur décision explicite.
 
-## 6. Idempotence : deux garanties, à deux niveaux
+### Ce que le moteur produit
 
-Le moteur classe, et la base refuse. Les deux sont nécessaires : le moteur peut être
-contourné, la base ne connaît pas la sémantique d'un relevé.
+| Situation | Verdict | Écrite par défaut |
+| --------- | ------- | ----------------- |
+| identifiant stable **déclaré** déjà connu, ou répété dans le fichier | `EXACT_DUPLICATE` | non, et non incluable |
+| tuple identique à une opération connue non encore revendiquée | `PROBABLE_DUPLICATE` | non, incluable |
+| même montant et libellé à quelques jours d'écart | `PROBABLE_DUPLICATE` | non, incluable |
+| même date et montant sous un libellé différent | `POSSIBLE_MATCH` | non, incluable |
+| rien de connu | `NEW` | oui |
+| ligne vide, hors périmètre ou trop incomplète | `null` (non évalué) | non |
 
-| Garantie                                                                                                 | Portée                                                    |
-| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `import_sessions_committed_file_uidx` sur `(user_id, source_id, file_hash)` où le statut est `COMMITTED` | un contenu de fichier ne se valide qu'une fois par source |
-| `import_normalized_records_committed_fingerprint_uidx` sur `(user_id, account_id, dedupe_fingerprint)`   | une empreinte ne s'écrit qu'une fois                      |
-| `import_normalized_records_committed_external_uidx` sur `(user_id, external_key)`                        | un identifiant stable de source ne s'écrit qu'une fois    |
-| `lfo_commit_import_session` sur une session déjà validée                                                 | retourne l'identifiant sans rien réécrire                 |
+Chaque opération connue n'est revendiquée qu'une fois : trois lignes identiques face à deux
+opérations connues rapprochent les deux premières et laissent la troisième **nouvelle**,
+parce qu'aucune opération connue ne peut plus l'expliquer.
 
-Limites assumées :
+### Clé de rapprochement, pas empreinte d'identité
 
-- les index de base protègent l'import contre l'import. Une transaction saisie
-  MANUELLEMENT ne porte pas d'empreinte ; c'est le moteur de déduplication, qui lit toutes
-  les transactions du compte quelle que soit leur origine, qui la reconnaît et classe le
-  candidat correspondant en doublon ;
-- si une transaction issue d'un import était supprimée, son empreinte resterait marquée
-  committée. Le produit n'offre aujourd'hui aucune suppression de transaction, donc le cas
-  ne se présente pas ; le jour où il existera, la suppression devra libérer l'empreinte de
-  la ligne normalisée correspondante, sans quoi le même relevé deviendrait irrémédiablement
-  non réimportable.
+```text
+v2|<compte>|2026-08-13|-3.200000|EUR|COFFEE SHOP|~1
+```
+
+Elle est **lisible** pour que l'utilisateur puisse lire la raison d'un rapprochement, et
+elle ne porte **aucune unicité en base** : le rang `~1` est local à l'analyse. Une contrainte
+d'unicité sur ce tuple supprimerait exactement les faits réels que la section précédente
+protège.
+
+## 6. Référence ≠ identifiant stable
+
+Deux champs cibles distincts, et une déclaration qui décide de leur rôle :
+
+| Champ | Alimenté par | Peut décider d'une identité |
+| ----- | ------------ | --------------------------- |
+| `externalTransactionId` | « Transaction ID », « Identifiant unique », « Unique reference » | uniquement si la stabilité est **déclarée** pour la session |
+| `reference` | « Référence », « Référence bancaire », « Numéro d'opération », « Motif », « End to end » | jamais |
+
+Une banque peut répéter une référence, la partager entre les lignes d'un lot, ou réutiliser
+le même motif chaque mois. Le nom d'un en-tête ne prouve donc rien : même une colonne
+nommée « Transaction ID » n'est qu'une **prétention** tant que l'utilisateur n'a pas
+déclaré, pour ce format, que cette colonne porte un identifiant unique par opération.
+
+La case correspondante est **décochée par défaut**, et c'est le bon défaut : sans
+déclaration, un prélèvement mensuel portant toujours la référence « LOYER » reste douze
+échéances distinctes.
+
+Une identité est toujours préfixée par sa source (`<provider>:<compte>#<id>`) : deux banques
+peuvent utiliser la même chaîne sans entrer en collision.
+
+## 6 bis. Date d'observation de l'import ≠ date d'arrêté du reporting
+
+Le cockpit arrête ses comptes à `AS_OF_DATE`. L'acquisition, elle, travaille à la date à
+laquelle l'import est **réellement effectué**.
+
+```text
+AS_OF_DATE du reporting  = 19/08/2026
+import effectué le        = 27/08/2026
+opération bookée le       = 26/08/2026   →  fait réel, ingéré normalement
+```
+
+Une opération bancaire bookée hier est un fait, même si le reporting est arrêté le mois
+précédent. La qualifier de « future » demanderait une intervention humaine sur une donnée
+parfaitement valide. C'est aux moteurs aval de décider qu'elle n'existait pas au 19/08 et de
+l'écarter d'une lecture à cette date : l'acquisition ingère, elle n'arbitre pas.
+
+Seule une date postérieure au **jour de l'import** est signalée. La date d'observation est
+persistée sur la session, et injectée dans le moteur en paramètre — les fonctions pures ne
+lisent jamais l'horloge.
+
+## 7. Idempotence : deux garanties, aux deux seuls endroits démontrables
+
+| Garantie | Portée |
+| -------- | ------ |
+| `import_sessions_committed_file_uidx` sur `(user_id, source_id, file_hash)` où le statut est `COMMITTED` | un contenu de fichier ne se valide qu'une fois par source ; le repository refuse en plus **avant** tout dépôt au coffre |
+| `import_normalized_records_committed_external_uidx` sur `(user_id, external_key)` | une identité démontrée ne s'écrit qu'une fois |
+| `lfo_commit_import_session` sur une session déjà validée | retourne l'identifiant sans rien réécrire |
+
+Il n'existe **délibérément aucune** contrainte d'unicité sur la clé de rapprochement. Ce
+n'est pas un manque : une unicité sur `(compte, date, montant, devise, libellé)` refuserait
+un troisième café réel, et le refus viendrait de la base — donc avec un message opaque et
+aucune possibilité de décision.
+
+Le réimport d'un même relevé reste sans effet, mais par un autre chemin : l'empreinte du
+fichier le refuse, et même en forçant la relecture, **aucune ligne n'est prête** — les trois
+sont reconnues comme probablement déjà présentes et attendent une décision.
+
+Limite assumée : une transaction saisie **manuellement** ne porte pas d'identité. C'est le
+moteur de déduplication, qui lit toutes les transactions du compte quelle que soit leur
+origine, qui la reconnaît et signale le candidat correspondant.
 
 ## 7. Statuts d'une ligne
 
@@ -152,6 +219,27 @@ transactions.id
 contrainte : c'est le prix d'une intégrité réelle plutôt que d'un `target_id uuid` sans
 contrainte.
 
+### La piste d'audit est en lecture seule
+
+`authenticated` n'a que le `SELECT` sur les six tables d'acquisition ; toutes les écritures
+passent par les RPC réservées à `service_role`. Une piste d'audit sur laquelle le client
+peut écrire n'est pas une piste d'audit : un `DELETE` direct sur un enregistrement brut
+cascaderait vers la ligne normalisée et son lien, et laisserait survivre une transaction
+étiquetée « importée » dont l'origine aurait disparu. Le gate de schéma refuse une base où
+ces tables auraient reçu `INSERT`, `UPDATE` ou `DELETE`.
+
+Quatre invariants complètent les privilèges, portés par la base :
+
+- un enregistrement brut ne se **modifie** jamais ;
+- un enregistrement brut ne se **supprime** que par l'abandon d'une session encore
+  analysée, qui n'a produit aucun fait ;
+- une ligne normalisée **committée** est gelée. Seule exception, explicite : le jumeau
+  désigné (`matched_transaction_id`) peut être détaché s'il disparaît — il décrit
+  l'opération à laquelle la ligne ressemblait, pas le fait qu'elle a produit ;
+- un lien de provenance est **immuable**, et la clé étrangère vers `transactions` est en
+  `restrict` : une transaction importée ne peut pas être supprimée en laissant sa
+  provenance orpheline.
+
 ## 9. Formats réellement supportés
 
 Lus aujourd'hui :
@@ -162,6 +250,9 @@ Lus aujourd'hui :
 - guillemets RFC 4180, guillemets doublés, séparateur protégé, champ multi-lignes ;
 - dates `AAAA-MM-JJ`, `JJ/MM/AAAA`, `MM/JJ/AAAA`, séparateurs `/ . -`, heure accolée
   ignorée, année sur deux chiffres signalée ;
+- champs facultatifs (date de valeur, solde après opération) : une cellule **vide** reste
+  `null` sans anomalie, une cellule **renseignée mais illisible** est signalée. ABSENT ≠
+  PRÉSENT MAIS ILLISIBLE, même quand aucun calcul ne consomme le champ ;
 - montants à virgule ou à point décimal, séparateurs de milliers par espace (insécable
   compris), apostrophe ou point/virgule, parenthèses et signe suffixé comme négatifs ;
 - montant signé, ou colonnes débit et crédit séparées portant des magnitudes ;
@@ -179,7 +270,9 @@ réutilise le staging, la déduplication, l'historique et l'audit.
 
 - le choix du compte alimenté ;
 - la devise, quand la source n'en fournit aucune ;
-- la confirmation d'un mapping ambigu, et la correction d'un mapping refusé ;
+- la confirmation d'un mapping ambigu, et la correction d'un mapping refusé — une colonne
+  source ne peut alimenter qu'un seul champ, un mapping qui en réutilise une est refusé ;
+- la déclaration éventuelle de stabilité de l'identifiant de transaction ;
 - la décision sur chaque ligne signalée ;
 - la classification Cash Flow des transactions écrites ;
 - la déclaration de la profondeur d'historique du ledger, dans Settings ;

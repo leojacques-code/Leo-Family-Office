@@ -153,6 +153,15 @@ create table if not exists public.import_sessions (
   -- Devise déclarée pour cet import quand la source n'en fournit aucune. Déclaration
   -- explicite, jamais héritée en silence du compte cible.
   declared_currency char(3),
+  -- Date à laquelle l'import est RÉELLEMENT effectué. Distincte de la date d'arrêté du
+  -- reporting : une opération bookée la veille est un fait réel même si le cockpit arrête
+  -- ses comptes le mois précédent. C'est elle, et elle seule, qui qualifie une date de
+  -- future pendant la lecture du fichier.
+  observation_date date,
+  -- L'utilisateur DÉCLARE-T-IL que la colonne d'identifiant de ce format porte un
+  -- identifiant unique et stable ? `false` par défaut : aucun nom d'en-tête ne le prouve,
+  -- et seule une identité démontrée autorise un rejet automatique de doublon.
+  stable_transaction_id_declared boolean not null default false,
   -- Période que l'utilisateur DÉCLARE avoir exportée. Distincte de la période observée, et
   -- volontairement non branchée sur `profiles.ledger_coverage_start`.
   declared_period_start date,
@@ -252,28 +261,57 @@ create unique index if not exists import_raw_records_id_user_uidx
 create index if not exists import_raw_records_session_idx
   on public.import_raw_records(session_id, user_id, row_number);
 
--- Le brut ne se corrige pas. Une transaction reçue pour 51,84 € reste ce que la banque a
--- dit, même quand l'utilisateur reclasse la dépense : c'est la ligne NORMALISÉE ou le fait
--- CANONIQUE qui change, jamais l'observation source. Le refus est porté par la base, pas
--- par une convention applicative.
+-- Le brut ne se corrige pas, et il ne s'efface pas non plus.
+--
+-- Une transaction reçue pour 51,84 € reste ce que la banque a dit, même quand
+-- l'utilisateur reclasse la dépense : c'est la ligne NORMALISÉE ou le fait CANONIQUE qui
+-- change, jamais l'observation source.
+--
+-- Ne protéger que l'UPDATE ne suffisait pas : une SUPPRESSION du brut cascade vers la
+-- ligne normalisée et son lien de provenance, et laisserait donc survivre une transaction
+-- importée dont l'origine aurait disparu. La suppression n'est autorisée que sur une
+-- session ENCORE ANALYSÉE — le chemin d'abandon officiel, qui n'a produit aucun fait.
 create or replace function public.import_raw_record_immutable()
 returns trigger
 language plpgsql
 security invoker
 set search_path = ''
 as $$
+declare
+  v_status text;
 begin
-  raise exception 'Un enregistrement brut est immuable : corriger la ligne normalisée, pas la source';
+  if tg_op = 'UPDATE' then
+    raise exception 'Un enregistrement brut est immuable : corriger la ligne normalisée, pas la source';
+  end if;
+  select status into v_status
+    from public.import_sessions
+   where id = old.session_id and user_id = old.user_id;
+
+  -- Session déjà absente : la suppression vient de la CASCADE d'une session supprimée. Ce
+  -- chemin n'est ouvert qu'à `service_role`, et il est lui-même barré dès qu'une ligne
+  -- normalisée de la session est committée — le gel de la provenance refuse alors sa propre
+  -- cascade. Une session sans fait écrit peut donc être remplacée ; une session qui en a
+  -- produit ne peut pas disparaître.
+  if v_status is null then
+    return old;
+  end if;
+
+  if v_status <> 'ANALYZED' then
+    raise exception
+      'Enregistrement brut d''une session % : la provenance d''un fait écrit ne se supprime pas',
+      v_status;
+  end if;
+  return old;
 end;
 $$;
 
 drop trigger if exists import_raw_records_immutable on public.import_raw_records;
 create trigger import_raw_records_immutable
-  before update on public.import_raw_records
+  before update or delete on public.import_raw_records
   for each row execute function public.import_raw_record_immutable();
 
 comment on table public.import_raw_records is
-  'Ce que la source a réellement fourni, ligne par ligne. Immuable : un trigger refuse toute mise à jour.';
+  'Ce que la source a réellement fourni, ligne par ligne. Immuable : un trigger refuse toute mise à jour, et toute suppression hors abandon d''une session encore analysée.';
 
 -- ---------------------------------------------------------------------------
 -- 4. Enregistrements normalisés — le staging
@@ -292,14 +330,25 @@ create table if not exists public.import_normalized_records (
   -- Montant SIGNÉ en devise native. `null` = non compris ou absent, jamais zéro.
   amount numeric(20,6),
   currency char(3),
-  external_reference text,
+  -- Identifiant PRÉTENDU par la source. Conservé tel quel ; il ne devient une identité
+  -- que si la session déclare sa stabilité.
+  external_transaction_id text,
+  -- Référence descriptive : référence bancaire, numéro d'opération, motif. Une banque peut
+  -- la répéter ou la réutiliser : elle ne décide JAMAIS d'une identité.
+  reference text,
   counterparty text,
   balance_after numeric(20,6),
   status text not null,
   -- `null` = déduplication NON ÉVALUÉE (ligne vide, hors périmètre, ou trop incomplète
   -- pour avoir une identité). Ce n'est pas « nouvelle ».
   dedupe_verdict text,
-  dedupe_fingerprint text,
+  -- Clé de RAPPROCHEMENT, lisible, servant à expliquer pourquoi deux lignes se ressemblent.
+  -- Ce n'est PAS une identité : aucune contrainte d'unicité ne s'y appuie, parce qu'une
+  -- égalité de tuple entre deux fichiers distincts ne prouve pas qu'il s'agit de la même
+  -- opération. Y mettre une unicité supprimerait des dépenses réelles.
+  match_key text,
+  -- Identité DÉMONTRÉE, préfixée par la source. Renseignée uniquement quand la stabilité
+  -- de l'identifiant est déclarée. C'est la seule colonne qui porte une unicité.
   external_key text,
   matched_transaction_id uuid,
   issues jsonb not null default '[]'::jsonb,
@@ -361,13 +410,17 @@ create table if not exists public.import_normalized_records (
   )
 );
 
--- IDEMPOTENCE de second rang, garantie par la BASE et non par le moteur : deux lignes de
--- même empreinte ne peuvent pas être committées deux fois sur la même enveloppe. Le rang
--- d'occurrence inscrit dans l'empreinte préserve les opérations réellement identiques.
-create unique index if not exists import_normalized_records_committed_fingerprint_uidx
-  on public.import_normalized_records(user_id, account_id, dedupe_fingerprint)
-  where commit_state = 'COMMITTED' and dedupe_fingerprint is not null;
--- Idempotence de premier rang : un identifiant stable de source ne s'écrit qu'une fois.
+-- La clé de rapprochement est INDEXÉE, jamais UNIQUE.
+--
+-- Une unicité sur (compte, date, montant, devise, libellé) supprimerait des faits réels :
+-- trois cafés identiques le même jour sont trois dépenses, et un relevé partiel qui en
+-- contient un ne prouve pas qu'il s'agit d'un des deux déjà connus. L'idempotence est
+-- portée là où l'identité est réellement démontrable : l'empreinte du FICHIER au niveau
+-- session, et l'identifiant stable ci-dessous.
+create index if not exists import_normalized_records_match_key_idx
+  on public.import_normalized_records(user_id, account_id, match_key)
+  where match_key is not null;
+-- Idempotence par IDENTITÉ DÉMONTRÉE : un identifiant stable ne s'écrit qu'une fois.
 create unique index if not exists import_normalized_records_committed_external_uidx
   on public.import_normalized_records(user_id, external_key)
   where commit_state = 'COMMITTED' and external_key is not null;
@@ -390,6 +443,10 @@ comment on table public.import_normalized_records is
   'Staging : ce que le parseur a compris d''une ligne brute, avec ses anomalies, son statut et son verdict de déduplication. Y écrire ne modifie aucune vérité canonique.';
 comment on column public.import_normalized_records.dedupe_verdict is
   'null = déduplication non évaluée (ligne vide, hors périmètre ou incomplète). Ce n''est pas « nouvelle ».';
+comment on column public.import_normalized_records.match_key is
+  'Clé de rapprochement lisible. PAS une identité : aucune unicité ne s''y appuie, une égalité de tuple entre deux fichiers ne prouvant pas la même opération.';
+comment on column public.import_normalized_records.external_key is
+  'Identité démontrée (identifiant stable déclaré), préfixée par la source. Seule colonne portant une unicité.';
 
 -- ---------------------------------------------------------------------------
 -- 5. Liens vers les faits canoniques
@@ -412,9 +469,13 @@ create table if not exists public.import_record_links (
   constraint import_record_links_normalized_fk
     foreign key (normalized_record_id, user_id)
     references public.import_normalized_records(id, user_id) on delete cascade,
+  -- PAS de cascade, et c'est l'invariant d'audit : supprimer une transaction importée
+  -- alors que sa provenance existe encore la laisserait étiquetée « importée » sans
+  -- pouvoir dire d'où elle vient. La suppression est REFUSÉE ; le jour où un chemin de
+  -- suppression existera, il devra retirer la provenance explicitement.
   constraint import_record_links_transaction_fk
     foreign key (transaction_id, user_id)
-    references public.transactions(id, user_id) on delete cascade,
+    references public.transactions(id, user_id) on delete restrict,
   constraint import_record_links_normalized_uk unique (user_id, normalized_record_id),
   constraint import_record_links_transaction_uk unique (user_id, transaction_id),
   constraint import_record_links_domain_ck check (target_domain in ('CASH_FLOW_TRANSACTION')),
@@ -466,11 +527,91 @@ comment on table public.import_column_mappings is
   'Mapping colonne → champ validé par l''utilisateur, réutilisable pour une signature de format identique. Versionné, jamais supposé éternel.';
 
 -- ---------------------------------------------------------------------------
--- 7. RLS et privilèges
+-- 6 bis. Gel de la provenance d'un fait écrit
+-- ---------------------------------------------------------------------------
+
+-- Une ligne normalisée COMMITTÉE est gelée. Sans ce gel, la provenance d'un fait canonique
+-- pourrait être réécrite après coup : un montant, une date ou un statut modifiés
+-- raconteraient une autre histoire que celle qui a réellement produit la transaction.
+create or replace function public.import_normalized_record_frozen()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if old.commit_state <> 'COMMITTED' then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  -- Seule exception au gel : le JUMEAU DÉSIGNÉ a disparu. `matched_transaction_id` ne
+  -- décrit pas le fait produit par cette ligne, seulement l'opération à laquelle elle
+  -- ressemblait ; sa suppression est un fait, pas une falsification. Tout le reste doit
+  -- être inchangé, sinon c'est une réécriture de provenance déguisée.
+  if
+    tg_op = 'UPDATE'
+    and new.matched_transaction_id is null
+    and old.matched_transaction_id is not null
+    and new.session_id = old.session_id
+    and new.raw_record_id = old.raw_record_id
+    and new.commit_state = old.commit_state
+    and new.status = old.status
+    and new.account_id is not distinct from old.account_id
+    and new.transaction_date is not distinct from old.transaction_date
+    and new.label is not distinct from old.label
+    and new.amount is not distinct from old.amount
+    and new.currency is not distinct from old.currency
+    and new.dedupe_verdict is not distinct from old.dedupe_verdict
+    and new.match_key is not distinct from old.match_key
+    and new.external_key is not distinct from old.external_key
+    and new.issues is not distinct from old.issues
+  then
+    return new;
+  end if;
+
+  raise exception 'Ligne normalisée déjà écrite au canonique : sa provenance est gelée';
+end;
+$$;
+
+drop trigger if exists import_normalized_records_frozen on public.import_normalized_records;
+create trigger import_normalized_records_frozen
+  before update or delete on public.import_normalized_records
+  for each row execute function public.import_normalized_record_frozen();
+
+-- Un lien de provenance est créé une fois, à la validation, et ne change jamais. Le
+-- modifier permettrait de faire pointer une transaction existante vers une autre ligne
+-- source, donc de falsifier l'audit sans rien supprimer.
+create or replace function public.import_record_link_immutable()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  raise exception 'Un lien de provenance est immuable';
+end;
+$$;
+
+drop trigger if exists import_record_links_immutable on public.import_record_links;
+create trigger import_record_links_immutable
+  before update on public.import_record_links
+  for each row execute function public.import_record_link_immutable();
+
+-- ---------------------------------------------------------------------------
+-- 7. RLS et privilèges — piste d'audit en LECTURE SEULE
 -- ---------------------------------------------------------------------------
 -- Le balayage de la migration initiale ne s'est exécuté qu'une fois : chaque table créée
--- après lui doit poser sa propre isolation, sinon les grants ci-dessous la rendraient
--- lisible par n'importe quel utilisateur authentifié.
+-- après lui doit poser sa propre isolation.
+--
+-- Contrairement aux tables de domaine, les tables d'acquisition n'accordent à
+-- `authenticated` que le SELECT. Toutes leurs écritures passent par les RPC `lfo_*`,
+-- réservées à `service_role`.
+--
+-- Ce n'est pas un durcissement décoratif. Une piste d'audit sur laquelle le client peut
+-- écrire n'est pas une piste d'audit : un DELETE direct sur un enregistrement brut ou sur
+-- un lien de provenance laisserait survivre une transaction étiquetée « importée » dont
+-- l'origine aurait disparu. La politique `owner_all` reste `FOR ALL` — elle exprime la
+-- PROPRIÉTÉ des lignes — et c'est le privilège de table qui refuse la commande.
 
 do $$
 declare target text;
@@ -486,8 +627,11 @@ begin
       'create policy owner_all on public.%I for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id)',
       target
     );
-    execute format('revoke all on table public.%I from anon', target);
-    execute format('grant select, insert, update, delete on table public.%I to authenticated', target);
+    -- `revoke all` est nécessaire avant le grant : la migration initiale accorde en bloc
+    -- les quatre commandes sur toutes les tables du schéma, et une migration ultérieure
+    -- pourrait le refaire. Le verifier contrôle l'état final.
+    execute format('revoke all on table public.%I from anon, authenticated', target);
+    execute format('grant select on table public.%I to authenticated', target);
   end loop;
 end $$;
 
@@ -578,7 +722,8 @@ begin
   insert into public.import_sessions (
     user_id, source_id, file_name, file_hash, file_size_bytes, content_type,
     encoding, delimiter, parser, parser_version, mapping, conventions,
-    declared_currency, declared_period_start, declared_period_end,
+    declared_currency, observation_date, stable_transaction_id_declared,
+    declared_period_start, declared_period_end,
     observed_period_start, observed_period_end, status,
     row_count, ready_count, warning_count, blocked_count, duplicate_count, ignored_count,
     document_id, issues
@@ -595,6 +740,8 @@ begin
     v_session -> 'mapping',
     v_session -> 'conventions',
     upper(nullif(v_session ->> 'declared_currency', '')),
+    nullif(v_session ->> 'observation_date', '')::date,
+    coalesce((v_session ->> 'stable_transaction_id_declared')::boolean, false),
     nullif(v_session ->> 'declared_period_start', '')::date,
     nullif(v_session ->> 'declared_period_end', '')::date,
     nullif(v_session ->> 'observed_period_start', '')::date,
@@ -633,8 +780,8 @@ begin
   -- fichier : c'est ce rattachement qui rend la provenance traçable jusqu'à la cellule.
   insert into public.import_normalized_records (
     user_id, session_id, raw_record_id, target_domain, account_id,
-    transaction_date, value_date, label, amount, currency, external_reference,
-    counterparty, balance_after, status, dedupe_verdict, dedupe_fingerprint,
+    transaction_date, value_date, label, amount, currency, external_transaction_id,
+    reference, counterparty, balance_after, status, dedupe_verdict, match_key,
     external_key, matched_transaction_id, issues, source
   )
   select
@@ -646,12 +793,13 @@ begin
     nullif(entry ->> 'label', ''),
     nullif(entry ->> 'amount', '')::numeric,
     upper(nullif(entry ->> 'currency', '')),
-    nullif(entry ->> 'external_reference', ''),
+    nullif(entry ->> 'external_transaction_id', ''),
+    nullif(entry ->> 'reference', ''),
     nullif(entry ->> 'counterparty', ''),
     nullif(entry ->> 'balance_after', '')::numeric,
     entry ->> 'status',
     nullif(entry ->> 'dedupe_verdict', ''),
-    nullif(entry ->> 'dedupe_fingerprint', ''),
+    nullif(entry ->> 'match_key', ''),
     nullif(entry ->> 'external_key', ''),
     nullif(entry ->> 'matched_transaction_id', '')::uuid,
     coalesce(entry -> 'issues', '[]'::jsonb),
@@ -810,6 +958,12 @@ begin
   if v_status <> 'ANALYZED' then
     raise exception 'Seule une session analysée peut être abandonnée (statut %)', v_status;
   end if;
+
+  -- Ordre imposé par les gardes d'immuabilité : les lignes normalisées d'abord (aucune
+  -- n'est committée sur une session ANALYSÉE), puis le brut. Le statut ne passe à
+  -- DISCARDED qu'ensuite, sans quoi la garde du brut refuserait sa propre suppression.
+  delete from public.import_normalized_records
+   where session_id = p_session_id and user_id = p_user_id;
 
   delete from public.import_raw_records
    where session_id = p_session_id and user_id = p_user_id;

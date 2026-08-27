@@ -67,7 +67,8 @@ const MAPPABLE_FIELDS: Array<{ field: BankTargetField; label: string; required: 
   { field: "credit", label: "Crédit", required: false },
   { field: "currency", label: "Devise", required: false },
   { field: "valueDate", label: "Date de valeur", required: false },
-  { field: "externalReference", label: "Référence de la source", required: false },
+  { field: "externalTransactionId", label: "Identifiant de transaction", required: false },
+  { field: "reference", label: "Référence descriptive", required: false },
   { field: "counterparty", label: "Contrepartie", required: false },
   { field: "balanceAfter", label: "Solde après opération", required: false },
 ];
@@ -118,6 +119,12 @@ function ImportsPage({ state, refresh }: SectionProps) {
   const [chosenCurrency, setChosenCurrency] = useState<string | null>(null);
   const [retainFile, setRetainFile] = useState(true);
   const [rememberMapping, setRememberMapping] = useState(true);
+  /**
+   * Déclaration de stabilité de l'identifiant. Décochée par défaut, et ce défaut est le
+   * bon : prendre une référence bancaire pour une identité ferait disparaître des
+   * opérations réelles.
+   */
+  const [stableIdDeclared, setStableIdDeclared] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -191,6 +198,7 @@ function ImportsPage({ state, refresh }: SectionProps) {
         declaredPeriodStart: null,
         declaredPeriodEnd: null,
         mapping,
+        stableTransactionIdDeclared: stableIdDeclared,
         rememberMapping,
         retainFile,
       }),
@@ -338,6 +346,20 @@ function ImportsPage({ state, refresh }: SectionProps) {
             />
             Mémoriser le mapping pour ce format
           </label>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={stableIdDeclared}
+              onChange={(event) => setStableIdDeclared(event.target.checked)}
+            />
+            La colonne d’identifiant porte un identifiant unique et stable
+          </label>
+          <small className="field-hint">
+            À ne cocher que si votre banque garantit un identifiant propre à chaque opération. Sans
+            cette déclaration, une opération identique à une opération connue est signalée pour
+            confirmation au lieu d’être écartée : une référence répétée chaque mois ferait
+            disparaître de vraies dépenses.
+          </small>
           <button className="button secondary" disabled={busy || !accountId || !pendingFile}>
             {busy ? "Analyse…" : "Analyser sans rien écrire"}
           </button>
@@ -413,6 +435,14 @@ function ImportsPage({ state, refresh }: SectionProps) {
               <strong>
                 {CONVENTION_LABELS[preview.conventions.date] ?? preview.conventions.date}
               </strong>
+            </span>
+            <span>
+              <small>Déjà présentes (probable)</small>
+              <strong>{preview.verdicts.probableDuplicate}</strong>
+            </span>
+            <span>
+              <small>Identité démontrée</small>
+              <strong>{preview.verdicts.exactDuplicate}</strong>
             </span>
             <span>
               <small>Période observée</small>

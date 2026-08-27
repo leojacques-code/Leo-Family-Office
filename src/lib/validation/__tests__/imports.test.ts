@@ -13,6 +13,7 @@ function analyze(overrides: Record<string, unknown> = {}) {
     declaredPeriodStart: null,
     declaredPeriodEnd: null,
     mapping: null,
+    stableTransactionIdDeclared: false,
     rememberMapping: true,
     retainFile: false,
     ...overrides,
@@ -53,6 +54,27 @@ describe("paramètres d'analyse", () => {
   it("accepte un mapping imposé et refuse un champ cible inconnu", () => {
     expect(analyze({ mapping: { transactionDate: 0, label: 1, amount: 2 } }).success).toBe(true);
     expect(analyze({ mapping: { transactionDate: 0, inventé: 1 } }).success).toBe(false);
+    // Le champ historique a été scindé : une référence n'est plus un identifiant.
+    expect(analyze({ mapping: { externalReference: 1 } }).success).toBe(false);
+    expect(analyze({ mapping: { reference: 1, externalTransactionId: 2 } }).success).toBe(true);
+  });
+
+  it("exige une déclaration EXPLICITE de stabilité de l'identifiant", () => {
+    const parsed = analyze({ stableTransactionIdDeclared: true });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.stableTransactionIdDeclared).toBe(true);
+    // Le champ est obligatoire : l'omettre ne vaut pas « non déclaré par défaut » côté API,
+    // la valeur doit être portée par l'appelant.
+    const missing = importAnalyzeSchema.safeParse({
+      accountId: ACCOUNT,
+      declaredCurrency: "EUR",
+      declaredPeriodStart: null,
+      declaredPeriodEnd: null,
+      mapping: null,
+      rememberMapping: true,
+      retainFile: false,
+    });
+    expect(missing.success).toBe(false);
   });
 
   it("refuse un index de colonne négatif ou non entier", () => {

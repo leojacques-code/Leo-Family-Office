@@ -1,27 +1,48 @@
 /**
- * DÉDUPLICATION — reconnaître ce qui existe déjà, sans effacer ce qui existe vraiment.
+ * DÉDUPLICATION — reconnaître ce qui existe déjà, sans jamais effacer ce qui existe
+ * vraiment.
  *
  * Deux erreurs symétriques sont possibles, et elles ne coûtent pas la même chose. Compter
  * deux fois la même opération fausse le patrimoine et les flux sans laisser de trace
  * visible. Écarter une opération réelle laisse un trou que l'utilisateur voit et peut
- * corriger par un nouvel import. La couche d'acquisition choisit donc, à égalité de doute,
- * de ne PAS écrire, et de le dire.
+ * corriger. La couche d'acquisition choisit donc, à égalité de doute, de ne PAS écrire, et
+ * de le dire — mais elle ne se donne jamais le droit de DÉCIDER seule qu'une opération
+ * réelle n'existe pas.
  *
- * Trois rangs d'identification, du plus fort au plus faible :
+ * ─────────────────────────────────────────────────────────────────────────────────────
+ * POURQUOI UNE ÉGALITÉ DE TUPLE NE DÉMONTRE PAS UNE IDENTITÉ
  *
- *   1. identifiant stable fourni par la source, préfixé par la source
- *   2. empreinte déterministe (compte, date, montant, devise, libellé) + RANG d'occurrence
- *   3. ressemblance : même montant à quelques jours près, ou même date et même montant
- *      sous un libellé différent
+ * Historique canonique :
  *
- * Le rang d'occurrence est ce qui distingue « deux fois la même ligne » de « deux
- * opérations réellement identiques ». Deux cafés à 3,20 € le même jour sont deux dépenses :
- * la première porte le rang 1, la seconde le rang 2. Un réimport du même fichier retrouve
- * les deux rangs déjà écrits et n'en crée aucun.
+ *     13/08  COFFEE SHOP  -3,20 €
+ *     13/08  COFFEE SHOP  -3,20 €
+ *
+ * Deux opérations réelles. Plus tard, un relevé partiel contient une seule ligne :
+ *
+ *     13/08  COFFEE SHOP  -3,20 €
+ *
+ * S'agit-il d'une des deux déjà connues, ou d'un TROISIÈME café réel ? Rien dans le
+ * fichier ne permet de le savoir. Un rang d'occurrence calculé sur le fichier candidat ne
+ * le dit pas non plus : il compte les lignes de CE fichier, pas les opérations du monde.
+ *
+ * Conclure `EXACT_DUPLICATE` reviendrait à supprimer une dépense réelle en silence. Cette
+ * égalité produit donc `PROBABLE_DUPLICATE` : visible, non écrite par défaut, et
+ * écrivable sur décision explicite.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────────────
+ * CE QUI DÉMONTRE UNE IDENTITÉ
+ *
+ *   1. l'empreinte du FICHIER, au niveau session : un contenu déjà validé pour cette
+ *      source est refusé avant même d'arriver ici (invariant de base) ;
+ *   2. un identifiant de transaction dont la STABILITÉ est garantie — par le contrat d'un
+ *      provider, ou par une déclaration explicite de l'utilisateur pour ce format. Le nom
+ *      d'un en-tête ne garantit rien : « Référence » peut être un motif de virement
+ *      répété chaque mois.
+ *
+ * Hors de ces deux cas, aucun verdict automatique ne fait disparaître une ligne.
  */
 
-import { labelFingerprintForm } from "@/lib/acquisition/normalization";
-import { issue } from "@/lib/acquisition/normalization";
+import { issue, labelFingerprintForm } from "@/lib/acquisition/normalization";
 import type {
   ExistingTransactionFact,
   ImportDedupeVerdict,
@@ -38,13 +59,19 @@ export interface DedupeCandidate {
   label: string;
   amount: number;
   currency: string;
-  externalReference: string | null;
+  /**
+   * Identifiant PRÉTENDU par la source. Il ne décide d'une identité que si la stabilité
+   * est déclarée pour la session : voir `DedupeInput.stableIdentifiers`.
+   */
+  externalTransactionId: string | null;
 }
 
 export interface DedupeOutcome {
   rowNumber: number;
   verdict: ImportDedupeVerdict;
-  fingerprint: string;
+  /** Clé de rapprochement lisible. Jamais une identité, jamais une contrainte d'unicité. */
+  matchKey: string;
+  /** Identité démontrée, ou `null`. */
   externalKey: string | null;
   matchedTransactionId: string | null;
   issues: ImportIssue[];
@@ -57,9 +84,9 @@ function amountForm(amount: number): string {
 }
 
 /**
- * Clé d'égalité stricte d'une opération. Le libellé y entre sous sa forme comparable :
- * une différence d'accent ou d'espace ne doit pas créer un faux « nouveau » flux, mais un
- * libellé réellement différent reste une opération différente.
+ * Clé de RESSEMBLANCE stricte d'une opération. Le libellé y entre sous sa forme
+ * comparable : une différence d'accent ou d'espace ne doit pas créer un faux « nouveau »
+ * flux, mais un libellé réellement différent reste une opération différente.
  */
 function exactKeyOf(candidate: {
   accountId: string;
@@ -106,18 +133,22 @@ function amountDateKeyOf(candidate: {
 }
 
 /**
- * Empreinte persistée. Volontairement LISIBLE plutôt que hachée : elle sert d'unicité en
- * base et de preuve d'audit. Un utilisateur qui demande « pourquoi cette ligne est-elle un
- * doublon ? » doit pouvoir lire la réponse, pas un condensé hexadécimal.
+ * Clé de rapprochement persistée. Volontairement LISIBLE plutôt que hachée : elle sert à
+ * expliquer un rapprochement, pas à le décider.
+ *
+ * Le rang d'occurrence qu'elle porte est LOCAL À L'ANALYSE : il numérote les lignes
+ * identiques du fichier courant. Il ne prétend pas numéroter les opérations du compte, et
+ * aucune contrainte d'unicité ne s'appuie sur lui — c'était précisément l'erreur qui
+ * transformait une ressemblance en identité.
  */
-export function fingerprintOf(
+export function matchKeyOf(
   candidate: Parameters<typeof exactKeyOf>[0],
-  occurrence: number,
+  occurrenceInFile: number,
 ): string {
-  return `v1|${exactKeyOf(candidate)}|#${occurrence}`;
+  return `v2|${exactKeyOf(candidate)}|~${occurrenceInFile}`;
 }
 
-/** Clé externe qualifiée par sa source : deux banques peuvent utiliser la même référence. */
+/** Clé d'identité qualifiée par sa source : deux banques peuvent utiliser la même référence. */
 export function externalKeyOf(sourceKey: string, reference: string): string {
   return `${sourceKey}#${reference.trim()}`;
 }
@@ -132,17 +163,20 @@ function dayDistance(left: string, right: string): number {
 export interface DedupeInput {
   candidates: readonly DedupeCandidate[];
   existing: readonly ExistingTransactionFact[];
-  /** Préfixe des clés externes : identifiant de la source, jamais celui de la session. */
+  /** Préfixe des clés d'identité : identifiant de la source, jamais celui de la session. */
   sourceKey: string;
+  /**
+   * La source garantit-elle que `externalTransactionId` est un identifiant STABLE et
+   * unique ? `false` par défaut, et `false` pour un CSV bancaire générique : aucun nom
+   * d'en-tête ne prouve la stabilité. Seule une déclaration explicite l'établit.
+   */
+  stableIdentifiers: boolean;
   dayWindow?: number;
 }
 
 /**
  * Classe chaque candidat par rapport aux faits déjà canoniques ET aux candidats qui le
  * précèdent dans le même fichier.
- *
- * L'ordre du fichier est significatif : c'est lui qui attribue les rangs d'occurrence, et
- * il doit donc être stable d'un import à l'autre pour que l'idempotence tienne.
  */
 export function classifyCandidates(input: DedupeInput): DedupeOutcome[] {
   const window = input.dayWindow ?? PROBABLE_DUPLICATE_DAY_WINDOW;
@@ -170,45 +204,66 @@ export function classifyCandidates(input: DedupeInput): DedupeOutcome[] {
     amountDateBuckets.set(amountDate, amountDateBucket);
   }
 
-  const consumedOrdinals = new Map<string, number>();
+  const occurrencesInFile = new Map<string, number>();
   const claimedIds = new Set<string>();
+  const claimedExternalKeys = new Set<string>();
   const outcomes: DedupeOutcome[] = [];
 
   for (const candidate of input.candidates) {
     const exact = exactKeyOf(candidate);
-    const ordinalIndex = consumedOrdinals.get(exact) ?? 0;
-    consumedOrdinals.set(exact, ordinalIndex + 1);
-    const fingerprint = fingerprintOf(candidate, ordinalIndex + 1);
-    const externalKey = candidate.externalReference
-      ? externalKeyOf(input.sourceKey, candidate.externalReference)
-      : null;
+    const occurrence = (occurrencesInFile.get(exact) ?? 0) + 1;
+    occurrencesInFile.set(exact, occurrence);
+    const matchKey = matchKeyOf(candidate, occurrence);
 
-    // Rang 1 : un identifiant stable tranche seul, dans les deux sens.
-    if (externalKey) {
+    // ── Identité DÉMONTRÉE : le seul chemin vers un rejet automatique ────────────────
+    if (input.stableIdentifiers && candidate.externalTransactionId) {
+      const externalKey = externalKeyOf(input.sourceKey, candidate.externalTransactionId);
       const matched = byExternalKey.get(externalKey);
       if (matched) {
         outcomes.push({
           rowNumber: candidate.rowNumber,
           verdict: "EXACT_DUPLICATE",
-          fingerprint,
+          matchKey,
           externalKey,
           matchedTransactionId: matched,
           issues: [
             issue(
               "DUPLICATE_EXACT",
               "INFO",
-              "Opération déjà importée : même identifiant de source.",
-              "externalReference",
-              candidate.externalReference,
+              "Opération déjà importée : même identifiant stable de source.",
+              "externalTransactionId",
+              candidate.externalTransactionId,
             ),
           ],
         });
         continue;
       }
+      // La source se contredit : le même identifiant stable deux fois dans un fichier ne
+      // peut pas désigner deux opérations. La seconde ligne n'est pas écrite.
+      if (claimedExternalKeys.has(externalKey)) {
+        outcomes.push({
+          rowNumber: candidate.rowNumber,
+          verdict: "EXACT_DUPLICATE",
+          matchKey,
+          externalKey,
+          matchedTransactionId: null,
+          issues: [
+            issue(
+              "DUPLICATE_EXACT",
+              "WARNING",
+              "Cet identifiant stable apparaît déjà plus haut dans le fichier : il ne peut pas désigner deux opérations.",
+              "externalTransactionId",
+              candidate.externalTransactionId,
+            ),
+          ],
+        });
+        continue;
+      }
+      claimedExternalKeys.add(externalKey);
       outcomes.push({
         rowNumber: candidate.rowNumber,
         verdict: "NEW",
-        fingerprint,
+        matchKey,
         externalKey,
         matchedTransactionId: null,
         issues: [],
@@ -216,28 +271,34 @@ export function classifyCandidates(input: DedupeInput): DedupeOutcome[] {
       continue;
     }
 
-    // Rang 2 : égalité stricte au rang d'occurrence près.
+    // ── Aucune identité démontrée : au mieux une ressemblance ────────────────────────
+    //
+    // Une opération déjà connue portant exactement le même tuple est un candidat de
+    // rapprochement fort, jamais une preuve. Chaque opération existante n'est revendiquée
+    // qu'une fois : trois lignes identiques face à deux opérations connues rapprochent les
+    // deux premières et laissent la troisième NOUVELLE, parce qu'aucune opération connue
+    // ne peut plus l'expliquer.
     const bucket = exactBuckets.get(exact) ?? [];
-    if (ordinalIndex < bucket.length) {
+    const available = bucket.find((id) => !claimedIds.has(id));
+    if (available) {
+      claimedIds.add(available);
       outcomes.push({
         rowNumber: candidate.rowNumber,
-        verdict: "EXACT_DUPLICATE",
-        fingerprint,
+        verdict: "PROBABLE_DUPLICATE",
+        matchKey,
         externalKey: null,
-        matchedTransactionId: bucket[ordinalIndex],
+        matchedTransactionId: available,
         issues: [
           issue(
-            "DUPLICATE_EXACT",
-            "INFO",
-            "Opération identique déjà présente (compte, date, montant, devise, libellé).",
+            "MATCH_WITHOUT_STABLE_ID",
+            "WARNING",
+            "Une opération identique existe déjà (compte, date, montant, devise, libellé). Sans identifiant stable, il est impossible de prouver qu'il s'agit de la même : confirmer pour l'écrire quand même.",
           ),
         ],
       });
-      claimedIds.add(bucket[ordinalIndex]);
       continue;
     }
 
-    // Rang 3 : ressemblances. Signalées, jamais écartées d'office.
     const looseBucket = looseBuckets.get(looseKeyOf(candidate)) ?? [];
     const near = looseBucket.find(
       (entry) =>
@@ -250,7 +311,7 @@ export function classifyCandidates(input: DedupeInput): DedupeOutcome[] {
       outcomes.push({
         rowNumber: candidate.rowNumber,
         verdict: "PROBABLE_DUPLICATE",
-        fingerprint,
+        matchKey,
         externalKey: null,
         matchedTransactionId: near.id,
         issues: [
@@ -273,7 +334,7 @@ export function classifyCandidates(input: DedupeInput): DedupeOutcome[] {
       outcomes.push({
         rowNumber: candidate.rowNumber,
         verdict: "POSSIBLE_MATCH",
-        fingerprint,
+        matchKey,
         externalKey: null,
         matchedTransactionId: sameAmountDate.id,
         issues: [
@@ -290,7 +351,7 @@ export function classifyCandidates(input: DedupeInput): DedupeOutcome[] {
     outcomes.push({
       rowNumber: candidate.rowNumber,
       verdict: "NEW",
-      fingerprint,
+      matchKey,
       externalKey: null,
       matchedTransactionId: null,
       issues: [],

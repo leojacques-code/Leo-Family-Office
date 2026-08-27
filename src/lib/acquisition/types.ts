@@ -63,7 +63,17 @@ export type ImportRowStatus = (typeof IMPORT_ROW_STATUSES)[number];
  * Verdict de déduplication.
  *
  * DUPLICATE ≠ NEW EVENT, mais RESSEMBLANCE ≠ DOUBLON : deux cafés du même jour au même
- * prix sont deux dépenses réelles. Seul `EXACT_DUPLICATE` est écarté sans demander.
+ * prix sont deux dépenses réelles.
+ *
+ * `EXACT_DUPLICATE` signifie IDENTITÉ DÉMONTRÉE, et rien d'autre. Une égalité de tuple
+ * (compte, date, montant, devise, libellé) ne la démontre PAS entre deux fichiers
+ * distincts : un relevé partiel qui contient un troisième café identique ne prouve pas
+ * qu'il s'agit d'un des deux déjà connus. Une telle égalité produit donc
+ * `PROBABLE_DUPLICATE`, visible et non écrite par défaut, jamais un rejet silencieux.
+ *
+ * L'identité n'est démontrée que par un identifiant de transaction dont la STABILITÉ est
+ * garantie par le contrat de la source — ou, au niveau session, par l'empreinte du fichier
+ * déjà validé, qui bloque le réimport avant même la déduplication.
  */
 export const IMPORT_DEDUPE_VERDICTS = [
   "NEW",
@@ -110,6 +120,7 @@ export const IMPORT_ISSUE_CODES = [
   "MAPPING_CONFLICT",
   "MAPPING_AMOUNT_SHAPE",
   "MAPPING_UNKNOWN_COLUMN",
+  "MAPPING_DUPLICATE_COLUMN",
   // Conventions
   "AMOUNT_CONVENTION_AMBIGUOUS",
   "DATE_CONVENTION_AMBIGUOUS",
@@ -129,9 +140,12 @@ export const IMPORT_ISSUE_CODES = [
   "CURRENCY_MISSING",
   "CURRENCY_UNKNOWN",
   "CURRENCY_FROM_SESSION_DECLARATION",
+  "VALUE_DATE_UNPARSEABLE",
+  "BALANCE_AFTER_UNPARSEABLE",
   // Déduplication
   "DUPLICATE_EXACT",
   "DUPLICATE_PROBABLE",
+  "MATCH_WITHOUT_STABLE_ID",
   "POSSIBLE_MATCH",
 ] as const;
 export type ImportIssueCode = (typeof IMPORT_ISSUE_CODES)[number];
@@ -153,7 +167,19 @@ export const BANK_TARGET_FIELDS = [
   "debit",
   "credit",
   "currency",
-  "externalReference",
+  /**
+   * Colonne qui PRÉTEND porter un identifiant de transaction. « Prétend » : le nom d'un
+   * en-tête ne garantit aucune stabilité. Elle ne devient une identité que si
+   * l'utilisateur le DÉCLARE pour la session.
+   */
+  "externalTransactionId",
+  /**
+   * Référence descriptive : référence bancaire, numéro d'opération, motif, référence de
+   * bout en bout. Une banque peut la répéter, la partager entre opérations d'un lot ou la
+   * réutiliser d'un mois sur l'autre. Elle est conservée pour l'audit et ne décide JAMAIS
+   * d'une identité.
+   */
+  "reference",
   "counterparty",
   "balanceAfter",
 ] as const;
@@ -211,7 +237,10 @@ export interface NormalizedBankRow {
   /** Montant SIGNÉ en devise native : négatif pour une sortie. */
   amount: number | null;
   currency: string | null;
-  externalReference: string | null;
+  /** Identifiant prétendu par la source. Ne devient une identité que sur déclaration. */
+  externalTransactionId: string | null;
+  /** Référence descriptive. Conservée pour l'audit, ne décide jamais d'une identité. */
+  reference: string | null;
   counterparty: string | null;
   /** Solde après opération, conservé pour la traçabilité. Aucun calcul ne le consomme. */
   balanceAfter: number | null;
@@ -222,18 +251,22 @@ export interface NormalizedBankRow {
    */
   verdict: ImportDedupeVerdict | null;
   /**
-   * Empreinte déterministe servant à la déduplication de second rang. `null` quand la
-   * ligne n'est pas assez complète pour être identifiée.
+   * Clé de RAPPROCHEMENT, lisible et déterministe. Ce n'est PAS une identité et elle ne
+   * porte aucune unicité en base : elle sert à expliquer pourquoi deux lignes se
+   * ressemblent. Le rang d'occurrence qu'elle contient est local à l'analyse.
    */
-  fingerprint: string | null;
-  /** Identifiant stable fourni par la source, préfixé par la source. Rang supérieur. */
+  matchKey: string | null;
+  /**
+   * Identité DÉMONTRÉE : identifiant de transaction dont la stabilité est déclarée par la
+   * source ou par l'utilisateur, préfixé par la source. `null` = aucune identité forte.
+   */
   externalKey: string | null;
   /** Transaction déjà présente que ce candidat reproduit, quand elle est identifiée. */
   matchedTransactionId: string | null;
   issues: ImportIssue[];
 }
 
-/** Décompte d'une session. Aucun total n'est arrondi ni estimé. */
+/** Décompte d'une session par STATUT. Aucun total n'est arrondi ni estimé. */
 export interface ImportRowCounts {
   total: number;
   ready: number;
@@ -241,6 +274,19 @@ export interface ImportRowCounts {
   blocked: number;
   duplicate: number;
   ignored: number;
+}
+
+/**
+ * Décompte par VERDICT de déduplication. Distinct du statut : une ligne signalée peut
+ * l'être parce qu'elle ressemble à une opération connue ou pour une raison de lecture, et
+ * l'utilisateur n'arbitre pas les deux de la même façon.
+ */
+export interface ImportVerdictCounts {
+  fresh: number;
+  exactDuplicate: number;
+  probableDuplicate: number;
+  possibleMatch: number;
+  notEvaluated: number;
 }
 
 /** Résultat complet d'une analyse de fichier : le dry-run, avant toute écriture canonique. */
@@ -261,6 +307,7 @@ export interface BankCsvAnalysis {
   rawRows: RawRow[];
   rows: NormalizedBankRow[];
   counts: ImportRowCounts;
+  verdicts: ImportVerdictCounts;
   /** Anomalies de fichier, distinctes des anomalies de ligne. */
   issues: ImportIssue[];
   /** Bornes des dates réellement OBSERVÉES. Ne certifient aucune exhaustivité. */
@@ -275,6 +322,9 @@ export interface ExistingTransactionFact {
   label: string;
   amount: number;
   currency: string;
-  /** Clé externe si la transaction vient elle-même d'un import qui en portait une. */
+  /**
+   * Clé d'identité si la transaction vient d'un import qui en portait une DÉCLARÉE stable.
+   * `null` pour une saisie manuelle comme pour un import sans identifiant démontré.
+   */
   externalKey: string | null;
 }

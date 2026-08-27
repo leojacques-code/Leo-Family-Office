@@ -38,6 +38,7 @@ import type {
   ImportIssue,
   ImportRowCounts,
   ImportRowStatus,
+  ImportVerdictCounts,
   NormalizedBankRow,
   RawRow,
 } from "@/lib/acquisition/types";
@@ -62,10 +63,23 @@ export interface BankCsvAnalysisInput {
   declaredCurrency: string | null;
   /** Faits canoniques déjà présents, servant à la déduplication. */
   existing: readonly ExistingTransactionFact[];
-  /** Préfixe des clés externes : identifiant stable de la source. */
+  /** Préfixe des clés d'identité : identifiant de la source. */
   sourceKey: string;
-  /** Date d'observation, pour signaler une opération postérieure. */
-  asOfDate: string;
+  /**
+   * Date à laquelle l'import est RÉELLEMENT effectué. Ce n'est PAS la date d'arrêté du
+   * reporting : une opération bookée hier est un fait réel même si le cockpit arrête ses
+   * comptes le mois dernier. L'acquisition ingère le fait ; les moteurs aval décident
+   * ensuite s'ils le retiennent à leur propre date d'analyse.
+   *
+   * Injectée par l'appelant, jamais lue depuis l'horloge : le moteur reste déterministe.
+   */
+  observationDate: string;
+  /**
+   * La source garantit-elle la STABILITÉ de sa colonne d'identifiant ? `false` par défaut.
+   * Un CSV bancaire générique ne garantit rien : seule une déclaration explicite de
+   * l'utilisateur autorise un identifiant à décider d'une identité.
+   */
+  stableIdentifiers: boolean;
   /** Mapping imposé : confirmé par l'utilisateur, ou mémorisé pour ce format. */
   mappingOverride?: BankColumnMapping | null;
   maxRows?: number;
@@ -78,6 +92,28 @@ function column(row: RawRow, index: number | undefined): string {
 
 function emptyCounts(): ImportRowCounts {
   return { total: 0, ready: 0, warning: 0, blocked: 0, duplicate: 0, ignored: 0 };
+}
+
+function emptyVerdicts(): ImportVerdictCounts {
+  return {
+    fresh: 0,
+    exactDuplicate: 0,
+    probableDuplicate: 0,
+    possibleMatch: 0,
+    notEvaluated: 0,
+  };
+}
+
+function countVerdicts(rows: readonly NormalizedBankRow[]): ImportVerdictCounts {
+  const counts = emptyVerdicts();
+  for (const row of rows) {
+    if (row.verdict === null) counts.notEvaluated += 1;
+    else if (row.verdict === "NEW") counts.fresh += 1;
+    else if (row.verdict === "EXACT_DUPLICATE") counts.exactDuplicate += 1;
+    else if (row.verdict === "PROBABLE_DUPLICATE") counts.probableDuplicate += 1;
+    else counts.possibleMatch += 1;
+  }
+  return counts;
 }
 
 function countRows(rows: readonly NormalizedBankRow[]): ImportRowCounts {
@@ -173,12 +209,13 @@ function normalizeRow(
     label: null,
     amount: null,
     currency: null,
-    externalReference: null,
+    externalTransactionId: null,
+    reference: null,
     counterparty: null,
     balanceAfter: null,
     status: "IGNORED",
     verdict: null,
-    fingerprint: null,
+    matchKey: null,
     externalKey: null,
     matchedTransactionId: null,
     issues,
@@ -248,12 +285,14 @@ function normalizeRow(
       ),
     );
   }
-  if (parsedDate.value !== null && parsedDate.value > input.asOfDate) {
+  // Postérieure à la date de l'IMPORT, pas à la date d'arrêté du reporting. Une opération
+  // du 26/08 importée le 27/08 est un fait réel, même si le cockpit arrête au 19/08.
+  if (parsedDate.value !== null && parsedDate.value > input.observationDate) {
     issues.push(
       issue(
         "DATE_IN_FUTURE",
         "WARNING",
-        "Opération postérieure à la date d'observation.",
+        `Opération datée après le jour de l'import (${input.observationDate}) : vérifier la date.`,
         "transactionDate",
         rawDate,
       ),
@@ -261,10 +300,26 @@ function normalizeRow(
   }
 
   // ── Date de valeur ────────────────────────────────────────────────────────────────
+  //
+  // ABSENT ≠ PRÉSENT MAIS ILLISIBLE. Aucun calcul de la V1 ne consomme cette date, mais une
+  // cellule renseignée que le parseur n'a pas comprise est une information PERDUE : elle se
+  // signale. Une cellule vide, elle, ne dit rien et ne signale rien.
   let valueDate: string | null = null;
-  if (mapping.valueDate !== undefined && conventions.valueDate) {
-    const parsed = parseDateWithConvention(column(row, mapping.valueDate), conventions.valueDate);
+  if (mapping.valueDate !== undefined) {
+    const rawValueDate = column(row, mapping.valueDate);
+    const parsed = parseDateWithConvention(rawValueDate, conventions.valueDate ?? "AMBIGUOUS");
     valueDate = parsed.value;
+    if (parsed.code !== "OK" && parsed.code !== "EMPTY") {
+      issues.push(
+        issue(
+          "VALUE_DATE_UNPARSEABLE",
+          "WARNING",
+          "Date de valeur renseignée mais illisible : elle n'est pas conservée.",
+          "valueDate",
+          rawValueDate,
+        ),
+      );
+    }
   }
 
   // ── Libellé ───────────────────────────────────────────────────────────────────────
@@ -382,12 +437,27 @@ function normalizeRow(
     }
   }
 
-  const externalReference = normalizeLabel(column(row, mapping.externalReference));
+  const externalTransactionId = normalizeLabel(column(row, mapping.externalTransactionId));
+  const reference = normalizeLabel(column(row, mapping.reference));
   const counterparty = normalizeLabel(column(row, mapping.counterparty));
-  const balanceAfter =
-    mapping.balanceAfter === undefined
-      ? null
-      : parseAmountWithConvention(column(row, mapping.balanceAfter), conventions.amount).value;
+
+  let balanceAfter: number | null = null;
+  if (mapping.balanceAfter !== undefined) {
+    const rawBalance = column(row, mapping.balanceAfter);
+    const parsed = parseAmountWithConvention(rawBalance, conventions.amount);
+    balanceAfter = parsed.value;
+    if (parsed.code !== "OK" && parsed.code !== "EMPTY") {
+      issues.push(
+        issue(
+          "BALANCE_AFTER_UNPARSEABLE",
+          "WARNING",
+          "Solde après opération renseigné mais illisible : il n'est pas conservé.",
+          "balanceAfter",
+          rawBalance,
+        ),
+      );
+    }
+  }
 
   return {
     ...base,
@@ -396,7 +466,8 @@ function normalizeRow(
     label,
     amount,
     currency,
-    externalReference,
+    externalTransactionId,
+    reference,
     counterparty,
     balanceAfter,
     status: statusFromIssues(issues),
@@ -446,6 +517,7 @@ export function analyzeBankCsv(input: BankCsvAnalysisInput): BankCsvAnalysis {
       rawRows: document.rows,
       rows: [],
       counts: emptyCounts(),
+      verdicts: emptyVerdicts(),
       issues: fileIssues,
       observedPeriod: null,
     };
@@ -468,6 +540,7 @@ export function analyzeBankCsv(input: BankCsvAnalysisInput): BankCsvAnalysis {
     rawRows: document.rows,
     rows,
     counts: countRows(rows),
+    verdicts: countVerdicts(rows),
     issues: fileIssues,
     observedPeriod: observedPeriodOf(rows),
   };
@@ -483,6 +556,7 @@ export function analyzeBankCsv(input: BankCsvAnalysisInput): BankCsvAnalysis {
     accountId: input.accountId,
     sourceKey: input.sourceKey,
     existing: input.existing,
+    stableIdentifiers: input.stableIdentifiers,
   });
 }
 
@@ -498,12 +572,19 @@ function observedPeriodOf(
 }
 
 /** Anomalies produites par la seule déduplication : elles sont remplacées, jamais empilées. */
-const DEDUPE_ISSUE_CODES = new Set(["DUPLICATE_EXACT", "DUPLICATE_PROBABLE", "POSSIBLE_MATCH"]);
+const DEDUPE_ISSUE_CODES = new Set([
+  "DUPLICATE_EXACT",
+  "DUPLICATE_PROBABLE",
+  "MATCH_WITHOUT_STABLE_ID",
+  "POSSIBLE_MATCH",
+]);
 
 export interface DedupeContext {
   accountId: string;
   sourceKey: string;
   existing: readonly ExistingTransactionFact[];
+  /** Voir `BankCsvAnalysisInput.stableIdentifiers`. */
+  stableIdentifiers: boolean;
 }
 
 /**
@@ -531,7 +612,7 @@ export function applyDedupe(analysis: BankCsvAnalysis, context: DedupeContext): 
       label: row.label,
       amount: row.amount,
       currency: row.currency,
-      externalReference: row.externalReference,
+      externalTransactionId: row.externalTransactionId,
     });
   }
 
@@ -540,6 +621,7 @@ export function applyDedupe(analysis: BankCsvAnalysis, context: DedupeContext): 
       candidates,
       existing: context.existing,
       sourceKey: context.sourceKey,
+      stableIdentifiers: context.stableIdentifiers,
     }).map((outcome) => [outcome.rowNumber, outcome]),
   );
 
@@ -558,7 +640,7 @@ export function applyDedupe(analysis: BankCsvAnalysis, context: DedupeContext): 
     return {
       ...row,
       verdict: outcome.verdict,
-      fingerprint: outcome.fingerprint,
+      matchKey: outcome.matchKey,
       externalKey: outcome.externalKey,
       matchedTransactionId: outcome.matchedTransactionId,
       issues,
@@ -566,7 +648,13 @@ export function applyDedupe(analysis: BankCsvAnalysis, context: DedupeContext): 
     };
   });
 
-  return { ...analysis, rows, counts: countRows(rows), observedPeriod: observedPeriodOf(rows) };
+  return {
+    ...analysis,
+    rows,
+    counts: countRows(rows),
+    verdicts: countVerdicts(rows),
+    observedPeriod: observedPeriodOf(rows),
+  };
 }
 
 /**

@@ -10,6 +10,24 @@ describe("normalisation d'en-tête", () => {
 });
 
 describe("inférence de mapping", () => {
+  it("sépare un identifiant de transaction d'une référence descriptive", () => {
+    const result = inferBankMapping([
+      "Date operation",
+      "Libelle",
+      "Montant",
+      "Reference bancaire",
+      "Transaction ID",
+    ]);
+    expect(result.mapping.reference).toBe(3);
+    expect(result.mapping.externalTransactionId).toBe(4);
+  });
+
+  it("une colonne « Reference » seule n'est jamais lue comme un identifiant", () => {
+    const result = inferBankMapping(["Date operation", "Libelle", "Montant", "Reference"]);
+    expect(result.mapping.reference).toBe(3);
+    expect(result.mapping.externalTransactionId).toBeUndefined();
+  });
+
   it("associe un format français signé sans ambiguïté", () => {
     const result = inferBankMapping(["Date operation", "Libelle", "Montant", "Devise"]);
     expect(result.mapping).toEqual({ transactionDate: 0, label: 1, amount: 2, currency: 3 });
@@ -73,6 +91,19 @@ describe("validation d'un mapping imposé", () => {
       debit: 3,
     });
     expect(result.issues.map((entry) => entry.code)).toContain("MAPPING_CONFLICT");
+    expect(result.confidence).toBe("INCOMPLETE");
+  });
+
+  it("refuse une colonne source associée à deux champs", () => {
+    // Une colonne ne peut pas être à la fois le libellé et la référence : ce serait deux
+    // faits tirés de la même observation, sans qu'aucun soit faux isolément.
+    const result = validateBankMapping(["Date", "Libelle", "Montant"], {
+      transactionDate: 0,
+      label: 1,
+      reference: 1,
+      amount: 2,
+    });
+    expect(result.issues.map((entry) => entry.code)).toContain("MAPPING_DUPLICATE_COLUMN");
     expect(result.confidence).toBe("INCOMPLETE");
   });
 
