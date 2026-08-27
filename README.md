@@ -67,7 +67,7 @@ npm run build
 npm run check
 ```
 
-`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les tables, colonnes, contraintes, 44 RPC, triggers d'invariant, permissions, RLS, policies, bucket Storage ou l'historique de migration divergent du code. Le contrôle des migrations est symétrique : une version attendue absente échoue, et une version appliquée hors du dépôt échoue aussi.
+`npm run db:verify` ouvre une transaction PostgreSQL `READ ONLY`. Il échoue si les tables, colonnes, contraintes, 48 RPC, triggers d'invariant, permissions, RLS, policies, bucket Storage ou l'historique de migration divergent du code. Le contrôle des migrations est symétrique : une version attendue absente échoue, et une version appliquée hors du dépôt échoue aussi.
 
 Le même contrôle s'exécute sans aucun credential, sur un PostgreSQL local jetable reconstruit depuis les seules migrations du dépôt :
 
@@ -76,7 +76,7 @@ npm run db:local:up
 npm run gate:local
 ```
 
-La production et le dépôt sont alignés sur **24 migrations**. Les migrations 16 et 17 installent la fondation Portfolio puis les index couvrant ses clés étrangères. Les migrations 18 et 19 installent Real Estate V2 puis les index couvrant ses clés étrangères composites. Les migrations 20 et 21 installent Business Equity V2. Les migrations 22 à 24 installent Business Equity V2.1, ses index et ses invariants bloquants ; elles ont été appliquées en production le 26 août 2026 puis contrôlées par smokes transactionnels rollbackés, isolation `authenticated`, permissions RPC, RLS et advisors Supabase. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
+Le dépôt porte **25 migrations** ; la production en compte **24**. La 25e, `20260827093000_data_acquisition_foundation`, est verte au gate local et **n'a pas encore été poussée** : le push distant et `npm run db:verify` restent des étapes humaines, et aucun gate distant n'est déclaré vert sans avoir été exécuté. Les migrations 16 et 17 installent la fondation Portfolio puis les index couvrant ses clés étrangères. Les migrations 18 et 19 installent Real Estate V2 puis les index couvrant ses clés étrangères composites. Les migrations 20 et 21 installent Business Equity V2. Les migrations 22 à 24 installent Business Equity V2.1, ses index et ses invariants bloquants ; elles ont été appliquées en production le 26 août 2026 puis contrôlées par smokes transactionnels rollbackés, isolation `authenticated`, permissions RPC, RLS et advisors Supabase. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique de la divergence clôturée le 25 août 2026 et la procédure à reprendre si une autre apparaît.
 
 ## Fonctionnalités
 
@@ -86,7 +86,8 @@ La production et le dépôt sont alignés sur **24 migrations**. Les migrations 
 - Debt Engine V2/V2.1 et arbitrage rembourser vs investir ;
 - scénarios versionnés et duplicables ;
 - projection déterministe et Monte-Carlo reproductible, P10/P25/P50/P75/P90 ;
-- immobilier, business equity, objectifs, exports et coffre documentaire privé.
+- immobilier, business equity, objectifs, exports et coffre documentaire privé ;
+- import de relevés bancaires CSV avec preview, déduplication et provenance ligne à ligne.
 
 ## Schéma Supabase
 
@@ -116,6 +117,7 @@ Les migrations sont appliquées dans cet ordre, sans modification rétroactive :
 22. `20260826194551_business_equity_v2_1.sql`
 23. `20260826194605_business_equity_v2_1_indexes.sql`
 24. `20260826194644_business_equity_v2_1_blocking_invariants.sql`
+25. `20260827093000_data_acquisition_foundation.sql`
 
 La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persistance. Elle ne déplace aucune formule financière dans la base.
 Les migrations Canonical Balance Sheet V2 enrichissent et versionnent les snapshots, sans supprimer ni écraser les données historiques ; toutes les formules restent dans les engines TypeScript.
@@ -123,6 +125,8 @@ La migration 16 ajoute le ledger portefeuille (`portfolio_events`, `portfolio_en
 Les migrations 14 et 15 ne portent que des index de `net_worth_snapshot_items` : la 15 remplace l'index de la 14, l'état final couvrant la FK composite `(snapshot_id, user_id)`.
 
 Les migrations 20 et 21 installent les faits Business Equity et leur vérité datée. La migration 22 installe le VALUATION ENGINE et porte l'invariant central du domaine : **une valorisation dérivée n'est jamais persistée**. `business_valuations_basis_v2_ck` interdit une Enterprise Value ou une Equity Value sur une méthode dérivée ; la base ne stocke qu'un multiple, une base financière, des retraitements d'EBITDA (`business_ebitda_adjustments`), des éléments de pont (`business_bridge_items`), des paramètres de DCF (`business_dcf_assumptions`, `business_dcf_periods`) et les termes d'un tour de table. EV, Equity Value, fourchette, valeur attribuable, MOIC et XIRR sont dérivés par `src/lib/engine/business-valuation.ts` et ses voisins. Elle relâche aussi la détention à 0 % — une cession totale est un fait — et remplace l'unicité par date des valorisations par une unicité par date ET méthode, pour qu'une expertise et une transaction divergentes coexistent au lieu de s'écraser. La migration 23 ajoute les index couvrants dans l'ORDRE des clés étrangères composites `(business_id, user_id)`. La migration 24 ajoute la complétude explicite du bridge EV → Equity, les changements de détention atomiques avec leur événement et le Quick Start strict : une donnée inconnue ne devient jamais zéro.
+
+La migration 25 installe la Data Acquisition Foundation : six tables de staging (`import_sources`, `import_sessions`, `import_raw_records`, `import_normalized_records`, `import_record_links`, `import_column_mappings`), le trigger d'immuabilité `import_raw_records_immutable` et quatre RPC. Elle ne touche à AUCUN domaine financier : son seul point de contact est l'écriture de `transactions` avec `category_id` nul, donc une opération importée reste NON CLASSÉE et le Cash Flow Engine la compte comme telle. Trois index uniques partiels y portent l'idempotence : un contenu de fichier ne se valide qu'une fois par source, une empreinte de déduplication et un identifiant stable de source ne s'écrivent qu'une fois. Voir `docs/DATA_ACQUISITION.md`.
 
 La migration 18 installe Real Estate V2 : quatre tables de faits (`real_estate_valuations`, `real_estate_capital_events`, `real_estate_operating_terms`, `real_estate_financing_links`), les colonnes canoniques de `properties`, la colonne d'attribution `transactions.property_id`, neuf RPC et le trigger `real_estate_financing_links_allocation_guard`. Ce trigger est le seul endroit où la règle « la somme des quote-parts d'un même concours ne dépasse jamais 1 » est réellement garantie : il verrouille la ligne de dette, donc il tient sous concurrence et sur une écriture directe hors RPC. Elle ne crée AUCUNE seconde vérité : la dette immobilière reste une ligne de `liabilities` à laquelle le bien se rattache par une quote-part, et les flux réels restent des lignes de `transactions` simplement rattachées à un bien. Rendement, equity, plus-value et coût économique du financement sont dérivés par `src/lib/engine/real-estate.ts`. Les tables héritées `mortgages` et `real_estate_cashflows` y sont marquées obsolètes et ne sont ni lues ni écrites. La migration 19 ajoute les index couvrants dans l'ORDRE des clés étrangères composites `(property_id, user_id)` des trois tables de faits.
 
