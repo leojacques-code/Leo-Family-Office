@@ -31,11 +31,11 @@ import type { ImportIssue } from "@/lib/acquisition/types";
 import { isProfitAndLossGroup, type PcgGroup } from "@/lib/acquisition/fec/pcg";
 import type {
   FecAmount,
+  FecBalanceLine,
   FecBalanceSheet,
   FecCoverage,
   FecGroupBalance,
   FecIncomeStatement,
-  FecLine,
   FecStatementCandidate,
   FecStatementStatus,
 } from "@/lib/acquisition/fec/types";
@@ -57,7 +57,7 @@ function round(value: number): number {
  * Seules les lignes exploitables participent : une ligne bloquée n'a pas de montant fiable,
  * et l'inclure produirait un état financier faux avec l'air d'être complet.
  */
-export function groupBalances(lines: readonly FecLine[]): FecGroupBalance[] {
+export function groupBalances(lines: readonly FecBalanceLine[]): FecGroupBalance[] {
   const byGroup = new Map<PcgGroup, FecGroupBalance>();
   for (const line of lines) {
     if (line.status === "BLOCKED" || line.status === "IGNORED") continue;
@@ -377,7 +377,7 @@ export function buildBalanceSheet(index: GroupIndex): FecBalanceSheet {
 }
 
 export interface StatementInput {
-  lines: readonly FecLine[];
+  lines: readonly FecBalanceLine[];
   coverage: FecCoverage;
   currency: string;
   periodStart: string | null;
@@ -478,6 +478,26 @@ export function buildStatementCandidate(input: StatementInput): FecStatementCand
         `Trésorerie comptable négative (${balanceSheet.cash.value.toFixed(2)}) : c'est un découvert, pas une trésorerie. Elle ne sera pas transmise comme cash.`,
       ),
     );
+  }
+
+  // Deux postes ne peuvent pas être NÉGATIFS au canonique : la dette brute et
+  // l'amortissement. Un solde inversé n'est pas une dette négative, c'est une anomalie de
+  // lecture ou d'imputation — elle est signalée ici, et le poste n'est pas transmis. Le
+  // faire échouer plus tard sur une contrainte de base ne l'aurait pas expliqué.
+  for (const [label, value] of [
+    ["dette financière (comptes 16 et 17)", balanceSheet.financialDebt.value],
+    ["dotations aux amortissements (comptes 68)", income.depreciationExpense.value],
+    ["charges d'intérêts (comptes 661)", income.interestExpense.value],
+  ] as const) {
+    if (value !== null && value < 0) {
+      blockers.push(
+        issue(
+          "FEC_UNEXPECTED_SIGN",
+          "WARNING",
+          `Solde de sens inattendu sur ${label} (${value.toFixed(2)}) : le poste n'est pas transmis, faute de lecture fondée.`,
+        ),
+      );
+    }
   }
 
   const status: FecStatementStatus = blockers.some((entry) => entry.severity === "ERROR")

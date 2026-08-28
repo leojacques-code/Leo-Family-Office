@@ -274,8 +274,16 @@ export function toBusinessFinancialCandidate(
   if (statement.periodEnd === null) return null;
 
   const blockers = statement.blockers.filter((entry) => entry.severity === "ERROR");
-  const cash = statement.balanceSheet.cash.value;
-  const usableCash = cash !== null && cash >= 0 ? cash : null;
+
+  /**
+   * Le fait canonique refuse un négatif sur ces postes, et il a raison : une dette brute
+   * négative ou un amortissement négatif ne sont pas des montants, ce sont des anomalies.
+   * Les transmettre échouerait en base sans rien expliquer ; les transmettre en valeur
+   * absolue inventerait un chiffre. Ils deviennent donc `null`, et l'anomalie a déjà été
+   * signalée dans les blockers de l'état.
+   */
+  const nonNegativeOrNull = (value: number | null): number | null =>
+    value !== null && value >= 0 ? value : null;
 
   return {
     periodEnd: statement.periodEnd,
@@ -289,14 +297,14 @@ export function toBusinessFinancialCandidate(
     ebitda: statement.income.grossOperatingSurplus.value,
     ebit: statement.income.operatingResult.value,
     netIncome: statement.income.netResult.value,
-    cash: usableCash,
-    grossDebt: statement.balanceSheet.financialDebt.value,
+    cash: nonNegativeOrNull(statement.balanceSheet.cash.value),
+    grossDebt: nonNegativeOrNull(statement.balanceSheet.financialDebt.value),
     workingCapital: statement.balanceSheet.operatingWorkingCapital.value,
     // Le FEC ne dit pas ce qui a été DÉCAISSÉ en investissement : il dit ce qui a été
     // immobilisé et amorti. Un capex inventé depuis les dotations serait faux.
     capex: null,
-    depreciationAmortisation: statement.income.depreciationExpense.value,
-    interestExpense: statement.income.interestExpense.value,
+    depreciationAmortisation: nonNegativeOrNull(statement.income.depreciationExpense.value),
+    interestExpense: nonNegativeOrNull(statement.income.interestExpense.value),
     taxExpense: statement.income.incomeTaxExpense.value,
     freeCashFlow: null,
     basis: {

@@ -8,7 +8,7 @@
  * de l'analyse financière, et rien n'entre chez lui sans décision explicite.
  */
 
-import type { ImportIssue, ImportRowStatus } from "@/lib/acquisition/types";
+import type { ImportIssue, ImportRowStatus, SourceEncoding } from "@/lib/acquisition/types";
 import type { PcgClass, PcgGroup } from "@/lib/acquisition/fec/pcg";
 import type { FecField } from "@/lib/acquisition/fec/spec";
 
@@ -44,6 +44,19 @@ export interface FecLine {
   status: ImportRowStatus;
   issues: ImportIssue[];
 }
+
+/**
+ * Ce dont la reconstruction d'états dépend RÉELLEMENT, et rien de plus.
+ *
+ * Le nommer explicitement n'est pas de la cosmétique de typage : la reconstruction doit
+ * pouvoir repartir des écritures PERSISTÉES, pas seulement de la lecture en mémoire du
+ * fichier. Un fait canonique dérivé d'une charge fournie par le client ne serait pas
+ * vérifiable ; dérivé de ce que la base contient, il l'est.
+ */
+export type FecBalanceLine = Pick<
+  FecLine,
+  "status" | "pcgGroup" | "debit" | "credit" | "accountNumber"
+>;
 
 /**
  * Écriture comptable : plusieurs lignes qui ne se comprennent qu'ensemble.
@@ -183,7 +196,7 @@ export interface FecCounts {
 
 /** Analyse complète d'un FEC : le dry-run comptable. */
 export interface FecAnalysis {
-  encoding: string;
+  encoding: SourceEncoding;
   delimiter: string;
   headers: string[];
   /** Positions résolues des champs réglementaires. */
