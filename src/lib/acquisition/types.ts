@@ -42,8 +42,20 @@ export const IMPORT_SOURCE_STATUSES = [
 ] as const;
 export type ImportSourceStatus = (typeof IMPORT_SOURCE_STATUSES)[number];
 
-/** Cycle de vie d'une session d'import. `COMMITTED` est terminal et irréversible. */
-export const IMPORT_SESSION_STATUSES = ["ANALYZED", "COMMITTED", "DISCARDED", "FAILED"] as const;
+/**
+ * Cycle de vie d'une session d'import. `COMMITTED` est terminal et irréversible.
+ *
+ * `RECEIVING` n'existe que pour les sources volumineuses reçues par lots : une session qui
+ * reçoit encore ses lignes n'est pas une session analysée, et ses décomptes ne veulent
+ * encore rien dire.
+ */
+export const IMPORT_SESSION_STATUSES = [
+  "RECEIVING",
+  "ANALYZED",
+  "COMMITTED",
+  "DISCARDED",
+  "FAILED",
+] as const;
 export type ImportSessionStatus = (typeof IMPORT_SESSION_STATUSES)[number];
 
 /**

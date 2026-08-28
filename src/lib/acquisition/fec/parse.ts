@@ -37,9 +37,22 @@ import type { FecEntry, FecLine } from "@/lib/acquisition/fec/types";
  * Volontairement DISTINCT du plafond d'un relevé bancaire : une PME produit couramment
  * plusieurs dizaines de milliers d'écritures par exercice, et appliquer mécaniquement la
  * limite du CSV bancaire rendrait la fonctionnalité inutilisable sur des fichiers normaux.
- * Un dépassement ÉCHOUE : il ne tronque pas.
+ *
+ * Le chiffre est MESURÉ, pas choisi par symétrie. Sur la machine de développement, la
+ * lecture pure d'un fichier synthétique coûte :
+ *
+ *      50 000 lignes →  0,7 s, 211 Mo résidents
+ *     100 000 lignes →  2,0 s, 378 Mo
+ *     150 000 lignes →  3,3 s, 640 Mo
+ *     200 000 lignes →  4,7 s, 828 Mo
+ *
+ * Le brut, les écritures lues et leurs anomalies coexistent en mémoire le temps de
+ * l'analyse : le coût croît donc plus vite que linéairement. 150 000 lignes garde une marge
+ * réelle sous un budget d'un gigaoctet, là où 200 000 n'en garde presque aucune. Un
+ * dépassement ÉCHOUE : il ne tronque pas — un exercice amputé produirait des états
+ * financiers faux et d'apparence complète.
  */
-export const MAX_FEC_LINES = 200_000;
+export const MAX_FEC_LINES = 150_000;
 
 /** Tolérance d'équilibre d'une écriture, en unité monétaire. Absorbe l'arrondi, rien de plus. */
 export const BALANCE_TOLERANCE = 0.005;
