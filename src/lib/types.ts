@@ -447,10 +447,15 @@ export interface Scenario {
 export interface Goal {
   id: string;
   name: string;
+  description?: string | null;
   targetAmount: number;
   targetDate: string | null;
   priority: number;
-  status: "ACTIVE" | "ACHIEVED" | "PAUSED";
+  status: "ACTIVE" | "ACHIEVED" | "PAUSED" | "ARCHIVED";
+  version?: number;
+  constraintStrength?: import("@/lib/engine/goal-contracts").GoalConstraintStrength;
+  archivedAt?: string | null;
+  definition?: import("@/lib/engine/goal-contracts").GoalVersionDefinition;
 }
 
 export interface Alert {

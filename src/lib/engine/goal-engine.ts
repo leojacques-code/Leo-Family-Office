@@ -110,6 +110,43 @@ export function createGoalVersion(input: {
   return definition;
 }
 
+/** Compatibilité explicite : l'ancien Goal signifiait toujours Net Worth >= cible. */
+export function legacyGoalDefinition(input: {
+  goalId: string;
+  version?: number;
+  name: string;
+  description?: string | null;
+  targetAmount: number;
+  targetDate: string | null;
+  priority: number;
+  status: GoalVersionDefinition["status"];
+  reportingCurrency: string | null;
+  createdAt: string;
+}): GoalVersionDefinition {
+  return {
+    schemaVersion: GOAL_V2_SCHEMA_VERSION,
+    methodologyVersion: GOAL_METHODOLOGY_VERSION,
+    goalId: input.goalId,
+    version: input.version ?? 1,
+    name: input.name,
+    description: input.description ?? null,
+    status: input.status,
+    priority: input.priority,
+    constraintStrength: "SOFT",
+    target: {
+      metric: "NET_WORTH",
+      operator: "AT_LEAST",
+      value: input.targetAmount,
+      currency: input.reportingCurrency,
+      entityId: null,
+    },
+    targetDate: input.targetDate,
+    targetWindow: null,
+    createdAt: input.createdAt,
+    legacyCompatibility: true,
+  };
+}
+
 export function targetSatisfied(
   value: number,
   target: GoalVersionDefinition["target"],

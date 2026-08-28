@@ -74,6 +74,11 @@ import { buildDashboardEventTimeline } from "@/lib/engine/event-adapters";
 import { isScenarioVersionDefinition } from "@/lib/engine/scenario-engine";
 import type { ScenarioVersionDefinition } from "@/lib/engine/scenario-contracts";
 import {
+  isGoalVersionDefinition,
+  legacyGoalDefinition,
+} from "@/lib/engine/goal-engine";
+import type { GoalVersionDefinition } from "@/lib/engine/goal-contracts";
+import {
   enumValue,
   finiteNumber,
   nullableBoolean,
@@ -201,6 +206,48 @@ export function mapScenario(row: Row, definition?: ScenarioVersionDefinition): S
   };
 }
 
+export function mapGoal(
+  row: Row,
+  definition: GoalVersionDefinition | undefined,
+  reportingCurrency: string,
+): Goal {
+  const id = str(row.id);
+  const context = `goals[id=${id || "inconnu"}]`;
+  const targetAmount = finiteNumber(row.target_amount, `${context}.target_amount`);
+  const targetDate =
+    row.target_date === null || row.target_date === undefined ? null : str(row.target_date);
+  const priority = finiteNumber(row.priority, `${context}.priority`);
+  const status = str(row.status) as Goal["status"];
+  const version = finiteNumber(row.current_version ?? 1, `${context}.current_version`);
+  const current =
+    definition ??
+    legacyGoalDefinition({
+      goalId: id,
+      version,
+      name: str(row.name),
+      description: row.description ? str(row.description) : null,
+      targetAmount,
+      targetDate,
+      priority,
+      status,
+      reportingCurrency: reportingCurrency || null,
+      createdAt: str(row.updated_at || row.created_at || `${AS_OF_DATE}T00:00:00.000Z`),
+    });
+  return {
+    id,
+    name: current.name,
+    description: current.description,
+    targetAmount: current.target.value,
+    targetDate: current.targetDate ?? current.targetWindow?.endDate ?? null,
+    priority: current.priority,
+    status: current.status,
+    version: current.version,
+    constraintStrength: current.constraintStrength,
+    archivedAt: row.archived_at ? str(row.archived_at) : null,
+    definition: current,
+  };
+}
+
 export function validateSimulationRun(run: SimulationRun): void {
   finiteNumber(run.seed, "simulation_runs.seed");
   finiteNumber(run.simulations, "simulation_runs.simulations");
@@ -245,6 +292,16 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
   const db = supabaseAdmin();
   const user = ownerId();
   const mine = (table: string) => db.from(table).select("*").eq("user_id", user);
+  const optionalMine = async (table: string) => {
+    const result = await mine(table);
+    if (
+      result.error &&
+      (result.error.code === "PGRST205" || /relation .* does not exist/i.test(result.error.message))
+    ) {
+      return { data: [] as Row[], error: null };
+    }
+    return result;
+  };
 
   /**
    * Charge toute la fenêtre de ledger consommée par le produit, page par page.
@@ -323,6 +380,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       scenarioRows,
       scenarioVersionRows,
       goalRows,
+      goalVersionRows,
       recurringRuleRows,
       cashFlowCloseRows,
       alertRows,
@@ -381,6 +439,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("scenarios"),
       mine("scenario_versions"),
       mine("goals"),
+      optionalMine("goal_versions"),
       mine("recurring_cash_flow_rules"),
       mine("cash_flow_monthly_closes"),
       db.from("alerts").select("*").eq("user_id", user).eq("status", "OPEN"),
@@ -938,16 +997,24 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       .map((row) => mapScenario(row, currentScenarioVersions.get(str(row.id))))
       .sort((a, b) => (SCENARIO_NAME_ORDER[a.name] ?? 5) - (SCENARIO_NAME_ORDER[b.name] ?? 5));
 
+    const profileCurrency = str(profileRows[0]?.reporting_currency || REPORTING_CURRENCY);
+    const currentGoalVersions = new Map<string, GoalVersionDefinition>();
+    for (const row of goalVersionRows) {
+      const identity = goalRows.find((item) => str(item.id) === str(row.goal_id));
+      const currentVersion = identity
+        ? finiteNumber(identity.current_version ?? 1, `goals[id=${str(identity.id)}].current_version`)
+        : null;
+      if (
+        identity &&
+        currentVersion === finiteNumber(row.version, `goal_versions[id=${str(row.id)}].version`) &&
+        isGoalVersionDefinition(row.payload)
+      ) {
+        currentGoalVersions.set(str(row.goal_id), row.payload);
+      }
+    }
     const goals: Goal[] = goalRows
-      .map((row) => ({
-        id: str(row.id),
-        name: str(row.name),
-        targetAmount: finiteNumber(row.target_amount, `goals[id=${str(row.id)}].target_amount`),
-        targetDate:
-          row.target_date === null || row.target_date === undefined ? null : str(row.target_date),
-        priority: finiteNumber(row.priority, `goals[id=${str(row.id)}].priority`),
-        status: str(row.status) as Goal["status"],
-      }))
+      .filter((row) => str(row.status) !== "ARCHIVED")
+      .map((row) => mapGoal(row, currentGoalVersions.get(str(row.id)), profileCurrency))
       .sort((a, b) => a.priority - b.priority);
 
     const alerts: Alert[] = alertRows
@@ -1406,7 +1473,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }));
 
     const coverage = readLedgerCoverage(profileRows[0]);
-    const reportingCurrency = str(profileRows[0]?.reporting_currency || REPORTING_CURRENCY);
+    const reportingCurrency = profileCurrency;
     const careerRoles: CareerRole[] = careerRoleRows.map((row) => ({
       id: str(row.id),
       employer: row.employer ? str(row.employer) : null,
@@ -2634,19 +2701,60 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         break;
       }
       case "add_goal": {
+        const definition = legacyGoalDefinition({
+          goalId: crypto.randomUUID(),
+          name: mutation.name,
+          targetAmount: mutation.targetAmount,
+          targetDate: mutation.targetDate,
+          priority: 99,
+          status: "ACTIVE",
+          reportingCurrency: REPORTING_CURRENCY,
+          createdAt: now,
+        });
         unwrap(
-          await db
-            .from("goals")
-            .insert({
-              user_id: user,
-              name: mutation.name,
-              target_amount: mutation.targetAmount,
-              target_date: mutation.targetDate,
-              priority: 99,
-              status: "ACTIVE",
-            })
-            .select("id"),
-          "création d'objectif",
+          await db.rpc("lfo_create_goal_v2", {
+            p_user_id: user,
+            p_definition: { ...definition, legacyCompatibility: false },
+            p_now: now,
+          }),
+          "création d'objectif compatible V2",
+        );
+        break;
+      }
+      case "create_goal_v2": {
+        unwrap(
+          await db.rpc("lfo_create_goal_v2", {
+            p_user_id: user,
+            p_definition: mutation.definition,
+            p_now: now,
+          }),
+          "création atomique d'objectif V2",
+        );
+        break;
+      }
+      case "save_goal_version_v2": {
+        unwrap(
+          await db.rpc("lfo_save_goal_version_v2", {
+            p_user_id: user,
+            p_goal_id: mutation.goalId,
+            p_expected_version: mutation.expectedVersion,
+            p_definition: mutation.definition,
+            p_updated_at: now,
+          }),
+          "versionnement atomique d'objectif V2",
+        );
+        break;
+      }
+      case "set_goal_status_v2": {
+        unwrap(
+          await db.rpc("lfo_set_goal_status_v2", {
+            p_user_id: user,
+            p_goal_id: mutation.goalId,
+            p_expected_version: mutation.expectedVersion,
+            p_status: mutation.status,
+            p_updated_at: now,
+          }),
+          "cycle de vie atomique d'objectif V2",
         );
         break;
       }

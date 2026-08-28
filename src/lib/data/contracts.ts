@@ -42,6 +42,10 @@ import type {
   ScenarioRunMode,
   ScenarioVersionDefinition,
 } from "@/lib/engine/scenario-contracts";
+import type {
+  GoalStatus,
+  GoalVersionDefinition,
+} from "@/lib/engine/goal-contracts";
 
 export interface DebtContractInput {
   liabilityId: string | null;
@@ -631,6 +635,19 @@ export type Mutation =
   | { action: "archive_scenario_v2"; scenarioId: string }
   | { action: "create_monthly_close"; closeDate: string }
   | { action: "add_goal"; name: string; targetAmount: number; targetDate: string | null }
+  | { action: "create_goal_v2"; definition: GoalVersionDefinition }
+  | {
+      action: "save_goal_version_v2";
+      goalId: string;
+      expectedVersion: number;
+      definition: GoalVersionDefinition;
+    }
+  | {
+      action: "set_goal_status_v2";
+      goalId: string;
+      expectedVersion: number;
+      status: GoalStatus;
+    }
   | {
       action: "update_category";
       categoryId: string;

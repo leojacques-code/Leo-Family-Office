@@ -19,6 +19,8 @@ import {
 import { AS_OF_DATE } from "@/lib/data/shared";
 import { isScenarioVersionDefinition } from "@/lib/engine/scenario-engine";
 import type { ScenarioVersionDefinition } from "@/lib/engine/scenario-contracts";
+import { isGoalVersionDefinition } from "@/lib/engine/goal-engine";
+import type { GoalVersionDefinition } from "@/lib/engine/goal-contracts";
 import {
   LEDGER_COVERAGE_SOURCES,
   LOT_MATCHING_METHODS,
@@ -82,6 +84,10 @@ const scenarioDefinitionSchema = z
       });
     }
   });
+const goalDefinitionSchema = z.custom<GoalVersionDefinition>(
+  isGoalVersionDefinition,
+  "Définition Goals V2 invalide",
+);
 const nullableMoney = finite.nonnegative().nullable();
 const datedTermKind = z.enum(["CONTRACTUAL", "ASSUMPTION"]);
 const debtContractSchema = z
@@ -1210,6 +1216,23 @@ export const mutationSchema = z.discriminatedUnion("action", [
     targetAmount: finite.positive(),
     targetDate: date.nullable(),
   }),
+  z.object({ action: z.literal("create_goal_v2"), definition: goalDefinitionSchema }).strict(),
+  z
+    .object({
+      action: z.literal("save_goal_version_v2"),
+      goalId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      definition: goalDefinitionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("set_goal_status_v2"),
+      goalId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      status: z.enum(["ACTIVE", "PAUSED", "ACHIEVED", "ARCHIVED"]),
+    })
+    .strict(),
   z.object({
     action: z.literal("update_category"),
     categoryId: z.string().min(1),
