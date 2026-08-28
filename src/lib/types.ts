@@ -864,6 +864,8 @@ export interface DashboardState {
   careerAnalytics?: import("@/lib/engine/career").CareerAnalytics;
   taxCalculation?: import("@/lib/engine/tax").TaxCalculation;
   careerTaxMonthly?: import("@/lib/engine/career-tax-cash-flow").CareerTaxMonthlyConsequence[];
+  /** Projection unifiée, dérivée en lecture : aucune conséquence n'est persistée. */
+  eventTimeline?: import("@/lib/engine/event-contracts").CanonicalTimeline;
   liabilities: Liability[];
   incomes: IncomeSource[];
   expenseCategories: ExpenseCategory[];

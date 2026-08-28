@@ -16,6 +16,8 @@ import {
   knownEnvelopeCash,
   knownMarketExposure,
 } from "@/lib/engine/balance-sheet-view";
+import { monthlyEventImpact, type MonthlyEventImpact } from "@/lib/engine/event-engine";
+import type { CanonicalMonthlyConsequence } from "@/lib/engine/event-contracts";
 
 /**
  * PERSONAL MONTHLY FINANCIAL MODEL
@@ -142,6 +144,12 @@ export interface MonthlyFinancialState {
   marketPnL: number;
   marketShockPnL: number;
   fundingGapChange: number;
+  /** Effets non opératoires venus du seul Event Engine. */
+  eventCapitalCashImpact: number;
+  eventPortfolioAssetDelta: number;
+  eventNonFinancialAssetDelta: number;
+  eventOtherLiabilityDelta: number;
+  eventSourceConsequenceIds: string[];
 
   bankCash: number;
   marketInvestedAssets: number;
@@ -181,6 +189,12 @@ export interface MonthlyModelInput {
   assumptions: MonthlyScenarioAssumptions;
   months: number;
   marketReturn: MarketReturnFn;
+  /**
+   * Présentes : les conséquences canoniques remplacent l'hypothèse de surplus et le
+   * calendrier Debt local. Absentes : compatibilité stricte avec Scenarios V1.
+   */
+  consequences?: CanonicalMonthlyConsequence[];
+  reportingCurrency?: string;
 }
 
 export interface MonthlyModelResult {
@@ -347,6 +361,11 @@ function openingState(opening: OpeningBalanceSheet): MonthlyFinancialState {
     marketPnL: 0,
     marketShockPnL: 0,
     fundingGapChange: 0,
+    eventCapitalCashImpact: 0,
+    eventPortfolioAssetDelta: 0,
+    eventNonFinancialAssetDelta: 0,
+    eventOtherLiabilityDelta: 0,
+    eventSourceConsequenceIds: [],
     bankCash: opening.bankCash,
     marketInvestedAssets: opening.marketInvestedAssets,
     investmentCash: opening.investmentCash,
@@ -377,6 +396,7 @@ export function advanceMonth(
   debt: MonthlyDebtImpact,
   assumptions: MonthlyScenarioAssumptions,
   marketReturnRate: number,
+  eventImpact?: MonthlyEventImpact,
 ): MonthlyFinancialState {
   const flags: string[] = [];
   const openingBankCash = previous.bankCash;
@@ -448,8 +468,32 @@ export function advanceMonth(
     assumptions.shockMagnitude !== null &&
     monthIndex === assumptions.shockYear * 12;
   const marketShockPnL = shockApplies ? marketBeforeShock * (assumptions.shockMagnitude ?? 0) : 0;
-  const marketInvestedAssets = Math.max(0, marketBeforeShock + marketShockPnL);
+  const eventPortfolioAssetDelta = eventImpact?.portfolioAssetDelta ?? 0;
+  const marketInvestedAssets = Math.max(
+    0,
+    marketBeforeShock + marketShockPnL + eventPortfolioAssetDelta,
+  );
   const marketPnL = marketInvestedAssets - openingMarket - investmentContribution;
+
+  const eventCapitalCashImpact = eventImpact?.capitalCashImpact ?? 0;
+  if (eventCapitalCashImpact < 0) {
+    const covered = Math.min(bankCash, -eventCapitalCashImpact);
+    bankCash -= covered;
+    const uncovered = -eventCapitalCashImpact - covered;
+    if (uncovered > 0) {
+      fundingGap += uncovered;
+      fundingGapChange += uncovered;
+      flags.push(FUNDING_GAP_FLAG);
+    }
+  } else if (eventCapitalCashImpact > 0) {
+    const repaid = Math.min(fundingGap, eventCapitalCashImpact);
+    fundingGap -= repaid;
+    gapRepayment += repaid;
+    bankCash += eventCapitalCashImpact - repaid;
+  }
+  const eventNonFinancialAssetDelta = eventImpact?.nonFinancialAssetDelta ?? 0;
+  const eventOtherLiabilityDelta = eventImpact?.otherLiabilityDelta ?? 0;
+  flags.push(...(eventImpact?.blockers ?? []));
 
   const financingCostMissing =
     previous.financingCostMissing || fundingGap > 0 || fundingGapChange > 0;
@@ -463,17 +507,21 @@ export function advanceMonth(
   // Les actifs non financiers restent au bilan projeté, à leur valeur d'ouverture. Ils ne
   // sont ni capitalisés ni effacés : leur trajectoire n'est pas modélisée, et le dire est
   // plus honnête que de la simuler.
+  const nonFinancialAssets = previous.nonFinancialAssets + eventNonFinancialAssetDelta;
+  const otherLiabilityBalance = Math.max(0, openingOtherLiability + eventOtherLiabilityDelta);
   const netWorth =
-    grossFinancialAssets +
-    previous.nonFinancialAssets -
-    loanBalance -
-    openingOtherLiability -
-    fundingGap;
+    grossFinancialAssets + nonFinancialAssets - loanBalance - otherLiabilityBalance - fundingGap;
 
   const economicDebtCosts = debt.economicCost;
   const netWorthChange = netWorth - openingNetWorth;
   // Attribution économique : le principal n'y figure pas, sa double jambe s'annule.
-  const attribution = operatingSurplus - economicDebtCosts + marketPnL;
+  const attribution =
+    operatingSurplus -
+    economicDebtCosts +
+    marketPnL +
+    eventCapitalCashImpact +
+    eventNonFinancialAssetDelta -
+    eventOtherLiabilityDelta;
 
   return {
     monthIndex,
@@ -504,14 +552,19 @@ export function advanceMonth(
     marketPnL,
     marketShockPnL,
     fundingGapChange,
+    eventCapitalCashImpact,
+    eventPortfolioAssetDelta,
+    eventNonFinancialAssetDelta,
+    eventOtherLiabilityDelta,
+    eventSourceConsequenceIds: eventImpact?.sourceConsequenceIds ?? [],
     bankCash,
     marketInvestedAssets,
     investmentCash: openingInvestmentCash,
     otherFinancialAssets: openingOther,
     grossFinancialAssets,
-    nonFinancialAssets: previous.nonFinancialAssets,
+    nonFinancialAssets,
     loanBalance,
-    otherLiabilityBalance: openingOtherLiability,
+    otherLiabilityBalance,
     fundingGap,
     netWorth,
     economicDebtCosts,
@@ -524,18 +577,26 @@ export function advanceMonth(
 
 /** Déroule le bilan mois par mois. Unique transition consommée par tous les modes. */
 export function runMonthlyModel(input: MonthlyModelInput): MonthlyModelResult {
-  const calendar = buildDebtCalendar(input.liabilities, input.opening.date, input.months);
+  const calendar = input.consequences
+    ? null
+    : buildDebtCalendar(input.liabilities, input.opening.date, input.months);
   const states: MonthlyFinancialState[] = [openingState(input.opening)];
   for (let monthIndex = 1; monthIndex <= input.months; monthIndex += 1) {
     const { end } = projectedMonthWindow(input.opening.date, monthIndex);
+    const eventImpact = input.consequences
+      ? monthlyEventImpact(input.consequences, end.slice(0, 7), input.reportingCurrency ?? "EUR")
+      : undefined;
     states.push(
       advanceMonth(
         states[monthIndex - 1],
         monthIndex,
         end,
-        calendar[monthIndex] ?? NO_DEBT,
-        input.assumptions,
+        eventImpact?.debt ?? calendar?.[monthIndex] ?? NO_DEBT,
+        eventImpact
+          ? { ...input.assumptions, operatingSurplus: eventImpact.operatingSurplus }
+          : input.assumptions,
         input.marketReturn(monthIndex),
+        eventImpact,
       ),
     );
   }
@@ -622,5 +683,28 @@ export function runDeterministicModel(
     assumptions,
     months,
     marketReturn: () => monthlyReturn,
+  });
+}
+
+/**
+ * Projection Event Engine. Le calendrier canonique remplace ici les hypothèses ad hoc de
+ * cash et l'échéancier Debt local ; le rendement de marché reste une hypothèse Scenarios.
+ */
+export function runDeterministicEventModel(input: {
+  opening: OpeningBalanceSheet;
+  consequences: CanonicalMonthlyConsequence[];
+  reportingCurrency: string;
+  assumptions: MonthlyScenarioAssumptions;
+  months: number;
+}): MonthlyModelResult {
+  const monthlyReturn = monthlyReturnFromAnnual(input.assumptions.annualReturn);
+  return runMonthlyModel({
+    opening: input.opening,
+    liabilities: [],
+    assumptions: input.assumptions,
+    months: input.months,
+    marketReturn: () => monthlyReturn,
+    consequences: input.consequences,
+    reportingCurrency: input.reportingCurrency,
   });
 }

@@ -1,5 +1,14 @@
 # Architecture
 
+## Event Engine
+
+L'orchestration temporelle canonique est documentée dans
+[`EVENT_ENGINE_ARCHITECTURE.md`](./EVENT_ENGINE_ARCHITECTURE.md), avec l'audit KEEP / REUSE /
+EXTEND / DEPRECATE / REPLACE dans [`EVENT_ENGINE_AUDIT.md`](./EVENT_ENGINE_AUDIT.md).
+
+Event Engine est une projection typée des faits de domaine. Il ne persiste aucune
+conséquence et ne recalcule aucun moteur financier.
+
 ## Principes
 
 1. **Traçabilité** — chaque valeur importante porte un type, une confiance et, si disponible, une source et une date.
