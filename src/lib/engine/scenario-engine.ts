@@ -584,6 +584,11 @@ export function createScenarioVersion(input: {
 export function isScenarioVersionDefinition(value: unknown): value is ScenarioVersionDefinition {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<ScenarioVersionDefinition>;
+  const market = candidate.market as Partial<ScenarioMarketModel> | undefined;
+  const allocation = candidate.capitalAllocation as
+    Partial<ScenarioVersionDefinition["capitalAllocation"]> | undefined;
+  const finiteOrNull = (item: unknown) =>
+    item === null || (typeof item === "number" && Number.isFinite(item));
   return (
     candidate.schemaVersion === SCENARIO_V2_SCHEMA_VERSION &&
     candidate.methodologyVersion === SCENARIO_METHODOLOGY_VERSION &&
@@ -591,9 +596,32 @@ export function isScenarioVersionDefinition(value: unknown): value is ScenarioVe
     Number.isInteger(candidate.version) &&
     typeof candidate.asOfDate === "string" &&
     Number.isInteger(candidate.horizonMonths) &&
+    (candidate.horizonMonths ?? 0) >= 1 &&
+    (candidate.horizonMonths ?? 0) <= 960 &&
+    ["DRAFT", "ACTIVE", "ARCHIVED"].includes(candidate.lifecycleStatus ?? "") &&
     Array.isArray(candidate.overrides) &&
+    candidate.overrides.every(
+      (override) =>
+        Boolean(override) &&
+        typeof override.id === "string" &&
+        ["ADD", "REPLACE", "CANCEL"].includes(override.operation) &&
+        typeof override.reason === "string",
+    ) &&
     Array.isArray(candidate.assumptions) &&
-    Boolean(candidate.market) &&
-    Boolean(candidate.capitalAllocation)
+    candidate.assumptions.every(
+      (assumption) =>
+        Boolean(assumption) &&
+        typeof assumption.key === "string" &&
+        typeof assumption.source === "string" &&
+        ["OBSERVED_MARKET_DATA", "USER_ASSUMPTION", "MODEL_ASSUMPTION"].includes(assumption.kind),
+    ) &&
+    Boolean(market) &&
+    finiteOrNull(market?.annualReturn) &&
+    finiteOrNull(market?.annualVolatility) &&
+    finiteOrNull(market?.annualInflation) &&
+    finiteOrNull(market?.stressProbability) &&
+    Boolean(allocation) &&
+    typeof allocation?.investmentAllocationRate === "number" &&
+    Number.isFinite(allocation.investmentAllocationRate)
   );
 }

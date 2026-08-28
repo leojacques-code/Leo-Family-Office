@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuthenticated } from "@/lib/auth";
 import { getRepository } from "@/lib/data/repository";
-import { runMonteCarlo } from "@/lib/engine/monte-carlo";
+import { runMonteCarlo, runScenarioMonteCarlo } from "@/lib/engine/monte-carlo";
+import { buildDashboardEventTimeline } from "@/lib/engine/event-adapters";
+import { buildBaselineReference, runScenarioComparison } from "@/lib/engine/scenario-engine";
 import {
   buildOpeningBalanceSheet,
+  projectedMonthWindow,
   runDeterministicModel,
   scenarioAssumptions,
   toAnnualPoints,
@@ -33,6 +36,64 @@ export async function POST(request: Request) {
     // Une seule source temporelle : le Personal Monthly Financial Model. Le déterministe
     // et le Monte-Carlo partagent le bilan d'ouverture, l'échéancier et la transition.
     const opening = buildOpeningBalanceSheet(state);
+    if (scenario.definition) {
+      const definition = scenario.definition;
+      const window = projectedMonthWindow(definition.asOfDate, definition.horizonMonths);
+      const baselineTimeline = buildDashboardEventTimeline({
+        state,
+        startDate: definition.asOfDate,
+        endDate: window.end,
+      });
+      const comparison = runScenarioComparison({
+        baselineEvents: baselineTimeline.events,
+        opening,
+        definition,
+      });
+      if (comparison.completeness === "NOT_COMPUTABLE") {
+        return NextResponse.json(
+          { error: "Scénario non calculable", blockers: comparison.blockers },
+          { status: 422 },
+        );
+      }
+      const result = runScenarioMonteCarlo({
+        definition,
+        baselineEvents: baselineTimeline.events,
+        opening,
+        simulations: parsed.data.simulations,
+        seed: parsed.data.seed,
+      });
+      const baselineReference = buildBaselineReference({ opening, timeline: baselineTimeline });
+      const runId = await repository.saveSimulation({
+        scenarioId: scenario.id,
+        seed: parsed.data.seed,
+        simulations: parsed.data.simulations,
+        years: Math.ceil(definition.horizonMonths / 12),
+        methodology: result.methodology,
+        points: result.points,
+        scenarioVersion: definition.version,
+        asOfDate: definition.asOfDate,
+        baselineReference,
+        eventSetVersion: baselineReference.eventSetVersion,
+        assumptionsSnapshot: definition.assumptions,
+        runMode: "MONTE_CARLO",
+        horizonMonths: definition.horizonMonths,
+        methodologyVersion: definition.methodologyVersion,
+        definitionSnapshot: definition,
+      });
+      return NextResponse.json({
+        ...result,
+        runId,
+        deterministic: comparison.scenario.annual,
+        openingNetWorth: opening.netWorth,
+        comparison,
+        baselineReference,
+        assumptions: {
+          operatingSurplusBeforeDebt: 0,
+          investmentAllocationRate: definition.capitalAllocation.investmentAllocationRate,
+          annualReturn: definition.market.annualReturn ?? 0,
+        },
+      });
+    }
     const assumptions = scenarioAssumptions(scenario);
     const deterministic = toAnnualPoints(
       runDeterministicModel(opening, state.liabilities, assumptions, parsed.data.years * 12),

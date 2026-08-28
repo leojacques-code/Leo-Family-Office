@@ -437,6 +437,10 @@ export interface Scenario {
   stressProbability: number;
   shockYear: number | null;
   shockMagnitude: number | null;
+  /** Cycle de vie et snapshot immuable courant de Scenarios V2. */
+  lifecycleStatus?: import("@/lib/engine/scenario-contracts").ScenarioLifecycleStatus;
+  archivedAt?: string | null;
+  definition?: import("@/lib/engine/scenario-contracts").ScenarioVersionDefinition;
   provenance: Provenance;
 }
 
