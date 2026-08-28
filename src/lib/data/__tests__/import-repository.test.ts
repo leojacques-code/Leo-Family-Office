@@ -209,13 +209,18 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
   });
 
   it("transmet une date d'observation de l'import, jamais la date d'arrêté du reporting", async () => {
-    const repository = createImportRepository();
-    await repository.analyze(analyzeRequest, file);
-    const session = analysisPayload().session as Record<string, unknown>;
-    const today = new Date().toISOString().slice(0, 10);
-    expect(session.observation_date).toBe(today);
-    // AS_OF_DATE est la date d'arrêté du cockpit : elle n'a rien à faire ici.
-    expect(session.observation_date).not.toBe("2026-08-19");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T12:00:00.000Z"));
+    try {
+      const repository = createImportRepository();
+      await repository.analyze(analyzeRequest, file);
+      const session = analysisPayload().session as Record<string, unknown>;
+      expect(session.observation_date).toBe("2026-08-27");
+      // AS_OF_DATE est la date d'arrêté du cockpit : elle n'a rien à faire ici.
+      expect(session.observation_date).not.toBe("2026-08-19");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("transmet la déclaration de stabilité, fausse par défaut", async () => {

@@ -80,11 +80,11 @@ La piste d'audit est en LECTURE SEULE : `authenticated` ne reçoit que le `SELEC
 
 Les invariants portés par la BASE, pas par l'application :
 
-* un enregistrement brut ne se **modifie** jamais, et ne se **supprime** que par l'abandon d'une session encore analysée — protéger seulement l'`UPDATE` laissait un `DELETE` cascader vers la ligne normalisée et son lien, en laissant survivre une transaction étiquetée « importée » sans origine ;
-* une ligne normalisée **committée** est gelée (`import_normalized_records_frozen`), et le gel est EXHAUSTIF : la comparaison porte sur `to_jsonb(new) - 'matched_transaction_id'` contre son équivalent sur `old`, donc sur la ligne entière et sur les colonnes futures. Seule exception, explicite : le jumeau désigné peut passer à `null` si rien d'autre ne change — une liste manuelle de colonnes laissait réécrire `reference`, `value_date`, `counterparty`, `balance_after` et `confidence` sous couvert d'un détachement ;
-* un lien de provenance est **immuable en `UPDATE` comme en `DELETE`**, et sa clé étrangère vers `transactions` est en `restrict` : ne refuser que l'`UPDATE` laissait le rôle serveur supprimer le lien, ce qui désarmait la clé étrangère et rendait la transaction supprimable sans trace ;
-* un contenu de fichier ne peut être validé qu'une fois par source — `import_sessions_committed_file_uidx`, partiel sur le statut `COMMITTED`, de sorte qu'une analyse abandonnée ne bloque rien ;
-* une identité DÉMONTRÉE ne s'écrit qu'une fois — `import_normalized_records_committed_external_uidx`.
+- un enregistrement brut ne se **modifie** jamais, et ne se **supprime** que par l'abandon d'une session encore analysée — protéger seulement l'`UPDATE` laissait un `DELETE` cascader vers la ligne normalisée et son lien, en laissant survivre une transaction étiquetée « importée » sans origine ;
+- une ligne normalisée **committée** est gelée (`import_normalized_records_frozen`), et le gel est EXHAUSTIF : la comparaison porte sur `to_jsonb(new) - 'matched_transaction_id'` contre son équivalent sur `old`, donc sur la ligne entière et sur les colonnes futures. Seule exception, explicite : le jumeau désigné peut passer à `null` si rien d'autre ne change — une liste manuelle de colonnes laissait réécrire `reference`, `value_date`, `counterparty`, `balance_after` et `confidence` sous couvert d'un détachement ;
+- un lien de provenance est **immuable en `UPDATE` comme en `DELETE`**, et sa clé étrangère vers `transactions` est en `restrict` : ne refuser que l'`UPDATE` laissait le rôle serveur supprimer le lien, ce qui désarmait la clé étrangère et rendait la transaction supprimable sans trace ;
+- un contenu de fichier ne peut être validé qu'une fois par source — `import_sessions_committed_file_uidx`, partiel sur le statut `COMMITTED`, de sorte qu'une analyse abandonnée ne bloque rien ;
+- une identité DÉMONTRÉE ne s'écrit qu'une fois — `import_normalized_records_committed_external_uidx`.
 
 Aucune unicité ne pèse sur `match_key`, et c'est un choix. Une contrainte sur `(compte, date, montant, devise, libellé)` refuserait un troisième achat réellement identique, et le refus viendrait de la base : message opaque, aucune décision possible. L'index correspondant existe pour la lecture, non pour l'unicité.
 
@@ -98,9 +98,9 @@ Cette migration a été corrigée EN PLACE à deux reprises après revue, **avan
 
 Contrôles passés en production après application : six tables d'acquisition présentes ; RLS actif sur les six ; `anon` sans aucun accès ; `authenticated` en SELECT seul, sans INSERT, UPDATE ni DELETE ; cinq RPC d'acquisition réservées à `service_role` ; triggers d'immuabilité présents ; smoke analyse → validation réussi puis intégralement rollbacké ; UPDATE et DELETE d'un enregistrement brut refusés ; modification d'une ligne normalisée committée refusée ; DELETE d'un lien de provenance refusé ; suppression d'une transaction liée refusée ; isolation RLS vérifiée sous claim `authenticated` réel — propriétaire visible, autre UUID invisible. Aucune fixture persistée. L'advisor sécurité ne remonte que le warning Auth historique `Leaked Password Protection Disabled` ; l'advisor performance ne remonte aucune clé étrangère d'acquisition non indexée.
 
-## Migration 26 — FEC / Corporate Data Acquisition
+## Migration 28 — FEC / Corporate Data Acquisition
 
-La migration `20260827180000_fec_corporate_acquisition` étend la fondation d'acquisition au domaine comptable. Elle est **présente dans le dépôt et NON appliquée en production** : `supabase_migrations.schema_migrations` en porte 25, `supabase/migrations/` en porte 26, et `npm run db:verify` échouera donc tant que le push n'a pas eu lieu. Le gate local, lui, reconstruit les 26 depuis zéro sans aucun credential.
+La migration `20260828080000_fec_corporate_acquisition` étend la fondation d'acquisition au domaine comptable. Elle est **présente dans le dépôt et NON appliquée en production** : `supabase_migrations.schema_migrations` en porte 27, `supabase/migrations/` en porte 28, et `npm run db:verify` échouera donc tant que le push n'a pas eu lieu. Le gate local, lui, reconstruit les 28 depuis zéro sans aucun credential.
 
 Elle est strictement ADDITIVE et ne crée aucun second pipeline :
 
@@ -127,9 +127,33 @@ Trois refus de validation sont portés par `lfo_commit_fec_session`, pas par l'a
 
 `business_financials_id_user_uidx` est ajouté parce que la clé étrangère composite du lien en a besoin : sans lui, un lien pourrait désigner l'instantané financier d'un AUTRE propriétaire.
 
-Gates exécutés : `npm run lint`, `npm run test`, `npx tsc --noEmit`, `npm run build`, `npm run db:local:reset` (26 migrations reconstruites depuis zéro), `npm run db:verify:local`, tous les smokes existants et le nouveau `scripts/smoke-fec-acquisition.ts`, intégralement rollbacké. `npm run db:verify` distant n'a PAS été exécuté : aucun credential de production n'est présent dans cet environnement, et la migration n'est pas poussée.
+Gates exécutés : `npm run lint`, `npm run test`, `npx tsc --noEmit`, `npm run build`, `npm run db:local:reset` (28 migrations reconstruites depuis zéro), `npm run db:verify:local`, tous les smokes existants et le nouveau `scripts/smoke-fec-acquisition.ts`, intégralement rollbacké. `npm run db:verify` distant n'a PAS été exécuté : aucun credential de production n'est présent dans cet environnement, et la migration n'est pas poussée.
 
 C'est le seul contrôle que le gate local ne peut pas produire : `auth.uid()` y reste nul.
+
+La migration `20260827215014_career_tax_v2` installe Career + Tax V2 de manière additive,
+sans barème France codé en dur et sans résultat calculé persisté. Elle crée huit tables de
+faits ou d'hypothèses protégées par RLS et cinq RPC atomiques exclusivement exécutables par
+`service_role`. La migration corrective `20260827215600_career_tax_v2_fk_indexes` ajoute les
+quatre index de clés étrangères signalés après application par l'advisor PostgreSQL, sans
+modifier de donnée ni de règle métier.
+
+Les deux migrations ont été appliquées en production le 27 août 2026. L'inventaire distant
+porte exactement les 27 versions du dépôt. Le smoke transactionnel a validé l'écriture
+atomique d'un package de rémunération, d'un événement payé, d'un profil fiscal, d'un jeu de
+règles remplacé de façon idempotente et d'une observation fiscale ; les références et
+écritures cross-user ont été refusées, puis l'isolation propriétaire/tiers a été vérifiée
+sous le rôle `authenticated`. Le `ROLLBACK` final a supprimé les deux utilisateurs de test
+et toutes leurs données : les huit nouvelles tables sont restées vides. La migration
+complète avait auparavant été appliquée puis annulée dans une transaction de prévalidation,
+ce qui fournit sur le PostgreSQL cible l'équivalent du gate de reconstruction local lorsque
+le runtime courant ne dispose pas d'un serveur PostgreSQL jetable.
+
+Après la migration corrective, l'advisor performance ne signale plus aucune clé étrangère
+Career + Tax non indexée ; ses seuls constats sur ce périmètre sont les index encore inutilisés,
+ce qui est attendu sur des tables vides. L'advisor sécurité ne remonte que le warning Auth
+historique [`Leaked Password Protection Disabled`](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection),
+sans finding introduit par Career + Tax.
 
 La migration `20260825193427_portfolio_data_foundation` ajoute le ledger portefeuille et ses trois RPC (`lfo_record_portfolio_event`, `lfo_delete_portfolio_event`, `lfo_set_portfolio_envelope_policy`). Elle crée aussi trois index uniques `(id, user_id)` sur `financial_accounts`, `securities` et `transactions` : ce sont les cibles des clés étrangères composites qui empêchent un événement de référencer l'objet d'un autre utilisateur. La migration `20260825193606_portfolio_fk_covering_indexes` couvre le côté référençant des deux clés étrangères signalées par l'advisor Postgres. Les deux sont appliquées en production et vérifiées par assertions SQL transactionnelles.
 
@@ -169,7 +193,7 @@ npm run db:verify
 supabase db advisors
 ```
 
-`db:verify` ouvre une transaction PostgreSQL `READ ONLY` via `SUPABASE_DB_URL`. Il contrôle les tables et colonnes structurantes, les contraintes, les 44 RPC et leurs permissions, les triggers qui portent un invariant financier, RLS, policies `owner_all`, bucket et policies Storage, ainsi que les versions de migration.
+`db:verify` ouvre une transaction PostgreSQL `READ ONLY` via `SUPABASE_DB_URL`. Il contrôle les tables et colonnes structurantes, les contraintes, les 54 RPC et leurs permissions, les triggers qui portent un invariant financier, RLS, policies `owner_all`, bucket et policies Storage, ainsi que les versions de migration.
 
 Le contrôle des migrations est symétrique : une version attendue absente échoue, **et** une version appliquée hors du dépôt échoue également. Une base en avance sur le dépôt signifie que `supabase/migrations/` ne reproduit plus la base, donc que le code a cessé d'être la source de vérité du schéma. Les autres inventaires restent des contrôles d'inclusion : une base peut légitimement porter des objets d'infrastructure inconnus du code applicatif.
 

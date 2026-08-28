@@ -420,7 +420,149 @@ export interface BusinessFundingRoundInput {
   notes: string | null;
 }
 
+export interface CareerPackageInput {
+  roleId: string | null;
+  employer: string | null;
+  jobTitle: string | null;
+  employmentType:
+    | "EMPLOYEE"
+    | "INTERN"
+    | "FREELANCE"
+    | "CONTRACTOR"
+    | "ENTREPRENEUR"
+    | "CORPORATE_OFFICER"
+    | "UNEMPLOYED"
+    | "OTHER";
+  industry: string | null;
+  country: string | null;
+  currency: string;
+  startDate: string;
+  endDate: string | null;
+  status: "ACTIVE" | "ENDED" | "FUTURE";
+  dataKind: "ACTUAL" | "CONTRACTUAL" | "USER_ASSUMPTION" | "PROJECTED";
+  confidence: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  source: string | null;
+  notes: string | null;
+  compensation: {
+    baseSalary: number | null;
+    frequency: "MONTHLY" | "ANNUAL" | "DAILY" | "HOURLY";
+    guaranteedBonus: number | null;
+    targetBonus: number | null;
+    targetBonusRate: number | null;
+    discretionaryBonus: number | null;
+    commissions: number | null;
+    profitSharing: number | null;
+    participation: number | null;
+    employerBenefits: number | null;
+    allowances: number | null;
+    otherTaxableCompensation: number | null;
+    otherNonTaxableCompensation: number | null;
+    workingTime: number | null;
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    dataKind: CareerPackageInput["dataKind"];
+    confidence: CareerPackageInput["confidence"];
+    source: string | null;
+    notes: string | null;
+  } | null;
+}
+
+export interface CareerEventInput {
+  roleId: string | null;
+  type:
+    | "JOB_START"
+    | "JOB_END"
+    | "PROMOTION"
+    | "SALARY_CHANGE"
+    | "BONUS_TARGET_CHANGE"
+    | "BONUS_EARNED"
+    | "BONUS_PAID"
+    | "COMMISSION"
+    | "UNEMPLOYMENT"
+    | "SABBATICAL"
+    | "FREELANCE_START"
+    | "FREELANCE_END"
+    | "EQUITY_GRANT"
+    | "EQUITY_VEST"
+    | "OTHER";
+  eventDate: string;
+  amount: number | null;
+  currency: string | null;
+  variableState: "TARGET" | "CONTRACTUAL" | "EARNED" | "PAID" | "PROJECTED" | null;
+  paidDate: string | null;
+  label: string | null;
+  dataKind: CareerPackageInput["dataKind"];
+  confidence: CareerPackageInput["confidence"];
+  source: string | null;
+  notes: string | null;
+}
+
+export interface TaxProfileInput {
+  id: string | null;
+  residencyCountry: string;
+  householdStatus: string;
+  jurisdiction: string | null;
+  maritalStatus: string | null;
+  dependants: number | null;
+  taxShares: number | null;
+  withholdingSettings: Record<string, unknown>;
+  socialContributionRegime: string | null;
+  professionalStatus: string | null;
+  specialRegime: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  source: string | null;
+  confidence: CareerPackageInput["confidence"];
+  notes: string | null;
+}
+
+export interface TaxRuleSetInput {
+  id: string | null;
+  jurisdiction: string;
+  taxYear: number;
+  name: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  source: string;
+  sourceDate: string;
+  confidence: CareerPackageInput["confidence"];
+  status: "DRAFT" | "DECLARED" | "VERIFIED" | "STALE";
+  legalReference: string | null;
+  notes: string | null;
+  rules: Array<{
+    name: string;
+    taxType:
+      "PAYROLL_CONTRIBUTION" | "TAXABLE_DEDUCTION" | "INCOME_TAX_BRACKETS" | "WITHHOLDING_RATE";
+    incomeCategory: "EMPLOYMENT" | "PROFESSIONAL" | "OTHER";
+    parameters: Record<string, unknown>;
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    verifiedAt: string | null;
+    confidence: CareerPackageInput["confidence"];
+    legalNote: string | null;
+    notes: string | null;
+  }>;
+}
+
+export interface TaxObservationInput {
+  type: "LIABILITY" | "WITHHELD" | "PAID" | "REFUND" | "BALANCE_DUE";
+  observedDate: string;
+  taxYear: number;
+  amount: number;
+  currency: string;
+  transactionId: string | null;
+  documentId: string | null;
+  confidence: CareerPackageInput["confidence"];
+  source: string | null;
+  notes: string | null;
+}
+
 export type Mutation =
+  | { action: "save_career_package"; career: CareerPackageInput }
+  | { action: "record_career_event"; event: CareerEventInput }
+  | { action: "set_tax_profile"; profile: TaxProfileInput }
+  | { action: "save_tax_rule_set"; ruleSet: TaxRuleSetInput }
+  | { action: "record_tax_observation"; observation: TaxObservationInput }
   | { action: "save_debt_contract"; contract: DebtContractInput }
   | {
       action: "record_debt_balance";

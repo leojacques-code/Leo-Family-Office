@@ -326,16 +326,19 @@ export function deriveFlowMetrics(
   transactions: Transaction[] = [],
   asOfDate: string = AS_OF_DATE,
 ): DeclaredFlowMetrics {
-  const monthlyIncome = incomes
-    .filter((income) => income.active)
-    .reduce((sum, income) => sum + (income.monthlyNet ?? 0), 0);
+  const activeIncomes = incomes.filter((income) => income.active);
+  const monthlyIncome =
+    activeIncomes.length === 0 || activeIncomes.some((income) => income.monthlyNet === null)
+      ? null
+      : activeIncomes.reduce((sum, income) => sum + (income.monthlyNet as number), 0);
   const knownExpenses = expenses.filter((expense) => expense.monthlyAmount !== null);
   const monthlyExpenses = knownExpenses.reduce(
     (sum, expense) => sum + (expense.monthlyAmount ?? 0),
     0,
   );
   const monthlyDebtService = monthlyDebtServiceAt(liabilities, asOfDate);
-  const freeCashFlow = monthlyIncome - monthlyExpenses - monthlyDebtService;
+  const freeCashFlow =
+    monthlyIncome === null ? null : monthlyIncome - monthlyExpenses - monthlyDebtService;
   const completeFields = knownExpenses.length;
   const period = monthBounds(asOfDate);
   const { savingsRate, investmentRate } = computeFlowRates(

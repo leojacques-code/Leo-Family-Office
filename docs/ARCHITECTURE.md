@@ -1,5 +1,14 @@
 # Architecture
 
+## Event Engine
+
+L'orchestration temporelle canonique est documentée dans
+[`EVENT_ENGINE_ARCHITECTURE.md`](./EVENT_ENGINE_ARCHITECTURE.md), avec l'audit KEEP / REUSE /
+EXTEND / DEPRECATE / REPLACE dans [`EVENT_ENGINE_AUDIT.md`](./EVENT_ENGINE_AUDIT.md).
+
+Event Engine est une projection typée des faits de domaine. Il ne persiste aucune
+conséquence et ne recalcule aucun moteur financier.
+
 ## Principes
 
 1. **Traçabilité** — chaque valeur importante porte un type, une confiance et, si disponible, une source et une date.
@@ -263,6 +272,14 @@ Période observée ≠ couverture DÉCLARÉE : sans déclaration, les totaux res
 Aucun état reconstruit n'est persisté : `fec_entry_lines` porte les écritures, les états s'en dérivent à la lecture. Le fait canonique est écrit par `lfo_record_business_financials`, et par elle seule — et il est reconstruit depuis les écritures PERSISTÉES au moment du commit, jamais repris de la charge du client.
 
 Détail complet, format supporté, plafonds mesurés et limites : `docs/FEC_ACQUISITION.md`.
+
+## Career + Tax V2
+
+Career produit des conséquences brutes datées ; Tax les consomme et sépare cotisations,
+assiette, liability, retenues, paiements et remboursements ; Cash Flow ne consomme que le net
+cash et préfère toujours une transaction réelle au forecast. Les résultats ne sont jamais
+persistés. Le modèle complet, les statuts et les invariants sont documentés dans
+[`CAREER_TAX_ARCHITECTURE.md`](CAREER_TAX_ARCHITECTURE.md).
 
 ## Lecture paginée des ledgers
 

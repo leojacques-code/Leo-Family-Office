@@ -126,15 +126,17 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Production alignée sur **25 migrations** au 27 août 2026. Le dépôt en porte **26** : la 26e,
-`20260827180000_fec_corporate_acquisition`, n'est PAS appliquée en production, et le gate
+Production alignée sur **27 migrations** au 27 août 2026. Le dépôt en porte **28** : la 28e,
+`20260828080000_fec_corporate_acquisition`, n'est PAS appliquée en production, et le gate
 distant échouera tant qu'elle ne l'est pas. Les dernières versions sont :
 
 - `20260826194551_business_equity_v2_1` ;
 - `20260826194605_business_equity_v2_1_indexes` ;
 - `20260826194644_business_equity_v2_1_blocking_invariants` ;
 - `20260827155134_data_acquisition_foundation` ;
-- `20260827180000_fec_corporate_acquisition` (dépôt uniquement, non poussée).
+- `20260827215014_career_tax_v2` ;
+- `20260827215600_career_tax_v2_fk_indexes` ;
+- `20260828080000_fec_corporate_acquisition` (dépôt uniquement, non poussée).
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
@@ -172,9 +174,9 @@ Correctness → données → intégration → calculs → tests → produit → 
 faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données + analytics)
                Real Estate (faits + scénarios) · Business Equity (faits + valorisation dérivée)
                Data Acquisition (staging + provenance + relevé bancaire CSV + FEC)
+               Career + Tax (faits datés + règles fiscales déclarées + calculs dérivés)
 en cours       vérité de schéma · vérité des consommateurs
-suivant        Career + Tax
-puis           Event Engine → Scenarios V2 → Goals → Decision Lab
+suivant        Event Engine → Scenarios V2 → Goals → Decision Lab
 enfin          imports et connecteurs → expérience globale → orchestration IA
 ```
 

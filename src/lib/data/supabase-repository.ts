@@ -54,6 +54,24 @@ import {
 import { deriveCanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
 import type { CurrencyRate } from "@/lib/engine/fx";
 import {
+  buildCareerAnalytics,
+  buildCareerMonthlyConsequences,
+  type CareerCompensationTerm,
+  type CareerEquityGrant,
+  type CareerEvent,
+  type CareerRole,
+  type CareerScenario,
+} from "@/lib/engine/career";
+import {
+  calculateEmploymentTax,
+  type TaxObservation,
+  type TaxProfile,
+  type TaxRule,
+  type TaxRuleSet,
+} from "@/lib/engine/tax";
+import { toCareerTaxCashFlow } from "@/lib/engine/career-tax-cash-flow";
+import { buildDashboardEventTimeline } from "@/lib/engine/event-adapters";
+import {
   enumValue,
   finiteNumber,
   nullableBoolean,
@@ -310,6 +328,15 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       businessBridgeItemRows,
       businessDcfRows,
       businessDcfPeriodRows,
+      careerRoleRows,
+      careerCompensationRows,
+      careerEventRows,
+      careerEquityRows,
+      careerScenarioRows,
+      taxProfileRows,
+      taxRuleSetRows,
+      taxRuleRows,
+      taxObservationRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -358,6 +385,15 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       fetchAllPages("business_bridge_items", "effective_date"),
       fetchAllPages("business_dcf_assumptions", "valuation_date"),
       mine("business_dcf_periods"),
+      fetchAllPages("career_roles", "start_date"),
+      fetchAllPages("career_compensation_terms", "effective_from"),
+      fetchAllPages("career_events", "event_date"),
+      fetchAllPages("career_equity_grants", "grant_date"),
+      fetchAllPages("career_scenarios", "effective_from"),
+      fetchAllPages("tax_profiles", "effective_from"),
+      fetchAllPages("tax_rule_sets", "effective_from"),
+      mine("tax_rules"),
+      fetchAllPages("tax_observations", "observed_date"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -1326,6 +1362,204 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
 
     const coverage = readLedgerCoverage(profileRows[0]);
     const reportingCurrency = str(profileRows[0]?.reporting_currency || REPORTING_CURRENCY);
+    const careerRoles: CareerRole[] = careerRoleRows.map((row) => ({
+      id: str(row.id),
+      employer: row.employer ? str(row.employer) : null,
+      jobTitle: row.job_title ? str(row.job_title) : null,
+      employmentType: str(row.employment_type) as CareerRole["employmentType"],
+      industry: row.industry ? str(row.industry) : null,
+      country: row.country ? str(row.country) : null,
+      currency: str(row.currency).toUpperCase(),
+      startDate: str(row.start_date),
+      endDate: row.end_date ? str(row.end_date) : null,
+      status: str(row.status) as CareerRole["status"],
+      dataKind: str(row.data_kind) as CareerRole["dataKind"],
+      confidence: str(row.confidence) as CareerRole["confidence"],
+      source: row.source ? str(row.source) : null,
+      notes: row.notes ? str(row.notes) : null,
+    }));
+    const careerCompensationTerms: CareerCompensationTerm[] = careerCompensationRows.map((row) => {
+      const amount = (name: string) =>
+        nullableFiniteNumber(row[name], `career_compensation_terms[id=${str(row.id)}].${name}`);
+      return {
+        id: str(row.id),
+        roleId: str(row.role_id),
+        baseSalary: amount("base_salary"),
+        frequency: str(row.frequency) as CareerCompensationTerm["frequency"],
+        guaranteedBonus: amount("guaranteed_bonus"),
+        targetBonus: amount("target_bonus"),
+        targetBonusRate: amount("target_bonus_rate"),
+        discretionaryBonus: amount("discretionary_bonus"),
+        commissions: amount("commissions"),
+        profitSharing: amount("profit_sharing"),
+        participation: amount("participation"),
+        employerBenefits: amount("employer_benefits"),
+        allowances: amount("allowances"),
+        otherTaxableCompensation: amount("other_taxable_compensation"),
+        otherNonTaxableCompensation: amount("other_non_taxable_compensation"),
+        workingTime: amount("working_time"),
+        effectiveFrom: str(row.effective_from),
+        effectiveTo: row.effective_to ? str(row.effective_to) : null,
+        dataKind: str(row.data_kind) as CareerCompensationTerm["dataKind"],
+        confidence: str(row.confidence) as CareerCompensationTerm["confidence"],
+        source: row.source ? str(row.source) : null,
+      };
+    });
+    const careerEvents: CareerEvent[] = careerEventRows.map((row) => ({
+      id: str(row.id),
+      roleId: row.role_id ? str(row.role_id) : null,
+      type: str(row.event_type) as CareerEvent["type"],
+      eventDate: str(row.event_date),
+      amount: nullableFiniteNumber(row.amount, `career_events[id=${str(row.id)}].amount`),
+      currency: row.currency ? str(row.currency).toUpperCase() : null,
+      variableState: row.variable_state
+        ? (str(row.variable_state) as CareerEvent["variableState"])
+        : null,
+      paidDate: row.paid_date ? str(row.paid_date) : null,
+      label: row.label ? str(row.label) : null,
+      notes: row.notes ? str(row.notes) : null,
+      dataKind: str(row.data_kind) as CareerEvent["dataKind"],
+      confidence: str(row.confidence) as CareerEvent["confidence"],
+      source: row.source ? str(row.source) : null,
+    }));
+    const careerEquityGrants: CareerEquityGrant[] = careerEquityRows.map((row) => ({
+      id: str(row.id),
+      roleId: row.role_id ? str(row.role_id) : null,
+      company: str(row.company),
+      instrumentType: str(row.instrument_type) as CareerEquityGrant["instrumentType"],
+      grantDate: str(row.grant_date),
+      quantity: nullableFiniteNumber(
+        row.quantity,
+        `career_equity_grants[id=${str(row.id)}].quantity`,
+      ),
+      strikePrice: nullableFiniteNumber(
+        row.strike_price,
+        `career_equity_grants[id=${str(row.id)}].strike_price`,
+      ),
+      currency: row.currency ? str(row.currency).toUpperCase() : null,
+      vestingSchedule: row.vesting_schedule,
+      expiryDate: row.expiry_date ? str(row.expiry_date) : null,
+      liquidityStatus: str(row.liquidity_status) as CareerEquityGrant["liquidityStatus"],
+      dataKind: str(row.data_kind) as CareerEquityGrant["dataKind"],
+      confidence: str(row.confidence) as CareerEquityGrant["confidence"],
+      source: row.source ? str(row.source) : null,
+    }));
+    const careerScenarios: CareerScenario[] = careerScenarioRows.map((row) => ({
+      id: str(row.id),
+      name: str(row.name),
+      type: str(row.scenario_type) as CareerScenario["type"],
+      effectiveFrom: str(row.effective_from),
+      roleId: row.role_id ? str(row.role_id) : null,
+      assumptions: (row.assumptions ?? {}) as Record<string, unknown>,
+      dataKind: str(row.data_kind) as CareerScenario["dataKind"],
+      confidence: str(row.confidence) as CareerScenario["confidence"],
+      source: row.source ? str(row.source) : null,
+    }));
+    const taxProfiles: TaxProfile[] = taxProfileRows.map((row) => ({
+      id: str(row.id),
+      jurisdiction: str(row.jurisdiction || row.residency_country),
+      residencyCountry: str(row.residency_country),
+      householdStatus: row.household_status ? str(row.household_status) : null,
+      maritalStatus: row.marital_status ? str(row.marital_status) : null,
+      dependants: nullableFiniteNumber(
+        row.dependants,
+        `tax_profiles[id=${str(row.id)}].dependants`,
+      ),
+      taxShares: nullableFiniteNumber(row.tax_shares, `tax_profiles[id=${str(row.id)}].tax_shares`),
+      withholdingSettings: (row.withholding_settings ?? {}) as Record<string, unknown>,
+      socialContributionRegime: row.social_contribution_regime
+        ? str(row.social_contribution_regime)
+        : null,
+      professionalStatus: row.professional_status ? str(row.professional_status) : null,
+      specialRegime: row.special_regime ? str(row.special_regime) : null,
+      effectiveFrom: str(row.effective_from),
+      effectiveTo: row.effective_to ? str(row.effective_to) : null,
+      source: row.source ? str(row.source) : null,
+      confidence: str(row.confidence) as TaxProfile["confidence"],
+    }));
+    const taxRuleSets: TaxRuleSet[] = taxRuleSetRows.map((row) => ({
+      id: str(row.id),
+      jurisdiction: str(row.jurisdiction),
+      taxYear: finiteNumber(row.tax_year, `tax_rule_sets[id=${str(row.id)}].tax_year`),
+      name: str(row.name),
+      effectiveFrom: str(row.effective_from),
+      effectiveTo: row.effective_to ? str(row.effective_to) : null,
+      source: str(row.source),
+      sourceDate: str(row.source_date),
+      confidence: str(row.confidence) as TaxRuleSet["confidence"],
+      status: str(row.status) as TaxRuleSet["status"],
+      legalReference: row.legal_reference ? str(row.legal_reference) : null,
+    }));
+    const taxRules: TaxRule[] = taxRuleRows
+      .filter((row) => row.rule_set_id && row.tax_type)
+      .map((row) => ({
+        id: str(row.id),
+        ruleSetId: str(row.rule_set_id),
+        taxType: str(row.tax_type) as TaxRule["taxType"],
+        category: str(row.income_category) as TaxRule["category"],
+        parameters: row.rule as TaxRule["parameters"],
+        effectiveFrom: str(row.effective_from),
+        effectiveTo: row.effective_to ? str(row.effective_to) : null,
+        source: str(row.source),
+        sourceDate: str(row.source_date),
+        confidence: str(row.confidence) as TaxRule["confidence"],
+      }));
+    const taxObservations: TaxObservation[] = taxObservationRows.map((row) => ({
+      id: str(row.id),
+      type: str(row.observation_type) as TaxObservation["type"],
+      observedDate: str(row.observed_date),
+      taxYear: finiteNumber(row.tax_year, `tax_observations[id=${str(row.id)}].tax_year`),
+      amount: finiteNumber(row.amount, `tax_observations[id=${str(row.id)}].amount`),
+      currency: str(row.currency).toUpperCase(),
+      transactionId: row.transaction_id ? str(row.transaction_id) : null,
+      source: row.source ? str(row.source) : null,
+      confidence: str(row.confidence) as TaxObservation["confidence"],
+    }));
+    const taxYear = Number(AS_OF_DATE.slice(0, 4));
+    const careerMonthly = buildCareerMonthlyConsequences({
+      roles: careerRoles,
+      terms: careerCompensationTerms,
+      events: careerEvents,
+      startDate: `${taxYear}-01-01`,
+      endDate: `${taxYear + 1}-12-31`,
+      reportingCurrency,
+      currencyRates,
+    });
+    const careerAnalytics = buildCareerAnalytics({
+      consequences: careerMonthly,
+      asOfDate: AS_OF_DATE,
+    });
+    const activeTaxProfile =
+      taxProfiles
+        .filter(
+          (item) =>
+            item.effectiveFrom <= AS_OF_DATE &&
+            (item.effectiveTo === null || item.effectiveTo >= AS_OF_DATE),
+        )
+        .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0] ?? null;
+    const activeRuleSet =
+      taxRuleSets
+        .filter(
+          (item) =>
+            item.taxYear === taxYear &&
+            item.effectiveFrom <= AS_OF_DATE &&
+            (item.effectiveTo === null || item.effectiveTo >= AS_OF_DATE),
+        )
+        .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0] ?? null;
+    const taxCalculation = calculateEmploymentTax({
+      income: careerMonthly,
+      profile: activeTaxProfile,
+      ruleSet: activeRuleSet,
+      rules: taxRules,
+      observations: taxObservations,
+      taxYear,
+      currency: reportingCurrency,
+    });
+    const careerTaxMonthly = toCareerTaxCashFlow({
+      tax: taxCalculation.monthly,
+      transactions,
+      categories: expenseCategories,
+    });
     // Le domaine immobilier est dérivé AVANT le bilan : il en produit les lignes d'actif.
     // Il ne produit AUCUNE ligne de passif : la dette immobilière est déjà portée par
     // `liabilities`, et le bilan la lit là. En émettre une ici la compterait deux fois.
@@ -1409,7 +1643,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       transactions,
       AS_OF_DATE,
     );
-    return {
+    const dashboardState: DashboardState = {
       asOfDate: AS_OF_DATE,
       reportingCurrency,
       ledgerCoverageStart: coverage.start,
@@ -1434,6 +1668,19 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       businessDcfAssumptions,
       businessCapitalEvents,
       businessHoldings,
+      careerRoles,
+      careerCompensationTerms,
+      careerEvents,
+      careerEquityGrants,
+      careerScenarios,
+      taxProfiles,
+      taxRuleSets,
+      taxRules,
+      taxObservations,
+      careerMonthly,
+      careerAnalytics,
+      taxCalculation,
+      careerTaxMonthly,
       liabilities,
       incomes,
       expenseCategories,
@@ -1456,11 +1703,179 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       metrics: composeDashboardMetrics({ balanceSheet, balanceSheetMetrics, flow: flowMetrics }),
       assumptions,
     };
+    const horizonYear = Number(AS_OF_DATE.slice(0, 4)) + 40;
+    dashboardState.eventTimeline = buildDashboardEventTimeline({
+      state: dashboardState,
+      startDate: AS_OF_DATE,
+      endDate: `${horizonYear}${AS_OF_DATE.slice(4)}`,
+    });
+    return dashboardState;
   }
 
   async function mutateState(mutation: Mutation): Promise<DashboardState> {
     const now = new Date().toISOString();
     switch (mutation.action) {
+      case "save_career_package": {
+        const value = mutation.career;
+        const compensation = value.compensation;
+        unwrap(
+          await db.rpc("lfo_save_career_package", {
+            p_user_id: user,
+            p_payload: {
+              role_id: value.roleId,
+              employer: value.employer,
+              job_title: value.jobTitle,
+              employment_type: value.employmentType,
+              industry: value.industry,
+              country: value.country,
+              currency: value.currency,
+              start_date: value.startDate,
+              end_date: value.endDate,
+              status: value.status,
+              data_kind: value.dataKind,
+              confidence: value.confidence,
+              source: value.source,
+              notes: value.notes,
+              compensation: compensation
+                ? {
+                    base_salary: compensation.baseSalary,
+                    frequency: compensation.frequency,
+                    guaranteed_bonus: compensation.guaranteedBonus,
+                    target_bonus: compensation.targetBonus,
+                    target_bonus_rate: compensation.targetBonusRate,
+                    discretionary_bonus: compensation.discretionaryBonus,
+                    commissions: compensation.commissions,
+                    profit_sharing: compensation.profitSharing,
+                    participation: compensation.participation,
+                    employer_benefits: compensation.employerBenefits,
+                    allowances: compensation.allowances,
+                    other_taxable_compensation: compensation.otherTaxableCompensation,
+                    other_non_taxable_compensation: compensation.otherNonTaxableCompensation,
+                    working_time: compensation.workingTime,
+                    effective_from: compensation.effectiveFrom,
+                    effective_to: compensation.effectiveTo,
+                    data_kind: compensation.dataKind,
+                    confidence: compensation.confidence,
+                    source: compensation.source,
+                    notes: compensation.notes,
+                  }
+                : null,
+            },
+          }),
+          "enregistrement atomique du package de rémunération",
+        );
+        break;
+      }
+      case "record_career_event": {
+        const value = mutation.event;
+        unwrap(
+          await db.rpc("lfo_record_career_event", {
+            p_user_id: user,
+            p_payload: {
+              role_id: value.roleId,
+              event_type: value.type,
+              event_date: value.eventDate,
+              amount: value.amount,
+              currency: value.currency,
+              variable_state: value.variableState,
+              paid_date: value.paidDate,
+              label: value.label,
+              data_kind: value.dataKind,
+              confidence: value.confidence,
+              source: value.source,
+              notes: value.notes,
+            },
+          }),
+          "enregistrement événement de carrière",
+        );
+        break;
+      }
+      case "set_tax_profile": {
+        const value = mutation.profile;
+        unwrap(
+          await db.rpc("lfo_set_tax_profile", {
+            p_user_id: user,
+            p_payload: {
+              id: value.id,
+              residency_country: value.residencyCountry,
+              household_status: value.householdStatus,
+              jurisdiction: value.jurisdiction,
+              marital_status: value.maritalStatus,
+              dependants: value.dependants,
+              tax_shares: value.taxShares,
+              withholding_settings: value.withholdingSettings,
+              social_contribution_regime: value.socialContributionRegime,
+              professional_status: value.professionalStatus,
+              special_regime: value.specialRegime,
+              effective_from: value.effectiveFrom,
+              effective_to: value.effectiveTo,
+              source: value.source,
+              confidence: value.confidence,
+              notes: value.notes,
+            },
+          }),
+          "enregistrement profil fiscal",
+        );
+        break;
+      }
+      case "save_tax_rule_set": {
+        const value = mutation.ruleSet;
+        unwrap(
+          await db.rpc("lfo_save_tax_rule_set", {
+            p_user_id: user,
+            p_payload: {
+              id: value.id,
+              jurisdiction: value.jurisdiction,
+              tax_year: value.taxYear,
+              name: value.name,
+              effective_from: value.effectiveFrom,
+              effective_to: value.effectiveTo,
+              source: value.source,
+              source_date: value.sourceDate,
+              confidence: value.confidence,
+              status: value.status,
+              legal_reference: value.legalReference,
+              notes: value.notes,
+              rules: value.rules.map((rule) => ({
+                name: rule.name,
+                tax_type: rule.taxType,
+                income_category: rule.incomeCategory,
+                parameters: rule.parameters,
+                effective_from: rule.effectiveFrom,
+                effective_to: rule.effectiveTo,
+                verified_at: rule.verifiedAt,
+                confidence: rule.confidence,
+                legal_note: rule.legalNote,
+                notes: rule.notes,
+              })),
+            },
+          }),
+          "enregistrement atomique du jeu fiscal",
+        );
+        break;
+      }
+      case "record_tax_observation": {
+        const value = mutation.observation;
+        unwrap(
+          await db.rpc("lfo_record_tax_observation", {
+            p_user_id: user,
+            p_payload: {
+              observation_type: value.type,
+              observed_date: value.observedDate,
+              tax_year: value.taxYear,
+              amount: value.amount,
+              currency: value.currency,
+              transaction_id: value.transactionId,
+              document_id: value.documentId,
+              confidence: value.confidence,
+              source: value.source,
+              notes: value.notes,
+            },
+          }),
+          "enregistrement fait fiscal observé",
+        );
+        break;
+      }
       case "create_business_quick_start": {
         const value = mutation.quickStart;
         unwrap(

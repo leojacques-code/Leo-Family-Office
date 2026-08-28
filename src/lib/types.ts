@@ -503,10 +503,11 @@ export interface DocumentRecord {
  * consommateur, et il reste hors de ce périmètre.
  */
 export interface DeclaredFlowMetrics {
-  monthlyIncome: number;
+  /** `null` dès qu'une source active est inconnue, ou qu'aucune source n'est déclarée. */
+  monthlyIncome: number | null;
   monthlyExpenses: number;
   monthlyDebtService: number;
-  freeCashFlow: number;
+  freeCashFlow: number | null;
   /** Flux constatés au ledger. `null` = non calculable faute de flux observés. */
   savingsRate: number | null;
   investmentRate: number | null;
@@ -849,6 +850,22 @@ export interface DashboardState {
   businessDcfAssumptions?: import("@/lib/engine/business-equity").BusinessDcfAssumptions[];
   businessCapitalEvents?: import("@/lib/engine/business-equity").BusinessCapitalEvent[];
   businessHoldings?: import("@/lib/engine/business-equity").BusinessHoldingLink[];
+  /** Career/Tax V2 — faits datés, moteurs purs et conséquences mensuelles canoniques. */
+  careerRoles?: import("@/lib/engine/career").CareerRole[];
+  careerCompensationTerms?: import("@/lib/engine/career").CareerCompensationTerm[];
+  careerEvents?: import("@/lib/engine/career").CareerEvent[];
+  careerEquityGrants?: import("@/lib/engine/career").CareerEquityGrant[];
+  careerScenarios?: import("@/lib/engine/career").CareerScenario[];
+  taxProfiles?: import("@/lib/engine/tax").TaxProfile[];
+  taxRuleSets?: import("@/lib/engine/tax").TaxRuleSet[];
+  taxRules?: import("@/lib/engine/tax").TaxRule[];
+  taxObservations?: import("@/lib/engine/tax").TaxObservation[];
+  careerMonthly?: import("@/lib/engine/career").CareerMonthlyConsequence[];
+  careerAnalytics?: import("@/lib/engine/career").CareerAnalytics;
+  taxCalculation?: import("@/lib/engine/tax").TaxCalculation;
+  careerTaxMonthly?: import("@/lib/engine/career-tax-cash-flow").CareerTaxMonthlyConsequence[];
+  /** Projection unifiée, dérivée en lecture : aucune conséquence n'est persistée. */
+  eventTimeline?: import("@/lib/engine/event-contracts").CanonicalTimeline;
   liabilities: Liability[];
   incomes: IncomeSource[];
   expenseCategories: ExpenseCategory[];
