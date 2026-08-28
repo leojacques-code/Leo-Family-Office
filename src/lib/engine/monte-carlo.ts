@@ -5,6 +5,9 @@ import {
   type MonthlyScenarioAssumptions,
   type OpeningBalanceSheet,
 } from "@/lib/engine/monthly-financial-model";
+import type { CanonicalEvent } from "@/lib/engine/event-contracts";
+import { prepareScenarioTimeline } from "@/lib/engine/scenario-engine";
+import type { ScenarioVersionDefinition } from "@/lib/engine/scenario-contracts";
 import type { Liability, ProjectionResult, Scenario } from "@/lib/types";
 
 export interface MonteCarloInput {
@@ -137,5 +140,102 @@ export function runMonteCarlo(input: MonteCarloInput): ProjectionResult {
     points,
     methodology:
       "Patrimoine net financier simulé par le Personal Monthly Financial Model : même transition mensuelle que la projection déterministe, seul le rendement de marché est tiré au sort (Student-t à 5 ddl, stress rares, choc daté optionnel). Le choc ne frappe que les actifs exposés au marché ; cash, dette et actifs sans exposition connue en sont exclus. Périmètre financier uniquement : ni immobilier, ni business equity, ni carrière, ni fiscalité future. Les percentiles décrivent le modèle et ses hypothèses, pas l'avenir.",
+  };
+}
+
+export interface ScenarioMonteCarloInput {
+  definition: ScenarioVersionDefinition;
+  baselineEvents: CanonicalEvent[];
+  opening: OpeningBalanceSheet;
+  reportingCurrency?: string;
+  simulations: number;
+  seed: number;
+  startingAge?: number;
+}
+
+/**
+ * Monte Carlo Scenarios V2. La timeline et la transition sont identiques au parcours
+ * déterministe ; seul `PORTFOLIO_RETURN`, explicitement déclaré aléatoire, est tiré.
+ */
+export function runScenarioMonteCarlo(input: ScenarioMonteCarloInput): ProjectionResult {
+  const { definition, simulations, seed } = input;
+  if (simulations < 100 || definition.horizonMonths < 1) {
+    throw new Error("Projection requires at least 100 simulations and one month");
+  }
+  if (definition.asOfDate !== input.opening.date) {
+    throw new Error("Monte Carlo impossible : baseline et cut-off ne correspondent pas");
+  }
+  const market = definition.market;
+  if (market.annualReturn === null || market.annualVolatility === null) {
+    throw new Error("Monte Carlo impossible : hypothèse de marché manquante");
+  }
+  const prepared = prepareScenarioTimeline({
+    baselineEvents: input.baselineEvents,
+    definition,
+  });
+  if (prepared.blockers.some((item) => item.blocking)) {
+    throw new Error(
+      `Monte Carlo impossible : ${prepared.blockers.map((item) => item.code).join(", ")}`,
+    );
+  }
+  const assumptions: MonthlyScenarioAssumptions = {
+    operatingSurplus: 0,
+    investmentAllocationRate: definition.capitalAllocation.investmentAllocationRate,
+    annualReturn: market.annualReturn,
+    shockYear: market.shockYear,
+    shockMagnitude: market.shockMagnitude,
+  };
+  const random = mulberry32(seed);
+  const expectedMonthly = Math.pow(1 + market.annualReturn, 1 / 12) - 1;
+  const volatilityMonthly = market.annualVolatility / Math.sqrt(12);
+  const years = Math.ceil(definition.horizonMonths / 12);
+  const baseYear = Number(input.opening.date.slice(0, 4));
+  const byYear: number[][] = Array.from({ length: years + 1 }, () => []);
+
+  for (let simulation = 0; simulation < simulations; simulation += 1) {
+    const marketReturn = () => {
+      let value = expectedMonthly + volatilityMonthly * studentT5(random);
+      if (market.stressProbability !== null && random() < market.stressProbability / 12) {
+        value -= 0.12 + random() * 0.15;
+      }
+      return value;
+    };
+    const result = runMonthlyModel({
+      opening: input.opening,
+      liabilities: [],
+      assumptions,
+      months: definition.horizonMonths,
+      marketReturn,
+      consequences: prepared.scenario.monthlyConsequences,
+      reportingCurrency: input.reportingCurrency ?? "EUR",
+    });
+    for (let year = 0; year <= years; year += 1) {
+      const monthIndex = Math.min(year * 12, definition.horizonMonths);
+      const state = result.states[monthIndex];
+      if (!state || !Number.isFinite(state.netWorth)) {
+        throw new Error(`Monte Carlo V2 invalide au mois ${monthIndex}`);
+      }
+      byYear[year].push(state.netWorth);
+    }
+  }
+
+  return {
+    scenarioId: definition.scenarioId,
+    seed,
+    simulations,
+    points: byYear.map((values, year) => {
+      values.sort((left, right) => left - right);
+      return {
+        year: baseYear + year,
+        age: (input.startingAge ?? 23) + year,
+        p10: percentile(values, 0.1),
+        p25: percentile(values, 0.25),
+        p50: percentile(values, 0.5),
+        p75: percentile(values, 0.75),
+        p90: percentile(values, 0.9),
+      };
+    }),
+    methodology:
+      "Scenarios V2 : timeline canonique et Personal Monthly Financial Model identiques au déterministe ; seul PORTFOLIO_RETURN est tiré avec un seed reproductible.",
   };
 }
