@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Save, Sparkles } from "lucide-react";
+import { Archive, Copy, Plus, Save, Sparkles } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -35,6 +35,7 @@ import {
   scenarioAssumptions,
   toAnnualPoints,
 } from "@/lib/engine/monthly-financial-model";
+import { createScenarioVersion, runScenarioComparison } from "@/lib/engine/scenario-engine";
 
 function ScenariosPage({
   state,
@@ -48,6 +49,9 @@ function ScenariosPage({
     state.scenarios.find((scenario) => scenario.name === "Central")?.id ?? state.scenarios[0].id,
   );
   const [editing, setEditing] = useState<Scenario | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createForm, setCreateForm] = useState({ name: "", description: "", horizonYears: "30" });
+  const [eventForm, setEventForm] = useState({ label: "", date: "", amount: "", direction: "OUT" });
   const [form, setForm] = useState({
     annualReturn: "",
     annualVolatility: "",
@@ -77,22 +81,149 @@ function ScenariosPage({
   async function saveScenario(event: React.FormEvent) {
     event.preventDefault();
     if (!editing) return;
-    const ok = await mutate({
-      action: "update_scenario",
-      scenarioId: editing.id,
-      patch: {
-        annualReturn: inputNumber(form.annualReturn) / 100,
-        annualVolatility: inputNumber(form.annualVolatility) / 100,
-        annualInflation: inputNumber(form.annualInflation) / 100,
-        monthlySavings: inputNumber(form.monthlySavings),
-        investmentAllocationRate: inputNumber(form.investmentAllocationRate) / 100,
-        salaryGrowth: inputNumber(form.salaryGrowth) / 100,
-        stressProbability: inputNumber(form.stressProbability) / 100,
-        shockYear: form.shockYear ? inputNumber(form.shockYear) : null,
-        shockMagnitude: form.shockMagnitude ? inputNumber(form.shockMagnitude) / 100 : null,
-      },
-    });
+    const patch = {
+      annualReturn: inputNumber(form.annualReturn) / 100,
+      annualVolatility: inputNumber(form.annualVolatility) / 100,
+      annualInflation: inputNumber(form.annualInflation) / 100,
+      monthlySavings: inputNumber(form.monthlySavings),
+      investmentAllocationRate: inputNumber(form.investmentAllocationRate) / 100,
+      salaryGrowth: inputNumber(form.salaryGrowth) / 100,
+      stressProbability: inputNumber(form.stressProbability) / 100,
+      shockYear: form.shockYear ? inputNumber(form.shockYear) : null,
+      shockMagnitude: form.shockMagnitude ? inputNumber(form.shockMagnitude) / 100 : null,
+    };
+    const customAmount = eventForm.amount ? inputNumber(eventForm.amount) : 0;
+    const customEvent =
+      editing.definition && eventForm.label.trim() && eventForm.date && customAmount > 0
+        ? {
+            id: crypto.randomUUID(),
+            operation: "ADD" as const,
+            baselineEventId: null,
+            reason: eventForm.label.trim(),
+            createdAt: new Date().toISOString(),
+            event: {
+              id: crypto.randomUUID(),
+              domain: "PERSONAL" as const,
+              type: "CUSTOM_EVENT" as const,
+              effectiveDate: eventForm.date,
+              eventDate: eventForm.date,
+              createdAt: new Date().toISOString(),
+              dataKind: "USER_ASSUMPTION" as const,
+              confidence: "HIGH" as const,
+              source: "Scenarios V2 editor",
+              provenance: {
+                source: "Scenarios V2 editor",
+                sourceRecordId: null,
+                engine: "SCENARIOS_V2",
+                formulaReference: null,
+                assumptions: [eventForm.label.trim()],
+              },
+              target: { entityType: "PERSONAL_DECISION", entityId: null },
+              status: "PLANNED" as const,
+              shape: "ONE_OFF" as const,
+              effectiveConvention: "IMMEDIATE" as const,
+              sequence: 0,
+              supersededBy: null,
+              scenarioId: editing.id,
+              blockers: [],
+              consequences: [
+                {
+                  id: crypto.randomUUID(),
+                  month: eventForm.date.slice(0, 7),
+                  economicDate: eventForm.date,
+                  sourceDomain: "PERSONAL" as const,
+                  sourceEntityId: null,
+                  sourceEventId: "",
+                  eventType: "CUSTOM_EVENT" as const,
+                  effectKind: "OPERATING" as const,
+                  currency: "EUR",
+                  cashIn: eventForm.direction === "IN" ? customAmount : 0,
+                  cashOut: eventForm.direction === "OUT" ? customAmount : 0,
+                  income: eventForm.direction === "IN" ? customAmount : 0,
+                  expense: eventForm.direction === "OUT" ? customAmount : 0,
+                  taxLiability: 0,
+                  taxCash: 0,
+                  debtPrincipal: 0,
+                  debtInterest: 0,
+                  fees: 0,
+                  assetDelta: 0,
+                  liabilityDelta: 0,
+                  economicCost: eventForm.direction === "OUT" ? customAmount : 0,
+                  dataKind: "USER_ASSUMPTION" as const,
+                  confidence: "HIGH" as const,
+                  provenance: {
+                    source: "Scenarios V2 editor",
+                    sourceRecordId: null,
+                    engine: "SCENARIOS_V2",
+                    formulaReference: null,
+                    assumptions: [eventForm.label.trim()],
+                  },
+                  blockers: [],
+                  status: "PRE_TAX" as const,
+                  reconciliationKey: null,
+                  recognition: "EXPECTED" as const,
+                  included: true,
+                  flags: [],
+                },
+              ],
+            },
+          }
+        : null;
+    if (customEvent?.event) {
+      customEvent.event.consequences[0].sourceEventId = customEvent.event.id;
+    }
+    const definition = editing.definition
+      ? {
+          ...editing.definition,
+          lifecycleStatus: "ACTIVE" as const,
+          market: {
+            ...editing.definition.market,
+            annualReturn: patch.annualReturn,
+            annualVolatility: patch.annualVolatility,
+            annualInflation: patch.annualInflation,
+            stressProbability: patch.stressProbability,
+            shockYear: patch.shockYear,
+            shockMagnitude: patch.shockMagnitude,
+          },
+          capitalAllocation: {
+            investmentAllocationRate: patch.investmentAllocationRate,
+            source: "EXPLICIT" as const,
+          },
+          overrides: customEvent
+            ? [...editing.definition.overrides, customEvent]
+            : editing.definition.overrides,
+        }
+      : null;
+    const ok = definition
+      ? await mutate({
+          action: "save_scenario_version_v2",
+          scenarioId: editing.id,
+          expectedVersion: editing.version,
+          definition,
+        })
+      : await mutate({ action: "update_scenario", scenarioId: editing.id, patch });
     if (ok) setEditing(null);
+  }
+  async function createScenario(event: React.FormEvent) {
+    event.preventDefault();
+    const definition = createScenarioVersion({
+      scenarioId: crypto.randomUUID(),
+      asOfDate: state.asOfDate,
+      horizonMonths: inputNumber(createForm.horizonYears) * 12,
+      market: { annualReturn: 0.05, annualVolatility: 0.12, annualInflation: 0.02 },
+      investmentAllocationRate: 0,
+    });
+    const ok = await mutate({
+      action: "create_scenario_v2",
+      name: createForm.name,
+      description: createForm.description,
+      color: "#39747a",
+      definition,
+    });
+    if (ok) {
+      setCreating(false);
+      setCreateForm({ name: "", description: "", horizonYears: "30" });
+    }
   }
   const finalPoint = projection?.points.at(-1);
   // Trajectoire déterministe recalculée côté client : déplacer la part investie ou le
@@ -100,16 +231,28 @@ function ScenariosPage({
   const selected =
     state.scenarios.find((scenario) => scenario.id === selectedId) ?? state.scenarios[0];
   const opening = buildOpeningBalanceSheet(state);
-  const monthly = runDeterministicModel(
+  const legacyMonthly = runDeterministicModel(
     opening,
     state.liabilities,
     scenarioAssumptions(selected),
     30 * 12,
   );
-  const deterministic = toAnnualPoints(monthly);
+  const comparison =
+    selected.definition && state.eventTimeline
+      ? runScenarioComparison({
+          baselineEvents: state.eventTimeline.events,
+          opening,
+          definition: selected.definition,
+        })
+      : null;
+  const deterministic = comparison?.scenario.annual ?? toAnnualPoints(legacyMonthly);
   const horizon = deterministic.at(-1);
   // Le pic se lit sur le déroulé mensuel : les points annuels le sous-échantillonnent.
-  const peakFundingGap = Math.max(...monthly.states.map((month) => month.fundingGap), 0);
+  const peakFundingGap = Math.max(
+    ...(comparison?.scenario.monthly.map((month) => month.fundingGap) ??
+      legacyMonthly.states.map((month) => month.fundingGap)),
+    0,
+  );
   return (
     <div className="page-stack">
       <SectionHeader
@@ -117,13 +260,18 @@ function ScenariosPage({
         title="Scenarios"
         description="Les scénarios remplacent uniquement les hypothèses futures. Ils ne modifient jamais l’historique ACTUAL."
         actions={
-          <button
-            className="button secondary"
-            onClick={() => mutate({ action: "duplicate_scenario", scenarioId: selectedId })}
-          >
-            <Copy size={15} />
-            Dupliquer
-          </button>
+          <>
+            <button className="button secondary" onClick={() => setCreating(true)}>
+              <Plus size={15} /> Nouveau scénario
+            </button>
+            <button
+              className="button secondary"
+              onClick={() => mutate({ action: "duplicate_scenario", scenarioId: selectedId })}
+            >
+              <Copy size={15} />
+              Dupliquer
+            </button>
+          </>
         }
       />
       <div className="scenario-grid">
@@ -142,6 +290,13 @@ function ScenariosPage({
               <DataBadge kind={scenario.provenance.kind} />
             </div>
             <p>{scenario.description}</p>
+            {scenario.definition ? (
+              <p className="muted-copy">
+                {scenario.definition.overrides.length} changement(s) ·{" "}
+                {scenario.definition.assumptions.length} hypothèse(s) ·{" "}
+                {scenario.lifecycleStatus ?? scenario.definition.lifecycleStatus}
+              </p>
+            ) : null}
             <div className="scenario-stats">
               <div>
                 <span>Rendement</span>
@@ -180,11 +335,73 @@ function ScenariosPage({
           </article>
         ))}
       </div>
+      {comparison ? (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Diff vs trajectoire actuelle</span>
+              <h2>
+                {comparison.completeness} · {comparison.humanDiff.length} changement(s)
+              </h2>
+            </div>
+            <button
+              className="link-button"
+              disabled={busy}
+              onClick={() => mutate({ action: "archive_scenario_v2", scenarioId: selected.id })}
+            >
+              <Archive size={14} /> Archiver
+            </button>
+          </div>
+          {comparison.humanDiff.length ? (
+            <div className="event-list">
+              {comparison.humanDiff.map((item, index) => (
+                <p key={`${item}-${index}`}>{item}</p>
+              ))}
+            </div>
+          ) : (
+            <p className="muted-copy">
+              Aucun changement d’événement : seules les hypothèses de marché diffèrent.
+            </p>
+          )}
+          {comparison.blockers.length ? (
+            <Callout tone="warning" title={`${comparison.blockers.length} point(s) à compléter`}>
+              {comparison.blockers.map((item) => item.message).join(" · ")}
+            </Callout>
+          ) : null}
+          <div className="percentile-cards">
+            <div>
+              <span>Δ patrimoine net</span>
+              <strong>
+                <Currency value={comparison.points.at(-1)?.delta.netWorth ?? 0} sign compact />
+              </strong>
+            </div>
+            <div>
+              <span>Δ liquidité</span>
+              <strong>
+                <Currency
+                  value={comparison.points.at(-1)?.delta.liquidNetWorth ?? 0}
+                  sign
+                  compact
+                />
+              </strong>
+            </div>
+            <div>
+              <span>Funding gap max</span>
+              <strong>
+                <Currency value={peakFundingGap} compact />
+              </strong>
+            </div>
+          </div>
+        </section>
+      ) : null}
       <section className="panel">
         <div className="panel-header">
           <div>
             <span className="eyebrow">Bilan projeté déterministe · {selected.name}</span>
-            <h2>Trajectoire mensuelle sur 30 ans</h2>
+            <h2>
+              Trajectoire mensuelle sur{" "}
+              {selected.definition ? Math.ceil(selected.definition.horizonMonths / 12) : 30} ans
+            </h2>
           </div>
           <button
             className="link-button"
@@ -538,6 +755,59 @@ function ScenariosPage({
               onChange={(event) => setForm({ ...form, shockMagnitude: event.target.value })}
             />
           </label>
+          {editing?.definition ? (
+            <>
+              <div className="form-section-heading">
+                <strong>Ajouter un changement ponctuel (optionnel)</strong>
+                <small>
+                  Pour les cas génériques. Les changements métier détaillés restent produits par
+                  leur domaine.
+                </small>
+              </div>
+              <label>
+                Libellé du changement
+                <input
+                  className="text-input"
+                  placeholder="Ex. apport personnel"
+                  value={eventForm.label}
+                  onChange={(event) => setEventForm({ ...eventForm, label: event.target.value })}
+                />
+              </label>
+              <label>
+                Date future
+                <input
+                  className="text-input"
+                  type="date"
+                  min={editing.definition.asOfDate}
+                  value={eventForm.date}
+                  onChange={(event) => setEventForm({ ...eventForm, date: event.target.value })}
+                />
+              </label>
+              <label>
+                Montant EUR
+                <input
+                  className="text-input"
+                  type="number"
+                  min="0"
+                  value={eventForm.amount}
+                  onChange={(event) => setEventForm({ ...eventForm, amount: event.target.value })}
+                />
+              </label>
+              <label>
+                Effet de trésorerie
+                <select
+                  className="text-input"
+                  value={eventForm.direction}
+                  onChange={(event) =>
+                    setEventForm({ ...eventForm, direction: event.target.value })
+                  }
+                >
+                  <option value="OUT">Décaissement</option>
+                  <option value="IN">Encaissement</option>
+                </select>
+              </label>
+            </>
+          ) : null}
           <div className="form-actions">
             <button type="button" className="button secondary" onClick={() => setEditing(null)}>
               Annuler
@@ -545,6 +815,58 @@ function ScenariosPage({
             <button className="button primary" disabled={busy}>
               <Save size={15} />
               Créer la version {editing ? editing.version + 1 : ""}
+            </button>
+          </div>
+        </form>
+      </Modal>
+      <Modal
+        open={creating}
+        onClose={() => setCreating(false)}
+        title="Nouveau scénario"
+        subtitle="Le scénario démarre de la trajectoire canonique ; vous pourrez ajouter les changements ensuite."
+      >
+        <form className="form-grid" onSubmit={createScenario}>
+          <label>
+            Nom
+            <input
+              className="text-input"
+              required
+              maxLength={160}
+              value={createForm.name}
+              onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })}
+            />
+          </label>
+          <label>
+            Description
+            <input
+              className="text-input"
+              maxLength={1000}
+              value={createForm.description}
+              onChange={(event) =>
+                setCreateForm({ ...createForm, description: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            Horizon (années)
+            <input
+              className="text-input"
+              type="number"
+              min="1"
+              max="80"
+              required
+              value={createForm.horizonYears}
+              onChange={(event) =>
+                setCreateForm({ ...createForm, horizonYears: event.target.value })
+              }
+            />
+          </label>
+          <div className="form-actions">
+            <button type="button" className="button secondary" onClick={() => setCreating(false)}>
+              Annuler
+            </button>
+            <button className="button primary" disabled={busy}>
+              <Plus size={15} /> Créer
             </button>
           </div>
         </form>

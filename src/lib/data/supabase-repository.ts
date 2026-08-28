@@ -71,6 +71,8 @@ import {
 } from "@/lib/engine/tax";
 import { toCareerTaxCashFlow } from "@/lib/engine/career-tax-cash-flow";
 import { buildDashboardEventTimeline } from "@/lib/engine/event-adapters";
+import { isScenarioVersionDefinition } from "@/lib/engine/scenario-engine";
+import type { ScenarioVersionDefinition } from "@/lib/engine/scenario-contracts";
 import {
   enumValue,
   finiteNumber,
@@ -172,7 +174,7 @@ const SCENARIO_COLUMNS: Record<string, string> = {
   shockMagnitude: "shock_magnitude",
 };
 
-export function mapScenario(row: Row): Scenario {
+export function mapScenario(row: Row, definition?: ScenarioVersionDefinition): Scenario {
   const context = `scenarios[id=${str(row.id) || "inconnu"}]`;
   return {
     id: str(row.id),
@@ -192,6 +194,9 @@ export function mapScenario(row: Row): Scenario {
     stressProbability: finiteNumber(row.stress_probability, `${context}.stress_probability`),
     shockYear: nullableFiniteNumber(row.shock_year, `${context}.shock_year`),
     shockMagnitude: nullableFiniteNumber(row.shock_magnitude, `${context}.shock_magnitude`),
+    lifecycleStatus: (str(row.scenario_status) || "ACTIVE") as Scenario["lifecycleStatus"],
+    archivedAt: row.archived_at ? str(row.archived_at) : null,
+    definition,
     provenance: provenance(row),
   };
 }
@@ -200,6 +205,28 @@ export function validateSimulationRun(run: SimulationRun): void {
   finiteNumber(run.seed, "simulation_runs.seed");
   finiteNumber(run.simulations, "simulation_runs.simulations");
   finiteNumber(run.years, "simulation_runs.years");
+  const v2Metadata = [
+    run.scenarioVersion,
+    run.asOfDate,
+    run.baselineReference,
+    run.eventSetVersion,
+    run.assumptionsSnapshot,
+    run.runMode,
+    run.horizonMonths,
+    run.methodologyVersion,
+    run.definitionSnapshot,
+  ];
+  const v2Count = v2Metadata.filter((value) => value !== undefined).length;
+  if (v2Count !== 0 && v2Count !== v2Metadata.length) {
+    throw new Error("Supabase donnée invalide (simulation_runs) : métadonnées V2 incomplètes");
+  }
+  if (v2Count > 0) {
+    finiteNumber(run.scenarioVersion, "simulation_runs.scenario_version");
+    finiteNumber(run.horizonMonths, "simulation_runs.horizon_months");
+    if (!run.definitionSnapshot || !isScenarioVersionDefinition(run.definitionSnapshot)) {
+      throw new Error("Supabase donnée invalide (simulation_runs) : snapshot V2 invalide");
+    }
+  }
   if (run.points.length === 0) {
     throw new Error("Supabase donnée invalide (simulation_results) : aucun percentile à persister");
   }
@@ -294,6 +321,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       budgetRows,
       transactionRows,
       scenarioRows,
+      scenarioVersionRows,
       goalRows,
       recurringRuleRows,
       cashFlowCloseRows,
@@ -351,6 +379,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("budgets"),
       fetchLedgerWindow(),
       mine("scenarios"),
+      mine("scenario_versions"),
       mine("goals"),
       mine("recurring_cash_flow_rules"),
       mine("cash_flow_monthly_closes"),
@@ -889,8 +918,24 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       provenance: provenance(row),
     }));
 
+    const currentScenarioVersions = new Map<string, ScenarioVersionDefinition>();
+    for (const row of scenarioVersionRows) {
+      const scenario = scenarioRows.find((item) => str(item.id) === str(row.scenario_id));
+      if (
+        scenario &&
+        finiteNumber(row.version, `scenario_versions[id=${str(row.id)}].version`) ===
+          finiteNumber(
+            scenario.current_version,
+            `scenarios[id=${str(scenario.id)}].current_version`,
+          ) &&
+        isScenarioVersionDefinition(row.payload)
+      ) {
+        currentScenarioVersions.set(str(row.scenario_id), row.payload);
+      }
+    }
     const scenarios: Scenario[] = scenarioRows
-      .map(mapScenario)
+      .filter((row) => str(row.scenario_status) !== "ARCHIVED")
+      .map((row) => mapScenario(row, currentScenarioVersions.get(str(row.id))))
       .sort((a, b) => (SCENARIO_NAME_ORDER[a.name] ?? 5) - (SCENARIO_NAME_ORDER[b.name] ?? 5));
 
     const goals: Goal[] = goalRows
@@ -2469,6 +2514,44 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         );
         break;
       }
+      case "create_scenario_v2": {
+        unwrap(
+          await db.rpc("lfo_create_scenario_v2", {
+            p_user_id: user,
+            p_name: mutation.name,
+            p_description: mutation.description,
+            p_color: mutation.color,
+            p_definition: mutation.definition,
+            p_now: now,
+          }),
+          "création atomique de scénario V2",
+        );
+        break;
+      }
+      case "save_scenario_version_v2": {
+        unwrap(
+          await db.rpc("lfo_save_scenario_version_v2", {
+            p_user_id: user,
+            p_scenario_id: mutation.scenarioId,
+            p_expected_version: mutation.expectedVersion,
+            p_definition: mutation.definition,
+            p_updated_at: now,
+          }),
+          "versionnement atomique de scénario V2",
+        );
+        break;
+      }
+      case "archive_scenario_v2": {
+        unwrap(
+          await db.rpc("lfo_archive_scenario_v2", {
+            p_user_id: user,
+            p_scenario_id: mutation.scenarioId,
+            p_archived_at: now,
+          }),
+          "archivage atomique de scénario V2",
+        );
+        break;
+      }
       case "create_monthly_close": {
         const state = await getDashboardState();
         if (
@@ -3006,6 +3089,28 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
 
   async function saveSimulation(run: SimulationRun): Promise<string> {
     validateSimulationRun(run);
+    if (run.definitionSnapshot) {
+      return unwrap(
+        await db.rpc("lfo_save_simulation_v2", {
+          p_user_id: user,
+          p_scenario_id: run.scenarioId,
+          p_scenario_version: run.scenarioVersion,
+          p_as_of_date: run.asOfDate,
+          p_baseline_reference: run.baselineReference,
+          p_event_set_version: run.eventSetVersion,
+          p_assumptions_snapshot: run.assumptionsSnapshot,
+          p_run_mode: run.runMode,
+          p_horizon_months: run.horizonMonths,
+          p_methodology: run.methodology,
+          p_methodology_version: run.methodologyVersion,
+          p_definition_snapshot: run.definitionSnapshot,
+          p_seed: run.seed,
+          p_simulations: run.simulations,
+          p_points: run.points,
+        }),
+        "enregistrement atomique de simulation V2",
+      ) as string;
+    }
     return unwrap(
       await db.rpc("lfo_save_simulation", {
         p_user_id: user,

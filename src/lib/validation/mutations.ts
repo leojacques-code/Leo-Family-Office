@@ -17,6 +17,8 @@ import {
 } from "@/lib/engine/business-equity";
 
 import { AS_OF_DATE } from "@/lib/data/shared";
+import { isScenarioVersionDefinition } from "@/lib/engine/scenario-engine";
+import type { ScenarioVersionDefinition } from "@/lib/engine/scenario-contracts";
 import {
   LEDGER_COVERAGE_SOURCES,
   LOT_MATCHING_METHODS,
@@ -55,6 +57,31 @@ const essentiality = z.enum(["ESSENTIAL", "NON_ESSENTIAL", "UNKNOWN"]);
 const expenseBehavior = z.enum(["FIXED", "VARIABLE", "DISCRETIONARY", "UNKNOWN"]);
 
 const realDate = date.refine(isRealCalendarDate, "Date inexistante au calendrier");
+const scenarioDefinitionSchema = z
+  .custom<ScenarioVersionDefinition>(
+    isScenarioVersionDefinition,
+    "Définition Scenarios V2 invalide",
+  )
+  .superRefine((definition, context) => {
+    if (!isRealCalendarDate(definition.asOfDate)) {
+      context.addIssue({ code: "custom", message: "Date as-of invalide", path: ["asOfDate"] });
+    }
+    if (definition.horizonMonths < 1 || definition.horizonMonths > 960) {
+      context.addIssue({
+        code: "custom",
+        message: "Horizon attendu entre 1 et 960 mois",
+        path: ["horizonMonths"],
+      });
+    }
+    const allocation = definition.capitalAllocation.investmentAllocationRate;
+    if (!Number.isFinite(allocation) || allocation < 0 || allocation > 1) {
+      context.addIssue({
+        code: "custom",
+        message: "Allocation attendue entre 0 et 1",
+        path: ["capitalAllocation", "investmentAllocationRate"],
+      });
+    }
+  });
 const nullableMoney = finite.nonnegative().nullable();
 const datedTermKind = z.enum(["CONTRACTUAL", "ASSUMPTION"]);
 const debtContractSchema = z
@@ -1158,6 +1185,24 @@ export const mutationSchema = z.discriminatedUnion("action", [
       .strict(),
   }),
   z.object({ action: z.literal("duplicate_scenario"), scenarioId: z.string().min(1) }),
+  z
+    .object({
+      action: z.literal("create_scenario_v2"),
+      name: z.string().trim().min(1).max(160),
+      description: z.string().trim().max(1000),
+      color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+      definition: scenarioDefinitionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("save_scenario_version_v2"),
+      scenarioId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      definition: scenarioDefinitionSchema,
+    })
+    .strict(),
+  z.object({ action: z.literal("archive_scenario_v2"), scenarioId: z.uuid() }).strict(),
   z.object({ action: z.literal("create_monthly_close"), closeDate: date }),
   z.object({
     action: z.literal("add_goal"),

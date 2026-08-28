@@ -40,12 +40,15 @@ const canonicalMigrations = [
   "20260827215600",
   "20260828131216",
   "20260828131433",
+  "20260828180000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
   profiles: ["user_id", "ledger_coverage_start", "ledger_coverage_source"],
   scenarios: [
     "id",
+    "scenario_status",
+    "archived_at",
     "investment_allocation_rate",
     "annual_return",
     "annual_volatility",
@@ -134,7 +137,7 @@ const requiredColumns: Record<string, string[]> = {
   ],
   recurring_cash_flow_rules: ["id", "cash_flow_kind", "frequency"],
   cash_flow_monthly_closes: ["id", "month", "version", "post_debt_surplus"],
-  simulation_runs: ["id", "scenario_id", "seed", "simulations", "years", "methodology"],
+  simulation_runs: ["id", "scenario_id", "scenario_version", "seed", "simulations", "years", "methodology", "as_of_date", "baseline_reference", "event_set_version", "assumptions_snapshot", "run_mode", "horizon_months", "methodology_version", "definition_snapshot"],
   simulation_results: ["id", "run_id", "year", "p10", "p25", "p50", "p75", "p90"],
   portfolio_events: ["id", "account_id", "security_id", "event_type", "event_date", "settlement_date", "quantity", "unit_price", "gross_amount", "fee_amount", "tax_amount", "envelope_cash_amount", "currency", "counterparty_account_id", "transaction_id", "matched_acquisition_event_id", "is_lot_opening", "matched_lot_is_opening", "data_kind", "confidence"],
   portfolio_envelope_policies: ["id", "account_id", "lot_matching_method", "ledger_coverage_start", "ledger_coverage_source"],
@@ -182,6 +185,7 @@ const userOwnedTables = [
 ] as const;
 
 const requiredIndexes = [
+  "scenarios_id_user_uidx", "scenario_versions_id_user_uidx", "simulation_runs_id_user_uidx", "scenario_versions_user_scenario_version_idx", "scenario_assumptions_user_scenario_key_idx", "simulation_runs_user_scenario_created_idx", "simulation_runs_scenario_version_idx", "simulation_results_user_run_year_idx",
   "net_worth_snapshot_items_snapshot_owner_idx", "financial_accounts_id_user_uidx", "securities_id_user_uidx", "transactions_id_user_uidx", "portfolio_events_opening_cash_uk", "portfolio_events_opening_position_uk", "portfolio_events_account_owner_idx", "portfolio_events_matched_lot_covering_idx", "properties_id_user_uidx", "liabilities_id_user_uidx", "real_estate_capital_events_acquisition_uk", "real_estate_capital_events_disposal_uk", "real_estate_financing_links_liability_idx", "real_estate_financing_links_property_idx", "real_estate_capital_events_transaction_idx", "transactions_property_owner_idx", "real_estate_valuations_property_owner_idx", "real_estate_capital_events_property_owner_idx", "real_estate_operating_terms_property_owner_idx", "businesses_id_user_uidx", "business_ownership_effective_uk", "business_ownership_business_owner_idx", "business_financials_business_owner_idx", "business_valuations_business_owner_idx", "business_capital_events_business_owner_idx", "business_holdings_parent_owner_idx", "business_holdings_child_owner_idx", "business_financials_effective_uk", "business_valuations_effective_method_uk", "businesses_user_idx", "business_financials_user_idx", "business_valuations_user_idx", "business_capital_events_user_idx", "business_capital_events_id_user_uidx", "business_ownership_origin_event_idx", "business_ebitda_adjustments_business_owner_idx", "business_bridge_items_business_owner_idx", "business_bridge_declarations_business_owner_idx", "business_bridge_declarations_owner_date_idx", "business_capital_events_ownership_change_uk", "business_dcf_assumptions_business_owner_idx", "business_dcf_periods_dcf_idx", "business_ebitda_adjustments_user_idx", "business_bridge_items_user_idx", "business_dcf_assumptions_user_idx", "business_dcf_periods_user_idx", "business_holdings_user_idx", "business_ownership_user_idx",
   "documents_id_user_uidx", "documents_owner_storage_path_uidx", "import_sources_account_provider_uidx", "import_sources_id_user_uidx", "import_sources_user_idx", "import_sources_account_idx", "import_sessions_committed_file_uidx", "import_sessions_id_user_uidx", "import_sessions_source_idx", "import_sessions_user_idx", "import_sessions_document_idx", "import_raw_records_id_user_uidx", "import_raw_records_session_idx", "import_normalized_records_match_key_idx", "import_normalized_records_committed_external_uidx", "import_normalized_records_id_user_uidx", "import_normalized_records_session_idx", "import_normalized_records_raw_idx", "import_normalized_records_account_idx", "import_normalized_records_matched_idx", "import_normalized_records_user_idx", "import_record_links_session_idx", "import_record_links_normalized_idx", "import_record_links_transaction_idx", "import_record_links_user_idx", "import_column_mappings_user_idx",
   "business_financials_id_user_uidx", "import_sources_business_provider_uidx", "import_sources_business_idx", "import_record_links_business_idx", "fec_entry_lines_id_user_uidx", "fec_entry_lines_session_idx", "fec_entry_lines_raw_idx", "fec_entry_lines_business_idx", "fec_entry_lines_account_idx", "fec_entry_lines_group_idx", "fec_entry_lines_entry_idx", "fec_entry_lines_user_idx", "import_upload_tickets_id_user_uidx", "import_upload_tickets_user_idx", "import_upload_tickets_open_idx",
@@ -193,6 +197,7 @@ const requiredTriggers = ["real_estate_financing_links_allocation_guard", "impor
 const requiredTriggerFunctions = ["real_estate_allocation_guard", "import_raw_record_immutable", "import_normalized_record_frozen", "import_record_link_immutable", "fec_entry_line_frozen"] as const;
 
 const requiredConstraints = [
+  "scenarios_status_ck", "scenarios_archive_shape_ck", "simulation_runs_mode_ck", "simulation_runs_horizon_ck", "scenario_versions_owner_fk", "scenario_assumptions_owner_fk", "simulation_runs_owner_fk", "simulation_runs_scenario_version_fk", "simulation_results_owner_fk",
   "scenarios_investment_allocation_rate_ck", "expense_categories_cash_flow_kind_ck", "expense_categories_essentiality_ck", "expense_categories_behavior_ck", "transactions_kind_override_ck", "recurring_rules_frequency_ck", "recurring_rules_day_ck", "profiles_ledger_coverage_source_ck", "liabilities_deferral_kind_ck", "liabilities_deferral_months_ck", "liabilities_deferral_interest_ck", "loan_early_repayments_outcome_ck", "loan_early_repayments_amount_ck", "liabilities_amortisation_profile_ck", "liabilities_payment_frequency_ck", "liabilities_interest_convention_ck", "liabilities_rate_type_ck", "loan_rate_changes_kind_ck", "loan_payment_changes_kind_ck", "loan_payment_changes_amount_ck", "net_worth_snapshots_version_ck", "net_worth_snapshots_completeness_ck", "net_worth_snapshot_items_owner_fk", "portfolio_events_type_ck", "portfolio_events_security_shape_ck", "portfolio_events_quantity_shape_ck", "portfolio_events_matched_lot_ck", "portfolio_events_counterparty_ck", "portfolio_events_data_kind_ck", "portfolio_events_settlement_ck", "portfolio_events_account_fk", "portfolio_events_security_fk", "portfolio_events_counterparty_fk", "portfolio_events_transaction_fk", "portfolio_events_lot_target_uk", "portfolio_events_matched_lot_fk", "portfolio_envelope_policies_method_ck", "portfolio_envelope_policies_coverage_source_ck", "portfolio_envelope_policies_coverage_pair_ck", "portfolio_envelope_policies_account_fk", "portfolio_envelope_policies_account_uk", "properties_usage_ck", "properties_ownership_share_ck", "properties_disposal_after_acquisition_ck", "real_estate_valuations_property_fk", "real_estate_valuations_value_ck", "real_estate_valuations_method_ck", "real_estate_valuations_data_kind_ck", "real_estate_capital_events_property_fk", "real_estate_capital_events_transaction_fk", "real_estate_capital_events_amount_ck", "real_estate_capital_events_type_ck", "real_estate_capital_events_data_kind_ck", "real_estate_operating_terms_property_fk", "real_estate_operating_terms_effective_uk", "real_estate_operating_terms_amounts_ck", "real_estate_operating_terms_rates_ck", "real_estate_operating_terms_management_exclusive_ck", "real_estate_operating_terms_data_kind_ck", "real_estate_financing_links_property_fk", "real_estate_financing_links_liability_fk", "real_estate_financing_links_pair_uk", "real_estate_financing_links_share_ck", "transactions_property_fk", "business_ownership_business_fk", "business_financials_business_fk", "business_valuations_business_fk", "business_ownership_rates_v2_ck", "business_ownership_shares_ck", "business_ownership_origin_event_fk", "business_valuations_basis_v2_ck", "business_valuations_method_ck", "business_valuations_multiple_ck", "business_valuations_metric_basis_ck", "business_valuations_round_ck", "businesses_capital_history_source_ck", "businesses_capital_history_start_ck", "business_financials_period_kind_ck", "business_financials_period_order_ck", "business_financials_non_negative_ck", "business_capital_events_business_fk", "business_capital_events_transaction_fk", "business_capital_events_amount_ck", "business_capital_events_type_v2_ck", "business_capital_events_amount_scope_ck", "business_capital_events_scope_domain_ck", "business_capital_events_fees_ck", "business_capital_events_ownership_after_ck", "business_capital_events_ownership_delta_ck", "business_ebitda_adjustments_business_fk", "business_ebitda_adjustments_category_ck", "business_ebitda_adjustments_data_kind_ck", "business_ebitda_adjustments_label_uk", "business_bridge_items_business_fk", "business_bridge_items_category_ck", "business_bridge_items_data_kind_ck", "business_bridge_items_label_uk", "business_bridge_declarations_business_fk", "business_bridge_declarations_status_ck", "business_bridge_declarations_effective_uk", "business_dcf_assumptions_business_fk", "business_dcf_assumptions_wacc_ck", "business_dcf_assumptions_tax_ck", "business_dcf_assumptions_terminal_ck", "business_dcf_assumptions_convention_ck", "business_dcf_assumptions_effective_uk", "business_dcf_periods_year_ck", "business_dcf_periods_non_negative_ck", "business_dcf_periods_year_uk", "business_holdings_parent_fk", "business_holdings_child_fk", "business_holdings_no_self_ck", "business_holdings_rate_ck", "business_holdings_effective_uk",
   "import_sources_account_fk", "import_sources_business_fk", "import_sources_kind_ck", "import_sources_domain_v2_ck", "import_sources_status_ck", "import_sources_data_kind_ck", "import_sources_domain_shape_v2_ck", "import_sources_coverage_order_ck",
   "import_sessions_source_fk", "import_sessions_document_fk", "import_sessions_status_v2_ck", "import_sessions_fiscal_year_ck", "import_sessions_entry_counts_ck", "import_sessions_coverage_shape_ck", "import_sessions_counts_ck", "import_sessions_committed_shape_ck", "import_sessions_file_hash_ck", "import_sessions_declared_period_ck", "import_sessions_observed_period_ck",
@@ -213,6 +218,10 @@ const requiredRpcs: Record<string, string> = {
   lfo_update_scenario:
     "p_user_id uuid, p_scenario_id uuid, p_patch jsonb, p_updated_at timestamp with time zone",
   lfo_duplicate_scenario: "p_user_id uuid, p_scenario_id uuid, p_now timestamp with time zone",
+  lfo_create_scenario_v2: "p_user_id uuid, p_name text, p_description text, p_color text, p_definition jsonb, p_now timestamp with time zone",
+  lfo_save_scenario_version_v2: "p_user_id uuid, p_scenario_id uuid, p_expected_version integer, p_definition jsonb, p_updated_at timestamp with time zone",
+  lfo_archive_scenario_v2: "p_user_id uuid, p_scenario_id uuid, p_archived_at timestamp with time zone",
+  lfo_save_simulation_v2: "p_user_id uuid, p_scenario_id uuid, p_scenario_version integer, p_as_of_date date, p_baseline_reference jsonb, p_event_set_version text, p_assumptions_snapshot jsonb, p_run_mode text, p_horizon_months integer, p_methodology text, p_methodology_version text, p_definition_snapshot jsonb, p_seed integer, p_simulations integer, p_points jsonb",
   lfo_create_monthly_close:
     "p_user_id uuid, p_close_date date, p_gross_assets numeric, p_debt numeric, p_net_worth numeric, p_forecast_net_worth numeric, p_variance numeric",
   lfo_add_category:
@@ -281,16 +290,26 @@ const requiredRpcs: Record<string, string> = {
 };
 
 /**
- * RPC de LECTURE d'un invariant, avec leur type de retour déclaré.
+ * RPC dont le type de retour N'EST PAS un `uuid`, avec ce type DÉCLARÉ ici.
  *
- * `lfo_fec_entry_balance` dérive des lignes persistées le nombre d'écritures et le nombre
- * d'écritures déséquilibrées. Ce n'est pas une formule financière déplacée dans la base :
- * Σdébits = Σcrédits par écriture est l'invariant d'INTÉGRITÉ de la source comptable, et il
- * doit être établi là où les lignes vivent — un décompte fourni par l'appelant ne prouve
- * rien de ce que la base contient.
+ * La convention du dépôt reste celle-ci : une RPC d'ÉCRITURE retourne l'identifiant de ce
+ * qu'elle a écrit, ce qui rend une écriture composée vérifiable par son appelant. Les
+ * exceptions sont nommées une par une, jamais tolérées en bloc : un type de retour changé
+ * en silence échoue comme le reste du gate.
+ *
+ * `lfo_fec_entry_balance` est une RPC de LECTURE D'INVARIANT — elle ne crée rien, donc elle
+ * n'a aucun identifiant à rendre. Elle dérive des lignes persistées le nombre d'écritures et
+ * de déséquilibres, parce que Σdébits = Σcrédits par écriture est l'invariant d'intégrité de
+ * la source comptable et qu'un décompte fourni par l'appelant ne prouve rien de ce que la
+ * base contient.
+ *
+ * `lfo_save_scenario_version_v2` rend le NUMÉRO DE VERSION résultant. C'est un choix du
+ * domaine Scenarios : sur une écriture optimiste avec version attendue, le numéro obtenu est
+ * l'information utile à l'appelant, davantage que l'identifiant de la ligne créée.
  */
-const integrityReaderRpcs: Record<string, string> = {
+const declaredReturnTypeRpcs: Record<string, string> = {
   lfo_fec_entry_balance: "TABLE(entries integer, unbalanced integer)",
+  lfo_save_scenario_version_v2: "integer",
 };
 
 /**
@@ -493,13 +512,9 @@ try {
       failures.push(
         `Signature RPC invalide : ${rpc.name}(${rpc.arguments}), attendu ${rpc.name}(${expectedArguments})`,
       );
-    // Une RPC d'ÉCRITURE retourne l'identifiant de ce qu'elle a écrit : c'est la convention
-    // du dépôt, et elle rend une écriture composée vérifiable par son appelant. Une RPC de
-    // LECTURE D'INVARIANT ne peut pas s'y plier — elle ne crée rien — mais elle n'échappe
-    // pas au gate pour autant : son type de retour est DÉCLARÉ ici, et un changement
-    // silencieux échoue comme le reste.
-    const integrityReader = integrityReaderRpcs[rpc.name];
-    const expectedResult = integrityReader ?? "uuid";
+    // `uuid` par défaut : une RPC d'écriture retourne l'identifiant de ce qu'elle a écrit.
+    // Les exceptions sont DÉCLARÉES au-dessus, une par une.
+    const expectedResult = declaredReturnTypeRpcs[rpc.name] ?? "uuid";
     if (rpc.result_type !== expectedResult)
       failures.push(
         `Type de retour RPC invalide : ${rpc.name} retourne ${rpc.result_type}, attendu ${expectedResult}`,

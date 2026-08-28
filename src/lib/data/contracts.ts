@@ -37,6 +37,11 @@ import type {
   RecurrenceFrequency,
   Scenario,
 } from "@/lib/types";
+import type {
+  ScenarioBaselineReference,
+  ScenarioRunMode,
+  ScenarioVersionDefinition,
+} from "@/lib/engine/scenario-contracts";
 
 export interface DebtContractInput {
   liabilityId: string | null;
@@ -610,6 +615,20 @@ export type Mutation =
       >;
     }
   | { action: "duplicate_scenario"; scenarioId: string }
+  | {
+      action: "create_scenario_v2";
+      name: string;
+      description: string;
+      color: string;
+      definition: ScenarioVersionDefinition;
+    }
+  | {
+      action: "save_scenario_version_v2";
+      scenarioId: string;
+      expectedVersion: number;
+      definition: ScenarioVersionDefinition;
+    }
+  | { action: "archive_scenario_v2"; scenarioId: string }
   | { action: "create_monthly_close"; closeDate: string }
   | { action: "add_goal"; name: string; targetAmount: number; targetDate: string | null }
   | {
@@ -724,6 +743,15 @@ export interface SimulationRun {
   years: number;
   methodology: string;
   points: Array<{ year: number; p10: number; p25: number; p50: number; p75: number; p90: number }>;
+  scenarioVersion?: number;
+  asOfDate?: string;
+  baselineReference?: ScenarioBaselineReference;
+  eventSetVersion?: string;
+  assumptionsSnapshot?: ScenarioVersionDefinition["assumptions"];
+  runMode?: ScenarioRunMode;
+  horizonMonths?: number;
+  methodologyVersion?: string;
+  definitionSnapshot?: ScenarioVersionDefinition;
 }
 
 export type StoredDocument = DocumentRecord;
