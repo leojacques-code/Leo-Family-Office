@@ -38,7 +38,9 @@ const canonicalMigrations = [
   "20260827155134",
   "20260827215014",
   "20260827215600",
-  "20260828065833",
+  "20260828131216",
+  "20260828131433",
+  "20260828180000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -155,11 +157,13 @@ const requiredColumns: Record<string, string[]> = {
   business_bridge_declarations: ["id", "user_id", "business_id", "effective_date", "status", "data_kind", "confidence", "source", "notes"],
   business_dcf_assumptions: ["id", "user_id", "business_id", "valuation_date", "currency", "wacc", "tax_rate", "terminal_method", "terminal_growth", "terminal_exit_multiple", "terminal_exit_metric", "discount_convention"],
   business_dcf_periods: ["id", "user_id", "dcf_id", "year_index", "revenue", "ebitda", "ebit", "depreciation_amortisation", "capex", "working_capital_change"],
-  import_sources: ["id", "user_id", "kind", "domain", "provider", "label", "target_account_id", "status", "adapter_version", "coverage_start", "coverage_end", "last_attempt_at", "last_success_at", "last_error", "data_kind", "confidence"],
-  import_sessions: ["id", "user_id", "source_id", "file_name", "file_hash", "file_size_bytes", "content_type", "encoding", "delimiter", "parser", "parser_version", "mapping", "conventions", "declared_currency", "observation_date", "stable_transaction_id_declared", "retain_file_requested", "declared_period_start", "declared_period_end", "observed_period_start", "observed_period_end", "status", "row_count", "ready_count", "warning_count", "blocked_count", "duplicate_count", "ignored_count", "committed_count", "document_id", "issues", "analyzed_at", "committed_at", "discarded_at"],
+  import_upload_tickets: ["id", "user_id", "domain", "storage_path", "file_name", "content_type", "byte_size", "created_at", "expires_at", "consumed_at", "consumed_session_id"],
+  fec_entry_lines: ["id", "user_id", "session_id", "raw_record_id", "business_id", "journal_code", "journal_lib", "entry_num", "entry_date", "account_num", "account_lib", "aux_account_num", "aux_account_lib", "piece_ref", "piece_date", "entry_label", "debit", "credit", "lettering_code", "lettering_date", "validation_date", "currency_amount", "currency_code", "pcg_class", "pcg_group", "status", "issues", "commit_state", "committed_at", "data_kind", "confidence"],
+  import_sources: ["id", "user_id", "kind", "domain", "provider", "label", "target_account_id", "target_business_id", "status", "adapter_version", "coverage_start", "coverage_end", "last_attempt_at", "last_success_at", "last_error", "data_kind", "confidence"],
+  import_sessions: ["id", "user_id", "source_id", "file_name", "file_hash", "file_size_bytes", "content_type", "encoding", "delimiter", "parser", "parser_version", "mapping", "conventions", "declared_currency", "observation_date", "stable_transaction_id_declared", "retain_file_requested", "declared_period_start", "declared_period_end", "observed_period_start", "observed_period_end", "fiscal_year_start", "fiscal_year_end", "coverage_declared", "entry_count", "unbalanced_entry_count", "staging_storage_path", "staging_cleanup_failed_at", "status", "row_count", "ready_count", "warning_count", "blocked_count", "duplicate_count", "ignored_count", "committed_count", "document_id", "issues", "analyzed_at", "committed_at", "discarded_at"],
   import_raw_records: ["id", "user_id", "session_id", "row_number", "raw_line", "cells"],
   import_normalized_records: ["id", "user_id", "session_id", "raw_record_id", "target_domain", "account_id", "transaction_date", "value_date", "label", "amount", "currency", "external_transaction_id", "reference", "counterparty", "balance_after", "status", "dedupe_verdict", "match_key", "external_key", "matched_transaction_id", "issues", "commit_state", "committed_at", "data_kind", "confidence"],
-  import_record_links: ["id", "user_id", "session_id", "normalized_record_id", "target_domain", "transaction_id"],
+  import_record_links: ["id", "user_id", "session_id", "normalized_record_id", "target_domain", "transaction_id", "business_financials_id"],
   import_column_mappings: ["id", "user_id", "signature", "provider", "label", "headers", "mapping", "conventions", "version", "confirmed_at"],
   career_roles: ["id", "user_id", "employer", "job_title", "employment_type", "industry", "country", "currency", "start_date", "end_date", "status", "data_kind", "confidence", "source", "notes"],
   career_compensation_terms: ["id", "user_id", "role_id", "base_salary", "frequency", "guaranteed_bonus", "target_bonus", "target_bonus_rate", "discretionary_bonus", "commissions", "profit_sharing", "participation", "employer_benefits", "allowances", "other_taxable_compensation", "other_non_taxable_compensation", "working_time", "effective_from", "effective_to", "data_kind", "confidence", "source", "notes"],
@@ -177,26 +181,31 @@ const userOwnedTables = [
   "profiles", "institutions", "asset_classes", "financial_accounts", "account_balances", "expense_categories", "transactions", "securities", "positions", "position_snapshots", "liabilities", "loan_schedules", "income_sources", "budgets", "properties", "mortgages", "real_estate_cashflows", "businesses", "business_ownership", "business_financials", "business_valuations", "tax_profiles", "tax_rules", "economic_assumptions", "market_assumptions", "scenarios", "scenario_versions", "scenario_assumptions", "goals", "net_worth_snapshots", "documents", "document_metadata", "alerts", "external_sources", "currency_rates", "simulation_runs", "simulation_results", "decision_cases", "monthly_closes", "recurring_cash_flow_rules", "cash_flow_monthly_closes", "loan_early_repayments", "loan_charges", "loan_rate_changes", "loan_payment_changes", "liability_balance_observations", "net_worth_snapshot_items", "portfolio_events", "portfolio_envelope_policies", "real_estate_valuations", "real_estate_capital_events", "real_estate_operating_terms", "real_estate_financing_links", "business_capital_events", "business_holdings", "business_ebitda_adjustments", "business_bridge_items", "business_bridge_declarations", "business_dcf_assumptions", "business_dcf_periods",
   "import_sources", "import_sessions", "import_raw_records", "import_normalized_records", "import_record_links", "import_column_mappings",
   "career_roles", "career_compensation_terms", "career_events", "career_equity_grants", "career_scenarios", "tax_rule_sets", "tax_observations", "tax_income_items",
+  "fec_entry_lines", "import_upload_tickets",
 ] as const;
 
 const requiredIndexes = [
   "scenarios_id_user_uidx", "scenario_versions_id_user_uidx", "simulation_runs_id_user_uidx", "scenario_versions_user_scenario_version_idx", "scenario_assumptions_user_scenario_key_idx", "simulation_runs_user_scenario_created_idx", "simulation_runs_scenario_version_idx", "simulation_results_user_run_year_idx",
   "net_worth_snapshot_items_snapshot_owner_idx", "financial_accounts_id_user_uidx", "securities_id_user_uidx", "transactions_id_user_uidx", "portfolio_events_opening_cash_uk", "portfolio_events_opening_position_uk", "portfolio_events_account_owner_idx", "portfolio_events_matched_lot_covering_idx", "properties_id_user_uidx", "liabilities_id_user_uidx", "real_estate_capital_events_acquisition_uk", "real_estate_capital_events_disposal_uk", "real_estate_financing_links_liability_idx", "real_estate_financing_links_property_idx", "real_estate_capital_events_transaction_idx", "transactions_property_owner_idx", "real_estate_valuations_property_owner_idx", "real_estate_capital_events_property_owner_idx", "real_estate_operating_terms_property_owner_idx", "businesses_id_user_uidx", "business_ownership_effective_uk", "business_ownership_business_owner_idx", "business_financials_business_owner_idx", "business_valuations_business_owner_idx", "business_capital_events_business_owner_idx", "business_holdings_parent_owner_idx", "business_holdings_child_owner_idx", "business_financials_effective_uk", "business_valuations_effective_method_uk", "businesses_user_idx", "business_financials_user_idx", "business_valuations_user_idx", "business_capital_events_user_idx", "business_capital_events_id_user_uidx", "business_ownership_origin_event_idx", "business_ebitda_adjustments_business_owner_idx", "business_bridge_items_business_owner_idx", "business_bridge_declarations_business_owner_idx", "business_bridge_declarations_owner_date_idx", "business_capital_events_ownership_change_uk", "business_dcf_assumptions_business_owner_idx", "business_dcf_periods_dcf_idx", "business_ebitda_adjustments_user_idx", "business_bridge_items_user_idx", "business_dcf_assumptions_user_idx", "business_dcf_periods_user_idx", "business_holdings_user_idx", "business_ownership_user_idx",
   "documents_id_user_uidx", "documents_owner_storage_path_uidx", "import_sources_account_provider_uidx", "import_sources_id_user_uidx", "import_sources_user_idx", "import_sources_account_idx", "import_sessions_committed_file_uidx", "import_sessions_id_user_uidx", "import_sessions_source_idx", "import_sessions_user_idx", "import_sessions_document_idx", "import_raw_records_id_user_uidx", "import_raw_records_session_idx", "import_normalized_records_match_key_idx", "import_normalized_records_committed_external_uidx", "import_normalized_records_id_user_uidx", "import_normalized_records_session_idx", "import_normalized_records_raw_idx", "import_normalized_records_account_idx", "import_normalized_records_matched_idx", "import_normalized_records_user_idx", "import_record_links_session_idx", "import_record_links_normalized_idx", "import_record_links_transaction_idx", "import_record_links_user_idx", "import_column_mappings_user_idx",
+  "business_financials_id_user_uidx", "import_sources_business_provider_uidx", "import_sources_business_idx", "import_record_links_business_idx", "fec_entry_lines_id_user_uidx", "fec_entry_lines_session_idx", "fec_entry_lines_raw_idx", "fec_entry_lines_business_idx", "fec_entry_lines_account_idx", "fec_entry_lines_group_idx", "fec_entry_lines_entry_idx", "fec_entry_lines_user_idx", "import_upload_tickets_id_user_uidx", "import_upload_tickets_user_idx", "import_upload_tickets_open_idx",
+  "fec_entry_lines_business_owner_fk_idx", "import_upload_tickets_session_owner_fk_idx",
   "income_sources_id_user_uidx", "tax_profiles_id_user_uidx", "tax_profiles_owner_effective_uidx", "tax_rules_id_user_uidx", "income_sources_user_idx", "tax_profiles_user_idx", "tax_rules_user_idx", "career_roles_user_date_idx", "career_compensation_role_owner_idx", "career_events_role_owner_idx", "career_events_paid_idx", "career_equity_role_owner_idx", "career_scenarios_role_owner_idx", "tax_rule_sets_user_year_idx", "tax_rules_rule_set_owner_idx", "tax_observations_user_year_idx", "tax_observations_transaction_owner_idx", "tax_income_role_owner_idx", "tax_income_event_owner_idx", "tax_income_transaction_owner_idx", "career_equity_grants_user_idx", "career_scenarios_user_idx", "tax_income_items_user_idx", "tax_observations_document_owner_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx", "business_valuations_effective_uk"] as const;
-const requiredTriggers = ["real_estate_financing_links_allocation_guard", "import_raw_records_immutable", "import_normalized_records_frozen", "import_record_links_immutable"] as const;
-const requiredTriggerFunctions = ["real_estate_allocation_guard", "import_raw_record_immutable", "import_normalized_record_frozen", "import_record_link_immutable"] as const;
+const requiredTriggers = ["real_estate_financing_links_allocation_guard", "import_raw_records_immutable", "import_normalized_records_frozen", "import_record_links_immutable", "fec_entry_lines_frozen"] as const;
+const requiredTriggerFunctions = ["real_estate_allocation_guard", "import_raw_record_immutable", "import_normalized_record_frozen", "import_record_link_immutable", "fec_entry_line_frozen"] as const;
 
 const requiredConstraints = [
   "scenarios_status_ck", "scenarios_archive_shape_ck", "simulation_runs_mode_ck", "simulation_runs_horizon_ck", "scenario_versions_owner_fk", "scenario_assumptions_owner_fk", "simulation_runs_owner_fk", "simulation_runs_scenario_version_fk", "simulation_results_owner_fk",
   "scenarios_investment_allocation_rate_ck", "expense_categories_cash_flow_kind_ck", "expense_categories_essentiality_ck", "expense_categories_behavior_ck", "transactions_kind_override_ck", "recurring_rules_frequency_ck", "recurring_rules_day_ck", "profiles_ledger_coverage_source_ck", "liabilities_deferral_kind_ck", "liabilities_deferral_months_ck", "liabilities_deferral_interest_ck", "loan_early_repayments_outcome_ck", "loan_early_repayments_amount_ck", "liabilities_amortisation_profile_ck", "liabilities_payment_frequency_ck", "liabilities_interest_convention_ck", "liabilities_rate_type_ck", "loan_rate_changes_kind_ck", "loan_payment_changes_kind_ck", "loan_payment_changes_amount_ck", "net_worth_snapshots_version_ck", "net_worth_snapshots_completeness_ck", "net_worth_snapshot_items_owner_fk", "portfolio_events_type_ck", "portfolio_events_security_shape_ck", "portfolio_events_quantity_shape_ck", "portfolio_events_matched_lot_ck", "portfolio_events_counterparty_ck", "portfolio_events_data_kind_ck", "portfolio_events_settlement_ck", "portfolio_events_account_fk", "portfolio_events_security_fk", "portfolio_events_counterparty_fk", "portfolio_events_transaction_fk", "portfolio_events_lot_target_uk", "portfolio_events_matched_lot_fk", "portfolio_envelope_policies_method_ck", "portfolio_envelope_policies_coverage_source_ck", "portfolio_envelope_policies_coverage_pair_ck", "portfolio_envelope_policies_account_fk", "portfolio_envelope_policies_account_uk", "properties_usage_ck", "properties_ownership_share_ck", "properties_disposal_after_acquisition_ck", "real_estate_valuations_property_fk", "real_estate_valuations_value_ck", "real_estate_valuations_method_ck", "real_estate_valuations_data_kind_ck", "real_estate_capital_events_property_fk", "real_estate_capital_events_transaction_fk", "real_estate_capital_events_amount_ck", "real_estate_capital_events_type_ck", "real_estate_capital_events_data_kind_ck", "real_estate_operating_terms_property_fk", "real_estate_operating_terms_effective_uk", "real_estate_operating_terms_amounts_ck", "real_estate_operating_terms_rates_ck", "real_estate_operating_terms_management_exclusive_ck", "real_estate_operating_terms_data_kind_ck", "real_estate_financing_links_property_fk", "real_estate_financing_links_liability_fk", "real_estate_financing_links_pair_uk", "real_estate_financing_links_share_ck", "transactions_property_fk", "business_ownership_business_fk", "business_financials_business_fk", "business_valuations_business_fk", "business_ownership_rates_v2_ck", "business_ownership_shares_ck", "business_ownership_origin_event_fk", "business_valuations_basis_v2_ck", "business_valuations_method_ck", "business_valuations_multiple_ck", "business_valuations_metric_basis_ck", "business_valuations_round_ck", "businesses_capital_history_source_ck", "businesses_capital_history_start_ck", "business_financials_period_kind_ck", "business_financials_period_order_ck", "business_financials_non_negative_ck", "business_capital_events_business_fk", "business_capital_events_transaction_fk", "business_capital_events_amount_ck", "business_capital_events_type_v2_ck", "business_capital_events_amount_scope_ck", "business_capital_events_scope_domain_ck", "business_capital_events_fees_ck", "business_capital_events_ownership_after_ck", "business_capital_events_ownership_delta_ck", "business_ebitda_adjustments_business_fk", "business_ebitda_adjustments_category_ck", "business_ebitda_adjustments_data_kind_ck", "business_ebitda_adjustments_label_uk", "business_bridge_items_business_fk", "business_bridge_items_category_ck", "business_bridge_items_data_kind_ck", "business_bridge_items_label_uk", "business_bridge_declarations_business_fk", "business_bridge_declarations_status_ck", "business_bridge_declarations_effective_uk", "business_dcf_assumptions_business_fk", "business_dcf_assumptions_wacc_ck", "business_dcf_assumptions_tax_ck", "business_dcf_assumptions_terminal_ck", "business_dcf_assumptions_convention_ck", "business_dcf_assumptions_effective_uk", "business_dcf_periods_year_ck", "business_dcf_periods_non_negative_ck", "business_dcf_periods_year_uk", "business_holdings_parent_fk", "business_holdings_child_fk", "business_holdings_no_self_ck", "business_holdings_rate_ck", "business_holdings_effective_uk",
-  "import_sources_account_fk", "import_sources_kind_ck", "import_sources_domain_ck", "import_sources_status_ck", "import_sources_data_kind_ck", "import_sources_domain_shape_ck", "import_sources_coverage_order_ck",
-  "import_sessions_source_fk", "import_sessions_document_fk", "import_sessions_status_ck", "import_sessions_counts_ck", "import_sessions_committed_shape_ck", "import_sessions_file_hash_ck", "import_sessions_declared_period_ck", "import_sessions_observed_period_ck",
+  "import_sources_account_fk", "import_sources_business_fk", "import_sources_kind_ck", "import_sources_domain_v2_ck", "import_sources_status_ck", "import_sources_data_kind_ck", "import_sources_domain_shape_v2_ck", "import_sources_coverage_order_ck",
+  "import_sessions_source_fk", "import_sessions_document_fk", "import_sessions_status_v2_ck", "import_sessions_fiscal_year_ck", "import_sessions_entry_counts_ck", "import_sessions_coverage_shape_ck", "import_sessions_counts_ck", "import_sessions_committed_shape_ck", "import_sessions_file_hash_ck", "import_sessions_declared_period_ck", "import_sessions_observed_period_ck",
   "import_raw_records_session_fk", "import_raw_records_row_uk", "import_raw_records_row_number_ck", "import_raw_records_cells_ck",
   "import_normalized_records_session_fk", "import_normalized_records_raw_fk", "import_normalized_records_account_fk", "import_normalized_records_matched_fk", "import_normalized_records_raw_uk", "import_normalized_records_domain_ck", "import_normalized_records_status_ck", "import_normalized_records_verdict_ck", "import_normalized_records_commit_state_ck", "import_normalized_records_data_kind_ck", "import_normalized_records_issues_ck", "import_normalized_records_ready_shape_ck", "import_normalized_records_committable_ck",
-  "import_record_links_session_fk", "import_record_links_normalized_fk", "import_record_links_transaction_fk", "import_record_links_normalized_uk", "import_record_links_transaction_uk", "import_record_links_domain_ck", "import_record_links_target_ck",
+  "import_record_links_session_fk", "import_record_links_normalized_fk", "import_record_links_transaction_fk", "import_record_links_business_fk", "import_record_links_normalized_uk", "import_record_links_transaction_uk", "import_record_links_business_session_uk", "import_record_links_domain_v2_ck", "import_record_links_target_v2_ck",
+  "fec_entry_lines_session_fk", "fec_entry_lines_raw_fk", "fec_entry_lines_business_fk", "fec_entry_lines_raw_uk", "fec_entry_lines_status_ck", "fec_entry_lines_commit_state_ck", "fec_entry_lines_data_kind_ck", "fec_entry_lines_issues_ck", "fec_entry_lines_pcg_class_ck", "fec_entry_lines_amount_shape_ck", "fec_entry_lines_currency_ck", "fec_entry_lines_committable_ck",
+  "import_upload_tickets_domain_ck", "import_upload_tickets_path_uk", "import_upload_tickets_size_ck", "import_upload_tickets_expiry_ck", "import_upload_tickets_consumed_shape_ck", "import_upload_tickets_session_fk",
   "import_column_mappings_signature_uk", "import_column_mappings_headers_ck", "import_column_mappings_mapping_ck", "import_column_mappings_version_ck",
   "career_roles_type_ck", "career_roles_status_ck", "career_roles_dates_ck", "career_roles_data_kind_ck", "career_roles_id_user_uk", "career_compensation_role_fk", "career_compensation_frequency_ck", "career_compensation_dates_ck", "career_compensation_amounts_ck", "career_compensation_data_kind_ck", "career_compensation_effective_uk", "career_events_role_fk", "career_events_type_ck", "career_events_variable_state_ck", "career_events_paid_shape_ck", "career_events_amount_ck", "career_events_data_kind_ck", "career_events_id_user_uk", "career_equity_role_fk", "career_equity_type_ck", "career_equity_liquidity_ck", "career_equity_amounts_ck", "career_equity_expiry_ck", "career_scenarios_role_fk", "career_scenarios_type_ck", "career_scenarios_kind_ck", "tax_profiles_dates_ck", "tax_profiles_dependants_ck", "tax_rule_sets_dates_ck", "tax_rule_sets_status_ck", "tax_rule_sets_effective_uk", "tax_rule_sets_id_user_uk", "tax_rules_rule_set_fk", "tax_rules_type_ck", "tax_rules_category_ck", "tax_rules_dates_ck", "tax_observations_transaction_fk", "tax_observations_document_fk", "tax_observations_type_ck", "tax_observations_amount_ck", "tax_observations_kind_ck", "tax_income_role_fk", "tax_income_event_fk", "tax_income_transaction_fk", "tax_income_category_ck", "tax_income_amount_ck", "tax_income_kind_ck",
 ] as const;
@@ -265,11 +274,32 @@ const requiredRpcs: Record<string, string> = {
   lfo_discard_import_session: "p_user_id uuid, p_session_id uuid",
   lfo_attach_import_document: "p_user_id uuid, p_payload jsonb",
   lfo_save_import_mapping: "p_user_id uuid, p_payload jsonb",
+  lfo_issue_import_upload_ticket: "p_user_id uuid, p_payload jsonb",
+  lfo_consume_import_upload_ticket: "p_user_id uuid, p_ticket_id uuid",
+  lfo_record_import_staging_cleanup: "p_user_id uuid, p_session_id uuid, p_removed boolean",
+  lfo_fec_entry_balance: "p_user_id uuid, p_session_id uuid",
+  lfo_open_fec_session: "p_user_id uuid, p_payload jsonb",
+  lfo_append_fec_lines: "p_user_id uuid, p_payload jsonb",
+  lfo_finalize_fec_session: "p_user_id uuid, p_payload jsonb",
+  lfo_commit_fec_session: "p_user_id uuid, p_payload jsonb",
   lfo_save_career_package: "p_user_id uuid, p_payload jsonb",
   lfo_record_career_event: "p_user_id uuid, p_payload jsonb",
   lfo_set_tax_profile: "p_user_id uuid, p_payload jsonb",
   lfo_save_tax_rule_set: "p_user_id uuid, p_payload jsonb",
   lfo_record_tax_observation: "p_user_id uuid, p_payload jsonb",
+};
+
+/**
+ * RPC de LECTURE d'un invariant, avec leur type de retour déclaré.
+ *
+ * `lfo_fec_entry_balance` dérive des lignes persistées le nombre d'écritures et le nombre
+ * d'écritures déséquilibrées. Ce n'est pas une formule financière déplacée dans la base :
+ * Σdébits = Σcrédits par écriture est l'invariant d'INTÉGRITÉ de la source comptable, et il
+ * doit être établi là où les lignes vivent — un décompte fourni par l'appelant ne prouve
+ * rien de ce que la base contient.
+ */
+const integrityReaderRpcs: Record<string, string> = {
+  lfo_fec_entry_balance: "TABLE(entries integer, unbalanced integer)",
 };
 
 /**
@@ -289,6 +319,8 @@ const readOnlyAuditTables = [
   "import_normalized_records",
   "import_record_links",
   "import_column_mappings",
+  "fec_entry_lines",
+  "import_upload_tickets",
 ] as const;
 
 const storagePolicies = ["documents_owner_select", "documents_owner_insert", "documents_owner_update", "documents_owner_delete"] as const;
@@ -310,6 +342,16 @@ function addExactInventory(
 ): void {
   failures.push(...diffExactInventory(label, expected, actual));
 }
+
+/**
+ * Plafond d'analyse d'un FEC, répliqué ici depuis `src/lib/validation/fec-imports.ts`.
+ *
+ * Le gate ne peut pas importer un module applicatif — il tourne sans build. Le chiffre est
+ * donc redit, et c'est précisément ce que le contrôle ci-dessous protège : si l'un des deux
+ * bouge sans l'autre, le bucket devient le premier refus rencontré, et le contournement de
+ * la limite de corps de requête ne sert plus à rien.
+ */
+const MAX_FEC_FILE_BYTES = 24 * 1024 * 1024;
 
 const connectionString = required("SUPABASE_DB_URL");
 const connectionUrl = new URL(connectionString);
@@ -460,7 +502,17 @@ try {
       failures.push(
         `Signature RPC invalide : ${rpc.name}(${rpc.arguments}), attendu ${rpc.name}(${expectedArguments})`,
       );
-    if (rpc.result_type !== "uuid") failures.push(`Type de retour RPC invalide : ${rpc.name}`);
+    // Une RPC d'ÉCRITURE retourne l'identifiant de ce qu'elle a écrit : c'est la convention
+    // du dépôt, et elle rend une écriture composée vérifiable par son appelant. Une RPC de
+    // LECTURE D'INVARIANT ne peut pas s'y plier — elle ne crée rien — mais elle n'échappe
+    // pas au gate pour autant : son type de retour est DÉCLARÉ ici, et un changement
+    // silencieux échoue comme le reste.
+    const integrityReader = integrityReaderRpcs[rpc.name];
+    const expectedResult = integrityReader ?? "uuid";
+    if (rpc.result_type !== expectedResult)
+      failures.push(
+        `Type de retour RPC invalide : ${rpc.name} retourne ${rpc.result_type}, attendu ${expectedResult}`,
+      );
     if (rpc.security_definer) failures.push(`RPC SECURITY DEFINER interdite : ${rpc.name}`);
     if (!rpc.settings?.some((setting) => setting === 'search_path=""'))
       failures.push(`search_path non verrouillé : ${rpc.name}`);
@@ -470,22 +522,55 @@ try {
       failures.push(`RPC non exécutable par service_role : ${rpc.name}`);
   }
 
-  const bucket = await client.query<{
+  const buckets = await client.query<{
     id: string;
     public: boolean;
     file_size_limit: number | null;
+    allowed_mime_types: string[] | null;
   }>(
-    `select id, public, file_size_limit from storage.buckets where id = 'family-office-documents'`,
+    `select id, public, file_size_limit, allowed_mime_types from storage.buckets
+      where id in ('family-office-documents', 'family-office-import-staging')`,
   );
-  const documentsBucket = bucket.rows[0];
+  const documentsBucket = buckets.rows.find((row) => row.id === "family-office-documents");
   if (!documentsBucket) failures.push("Bucket Storage absent : family-office-documents");
   else {
     if (documentsBucket.public) failures.push("Bucket Storage public : family-office-documents");
+    // Le coffre garde sa vocation : des archives petites et durables. Sa limite n'est PAS
+    // relevée pour accueillir un FEC — l'analyse lourde appartient au staging.
     if (Number(documentsBucket.file_size_limit) !== 8_388_608)
       failures.push("Limite du bucket Storage invalide : family-office-documents");
+    // Un FEC conservé est du texte à plat. Sans ce type, l'archivage échouerait APRÈS que
+    // les faits ont été écrits — le pire moment pour l'apprendre.
+    for (const mime of ["text/plain", "application/pdf", "text/csv"]) {
+      if (!(documentsBucket.allowed_mime_types ?? []).includes(mime))
+        failures.push(`Type MIME absent du bucket family-office-documents : ${mime}`);
+    }
   }
-  const storagePolicyRows = await client.query<{ policyname: string }>(
-    `select policyname from pg_catalog.pg_policies where schemaname = 'storage' and tablename = 'objects'`,
+
+  // STAGING ≠ COFFRE DOCUMENTAIRE. Le bucket de staging doit pouvoir accueillir ce que
+  // l'application accepte d'analyser, sans quoi le contournement de la limite de corps de
+  // requête ne sert à rien : le fichier éviterait la fonction serveur pour être refusé par
+  // le stockage.
+  const stagingBucket = buckets.rows.find((row) => row.id === "family-office-import-staging");
+  if (!stagingBucket) failures.push("Bucket Storage absent : family-office-import-staging");
+  else {
+    if (stagingBucket.public)
+      failures.push("Bucket Storage public : family-office-import-staging");
+    if (Number(stagingBucket.file_size_limit) < MAX_FEC_FILE_BYTES)
+      failures.push(
+        `Limite du bucket family-office-import-staging (${stagingBucket.file_size_limit}) inférieure au plafond d'analyse (${MAX_FEC_FILE_BYTES})`,
+      );
+    for (const mime of ["text/plain", "text/csv", "text/tab-separated-values"]) {
+      if (!(stagingBucket.allowed_mime_types ?? []).includes(mime))
+        failures.push(`Type MIME absent du bucket family-office-import-staging : ${mime}`);
+    }
+  }
+  const storagePolicyRows = await client.query<{
+    policyname: string;
+    qual: string | null;
+    with_check: string | null;
+  }>(
+    `select policyname, qual, with_check from pg_catalog.pg_policies where schemaname = 'storage' and tablename = 'objects'`,
   );
   addMissing(
     failures,
@@ -493,6 +578,18 @@ try {
     storagePolicies,
     storagePolicyRows.rows.map((row) => row.policyname),
   );
+
+  // AUCUNE policy ne doit ouvrir la zone de staging à `authenticated`. Le navigateur n'y
+  // accède que par une URL signée, le serveur sous `service_role` : un droit de lecture ou
+  // de liste n'ouvrirait aucun usage légitime et exposerait des comptabilités entières.
+  for (const policy of storagePolicyRows.rows) {
+    const expression = `${policy.qual ?? ""} ${policy.with_check ?? ""}`;
+    if (expression.includes("family-office-import-staging")) {
+      failures.push(
+        `Policy Storage ouvrant la zone de staging : ${policy.policyname}. Le staging n'est accessible que par URL signée et sous service_role.`,
+      );
+    }
+  }
 
   const migrations = await client.query<{ version: string }>(
     `select version from supabase_migrations.schema_migrations order by version`,

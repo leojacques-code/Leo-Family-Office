@@ -17,6 +17,22 @@ export const LEDGER_MAX_PAGES = 20;
 /** Taille d'une page. Alignée sur la borne par défaut de PostgREST. */
 export const LEDGER_PAGE_SIZE = 1000;
 
+/**
+ * Budget de pages nécessaire pour lire COMPLÈTEMENT une source d'au plus `maxRows` lignes.
+ *
+ * Le `+ 1` n'est pas une marge de confort : c'est une PAGE DE CONTRÔLE, et sans elle une
+ * source pleine au dernier octet serait déclarée tronquée. Avec 150 000 lignes et des pages
+ * de 1 000, les 150 pages sont toutes pleines — la boucle ne voit jamais de page incomplète,
+ * donc elle ne peut pas conclure que la lecture est finie, et elle refuse. La page
+ * supplémentaire revient vide, et c'est cette réponse vide qui PROUVE la complétude.
+ *
+ * Le budget générique des ledgers, lui, ne bouge pas : chaque domaine qui a besoin d'un
+ * autre plafond le DÉCLARE, plutôt que de relever la règle commune pour tout le monde.
+ */
+export function pagesFor(maxRows: number, pageSize: number = LEDGER_PAGE_SIZE): number {
+  return Math.ceil(maxRows / pageSize) + 1;
+}
+
 export interface PageResponse<TRow, TError> {
   data: TRow[] | null;
   error: TError | null;
