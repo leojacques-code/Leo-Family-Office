@@ -290,16 +290,26 @@ const requiredRpcs: Record<string, string> = {
 };
 
 /**
- * RPC de LECTURE d'un invariant, avec leur type de retour déclaré.
+ * RPC dont le type de retour N'EST PAS un `uuid`, avec ce type DÉCLARÉ ici.
  *
- * `lfo_fec_entry_balance` dérive des lignes persistées le nombre d'écritures et le nombre
- * d'écritures déséquilibrées. Ce n'est pas une formule financière déplacée dans la base :
- * Σdébits = Σcrédits par écriture est l'invariant d'INTÉGRITÉ de la source comptable, et il
- * doit être établi là où les lignes vivent — un décompte fourni par l'appelant ne prouve
- * rien de ce que la base contient.
+ * La convention du dépôt reste celle-ci : une RPC d'ÉCRITURE retourne l'identifiant de ce
+ * qu'elle a écrit, ce qui rend une écriture composée vérifiable par son appelant. Les
+ * exceptions sont nommées une par une, jamais tolérées en bloc : un type de retour changé
+ * en silence échoue comme le reste du gate.
+ *
+ * `lfo_fec_entry_balance` est une RPC de LECTURE D'INVARIANT — elle ne crée rien, donc elle
+ * n'a aucun identifiant à rendre. Elle dérive des lignes persistées le nombre d'écritures et
+ * de déséquilibres, parce que Σdébits = Σcrédits par écriture est l'invariant d'intégrité de
+ * la source comptable et qu'un décompte fourni par l'appelant ne prouve rien de ce que la
+ * base contient.
+ *
+ * `lfo_save_scenario_version_v2` rend le NUMÉRO DE VERSION résultant. C'est un choix du
+ * domaine Scenarios : sur une écriture optimiste avec version attendue, le numéro obtenu est
+ * l'information utile à l'appelant, davantage que l'identifiant de la ligne créée.
  */
-const integrityReaderRpcs: Record<string, string> = {
+const declaredReturnTypeRpcs: Record<string, string> = {
   lfo_fec_entry_balance: "TABLE(entries integer, unbalanced integer)",
+  lfo_save_scenario_version_v2: "integer",
 };
 
 /**
@@ -502,13 +512,9 @@ try {
       failures.push(
         `Signature RPC invalide : ${rpc.name}(${rpc.arguments}), attendu ${rpc.name}(${expectedArguments})`,
       );
-    // Une RPC d'ÉCRITURE retourne l'identifiant de ce qu'elle a écrit : c'est la convention
-    // du dépôt, et elle rend une écriture composée vérifiable par son appelant. Une RPC de
-    // LECTURE D'INVARIANT ne peut pas s'y plier — elle ne crée rien — mais elle n'échappe
-    // pas au gate pour autant : son type de retour est DÉCLARÉ ici, et un changement
-    // silencieux échoue comme le reste.
-    const integrityReader = integrityReaderRpcs[rpc.name];
-    const expectedResult = integrityReader ?? "uuid";
+    // `uuid` par défaut : une RPC d'écriture retourne l'identifiant de ce qu'elle a écrit.
+    // Les exceptions sont DÉCLARÉES au-dessus, une par une.
+    const expectedResult = declaredReturnTypeRpcs[rpc.name] ?? "uuid";
     if (rpc.result_type !== expectedResult)
       failures.push(
         `Type de retour RPC invalide : ${rpc.name} retourne ${rpc.result_type}, attendu ${expectedResult}`,
