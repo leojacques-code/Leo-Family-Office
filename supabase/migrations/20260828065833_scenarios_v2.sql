@@ -349,6 +349,9 @@ begin
   if pg_catalog.jsonb_typeof(p_definition) <> 'object' then
     raise exception 'Scenario V2 definition doit être un objet JSON';
   end if;
+  if p_definition ->> 'lifecycleStatus' not in ('DRAFT', 'ACTIVE') then
+    raise exception 'Archiver un scénario requiert lfo_archive_scenario_v2';
+  end if;
   select * into v_current
     from public.scenarios
    where id = p_scenario_id and user_id = p_user_id

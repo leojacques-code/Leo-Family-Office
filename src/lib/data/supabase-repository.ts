@@ -934,6 +934,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }
     }
     const scenarios: Scenario[] = scenarioRows
+      .filter((row) => str(row.scenario_status) !== "ARCHIVED")
       .map((row) => mapScenario(row, currentScenarioVersions.get(str(row.id))))
       .sort((a, b) => (SCENARIO_NAME_ORDER[a.name] ?? 5) - (SCENARIO_NAME_ORDER[b.name] ?? 5));
 

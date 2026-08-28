@@ -1,4 +1,5 @@
 /** Smoke PostgreSQL Scenarios V2. Toutes les écritures sont rollbackées. */
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 
 const { Client } = pg;
@@ -20,6 +21,11 @@ try {
   );
   assert(owner.rows[0], "Aucun utilisateur disponible pour le smoke");
   const userId = owner.rows[0].id;
+  const foreignUser = randomUUID();
+  await client.query("insert into auth.users(id,email) values($1,$2)", [
+    foreignUser,
+    `scenarios-${foreignUser}@invalid`,
+  ]);
   await client.query("set local role service_role");
   const asOf = "2026-08-28";
   const definition = {
@@ -79,6 +85,23 @@ try {
     [scenarioId],
   );
   assert(versions.rows[0].count === "2", "Une version immuable a été perdue");
+
+  await client.query("savepoint owner_guard");
+  try {
+    await client.query("select public.lfo_save_scenario_version_v2($1,$2,2,$3,$4)", [
+      foreignUser,
+      scenarioId,
+      definition,
+      `${asOf}T13:30:00Z`,
+    ]);
+    throw new Error("Une mutation cross-user a été acceptée");
+  } catch (error) {
+    await client.query("rollback to savepoint owner_guard");
+    assert(
+      String(error).includes("Scenario not found"),
+      `Mauvais refus ownership : ${String(error)}`,
+    );
+  }
 
   await client.query("savepoint version_conflict");
   try {
