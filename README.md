@@ -76,10 +76,11 @@ npm run db:local:up
 npm run gate:local
 ```
 
-Le dépôt porte **28 migrations**, la production **27** : la 28e,
-`20260828080000_fec_corporate_acquisition`, étend la fondation d'acquisition au domaine
-comptable et n'est PAS encore appliquée en production. Le gate distant échouera tant qu'elle
-ne l'est pas ; le gate local, lui, reconstruit les 28 depuis zéro. La 25e installe Data Acquisition Foundation ; les 26e et 27e installent Career + Tax V2 puis ses index couvrants. Elles ont été appliquées en production le 27 août 2026. Career + Tax a été prévalidée par application transactionnelle rollbackée, puis contrôlée après application par inventaire exact, smoke rollbacké, isolation cross-user, permissions RPC, RLS et advisors Supabase. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique et la procédure à reprendre si une autre apparaît.
+La production et le dépôt sont alignés sur **29 migrations**. Les 28e et 29e,
+`20260828131216_fec_corporate_acquisition` et
+`20260828131433_fec_corporate_acquisition_fk_indexes`, étendent la fondation d'acquisition au
+domaine comptable puis couvrent ses clés étrangères composites ; elles ont été appliquées en
+production le 28 août 2026. La 25e installe Data Acquisition Foundation ; les 26e et 27e installent Career + Tax V2 puis ses index couvrants. Elles ont été appliquées en production le 27 août 2026. Career + Tax a été prévalidée par application transactionnelle rollbackée, puis contrôlée après application par inventaire exact, smoke rollbacké, isolation cross-user, permissions RPC, RLS et advisors Supabase. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique et la procédure à reprendre si une autre apparaît.
 
 ## Fonctionnalités
 
@@ -125,7 +126,8 @@ Les migrations sont appliquées dans cet ordre, sans modification rétroactive :
 25. `20260827155134_data_acquisition_foundation.sql`
 26. `20260827215014_career_tax_v2.sql`
 27. `20260827215600_career_tax_v2_fk_indexes.sql`
-28. `20260828080000_fec_corporate_acquisition.sql`
+28. `20260828131216_fec_corporate_acquisition.sql`
+29. `20260828131433_fec_corporate_acquisition_fk_indexes.sql`
 
 La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persistance. Elle ne déplace aucune formule financière dans la base.
 Les migrations Canonical Balance Sheet V2 enrichissent et versionnent les snapshots, sans supprimer ni écraser les données historiques ; toutes les formules restent dans les engines TypeScript.
@@ -157,7 +159,9 @@ source n'est jamais écrasée : seule une correction FEC → FEC l'est, et la pr
 comptable est la provenance, pas un libellé. Le fichier ne traverse pas la fonction serveur :
 `import_upload_tickets` porte la référence d'un objet déposé directement au stockage privé,
 dont le chemin est calculé en base et le billet à usage unique, expirant et cloisonné. Aucun
-moteur financier n'est modifié, aucune valorisation n'est produite. Voir
+moteur financier n'est modifié, aucune valorisation n'est produite. La migration 29 ajoute
+les index couvrants dans l'ORDRE des clés étrangères composites `(business_id, user_id)` de
+`fec_entry_lines` et `(consumed_session_id, user_id)` de `import_upload_tickets`. Voir
 `docs/FEC_ACQUISITION.md`.
 
 La migration 18 installe Real Estate V2 : quatre tables de faits (`real_estate_valuations`, `real_estate_capital_events`, `real_estate_operating_terms`, `real_estate_financing_links`), les colonnes canoniques de `properties`, la colonne d'attribution `transactions.property_id`, neuf RPC et le trigger `real_estate_financing_links_allocation_guard`. Ce trigger est le seul endroit où la règle « la somme des quote-parts d'un même concours ne dépasse jamais 1 » est réellement garantie : il verrouille la ligne de dette, donc il tient sous concurrence et sur une écriture directe hors RPC. Elle ne crée AUCUNE seconde vérité : la dette immobilière reste une ligne de `liabilities` à laquelle le bien se rattache par une quote-part, et les flux réels restent des lignes de `transactions` simplement rattachées à un bien. Rendement, equity, plus-value et coût économique du financement sont dérivés par `src/lib/engine/real-estate.ts`. Les tables héritées `mortgages` et `real_estate_cashflows` y sont marquées obsolètes et ne sont ni lues ni écrites. La migration 19 ajoute les index couvrants dans l'ORDRE des clés étrangères composites `(property_id, user_id)` des trois tables de faits.

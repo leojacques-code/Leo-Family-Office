@@ -16,7 +16,10 @@ import { MAX_FEC_FILE_BYTES, MAX_RETAINED_FEC_FILE_BYTES } from "@/lib/validatio
  * signée demande un Storage distant.
  */
 
-/** Reproduit la configuration portée par la migration 28. Un écart doit casser un test. */
+/**
+ * Reproduit la configuration portée par `20260828131216_fec_corporate_acquisition`. Un écart
+ * doit casser un test.
+ */
 const STAGING_BUCKET = {
   id: "family-office-import-staging",
   public: false,
