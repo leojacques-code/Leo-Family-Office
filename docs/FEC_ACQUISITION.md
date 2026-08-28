@@ -636,6 +636,34 @@ budget d'un gigaoctet, là où 200 000 n'en garde presque aucune.
 Un dépassement **échoue** : il ne tronque pas. Un exercice amputé produirait des états
 financiers faux et d'apparence complète — le pire résultat possible.
 
+### Deux lecteurs, deux budgets
+
+Le budget de pagination générique des ledgers — 20 pages de 1 000 lignes — est bon pour un
+relevé bancaire ou un portefeuille. Il est absurde pour une comptabilité : un exercice de PME
+dépasse couramment 20 000 lignes, et l'appliquer ici refusait la lecture de faits que
+l'application venait elle-même d'accepter d'écrire.
+
+```text
+PREVIEW UI        →  300 écritures, bornées CÔTÉ BASE
+RECONSTRUCTION    →  l'exercice entier, jusqu'à 150 000 lignes
+BUDGET GÉNÉRIQUE  →  inchangé, 20 000 lignes
+```
+
+Le lecteur d'affichage ne pagine pas : il borne d'abord les enregistrements bruts par leur
+clé `(session, propriétaire, numéro de ligne)`, puis ne lit que les écritures
+correspondantes. Deux requêtes bornées, l'ordre exact du fichier. Relire un exercice entier
+pour n'en montrer que les premières lignes était le défaut le plus coûteux de cette
+verticale : 46 870 lignes correctement importées, puis un refus de lecture au moment de
+l'affichage.
+
+La reconstruction canonique, elle, doit lire **tout** — un chiffre d'affaires parfaitement
+calculé sur un exercice amputé serait faux sans que rien ne le dise. Elle déclare donc son
+propre budget, `pagesFor(MAX_FEC_LINES)`, sans relever la règle commune. Le `+ 1` de
+`pagesFor` n'est pas une marge de confort mais une **page de contrôle** : 150 000 lignes
+tiennent en 150 pages exactement pleines, la boucle ne verrait jamais de page incomplète, et
+elle refuserait une lecture pourtant complète. C'est la réponse vide de la page
+supplémentaire qui prouve la complétude.
+
 ### Analyser n'est pas archiver
 
 ```text

@@ -285,6 +285,8 @@ CONFLIT DE SOURCES ≠ CHOIX SILENCIEUX D'UNE SOURCE : une période financière 
 
 ANALYSER ≠ ARCHIVER : l'analyse accepte 24 Mo, le coffre privé 8. La conservation d'un fichier trop lourd est refusée AVANT toute écriture canonique, et un échec de dépôt APRÈS l'écriture ne se présente jamais comme un échec de validation — `commitStatus` et `documentStatus` sont deux statuts distincts.
 
+Deux lecteurs, deux budgets de pagination, et la distinction est structurelle : le preview borne 300 écritures CÔTÉ BASE, la reconstruction canonique lit l'exercice entier avec un budget déclaré par le domaine, et le budget générique des autres ledgers reste inchangé. Relire un exercice complet pour n'en afficher que les premières lignes heurtait le plafond commun sur un fichier pourtant correctement importé.
+
 Détail complet, format supporté, plafonds mesurés et limites : `docs/FEC_ACQUISITION.md`.
 
 ## Career + Tax V2

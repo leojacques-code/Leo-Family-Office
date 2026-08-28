@@ -29,7 +29,7 @@ import type {
 } from "@/lib/data/fec-contracts";
 import { MAX_FEC_FILE_BYTES, MAX_RETAINED_FEC_FILE_BYTES } from "@/lib/validation/fec-imports";
 import type { ImportFileInput } from "@/lib/data/import-repository";
-import { readAllPages } from "@/lib/data/pagination";
+import { LEDGER_PAGE_SIZE, pagesFor, readAllPages } from "@/lib/data/pagination";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
 import {
   DOCUMENTS_BUCKET,
@@ -65,7 +65,18 @@ const UPLOAD_TICKET_TTL_MINUTES = 30;
 const APPEND_CHUNK = 2_000;
 
 /** Plafond d'AFFICHAGE des écritures. Le staging en contient toujours l'intégralité. */
-const PREVIEW_LINE_LIMIT = 300;
+export const PREVIEW_LINE_LIMIT = 300;
+
+/**
+ * Budget de pages pour lire COMPLÈTEMENT les écritures persistées d'un exercice.
+ *
+ * Le budget générique des ledgers — 20 pages de 1 000 lignes — est bon pour un ledger
+ * bancaire ou un portefeuille. Il est absurde pour une comptabilité : un exercice de PME
+ * dépasse couramment 20 000 lignes, et l'appliquer ici refuserait la lecture de faits que
+ * l'application vient elle-même d'accepter d'écrire. Le domaine DÉCLARE donc son propre
+ * budget, aligné sur son propre plafond, sans relever la règle commune pour tout le monde.
+ */
+const FEC_READ_PAGES = pagesFor(MAX_FEC_LINES, LEDGER_PAGE_SIZE);
 
 /**
  * Date à laquelle l'import est réellement effectué. DÉLIBÉRÉMENT distincte de `AS_OF_DATE`,
@@ -148,7 +159,14 @@ export interface FecRepository {
    */
   commit(sessionId: string): Promise<FecCommitResult>;
   discard(sessionId: string): Promise<string>;
-  getSessionLines(sessionId: string): Promise<FecPreviewLine[]>;
+  /**
+   * Écritures d'une session, pour AFFICHAGE, bornées côté base.
+   *
+   * Ce lecteur n'est jamais une source de vérité : la reconstruction canonique a le sien,
+   * qui lit l'exercice entier. Confondre les deux, c'était relire 46 870 lignes pour en
+   * montrer 300, et se heurter au budget de pagination générique.
+   */
+  getSessionLines(sessionId: string, limit?: number): Promise<FecPreviewLine[]>;
 }
 
 export function createFecRepository(): FecRepository {
@@ -449,7 +467,10 @@ export function createFecRepository(): FecRepository {
       await dropStagedFile(sessionId, staged.storagePath);
     }
 
-    const lines = await getSessionLines(sessionId);
+    // Le preview affiche 300 écritures : il en lit 300. Relire un exercice entier pour n'en
+    // montrer que les premières était le bug le plus coûteux de cette verticale — 46 870
+    // lignes correctement importées, puis un refus de lecture au moment de les afficher.
+    const lines = await getSessionLines(sessionId, PREVIEW_LINE_LIMIT);
     const candidate = toBusinessFinancialCandidate(analysis.statement);
 
     return {
@@ -472,8 +493,10 @@ export function createFecRepository(): FecRepository {
       currencies: analysis.currencies,
       statement: analysis.statement,
       candidate,
-      lines: lines.slice(0, PREVIEW_LINE_LIMIT),
-      linesTruncated: lines.length > PREVIEW_LINE_LIMIT,
+      lines,
+      // Le décompte TOTAL vient de la lecture du fichier, pas de la longueur de l'extrait
+      // affiché : celui-ci est borné par construction, il ne peut plus rien dire du volume.
+      linesTruncated: analysis.counts.lines > lines.length,
     };
   }
 
@@ -502,6 +525,10 @@ export function createFecRepository(): FecRepository {
     const currency = nullableStr(session.declared_currency);
     if (!currency) throw new Error("Session comptable sans devise de tenue déclarée");
 
+    // Lecture COMPLÈTE, et elle doit l'être : le fait canonique dérive de ces lignes, et une
+    // lecture tronquée produirait un chiffre d'affaires parfaitement calculé sur un exercice
+    // amputé. `readAllPages` refuse de rendre une lecture tronquée ; le budget déclaré ici
+    // lui donne les moyens d'aller jusqu'au bout d'un exercice que le parseur a accepté.
     const rows = unwrap(
       await readAllPages<Row, PostgrestError>(
         `écritures persistées de la session ${sessionId}`,
@@ -517,6 +544,7 @@ export function createFecRepository(): FecRepository {
             .range(from, to);
           return { data: (result.data ?? null) as Row[] | null, error: result.error };
         },
+        { maxPages: FEC_READ_PAGES, pageSize: LEDGER_PAGE_SIZE },
       ),
       "lecture des écritures persistées",
     );
@@ -784,32 +812,52 @@ export function createFecRepository(): FecRepository {
    * Écritures d'une session, triées par numéro de ligne du fichier : c'est le numéro que
    * l'utilisateur lit dans son tableur.
    */
-  async function getSessionLines(sessionId: string): Promise<FecPreviewLine[]> {
-    const rows = unwrap(
-      await readAllPages<Row, PostgrestError>(
-        `écritures de la session ${sessionId}`,
-        async (from, to) => {
-          const result = await db
-            .from("fec_entry_lines")
-            .select(
-              "id, journal_code, entry_num, entry_date, account_num, account_lib, entry_label, debit, credit, pcg_group, status, issues, import_raw_records!inner(row_number)",
-            )
-            .eq("user_id", user)
-            .eq("session_id", sessionId)
-            .order("id", { ascending: true })
-            .range(from, to);
-          return { data: (result.data ?? null) as Row[] | null, error: result.error };
-        },
-      ),
-      "lecture des écritures d'une session",
+  async function getSessionLines(
+    sessionId: string,
+    limit: number = PREVIEW_LINE_LIMIT,
+  ): Promise<FecPreviewLine[]> {
+    // Les PREMIÈRES lignes du fichier, et elles seules.
+    //
+    // Le numéro de ligne vit sur l'enregistrement brut, pas sur l'écriture lue : on borne
+    // donc d'abord le brut — sa clé `(session, propriétaire, numéro de ligne)` est indexée —
+    // puis on ne lit que les écritures correspondantes. Deux requêtes bornées, l'ordre exact
+    // du fichier, et aucune pagination.
+    const rawRows = unwrap(
+      await db
+        .from("import_raw_records")
+        .select("id, row_number")
+        .eq("user_id", user)
+        .eq("session_id", sessionId)
+        .order("row_number", { ascending: true })
+        .limit(limit),
+      "lecture des premières lignes brutes d'une session",
+    ) as Row[];
+
+    if (rawRows.length === 0) return [];
+    const rowNumberByRawId = new Map(
+      rawRows.map((row) => [
+        str(row.id),
+        finiteNumber(row.row_number, "import_raw_records.row_number"),
+      ]),
     );
 
+    const rows = unwrap(
+      await db
+        .from("fec_entry_lines")
+        .select(
+          "id, raw_record_id, journal_code, entry_num, entry_date, account_num, account_lib, entry_label, debit, credit, pcg_group, status, issues",
+        )
+        .eq("user_id", user)
+        .eq("session_id", sessionId)
+        .in("raw_record_id", [...rowNumberByRawId.keys()])
+        .limit(limit),
+      "lecture des écritures d'une session",
+    ) as Row[];
+
     const mapped = rows.map((row) => {
-      const nested = row.import_raw_records as Row | Row[] | null;
-      const raw = Array.isArray(nested) ? nested[0] : nested;
       return {
         id: str(row.id),
-        rowNumber: raw ? finiteNumber(raw.row_number, "import_raw_records.row_number") : 0,
+        rowNumber: rowNumberByRawId.get(str(row.raw_record_id)) ?? 0,
         journalCode: str(row.journal_code),
         entryNumber: str(row.entry_num),
         entryDate: nullableStr(row.entry_date),
