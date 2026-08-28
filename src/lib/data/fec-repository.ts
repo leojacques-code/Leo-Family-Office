@@ -8,6 +8,7 @@ import { civilDateIn, resolveTimeZone } from "@/lib/acquisition/clock";
 import type { ImportIssue, ImportRowStatus } from "@/lib/acquisition/types";
 import {
   analyzeFec,
+  BALANCE_TOLERANCE,
   buildStatementCandidate,
   MAX_FEC_LINES,
   toBusinessFinancialCandidate,
@@ -21,9 +22,11 @@ import type { PcgGroup } from "@/lib/acquisition/fec/pcg";
 import type {
   FecAnalyzeRequest,
   FecCommitResult,
+  FecDocumentStatus,
   FecPreview,
   FecPreviewLine,
 } from "@/lib/data/fec-contracts";
+import { MAX_RETAINED_FEC_FILE_BYTES } from "@/lib/validation/fec-imports";
 import type { ImportFileInput } from "@/lib/data/import-repository";
 import { readAllPages } from "@/lib/data/pagination";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
@@ -307,7 +310,7 @@ export function createFecRepository(): FecRepository {
       await db
         .from("import_sessions")
         .select(
-          "coverage_declared, declared_currency, fiscal_year_start, fiscal_year_end, observed_period_start, observed_period_end, unbalanced_entry_count",
+          "coverage_declared, declared_currency, fiscal_year_start, fiscal_year_end, observed_period_start, observed_period_end",
         )
         .eq("user_id", user)
         .eq("id", sessionId),
@@ -325,7 +328,9 @@ export function createFecRepository(): FecRepository {
         async (from, to) => {
           const result = await db
             .from("fec_entry_lines")
-            .select("status, pcg_group, debit, credit, account_num, currency_code")
+            .select(
+              "status, pcg_group, debit, credit, account_num, currency_code, journal_code, entry_num, entry_date",
+            )
             .eq("user_id", user)
             .eq("session_id", sessionId)
             .order("id", { ascending: true })
@@ -336,30 +341,59 @@ export function createFecRepository(): FecRepository {
       "lecture des écritures persistées",
     );
 
+    const fiscalYearStart = nullableStr(session.fiscal_year_start);
+    const fiscalYearEnd = nullableStr(session.fiscal_year_end);
     const currencies = new Set<string>();
+
+    // Partie double et écritures hors période sont RE-DÉRIVÉES des lignes persistées, et
+    // non relues sur les décomptes de la session. Ces colonnes restent un fait d'audit
+    // utile à l'affichage, mais elles sont modifiables : un fait canonique ne doit pas en
+    // dépendre. La base pose le même contrôle de son côté, dans `lfo_commit_fec_session`.
+    const balanceByEntry = new Map<string, number>();
+    let outOfFiscalYear = 0;
+
     const lines: FecBalanceLine[] = rows.map((row) => {
       const code = nullableStr(row.currency_code);
       if (code) currencies.add(code);
+      const status = str(row.status) as ImportRowStatus;
+      const debit = nullableFiniteNumber(row.debit, "fec_entry_lines.debit");
+      const credit = nullableFiniteNumber(row.credit, "fec_entry_lines.credit");
+      const entryDate = nullableStr(row.entry_date);
+
+      if (status !== "BLOCKED" && status !== "IGNORED") {
+        const key = `${str(row.journal_code)}|${str(row.entry_num)}`;
+        balanceByEntry.set(key, (balanceByEntry.get(key) ?? 0) + (debit ?? 0) - (credit ?? 0));
+        if (
+          entryDate !== null &&
+          fiscalYearStart !== null &&
+          fiscalYearEnd !== null &&
+          (entryDate < fiscalYearStart || entryDate > fiscalYearEnd)
+        ) {
+          outOfFiscalYear += 1;
+        }
+      }
+
       return {
-        status: str(row.status) as ImportRowStatus,
+        status,
         pcgGroup: str(row.pcg_group) as PcgGroup,
-        debit: nullableFiniteNumber(row.debit, "fec_entry_lines.debit"),
-        credit: nullableFiniteNumber(row.credit, "fec_entry_lines.credit"),
+        debit,
+        credit,
         accountNumber: nullableStr(row.account_num),
       };
     });
+
+    const unbalancedEntries = [...balanceByEntry.values()].filter(
+      (imbalance) => Math.abs(imbalance) > BALANCE_TOLERANCE,
+    ).length;
 
     return buildStatementCandidate({
       lines,
       coverage: session.coverage_declared === true ? "DECLARED_COMPLETE" : "OBSERVED_ONLY",
       currency,
-      periodStart:
-        nullableStr(session.fiscal_year_start) ?? nullableStr(session.observed_period_start),
-      periodEnd: nullableStr(session.fiscal_year_end) ?? nullableStr(session.observed_period_end),
-      unbalancedEntries: finiteNumber(
-        session.unbalanced_entry_count,
-        "import_sessions.unbalanced_entry_count",
-      ),
+      periodStart: fiscalYearStart ?? nullableStr(session.observed_period_start),
+      periodEnd: fiscalYearEnd ?? nullableStr(session.observed_period_end),
+      unbalancedEntries,
+      outOfFiscalYear,
       currencies: [...currencies],
     });
   }
@@ -437,6 +471,19 @@ export function createFecRepository(): FecRepository {
       throw new Error(candidate.blockers.map((entry: ImportIssue) => entry.message).join(" "));
     }
 
+    // PRÉVALIDATION de la conservation, AVANT toute écriture canonique.
+    //
+    // Le coffre privé plafonne à 8 Mo, l'analyse à 24. Un FEC de 15 Mo est analysable et
+    // non archivable : le dire maintenant est la seule façon de ne pas laisser l'utilisateur
+    // choisir entre un fait écrit et une erreur affichée. Le refus porte sur la CONSERVATION,
+    // pas sur l'import : décocher la conservation suffit.
+    const retainRequested = await retainRequestedFor(sessionId);
+    if (retainRequested && file && file.size > MAX_RETAINED_FEC_FILE_BYTES) {
+      throw new Error(
+        `Ce fichier de ${Math.round(file.size / (1024 * 1024))} Mo peut être analysé mais pas conservé : le coffre privé est limité à ${MAX_RETAINED_FEC_FILE_BYTES / (1024 * 1024)} Mo. Désactivez la conservation du fichier pour valider cet import.`,
+      );
+    }
+
     unwrap(
       await db.rpc("lfo_commit_fec_session", {
         p_user_id: user,
@@ -448,6 +495,15 @@ export function createFecRepository(): FecRepository {
       "validation d'import comptable",
     );
 
+    // ── À partir d'ici, LE FAIT EST ÉCRIT. ────────────────────────────────────────────
+    //
+    // Plus aucune défaillance ne doit se présenter comme un échec de validation. Un dépôt
+    // d'archive qui échoue après coup laisserait sinon l'utilisateur devant un message
+    // d'erreur alors que son instantané financier existe : il réimporterait, ou saisirait à
+    // la main, et croirait à un doublon. Le fait et sa copie sont deux statuts distincts.
+    const warnings: string[] = [];
+    let documentStatus: FecDocumentStatus = "NOT_REQUESTED";
+
     const rows = unwrap(
       await db
         .from("import_sessions")
@@ -458,14 +514,25 @@ export function createFecRepository(): FecRepository {
     ) as Row[];
     const session = rows[0];
 
-    if (
-      session &&
-      file &&
-      session.retain_file_requested === true &&
-      session.document_id === null &&
-      nullableStr(session.file_hash)
-    ) {
-      await retainSessionFile(sessionId, str(session.file_hash), file);
+    if (session && session.retain_file_requested === true) {
+      documentStatus = session.document_id === null ? "FAILED" : "STORED";
+      if (file && session.document_id === null && nullableStr(session.file_hash)) {
+        try {
+          await retainSessionFile(sessionId, str(session.file_hash), file);
+          documentStatus = "STORED";
+        } catch (error) {
+          documentStatus = "FAILED";
+          warnings.push(
+            `L'instantané financier est bien écrit, mais la conservation du fichier a échoué : ${
+              error instanceof Error ? error.message : String(error)
+            }. Le fait canonique n'est pas remis en cause ; seule la copie d'archive manque.`,
+          );
+        }
+      } else if (session.document_id === null) {
+        warnings.push(
+          "L'instantané financier est bien écrit, mais le fichier n'a pas été transmis avec la validation : aucune copie n'a été conservée.",
+        );
+      }
     }
 
     const links = unwrap(
@@ -480,12 +547,29 @@ export function createFecRepository(): FecRepository {
 
     return {
       sessionId,
+      // Le fait est écrit et gelé. Ce statut n'est jamais conditionné par la conservation.
+      commitStatus: "COMMITTED",
       committedCount: session
         ? finiteNumber(session.committed_count, "import_sessions.committed_count")
         : 0,
       businessFinancialsId: links[0] ? str(links[0].business_financials_id) : "",
       periodEnd: candidate.periodEnd,
+      documentStatus,
+      warnings,
     };
+  }
+
+  /** La session a-t-elle demandé la conservation du fichier ? Lu avant toute écriture. */
+  async function retainRequestedFor(sessionId: string): Promise<boolean> {
+    const rows = unwrap(
+      await db
+        .from("import_sessions")
+        .select("retain_file_requested")
+        .eq("user_id", user)
+        .eq("id", sessionId),
+      "lecture de l'intention de conservation",
+    ) as Row[];
+    return rows[0]?.retain_file_requested === true;
   }
 
   async function discard(sessionId: string): Promise<string> {

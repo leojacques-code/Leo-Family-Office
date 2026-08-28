@@ -7,6 +7,7 @@ import {
   fecAnalyzeSchema,
   fecCommandSchema,
   MAX_FEC_FILE_BYTES,
+  MAX_RETAINED_FEC_FILE_BYTES,
 } from "@/lib/validation/fec-imports";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +73,18 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Paramètres d'import invalides", issues: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+
+    // Le plafond d'ANALYSE et le plafond de CONSERVATION diffèrent, et l'écart se dit dès
+    // le dépôt : découvrir à la validation qu'un fichier n'est pas archivable, alors que le
+    // fait est déjà écrit, est le mauvais moment pour l'apprendre.
+    if (parsed.data.retainFile && file.size > MAX_RETAINED_FEC_FILE_BYTES) {
+      return NextResponse.json(
+        {
+          error: `Ce fichier de ${Math.round(file.size / (1024 * 1024))} Mo peut être analysé mais pas conservé : le coffre privé est limité à ${MAX_RETAINED_FEC_FILE_BYTES / (1024 * 1024)} Mo. Décochez la conservation du fichier pour l'importer.`,
+        },
         { status: 400 },
       );
     }

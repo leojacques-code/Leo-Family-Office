@@ -164,8 +164,18 @@ function FecSection({ businesses, refresh }: FecSectionProps) {
     else {
       if (action === "commit") {
         const result = payload as FecCommitResult;
+        // Le fait et sa copie d'archive sont annoncés SÉPARÉMENT : un dépôt manqué ne doit
+        // jamais laisser croire que l'instantané financier n'a pas été écrit.
+        const archive =
+          result.documentStatus === "FAILED"
+            ? " La conservation du fichier a échoué : le fait est écrit, seule la copie d'archive manque."
+            : result.documentStatus === "STORED"
+              ? " Fichier conservé au coffre privé."
+              : "";
         setNotice(
-          `${result.committedCount} écriture(s) conservée(s) et instantané financier au ${result.periodEnd} écrit dans Business Equity. Aucune valorisation n'a été produite.`,
+          `${result.committedCount} écriture(s) conservée(s) et instantané financier au ${result.periodEnd} écrit dans Business Equity. Aucune valorisation n'a été produite.${archive}${
+            result.warnings.length ? ` ${result.warnings.join(" ")}` : ""
+          }`,
         );
       } else setNotice("Analyse abandonnée. Aucun fait n'avait été écrit.");
       setPreview(null);
@@ -187,7 +197,7 @@ function FecSection({ businesses, refresh }: FecSectionProps) {
             <Building2 size={24} />
           </span>
           <h2>Déposer un FEC</h2>
-          <p>Fichier des écritures comptables · TXT, CSV ou TSV · 24 Mo maximum</p>
+          <p>Fichier des écritures comptables · TXT, CSV ou TSV · 24 Mo analysés, 8 Mo conservés</p>
           <input
             id="fec-file"
             type="file"
@@ -275,6 +285,11 @@ function FecSection({ businesses, refresh }: FecSectionProps) {
             />
             Conserver le fichier au coffre privé
           </label>
+          <small className="field-hint">
+            Le coffre privé est limité à 8 Mo, là où l’analyse en accepte 24 : un FEC plus lourd
+            s’importe très bien, il ne s’archive simplement pas ici. Le refus porte alors sur la
+            conservation, jamais sur l’import.
+          </small>
 
           <button
             className="button secondary"

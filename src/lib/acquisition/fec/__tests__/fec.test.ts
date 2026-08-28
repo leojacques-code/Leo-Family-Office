@@ -16,6 +16,15 @@ import {
   EXPLICIT_ZERO,
   FEC_HEADER,
   FINANCIAL_EXPENSES_SPLIT,
+  MISSING_PIECE_REF,
+  MONTANT_SENS_INVALID,
+  MONTANT_SENS_LETTERS,
+  MONTANT_SENS_MISSING,
+  MONTANT_SENS_NUMERIC,
+  SEMICOLON_DELIMITED,
+  SIGNED_CREDIT_ONLY,
+  SIGNED_CURRENCY,
+  SIGNED_REVERSAL,
   FOREIGN_CURRENCY,
   HEADER_WITHOUT_ACCOUNT,
   INVALID_DATE,
@@ -28,6 +37,7 @@ import {
   NON_STANDARD_DATE,
   OVERDRAFT_ACCOUNT,
   PIPE_DELIMITED,
+  PROFIT_SHARING_AND_TAX,
   TRADING,
   TWO_FISCAL_YEARS,
   UNBALANCED,
@@ -504,10 +514,16 @@ describe("marge commerciale : un solde nommé, jamais la valeur ajoutée renomm�
     // 707 3 000 − 607 1 800 − 6037 200 = 1 000.
     expect(income.merchandiseMargin.value).toBe(1000);
     expect(income.merchandiseMargin.basis).toContain("707");
-    // Les agrégats de classe restent complets : 707 dans le 70, 607 et 6037 dans le 60.
+    // Le chiffre d'affaires reste la classe 70 ENTIÈRE, marchandises incluses.
     expect(income.revenue.value).toBe(3000);
-    expect(income.externalConsumption.value).toBe(2400);
-    // Valeur ajoutée 3 000 − 2 400 = 600 : elle DIFFÈRE de la marge commerciale.
+    // La production de l'exercice, elle, EXCLUT les ventes de marchandises : cette société
+    // ne produit rien, elle revend.
+    expect(income.production.value).toBe(0);
+    // Consommations de tiers = 613 seul : 607 et 6037 forment le coût d'achat des
+    // marchandises vendues, terme de la marge commerciale.
+    expect(income.externalConsumption.value).toBe(400);
+    // Valeur ajoutée = marge commerciale 1 000 + production 0 − consommations 400 = 600.
+    // Elle DIFFÈRE de la marge commerciale, et la décomposition SIG est respectée.
     expect(income.addedValue.value).toBe(600);
   });
 
@@ -524,5 +540,196 @@ describe("marge commerciale : un solde nommé, jamais la valeur ajoutée renomm�
     // Et la valeur ajoutée, elle, reste calculée.
     expect(analysis.statement.income.addedValue.value).not.toBeNull();
     expect(toBusinessFinancialCandidate(analysis.statement)?.grossProfit).toBeNull();
+  });
+});
+
+describe("texte primaire · valeurs numériques SIGNÉES", () => {
+  // L'arrêté du 29 juillet 2013 autorise explicitement les valeurs numériques signées. Un
+  // montant négatif est donc une donnée valide, pas une lecture fautive : une
+  // contrepassation s'écrit ainsi, et lui appliquer une valeur absolue inverserait le sens
+  // économique de l'opération.
+  it("une contrepassation signée est lue, équilibrée et non bloquée", () => {
+    const analysis = analyze(utf8(SIGNED_REVERSAL));
+    expect(analysis.counts.blocked).toBe(0);
+    expect(analysis.counts.unbalancedEntries).toBe(0);
+    // La ligne 1 du fichier est l'en-tête : la contrepassation occupe les lignes 4 et 5.
+    expect(lineAt(analysis, 4).debit).toBe(-1200);
+    expect(lineAt(analysis, 5).credit).toBe(-1200);
+    // La vente et sa contrepassation s'annulent : chiffre d'affaires nul, et c'est la vérité.
+    expect(analysis.statement.income.revenue.value).toBe(0);
+    expect(analysis.statement.status).toBe("CALCULABLE");
+  });
+
+  it("un débit négatif et un crédit négatif seuls restent lisibles", () => {
+    const analysis = analyze(utf8(SIGNED_CREDIT_ONLY));
+    expect(analysis.counts.blocked).toBe(0);
+    expect(lineAt(analysis, 2).debit).toBe(-500);
+    expect(lineAt(analysis, 3).credit).toBe(-500);
+    expect(analysis.counts.unbalancedEntries).toBe(0);
+    // Le solde créditeur du groupe suit le signe : −(−500) = −500 au crédit.
+    expect(analysis.statement.income.revenue.value).toBe(-500);
+  });
+
+  it("un montant en devise négatif accompagné de son code est accepté", () => {
+    const analysis = analyze(utf8(SIGNED_CURRENCY));
+    expect(lineAt(analysis, 2).currencyAmount).toBe(-110);
+    expect(lineAt(analysis, 2).currencyCode).toBe("USD");
+    expect(codes(lineAt(analysis, 2).issues)).not.toContain("FEC_CURRENCY_AMOUNT_WITHOUT_CODE");
+    expect(lineAt(analysis, 2).status).not.toBe("BLOCKED");
+  });
+
+  it("aucun signe négatif ne produit à lui seul une anomalie", () => {
+    for (const fixture of [SIGNED_REVERSAL, SIGNED_CREDIT_ONLY, SIGNED_CURRENCY]) {
+      const analysis = analyze(utf8(fixture));
+      const allCodes = analysis.lines.flatMap((line) => codes(line.issues));
+      expect(allCodes).not.toContain("FEC_AMOUNT_UNPARSEABLE");
+      expect(allCodes).not.toContain("FEC_AMOUNT_MISSING");
+    }
+  });
+});
+
+describe("texte primaire · variante réglementaire Montant / Sens", () => {
+  it("Sens D et C sont normalisés vers débit et crédit", () => {
+    const analysis = analyze(utf8(MONTANT_SENS_LETTERS));
+    expect(analysis.amountSchema).toBe("MONTANT_SENS");
+    expect(analysis.counts.blocked).toBe(0);
+    expect(lineAt(analysis, 2).debit).toBe(1200);
+    expect(lineAt(analysis, 2).credit).toBeNull();
+    expect(lineAt(analysis, 3).credit).toBe(1200);
+    expect(lineAt(analysis, 3).debit).toBeNull();
+    expect(analysis.counts.unbalancedEntries).toBe(0);
+    expect(analysis.statement.income.revenue.value).toBe(1200);
+  });
+
+  it("Sens +1 et -1 sont normalisés de la même façon", () => {
+    const analysis = analyze(utf8(MONTANT_SENS_NUMERIC));
+    expect(analysis.amountSchema).toBe("MONTANT_SENS");
+    expect(lineAt(analysis, 2).debit).toBe(1200);
+    expect(lineAt(analysis, 3).credit).toBe(1200);
+    expect(analysis.counts.unbalancedEntries).toBe(0);
+  });
+
+  it("un Sens non reconnu bloque la ligne au lieu de deviner un côté", () => {
+    const analysis = analyze(utf8(MONTANT_SENS_INVALID));
+    expect(codes(lineAt(analysis, 2).issues)).toContain("FEC_AMOUNT_SENS_INVALID");
+    expect(lineAt(analysis, 2).status).toBe("BLOCKED");
+    expect(lineAt(analysis, 2).debit).toBeNull();
+    expect(lineAt(analysis, 2).credit).toBeNull();
+  });
+
+  it("un Sens absent bloque la ligne : le sens ne se devine pas", () => {
+    const analysis = analyze(utf8(MONTANT_SENS_MISSING));
+    expect(codes(lineAt(analysis, 2).issues)).toContain("FEC_AMOUNT_SENS_INVALID");
+    expect(lineAt(analysis, 2).status).toBe("BLOCKED");
+  });
+
+  it("l'absence de Debit/Credit n'est plus une erreur quand Montant/Sens est présent", () => {
+    const analysis = analyze(utf8(MONTANT_SENS_LETTERS));
+    expect(codes(analysis.issues)).not.toContain("FEC_HEADER_MISSING_FIELD");
+  });
+
+  it("un en-tête portant les deux formes ne compte pas deux fois le même montant", () => {
+    const header = `${FEC_HEADER}\tMontant\tSens`;
+    const analysis = analyze(utf8(`${header}\n${NOMINAL.split("\n")[1]}\t1200,00\tD`));
+    expect(analysis.amountSchema).toBe("DEBIT_CREDIT");
+    expect(codes(analysis.issues)).toContain("FEC_AMOUNT_SCHEMA_AMBIGUOUS");
+  });
+});
+
+describe("texte primaire · séparateurs conformes et tolérés", () => {
+  it("la tabulation et la barre verticale sont conformes, sans signalement", () => {
+    for (const fixture of [NOMINAL, PIPE_DELIMITED]) {
+      const analysis = analyze(utf8(fixture));
+      expect(analysis.delimiterConforming).toBe(true);
+      expect(codes(analysis.issues)).not.toContain("FEC_NON_STANDARD_DELIMITER");
+    }
+  });
+
+  it("le point-virgule est LU mais signalé hors norme : lisible ≠ conforme", () => {
+    const analysis = analyze(utf8(SEMICOLON_DELIMITED));
+    // Le fichier est intégralement exploitable...
+    expect(analysis.counts.lines).toBe(24);
+    expect(analysis.counts.blocked).toBe(0);
+    expect(analysis.statement.status).toBe("CALCULABLE");
+    // ...et l'écart de conformité est dit.
+    expect(analysis.delimiterConforming).toBe(false);
+    expect(codes(analysis.issues)).toContain("FEC_NON_STANDARD_DELIMITER");
+  });
+});
+
+describe("exercice déclaré complet · aucune écriture d'une autre période", () => {
+  it("une ligne hors exercice interdit la reconstruction annuelle quand la couverture est déclarée", () => {
+    const analysis = analyze(utf8(TWO_FISCAL_YEARS), {
+      coverage: "DECLARED_COMPLETE",
+      fiscalYear: YEAR_2025,
+    });
+    expect(analysis.counts.outOfFiscalYear).toBeGreaterThan(0);
+    expect(codes(analysis.statement.blockers)).toContain(
+      "FEC_OUT_OF_FISCAL_YEAR_IN_DECLARED_PERIOD",
+    );
+    expect(analysis.statement.status).not.toBe("CALCULABLE");
+    // Le candidat Business porte le refus, il n'est pas intégrable.
+    const candidate = toBusinessFinancialCandidate(analysis.statement);
+    expect(candidate?.blockers.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("sans couverture déclarée, la même ligne reste une simple observation", () => {
+    const analysis = analyze(utf8(TWO_FISCAL_YEARS), {
+      coverage: "OBSERVED_ONLY",
+      fiscalYear: YEAR_2025,
+    });
+    expect(codes(analysis.statement.blockers)).not.toContain(
+      "FEC_OUT_OF_FISCAL_YEAR_IN_DECLARED_PERIOD",
+    );
+  });
+});
+
+describe("écart de conformité ≠ montant non calculable", () => {
+  it("un champ de traçabilité blanc est signalé au FICHIER, en INFO, et ne bloque rien", () => {
+    const analysis = analyze(utf8(MISSING_PIECE_REF));
+    const blank = analysis.issues.filter((entry) => entry.code === "FEC_REGULATORY_FIELD_BLANK");
+    expect(blank.length).toBeGreaterThan(0);
+    expect(blank.every((entry) => entry.severity === "INFO")).toBe(true);
+    // Aucune ligne n'est dégradée par ces écarts, et l'exercice reste reconstructible.
+    expect(analysis.counts.blocked).toBe(0);
+    expect(analysis.statement.status).toBe("CALCULABLE");
+  });
+
+  it("l'écart n'est PAS répété ligne à ligne : un exercice n'a pas 150 000 anomalies identiques", () => {
+    const analysis = analyze(utf8(MISSING_PIECE_REF));
+    const perLine = analysis.lines.flatMap((line) => codes(line.issues));
+    expect(perLine).not.toContain("FEC_REGULATORY_FIELD_BLANK");
+    expect(perLine).not.toContain("FEC_PIECE_MISSING");
+  });
+});
+
+describe("PCG · participation des salariés ≠ impôt sur les bénéfices", () => {
+  const analysis = analyze(utf8(PROFIT_SHARING_AND_TAX));
+
+  it("691 et 695 sont deux groupes comptables distincts", () => {
+    expect(pcgGroupOf("691000")).toBe("EMPLOYEE_PROFIT_SHARING");
+    expect(pcgGroupOf("695000")).toBe("INCOME_TAX_EXPENSE");
+    expect(pcgGroupOf("696000")).toBe("INCOME_TAX_EXPENSE");
+    expect(pcgGroupOf("698000")).toBe("INCOME_TAX_EXPENSE");
+    expect(pcgGroupOf("699000")).toBe("INCOME_TAX_EXPENSE");
+  });
+
+  it("la charge d'impôt n'agrège JAMAIS la participation", () => {
+    expect(analysis.statement.income.incomeTaxExpense.value).toBe(30000);
+    expect(analysis.statement.income.employeeProfitSharing.value).toBe(10000);
+    expect(analysis.statement.income.incomeTaxExpense.basis).toContain("hors 691");
+    expect(analysis.statement.income.employeeProfitSharing.note).toContain("PAS un impôt");
+  });
+
+  it("le résultat net soustrait bien les DEUX charges", () => {
+    // CA 100 000, participation 10 000, impôt 30 000 → résultat net 60 000.
+    expect(analysis.statement.income.netResult.value).toBe(60000);
+  });
+
+  it("le contrat Business reçoit 30 000 d'impôt, jamais 40 000", () => {
+    const candidate = toBusinessFinancialCandidate(analysis.statement);
+    expect(candidate?.taxExpense).toBe(30000);
+    expect(candidate?.netIncome).toBe(60000);
+    expect(candidate?.basis.taxExpense).toContain("hors 691");
   });
 });

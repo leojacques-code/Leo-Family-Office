@@ -17,7 +17,12 @@ import {
   parseDelimited,
   resolveFecConventions,
 } from "@/lib/acquisition/fec/parse";
-import { resolveFecHeader } from "@/lib/acquisition/fec/spec";
+import {
+  FEC_TRACEABILITY_FIELDS,
+  isRegulatoryDelimiter,
+  resolveFecHeader,
+  type FecTraceabilityField,
+} from "@/lib/acquisition/fec/spec";
 import { buildStatementCandidate } from "@/lib/acquisition/fec/statements";
 import type {
   FecAnalysis,
@@ -28,8 +33,18 @@ import type {
 } from "@/lib/acquisition/fec/types";
 
 export * from "@/lib/acquisition/fec/types";
-export { FEC_FIELDS, resolveFecHeader } from "@/lib/acquisition/fec/spec";
-export { MAX_FEC_LINES, parseFecDate } from "@/lib/acquisition/fec/parse";
+export {
+  FEC_AMOUNT_ALTERNATIVE_FIELDS,
+  FEC_FIELDS,
+  FEC_REGULATORY_DELIMITERS,
+  FEC_TOLERATED_DELIMITERS,
+  FEC_TRACEABILITY_FIELDS,
+  isRegulatoryDelimiter,
+  normalizeFecSens,
+  resolveFecHeader,
+  type FecAmountSchema,
+} from "@/lib/acquisition/fec/spec";
+export { BALANCE_TOLERANCE, MAX_FEC_LINES, parseFecDate } from "@/lib/acquisition/fec/parse";
 export { pcgClassOf, pcgGroupOf, PCG_GROUPS } from "@/lib/acquisition/fec/pcg";
 export { buildStatementCandidate, groupBalances } from "@/lib/acquisition/fec/statements";
 
@@ -58,7 +73,15 @@ function emptyCounts(): FecCounts {
     unbalancedEntries: 0,
     journals: 0,
     accounts: 0,
+    outOfFiscalYear: 0,
   };
+}
+
+/** Valeur d'un champ de traçabilité sur une ligne lue. */
+function traceabilityValueOf(line: FecLine, field: FecTraceabilityField) {
+  if (field === "PieceRef") return line.pieceReference;
+  if (field === "PieceDate") return line.pieceDate;
+  return line.validationDate;
 }
 
 /** Analyse complète d'un FEC. Fonction PURE : aucun accès base, aucune horloge. */
@@ -109,6 +132,7 @@ export function analyzeFec(input: FecAnalysisInput): FecAnalysis {
       periodStart: null,
       periodEnd: null,
       unbalancedEntries: 0,
+      outOfFiscalYear: 0,
       currencies: [],
     });
 
@@ -118,6 +142,8 @@ export function analyzeFec(input: FecAnalysisInput): FecAnalysis {
     return {
       encoding: decoded.encoding,
       delimiter: detected.delimiter,
+      delimiterConforming: isRegulatoryDelimiter(detected.delimiter),
+      amountSchema: header.amountSchema,
       headers: document.headers,
       fieldPositions: header.positions,
       unknownHeaders: header.unknownHeaders,
@@ -142,6 +168,7 @@ export function analyzeFec(input: FecAnalysisInput): FecAnalysis {
   const context = {
     positions: header.positions,
     conventions,
+    amountSchema: header.amountSchema,
     fiscalYear: input.fiscalYear,
   };
   const parsedLines = document.rows.map((row) => normalizeFecLine(row, context));
@@ -182,6 +209,33 @@ export function analyzeFec(input: FecAnalysisInput): FecAnalysis {
   }
   counts.journals = journals.size;
   counts.accounts = accounts.size;
+  counts.outOfFiscalYear = lines.filter(
+    (line) =>
+      line.status !== "BLOCKED" &&
+      line.status !== "IGNORED" &&
+      line.issues.some((entry) => entry.code === "FEC_DATE_OUT_OF_FISCAL_YEAR"),
+  ).length;
+
+  // ÉCART DE CONFORMITÉ ≠ MONTANT NON CALCULABLE.
+  //
+  // Les champs de traçabilité laissés blancs sont comptés puis signalés UNE FOIS, au niveau
+  // du fichier. Le faire ligne à ligne produirait des dizaines de milliers d'anomalies
+  // identiques — coûteuses en mémoire, et noyant les vraies. Et cela reste un INFO : une
+  // référence de pièce absente empêche de remonter à un justificatif, elle n'empêche
+  // jamais de reconstruire un chiffre d'affaires.
+  for (const field of FEC_TRACEABILITY_FIELDS) {
+    if (header.positions[field] === undefined) continue;
+    const blank = lines.filter((line) => traceabilityValueOf(line, field) === null).length;
+    if (blank === 0) continue;
+    fileIssues.push(
+      issue(
+        "FEC_REGULATORY_FIELD_BLANK",
+        "INFO",
+        `Champ « ${field} » laissé blanc sur ${blank} ligne(s) sur ${lines.length} : écart de traçabilité réglementaire, sans effet sur les montants reconstruits.`,
+        field,
+      ),
+    );
+  }
   counts.entries = grouped.entries.length;
   counts.unbalancedEntries = grouped.entries.filter((entry) => !entry.balanced).length;
 
@@ -196,12 +250,15 @@ export function analyzeFec(input: FecAnalysisInput): FecAnalysis {
     periodStart: input.fiscalYear?.start ?? observedPeriod?.start ?? null,
     periodEnd: input.fiscalYear?.end ?? observedPeriod?.end ?? null,
     unbalancedEntries: counts.unbalancedEntries,
+    outOfFiscalYear: counts.outOfFiscalYear,
     currencies: [...currencies],
   });
 
   return {
     encoding: decoded.encoding,
     delimiter: detected.delimiter,
+    delimiterConforming: isRegulatoryDelimiter(detected.delimiter),
+    amountSchema: header.amountSchema,
     headers: document.headers,
     fieldPositions: header.positions,
     unknownHeaders: header.unknownHeaders,

@@ -192,11 +192,11 @@ const requiredTriggerFunctions = ["real_estate_allocation_guard", "import_raw_re
 const requiredConstraints = [
   "scenarios_investment_allocation_rate_ck", "expense_categories_cash_flow_kind_ck", "expense_categories_essentiality_ck", "expense_categories_behavior_ck", "transactions_kind_override_ck", "recurring_rules_frequency_ck", "recurring_rules_day_ck", "profiles_ledger_coverage_source_ck", "liabilities_deferral_kind_ck", "liabilities_deferral_months_ck", "liabilities_deferral_interest_ck", "loan_early_repayments_outcome_ck", "loan_early_repayments_amount_ck", "liabilities_amortisation_profile_ck", "liabilities_payment_frequency_ck", "liabilities_interest_convention_ck", "liabilities_rate_type_ck", "loan_rate_changes_kind_ck", "loan_payment_changes_kind_ck", "loan_payment_changes_amount_ck", "net_worth_snapshots_version_ck", "net_worth_snapshots_completeness_ck", "net_worth_snapshot_items_owner_fk", "portfolio_events_type_ck", "portfolio_events_security_shape_ck", "portfolio_events_quantity_shape_ck", "portfolio_events_matched_lot_ck", "portfolio_events_counterparty_ck", "portfolio_events_data_kind_ck", "portfolio_events_settlement_ck", "portfolio_events_account_fk", "portfolio_events_security_fk", "portfolio_events_counterparty_fk", "portfolio_events_transaction_fk", "portfolio_events_lot_target_uk", "portfolio_events_matched_lot_fk", "portfolio_envelope_policies_method_ck", "portfolio_envelope_policies_coverage_source_ck", "portfolio_envelope_policies_coverage_pair_ck", "portfolio_envelope_policies_account_fk", "portfolio_envelope_policies_account_uk", "properties_usage_ck", "properties_ownership_share_ck", "properties_disposal_after_acquisition_ck", "real_estate_valuations_property_fk", "real_estate_valuations_value_ck", "real_estate_valuations_method_ck", "real_estate_valuations_data_kind_ck", "real_estate_capital_events_property_fk", "real_estate_capital_events_transaction_fk", "real_estate_capital_events_amount_ck", "real_estate_capital_events_type_ck", "real_estate_capital_events_data_kind_ck", "real_estate_operating_terms_property_fk", "real_estate_operating_terms_effective_uk", "real_estate_operating_terms_amounts_ck", "real_estate_operating_terms_rates_ck", "real_estate_operating_terms_management_exclusive_ck", "real_estate_operating_terms_data_kind_ck", "real_estate_financing_links_property_fk", "real_estate_financing_links_liability_fk", "real_estate_financing_links_pair_uk", "real_estate_financing_links_share_ck", "transactions_property_fk", "business_ownership_business_fk", "business_financials_business_fk", "business_valuations_business_fk", "business_ownership_rates_v2_ck", "business_ownership_shares_ck", "business_ownership_origin_event_fk", "business_valuations_basis_v2_ck", "business_valuations_method_ck", "business_valuations_multiple_ck", "business_valuations_metric_basis_ck", "business_valuations_round_ck", "businesses_capital_history_source_ck", "businesses_capital_history_start_ck", "business_financials_period_kind_ck", "business_financials_period_order_ck", "business_financials_non_negative_ck", "business_capital_events_business_fk", "business_capital_events_transaction_fk", "business_capital_events_amount_ck", "business_capital_events_type_v2_ck", "business_capital_events_amount_scope_ck", "business_capital_events_scope_domain_ck", "business_capital_events_fees_ck", "business_capital_events_ownership_after_ck", "business_capital_events_ownership_delta_ck", "business_ebitda_adjustments_business_fk", "business_ebitda_adjustments_category_ck", "business_ebitda_adjustments_data_kind_ck", "business_ebitda_adjustments_label_uk", "business_bridge_items_business_fk", "business_bridge_items_category_ck", "business_bridge_items_data_kind_ck", "business_bridge_items_label_uk", "business_bridge_declarations_business_fk", "business_bridge_declarations_status_ck", "business_bridge_declarations_effective_uk", "business_dcf_assumptions_business_fk", "business_dcf_assumptions_wacc_ck", "business_dcf_assumptions_tax_ck", "business_dcf_assumptions_terminal_ck", "business_dcf_assumptions_convention_ck", "business_dcf_assumptions_effective_uk", "business_dcf_periods_year_ck", "business_dcf_periods_non_negative_ck", "business_dcf_periods_year_uk", "business_holdings_parent_fk", "business_holdings_child_fk", "business_holdings_no_self_ck", "business_holdings_rate_ck", "business_holdings_effective_uk",
   "import_sources_account_fk", "import_sources_business_fk", "import_sources_kind_ck", "import_sources_domain_v2_ck", "import_sources_status_ck", "import_sources_data_kind_ck", "import_sources_domain_shape_v2_ck", "import_sources_coverage_order_ck",
-  "import_sessions_source_fk", "import_sessions_document_fk", "import_sessions_status_v2_ck", "import_sessions_fiscal_year_ck", "import_sessions_entry_counts_ck", "import_sessions_counts_ck", "import_sessions_committed_shape_ck", "import_sessions_file_hash_ck", "import_sessions_declared_period_ck", "import_sessions_observed_period_ck",
+  "import_sessions_source_fk", "import_sessions_document_fk", "import_sessions_status_v2_ck", "import_sessions_fiscal_year_ck", "import_sessions_entry_counts_ck", "import_sessions_coverage_shape_ck", "import_sessions_counts_ck", "import_sessions_committed_shape_ck", "import_sessions_file_hash_ck", "import_sessions_declared_period_ck", "import_sessions_observed_period_ck",
   "import_raw_records_session_fk", "import_raw_records_row_uk", "import_raw_records_row_number_ck", "import_raw_records_cells_ck",
   "import_normalized_records_session_fk", "import_normalized_records_raw_fk", "import_normalized_records_account_fk", "import_normalized_records_matched_fk", "import_normalized_records_raw_uk", "import_normalized_records_domain_ck", "import_normalized_records_status_ck", "import_normalized_records_verdict_ck", "import_normalized_records_commit_state_ck", "import_normalized_records_data_kind_ck", "import_normalized_records_issues_ck", "import_normalized_records_ready_shape_ck", "import_normalized_records_committable_ck",
   "import_record_links_session_fk", "import_record_links_normalized_fk", "import_record_links_transaction_fk", "import_record_links_business_fk", "import_record_links_normalized_uk", "import_record_links_transaction_uk", "import_record_links_business_session_uk", "import_record_links_domain_v2_ck", "import_record_links_target_v2_ck",
-  "fec_entry_lines_session_fk", "fec_entry_lines_raw_fk", "fec_entry_lines_business_fk", "fec_entry_lines_raw_uk", "fec_entry_lines_status_ck", "fec_entry_lines_commit_state_ck", "fec_entry_lines_data_kind_ck", "fec_entry_lines_issues_ck", "fec_entry_lines_pcg_class_ck", "fec_entry_lines_amount_sign_ck", "fec_entry_lines_amount_shape_ck", "fec_entry_lines_currency_ck", "fec_entry_lines_committable_ck",
+  "fec_entry_lines_session_fk", "fec_entry_lines_raw_fk", "fec_entry_lines_business_fk", "fec_entry_lines_raw_uk", "fec_entry_lines_status_ck", "fec_entry_lines_commit_state_ck", "fec_entry_lines_data_kind_ck", "fec_entry_lines_issues_ck", "fec_entry_lines_pcg_class_ck", "fec_entry_lines_amount_shape_ck", "fec_entry_lines_currency_ck", "fec_entry_lines_committable_ck",
   "import_column_mappings_signature_uk", "import_column_mappings_headers_ck", "import_column_mappings_mapping_ck", "import_column_mappings_version_ck",
   "career_roles_type_ck", "career_roles_status_ck", "career_roles_dates_ck", "career_roles_data_kind_ck", "career_roles_id_user_uk", "career_compensation_role_fk", "career_compensation_frequency_ck", "career_compensation_dates_ck", "career_compensation_amounts_ck", "career_compensation_data_kind_ck", "career_compensation_effective_uk", "career_events_role_fk", "career_events_type_ck", "career_events_variable_state_ck", "career_events_paid_shape_ck", "career_events_amount_ck", "career_events_data_kind_ck", "career_events_id_user_uk", "career_equity_role_fk", "career_equity_type_ck", "career_equity_liquidity_ck", "career_equity_amounts_ck", "career_equity_expiry_ck", "career_scenarios_role_fk", "career_scenarios_type_ck", "career_scenarios_kind_ck", "tax_profiles_dates_ck", "tax_profiles_dependants_ck", "tax_rule_sets_dates_ck", "tax_rule_sets_status_ck", "tax_rule_sets_effective_uk", "tax_rule_sets_id_user_uk", "tax_rules_rule_set_fk", "tax_rules_type_ck", "tax_rules_category_ck", "tax_rules_dates_ck", "tax_observations_transaction_fk", "tax_observations_document_fk", "tax_observations_type_ck", "tax_observations_amount_ck", "tax_observations_kind_ck", "tax_income_role_fk", "tax_income_event_fk", "tax_income_transaction_fk", "tax_income_category_ck", "tax_income_amount_ck", "tax_income_kind_ck",
 ] as const;
@@ -261,6 +261,7 @@ const requiredRpcs: Record<string, string> = {
   lfo_discard_import_session: "p_user_id uuid, p_session_id uuid",
   lfo_attach_import_document: "p_user_id uuid, p_payload jsonb",
   lfo_save_import_mapping: "p_user_id uuid, p_payload jsonb",
+  lfo_fec_entry_balance: "p_user_id uuid, p_session_id uuid",
   lfo_open_fec_session: "p_user_id uuid, p_payload jsonb",
   lfo_append_fec_lines: "p_user_id uuid, p_payload jsonb",
   lfo_finalize_fec_session: "p_user_id uuid, p_payload jsonb",
@@ -270,6 +271,19 @@ const requiredRpcs: Record<string, string> = {
   lfo_set_tax_profile: "p_user_id uuid, p_payload jsonb",
   lfo_save_tax_rule_set: "p_user_id uuid, p_payload jsonb",
   lfo_record_tax_observation: "p_user_id uuid, p_payload jsonb",
+};
+
+/**
+ * RPC de LECTURE d'un invariant, avec leur type de retour déclaré.
+ *
+ * `lfo_fec_entry_balance` dérive des lignes persistées le nombre d'écritures et le nombre
+ * d'écritures déséquilibrées. Ce n'est pas une formule financière déplacée dans la base :
+ * Σdébits = Σcrédits par écriture est l'invariant d'INTÉGRITÉ de la source comptable, et il
+ * doit être établi là où les lignes vivent — un décompte fourni par l'appelant ne prouve
+ * rien de ce que la base contient.
+ */
+const integrityReaderRpcs: Record<string, string> = {
+  lfo_fec_entry_balance: "TABLE(entries integer, unbalanced integer)",
 };
 
 /**
@@ -461,7 +475,17 @@ try {
       failures.push(
         `Signature RPC invalide : ${rpc.name}(${rpc.arguments}), attendu ${rpc.name}(${expectedArguments})`,
       );
-    if (rpc.result_type !== "uuid") failures.push(`Type de retour RPC invalide : ${rpc.name}`);
+    // Une RPC d'ÉCRITURE retourne l'identifiant de ce qu'elle a écrit : c'est la convention
+    // du dépôt, et elle rend une écriture composée vérifiable par son appelant. Une RPC de
+    // LECTURE D'INVARIANT ne peut pas s'y plier — elle ne crée rien — mais elle n'échappe
+    // pas au gate pour autant : son type de retour est DÉCLARÉ ici, et un changement
+    // silencieux échoue comme le reste.
+    const integrityReader = integrityReaderRpcs[rpc.name];
+    const expectedResult = integrityReader ?? "uuid";
+    if (rpc.result_type !== expectedResult)
+      failures.push(
+        `Type de retour RPC invalide : ${rpc.name} retourne ${rpc.result_type}, attendu ${expectedResult}`,
+      );
     if (rpc.security_definer) failures.push(`RPC SECURITY DEFINER interdite : ${rpc.name}`);
     if (!rpc.settings?.some((setting) => setting === 'search_path=""'))
       failures.push(`search_path non verrouillé : ${rpc.name}`);

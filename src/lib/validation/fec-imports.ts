@@ -10,11 +10,20 @@ import { z } from "zod";
 import { MAX_FEC_LINES } from "@/lib/acquisition/fec";
 
 /**
- * 24 Mo. Un FEC d'exercice complet est un fichier texte long — 200 000 lignes de dix-huit
- * champs pèsent bien plus qu'un relevé bancaire. Le plafond du coffre privé reste à 8 Mo,
- * donc au-delà la conservation du fichier échouera : l'analyse, elle, reste possible.
+ * 24 Mo pour l'ANALYSE. Un FEC d'exercice complet est un fichier texte long : 150 000 lignes
+ * de dix-huit champs pèsent bien plus qu'un relevé bancaire.
  */
 export const MAX_FEC_FILE_BYTES = 24 * 1024 * 1024;
+
+/**
+ * 8 Mo pour la CONSERVATION : c'est la capacité réelle du coffre privé.
+ *
+ * Les deux plafonds diffèrent, et les confondre serait pire que les séparer. Un FEC de
+ * 15 Mo est parfaitement analysable ; il n'est simplement pas archivable ici. La demande de
+ * conservation est donc refusée EN AMONT, avant toute écriture canonique, plutôt que de
+ * laisser un dépôt échouer après que les faits ont été écrits.
+ */
+export const MAX_RETAINED_FEC_FILE_BYTES = 8 * 1024 * 1024;
 
 /** Au-delà, le fichier est refusé plutôt que tronqué. Un exercice amputé produirait des
  * états faux et d'apparence complète. */

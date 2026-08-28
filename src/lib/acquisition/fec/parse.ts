@@ -27,6 +27,9 @@ import { normalizeAccountNumber, pcgClassOf, pcgGroupOf } from "@/lib/acquisitio
 import {
   FEC_DELIMITERS,
   FEC_FIELDS,
+  isRegulatoryDelimiter,
+  normalizeFecSens,
+  type FecAmountSchema,
   type FecField,
 } from "@/lib/acquisition/fec/spec";
 import type { FecEntry, FecLine } from "@/lib/acquisition/fec/types";
@@ -84,13 +87,21 @@ export function parseFecDate(
   return { value: parsed.value, code: "NON_STANDARD" };
 }
 
-/** Séparateur d'un FEC : les candidats du format d'abord, la détection générique ensuite. */
+/**
+ * Séparateur d'un FEC.
+ *
+ * Les séparateurs RÉGLEMENTAIRES sont essayés d'abord, les tolérés ensuite, et le choix
+ * d'un toléré est SIGNALÉ. LISIBLE ≠ CONFORME : un export au point-virgule s'ouvre très
+ * bien, mais le présenter comme une forme réglementaire du FEC serait faux, et
+ * l'utilisateur qui doit répondre à une demande de l'administration a besoin de le savoir.
+ */
 export function detectFecDelimiter(text: string): { delimiter: string; issues: ImportIssue[] } {
   const firstLine = text.split(/\r?\n/).find((line) => line.trim().length > 0) ?? "";
   for (const candidate of FEC_DELIMITERS) {
-    // Un en-tête conforme porte les dix-huit champs : le séparateur qui les révèle est le bon.
+    // Un en-tête complet porte dix-huit colonnes : le séparateur qui les révèle est le bon.
+    // La variante Montant/Sens en porte autant, les colonnes 12 et 13 étant remplacées.
     if (firstLine.split(candidate).length >= FEC_FIELDS.length) {
-      return { delimiter: candidate, issues: [] };
+      return { delimiter: candidate, issues: nonStandardDelimiterIssues(candidate) };
     }
   }
   const detected = detectDelimiter(text);
@@ -98,13 +109,26 @@ export function detectFecDelimiter(text: string): { delimiter: string; issues: I
     delimiter: detected.delimiter,
     issues: [
       ...detected.issues,
+      ...nonStandardDelimiterIssues(detected.delimiter),
       issue(
         "FEC_HEADER_INVALID",
         "WARNING",
-        `Aucun séparateur du format (tabulation, barre verticale, point-virgule) ne révèle les ${FEC_FIELDS.length} champs attendus dans l'en-tête.`,
+        `Aucun séparateur essayé ne révèle les ${FEC_FIELDS.length} colonnes attendues dans l'en-tête.`,
       ),
     ],
   };
+}
+
+function nonStandardDelimiterIssues(delimiter: string): ImportIssue[] {
+  if (isRegulatoryDelimiter(delimiter)) return [];
+  const label = delimiter === ";" ? "point-virgule" : delimiter === "," ? "virgule" : delimiter;
+  return [
+    issue(
+      "FEC_NON_STANDARD_DELIMITER",
+      "WARNING",
+      `Séparateur « ${label} » hors norme : le texte réglementaire prévoit la tabulation ou la barre verticale pour un fichier à plat. Le fichier est lu, mais il n'est pas conforme sur ce point.`,
+    ),
+  ];
 }
 
 interface Conventions {
@@ -135,7 +159,7 @@ export function resolveFecConventions(
 ): { conventions: Conventions; issues: ImportIssue[] } {
   const issues: ImportIssue[] = [];
   const amountCells: string[] = [];
-  for (const field of ["Debit", "Credit", "Montantdevise"] as const) {
+  for (const field of ["Debit", "Credit", "Montant", "Montantdevise"] as const) {
     const index = positions[field];
     if (index === undefined) continue;
     for (const row of rows) amountCells.push(cell(row.cells, index));
@@ -167,6 +191,7 @@ export function resolveFecConventions(
 interface LineContext {
   positions: Partial<Record<FecField, number>>;
   conventions: Conventions;
+  amountSchema: FecAmountSchema;
   fiscalYear: { start: string; end: string } | null;
 }
 
@@ -245,7 +270,12 @@ export function normalizeFecLine(
   // être laissé vide. Un côté absent alors que l'AUTRE est renseigné vaut zéro par la
   // CONVENTION du format, pas par défaut applicatif. Une ligne dont les deux côtés sont
   // absents n'a aucun montant : elle est bloquée.
-  const readAmount = (field: "Debit" | "Credit" | "Montantdevise") => {
+  //
+  // Le SIGNE est conservé tel quel. Le texte primaire autorise des valeurs numériques
+  // signées : un débit de −100 est une écriture valide — typiquement une contrepassation —
+  // et le prendre pour une erreur de lecture, ou lui appliquer une valeur absolue,
+  // inverserait le sens économique de l'opération.
+  const readAmount = (field: "Debit" | "Credit" | "Montant" | "Montantdevise") => {
     const raw = cell(row.cells, positions[field]);
     const parsed = parseAmountWithConvention(raw, conventions.amount);
     if (parsed.code === "UNPARSEABLE" || parsed.code === "AMBIGUOUS") {
@@ -261,23 +291,56 @@ export function normalizeFecLine(
     }
     return parsed.value;
   };
-  const debit = readAmount("Debit");
-  const credit = readAmount("Credit");
-  if (debit === null && credit === null) {
-    issues.push(
-      issue("FEC_AMOUNT_MISSING", "ERROR", "Ni débit ni crédit renseigné.", "Debit", null),
-    );
-  }
-  if (debit !== null && credit !== null && debit !== 0 && credit !== 0) {
-    issues.push(
-      issue(
-        "FEC_AMOUNT_BOTH_SIDES",
-        "WARNING",
-        "Débit et crédit tous deux non nuls sur la même ligne : le sens de la ligne est ambigu, seul son solde net est exploitable.",
-        "Debit",
-        `${debit} / ${credit}`,
-      ),
-    );
+
+  let debit: number | null;
+  let credit: number | null;
+
+  if (context.amountSchema === "MONTANT_SENS") {
+    // Variante réglementaire : un montant, et son sens. La normalisation vers débit/crédit
+    // est une TRADUCTION, pas une interprétation — le brut conserve la forme d'origine, et
+    // c'est lui qui répond plus tard à « qu'est-ce que la comptabilité a écrit ? ».
+    const amount = readAmount("Montant");
+    const rawSens = cell(row.cells, positions.Sens);
+    const sens = normalizeFecSens(rawSens);
+    if (amount !== null && sens === null) {
+      issues.push(
+        issue(
+          "FEC_AMOUNT_SENS_INVALID",
+          "ERROR",
+          rawSens.trim().length === 0
+            ? "Montant renseigné sans sens : le sens ne se devine pas, il inverserait une charge et un produit."
+            : `Sens « ${rawSens.trim()} » non reconnu : les valeurs prévues sont D, C, +1 ou -1.`,
+          "Sens",
+          rawSens,
+        ),
+      );
+    }
+    debit = sens === "DEBIT" ? amount : null;
+    credit = sens === "CREDIT" ? amount : null;
+    if (amount === null) {
+      issues.push(
+        issue("FEC_AMOUNT_MISSING", "ERROR", "Colonne « Montant » non renseignée.", "Montant", null),
+      );
+    }
+  } else {
+    debit = readAmount("Debit");
+    credit = readAmount("Credit");
+    if (debit === null && credit === null) {
+      issues.push(
+        issue("FEC_AMOUNT_MISSING", "ERROR", "Ni débit ni crédit renseigné.", "Debit", null),
+      );
+    }
+    if (debit !== null && credit !== null && debit !== 0 && credit !== 0) {
+      issues.push(
+        issue(
+          "FEC_AMOUNT_BOTH_SIDES",
+          "WARNING",
+          "Débit et crédit tous deux non nuls sur la même ligne : le sens de la ligne est ambigu, seul son solde net est exploitable.",
+          "Debit",
+          `${debit} / ${credit}`,
+        ),
+      );
+    }
   }
 
   // ── Devise ───────────────────────────────────────────────────────────────────────────
@@ -307,17 +370,11 @@ export function normalizeFecLine(
       ),
     );
   }
+  // La référence de pièce absente est un écart de TRAÇABILITÉ, pas une impossibilité de
+  // calcul. Elle n'est donc pas signalée ligne à ligne — sur un exercice, ce serait des
+  // dizaines de milliers d'anomalies identiques, coûteuses en mémoire et illisibles — mais
+  // agrégée au niveau du FICHIER par `analyzeFec`, sous `FEC_REGULATORY_FIELD_BLANK`.
   const pieceReference = text("PieceRef");
-  if (pieceReference === null && positions.PieceRef !== undefined) {
-    issues.push(
-      issue(
-        "FEC_PIECE_MISSING",
-        "INFO",
-        "Référence de pièce absente : la traçabilité de cette ligne s'arrête à son écriture.",
-        "PieceRef",
-      ),
-    );
-  }
 
   // ── Cohérences temporelles ───────────────────────────────────────────────────────────
   if (

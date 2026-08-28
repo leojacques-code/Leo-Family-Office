@@ -10,7 +10,7 @@
 
 import type { ImportIssue, ImportRowStatus, SourceEncoding } from "@/lib/acquisition/types";
 import type { PcgClass, PcgGroup } from "@/lib/acquisition/fec/pcg";
-import type { FecField } from "@/lib/acquisition/fec/spec";
+import type { FecAmountSchema, FecField } from "@/lib/acquisition/fec/spec";
 
 /** Ligne d'écriture normalisée. Les dix-huit champs, plus la classification comptable. */
 export interface FecLine {
@@ -123,6 +123,11 @@ export interface FecIncomeStatement {
    * marchandises : la valeur ajoutée n'en tient pas lieu.
    */
   merchandiseMargin: FecAmount;
+  /**
+   * Participation des salariés aux résultats (691). Charge du résultat, JAMAIS un impôt :
+   * elle est exposée séparément pour que `tax_expense` reste un périmètre fiscal.
+   */
+  employeeProfitSharing: FecAmount;
   depreciationExpense: FecAmount;
   /** Charges d'intérêts (661), isolées des autres charges financières. */
   interestExpense: FecAmount;
@@ -192,12 +197,23 @@ export interface FecCounts {
   unbalancedEntries: number;
   journals: number;
   accounts: number;
+  /**
+   * Lignes exploitables dont la date sort de l'exercice DÉCLARÉ. Sur un exercice déclaré
+   * complet, elles interdisent la reconstruction annuelle : mélanger des écritures hors
+   * période dans un exercice « entier » fabriquerait un résultat qui n'est celui d'aucune
+   * période réelle.
+   */
+  outOfFiscalYear: number;
 }
 
 /** Analyse complète d'un FEC : le dry-run comptable. */
 export interface FecAnalysis {
   encoding: SourceEncoding;
   delimiter: string;
+  /** Le séparateur retenu est-il celui du texte réglementaire ? Lisible ≠ conforme. */
+  delimiterConforming: boolean;
+  /** Représentation des montants réellement portée par le fichier. */
+  amountSchema: FecAmountSchema;
   headers: string[];
   /** Positions résolues des champs réglementaires. */
   fieldPositions: Partial<Record<FecField, number>>;

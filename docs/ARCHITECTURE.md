@@ -261,6 +261,10 @@ L'unité comptable est l'ÉCRITURE, pas la ligne : une vente de 1 200 € TTC pr
 
 ABSENT ≠ ZÉRO va jusque dans la base : un côté vide face à un côté renseigné vaut zéro par la CONVENTION du format, un zéro transmis est une valeur, et une ligne aux deux côtés absents n'a pas de montant — une contrainte impose qu'elle ne puisse exister qu'en `BLOCKED`.
 
+Le texte primaire autorise des valeurs numériques SIGNÉES : aucune contrainte de signe n'existe donc, et une contrepassation à −1 200 est une donnée valide. Il prévoit aussi deux formes pour les colonnes 12 et 13 — `Debit`/`Credit` et `Montant`/`Sens`, `Sens` valant `D`/`C` ou `+1`/`-1` — et les deux sont lues, la seconde normalisée vers la première sans que le brut perde sa forme d'origine. Un sens inconnu BLOQUE la ligne : le deviner inverserait un jour une charge et un produit. Enfin, LISIBLE ≠ CONFORME : tabulation et barre verticale sont les séparateurs du texte, le point-virgule est lu et SIGNALÉ.
+
+ÉCART DE CONFORMITÉ RÉGLEMENTAIRE ≠ MONTANT NON CALCULABLE : une référence de pièce absente empêche de remonter à un justificatif, jamais de reconstruire un chiffre d'affaires. Ces écarts sont donc agrégés au niveau du FICHIER, en INFO, et ne dégradent aucune ligne.
+
 `pcg.ts` classe par préfixe de compte, la règle la plus spécifique gagnant toujours, et s'arrête EXACTEMENT là : CLASSIFICATION COMPTABLE ≠ JUGEMENT ÉCONOMIQUE. Un compte 625 est un poste « déplacements et missions », pas une « dépense personnelle du dirigeant » ; le retraitement appartient au ledger de Quality of Earnings de Business Equity, sur décision humaine documentée.
 
 Chaque montant reconstruit porte le NOM de sa convention, parce qu'« EBITDA » ne veut rien dire tant qu'on n'a pas dit lequel : EBE au sens du SIG (VA + 74 − 63 − 64, hors 65 et 75), marge commerciale sur les marchandises seules (707 − 607 − 6037) et `null` sans compte de marchandises, la valeur ajoutée n'en tenant pas lieu. AUCUN EBITDA NORMATIF n'est produit.
@@ -270,6 +274,10 @@ Quatre isolements servent l'aval : trésorerie hors concours bancaires courants 
 Période observée ≠ couverture DÉCLARÉE : sans déclaration, les totaux restent exacts pour les lignes fournies mais ne constituent pas un exercice, et `lfo_commit_fec_session` refuse d'écrire. Un fichier réduit à son en-tête est `NOT_COMPUTABLE`, jamais un exercice à zéro.
 
 Aucun état reconstruit n'est persisté : `fec_entry_lines` porte les écritures, les états s'en dérivent à la lecture. Le fait canonique est écrit par `lfo_record_business_financials`, et par elle seule — et il est reconstruit depuis les écritures PERSISTÉES au moment du commit, jamais repris de la charge du client.
+
+La frontière de confiance est explicite. Le client n'envoie qu'une action, un identifiant de session et éventuellement le fichier ; le schéma `.strict()` REFUSE tout montant financier au lieu de l'ignorer. Le serveur reconstruit les états en TypeScript depuis le staging, et la RPC `service_role` persiste atomiquement. PostgreSQL ne recalcule ni CA, ni EBE, ni BFR — ces formules resteraient deux vérités à synchroniser. Ce que la base contrôle, c'est l'INTÉGRITÉ de la source : `lfo_fec_entry_balance` dérive des lignes le nombre d'écritures et de déséquilibres, et ni le finalize ni le commit ne font confiance à un décompte fourni par l'appelant.
+
+ANALYSER ≠ ARCHIVER : l'analyse accepte 24 Mo, le coffre privé 8. La conservation d'un fichier trop lourd est refusée AVANT toute écriture canonique, et un échec de dépôt APRÈS l'écriture ne se présente jamais comme un échec de validation — `commitStatus` et `documentStatus` sont deux statuts distincts.
 
 Détail complet, format supporté, plafonds mesurés et limites : `docs/FEC_ACQUISITION.md`.
 

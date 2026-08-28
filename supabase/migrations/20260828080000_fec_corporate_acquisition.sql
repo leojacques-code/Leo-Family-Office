@@ -131,6 +131,17 @@ do $$ begin
     alter table public.import_sessions add constraint import_sessions_entry_counts_ck
       check (entry_count >= 0 and unbalanced_entry_count >= 0);
   end if;
+  -- Déclarer qu'un fichier couvre « l'exercice entier » sans dire QUEL exercice n'a aucun
+  -- sens : sans bornes, il n'y a pas de période à couvrir. La validation applicative pose
+  -- déjà la règle ; la base la pose aussi, parce qu'un invariant qui ne vit que dans une
+  -- API se contourne par la première écriture directe.
+  if not exists (select 1 from pg_constraint where conname = 'import_sessions_coverage_shape_ck') then
+    alter table public.import_sessions add constraint import_sessions_coverage_shape_ck
+      check (
+        coverage_declared = false
+        or (fiscal_year_start is not null and fiscal_year_end is not null)
+      );
+  end if;
 end $$;
 
 -- Un FEC de plusieurs dizaines de milliers de lignes ne passe pas dans un seul appel RPC :
@@ -218,12 +229,11 @@ create table if not exists public.fec_entry_lines (
   ),
   constraint fec_entry_lines_issues_ck check (jsonb_typeof(issues) = 'array'),
   constraint fec_entry_lines_pcg_class_ck check (pcg_class is null or (pcg_class between 1 and 7)),
-  -- Les montants du FEC sont NON SIGNÉS : le sens est porté par la colonne, débit ou crédit.
-  -- Un montant négatif signalerait une lecture fautive, pas une écriture en sens inverse.
-  constraint fec_entry_lines_amount_sign_ck check (
-    (debit is null or debit >= 0) and (credit is null or credit >= 0)
-    and (currency_amount is null or currency_amount >= 0)
-  ),
+  -- AUCUNE contrainte de signe, et c'est le texte primaire qui l'impose : l'arrêté du
+  -- 29 juillet 2013 autorise explicitement des valeurs numériques SIGNÉES. Un débit de
+  -- −1 200 est une écriture valide — typiquement une contrepassation — et le refuser
+  -- rejetterait des FEC parfaitement conformes. Lui appliquer une valeur absolue serait
+  -- pire encore : cela inverserait le sens économique de l'opération sans laisser de trace.
   -- Une ligne sans aucun côté renseigné n'a pas de montant : elle est BLOQUÉE, jamais
   -- silencieusement comptée pour zéro.
   constraint fec_entry_lines_amount_shape_ck check (
@@ -624,9 +634,54 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- 8 bis. Intégrité de la source comptable, dérivée des lignes persistées
+-- ---------------------------------------------------------------------------
+-- Σdébits = Σcrédits PAR ÉCRITURE. C'est l'invariant d'intégrité du format, pas un calcul
+-- financier : il ne produit ni résultat, ni valorisation, et ne duplique aucun moteur. Il
+-- vit ici parce qu'un décompte fourni par l'appelant ne prouve rien — la base est le seul
+-- endroit qui puisse affirmer ce que les lignes persistées contiennent réellement.
+--
+-- Les lignes BLOQUÉES et IGNORÉES sont exclues : contrôler l'équilibre d'une écriture dont
+-- un montant est illisible produirait un FAUX déséquilibre. Même règle que la lecture pure.
+--
+-- La tolérance de 0,005 absorbe l'arrondi de présentation, et rien de plus.
+create or replace function public.lfo_fec_entry_balance(
+  p_user_id uuid,
+  p_session_id uuid
+) returns table (entries integer, unbalanced integer)
+language sql
+security invoker
+set search_path = ''
+as $$
+  with per_entry as (
+    select
+      journal_code,
+      entry_num,
+      sum(coalesce(debit, 0)) - sum(coalesce(credit, 0)) as imbalance
+      from public.fec_entry_lines
+     where user_id = p_user_id
+       and session_id = p_session_id
+       and status not in ('BLOCKED', 'IGNORED')
+     group by journal_code, entry_num
+  )
+  select
+    count(*)::integer,
+    count(*) filter (where abs(imbalance) > 0.005)::integer
+    from per_entry;
+$$;
+
 -- Clôt la réception : décomptes, période observée, anomalies de fichier, statut ANALYZED.
--- Les décomptes sont RELUS en base plutôt que crus sur parole — ce que la base contient
--- est la seule mesure de ce qui a été reçu.
+--
+-- TOUS les décomptes sont DÉRIVÉS des lignes persistées, y compris le nombre d'écritures et
+-- le nombre d'écritures déséquilibrées. Aucun n'est repris de la charge d'appel : ce que la
+-- base contient est la seule mesure de ce qui a été reçu, et un décompte fourni par
+-- l'appelant est un décompte que l'appelant peut se tromper — ou mentir — à produire.
+--
+-- Le contrôle de partie double en SQL n'est PAS une formule financière déplacée dans la
+-- base, et il ne duplique aucun moteur : Σdébits = Σcrédits par écriture est l'invariant
+-- d'INTÉGRITÉ de la source comptable, du même ordre que « la somme des quote-parts d'un
+-- concours ne dépasse pas 1 ». Les états financiers, eux, restent calculés en TypeScript.
 create or replace function public.lfo_finalize_fec_session(
   p_user_id uuid,
   p_payload jsonb
@@ -654,13 +709,13 @@ begin
      set status = 'ANALYZED',
          analyzed_at = now(),
          issues = coalesce(p_payload -> 'issues', ses.issues),
-         entry_count = coalesce(nullif(p_payload ->> 'entry_count', '')::integer, 0),
-         unbalanced_entry_count = coalesce(nullif(p_payload ->> 'unbalanced_entry_count', '')::integer, 0),
          row_count = counted.total,
          ready_count = counted.ready,
          warning_count = counted.warning,
          blocked_count = counted.blocked,
          ignored_count = counted.ignored,
+         entry_count = balance.entries,
+         unbalanced_entry_count = balance.unbalanced,
          observed_period_start = counted.period_start,
          observed_period_end = counted.period_end
     from (
@@ -674,7 +729,8 @@ begin
         max(entry_date) filter (where status <> 'BLOCKED') as period_end
         from public.fec_entry_lines
        where session_id = v_session_id and user_id = p_user_id
-    ) as counted
+    ) as counted,
+    (select * from public.lfo_fec_entry_balance(p_user_id, v_session_id)) as balance
    where ses.id = v_session_id and ses.user_id = p_user_id;
 
   return v_session_id;
@@ -689,9 +745,14 @@ $$;
 --   * couverture non DÉCLARÉE : des totaux exacts sur les lignes fournies ne constituent
 --     pas un exercice, et l'écrire comme tel surévaluerait ou sous-évaluerait la société ;
 --   * écriture DÉSÉQUILIBRÉE : la partie double n'est pas vérifiée, donc les états
---     reconstruits ne sont pas fiables ;
+--     reconstruits ne sont pas fiables. Le déséquilibre est RECALCULÉ ici depuis les lignes
+--     persistées, jamais relu sur `import_sessions.unbalanced_entry_count` : cette colonne
+--     est un fait d'audit utile à l'affichage, mais elle est modifiable, et un invariant qui
+--     repose sur une valeur modifiable n'est pas un invariant ;
 --   * ligne BLOQUÉE : un montant illisible dans le fichier rend l'agrégat faux, et un
---     agrégat faux d'apparence complète est le pire résultat possible.
+--     agrégat faux d'apparence complète est le pire résultat possible ;
+--   * écriture HORS de l'exercice déclaré : un exercice annoncé complet qui contient des
+--     écritures d'une autre période ne produit le résultat d'AUCUNE période réelle.
 --
 -- La valorisation n'est pas touchée : ce qui est écrit est un FAIT financier daté. Aucune
 -- Enterprise Value, aucun multiple, aucun retraitement normatif d'EBITDA.
@@ -710,16 +771,19 @@ declare
   v_source_id uuid;
   v_business_id uuid;
   v_coverage boolean;
+  v_fy_start date;
+  v_fy_end date;
   v_unbalanced integer;
   v_blocked integer;
+  v_out_of_period integer;
   v_financials_id uuid;
   v_committed integer := 0;
   v_period_start date;
   v_period_end date;
 begin
   select ses.status, ses.source_id, src.target_business_id, ses.coverage_declared,
-         ses.unbalanced_entry_count
-    into v_status, v_source_id, v_business_id, v_coverage, v_unbalanced
+         ses.fiscal_year_start, ses.fiscal_year_end
+    into v_status, v_source_id, v_business_id, v_coverage, v_fy_start, v_fy_end
     from public.import_sessions ses
     join public.import_sources src on src.id = ses.source_id and src.user_id = ses.user_id
    where ses.id = v_session_id and ses.user_id = p_user_id
@@ -740,6 +804,10 @@ begin
   if v_coverage is not true then
     raise exception 'Couverture de l''exercice non déclarée : la reconstruction n''est pas un exercice complet';
   end if;
+  -- Partie double RECALCULÉE depuis les lignes persistées. Un décompte de session pourrait
+  -- avoir été remis à zéro entre l'analyse et la validation ; les lignes, elles, sont là.
+  select unbalanced into v_unbalanced
+    from public.lfo_fec_entry_balance(p_user_id, v_session_id);
   if coalesce(v_unbalanced, 0) > 0 then
     raise exception '% écriture(s) déséquilibrée(s) : la partie double n''est pas vérifiée', v_unbalanced;
   end if;
@@ -749,6 +817,21 @@ begin
    where session_id = v_session_id and user_id = p_user_id and status = 'BLOCKED';
   if v_blocked > 0 then
     raise exception '% ligne(s) illisible(s) : un agrégat construit dessus serait faux', v_blocked;
+  end if;
+
+  -- Un exercice DÉCLARÉ complet ne peut pas contenir des écritures d'une autre période.
+  -- Les mélanger produirait un résultat qui n'est celui d'aucun exercice réel, et rien dans
+  -- le fait canonique écrit ne permettrait ensuite de s'en apercevoir.
+  select count(*)::integer into v_out_of_period
+    from public.fec_entry_lines
+   where session_id = v_session_id and user_id = p_user_id
+     and status not in ('BLOCKED', 'IGNORED')
+     and entry_date is not null
+     and (entry_date < v_fy_start or entry_date > v_fy_end);
+  if coalesce(v_out_of_period, 0) > 0 then
+    raise exception
+      '% ligne(s) hors de l''exercice déclaré (% → %) : corrigez les bornes de l''exercice, ou n''importez que le fichier de l''exercice',
+      v_out_of_period, v_fy_start, v_fy_end;
   end if;
 
   if v_financials is null then
@@ -850,6 +933,7 @@ $$;
 -- 9. Privilèges des RPC
 -- ---------------------------------------------------------------------------
 revoke all on function
+  public.lfo_fec_entry_balance(uuid, uuid),
   public.lfo_open_fec_session(uuid, jsonb),
   public.lfo_append_fec_lines(uuid, jsonb),
   public.lfo_finalize_fec_session(uuid, jsonb),
@@ -858,6 +942,7 @@ revoke all on function
 from public, anon, authenticated;
 
 grant execute on function
+  public.lfo_fec_entry_balance(uuid, uuid),
   public.lfo_open_fec_session(uuid, jsonb),
   public.lfo_append_fec_lines(uuid, jsonb),
   public.lfo_finalize_fec_session(uuid, jsonb),

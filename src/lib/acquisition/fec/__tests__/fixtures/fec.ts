@@ -295,6 +295,142 @@ export const NOMINAL = fec([
   }),
 ]);
 
+/**
+ * En-tête de la variante réglementaire `Montant` / `Sens` : les colonnes 12 et 13 de
+ * `Debit` / `Credit` sont REMPLACÉES, l'en-tête porte donc toujours dix-huit champs.
+ */
+export const FEC_HEADER_MONTANT_SENS = FEC_FIELDS.map((field) =>
+  field === "Debit" ? "Montant" : field === "Credit" ? "Sens" : field,
+).join("\t");
+
+/** Une ligne de la variante Montant/Sens : le montant en colonne 12, le sens en colonne 13. */
+export function montantSensLine(spec: LineSpec & { montant?: string; sens?: string }): string {
+  const base = line({ ...spec, debit: spec.montant, credit: spec.sens });
+  return base;
+}
+
+export function fecMontantSens(lines: string[]): string {
+  return [FEC_HEADER_MONTANT_SENS, ...lines].join("\n");
+}
+
+/** Variante Montant/Sens avec `D` et `C`. */
+export const MONTANT_SENS_LETTERS = fecMontantSens([
+  montantSensLine({ journal: "VTE", entry: "1", account: "411000", montant: "1200,00", sens: "D" }),
+  montantSensLine({ journal: "VTE", entry: "1", account: "701000", montant: "1200,00", sens: "C" }),
+]);
+
+/** Variante Montant/Sens avec `+1` et `-1`. */
+export const MONTANT_SENS_NUMERIC = fecMontantSens([
+  montantSensLine({
+    journal: "VTE",
+    entry: "1",
+    account: "411000",
+    montant: "1200,00",
+    sens: "+1",
+  }),
+  montantSensLine({
+    journal: "VTE",
+    entry: "1",
+    account: "701000",
+    montant: "1200,00",
+    sens: "-1",
+  }),
+]);
+
+/** Sens inconnu : le montant existe, son sens non. */
+export const MONTANT_SENS_INVALID = fecMontantSens([
+  montantSensLine({ journal: "VTE", entry: "1", account: "411000", montant: "1200,00", sens: "X" }),
+  montantSensLine({ journal: "VTE", entry: "1", account: "701000", montant: "1200,00", sens: "C" }),
+]);
+
+/** Sens absent : rien ne dit de quel côté imputer. */
+export const MONTANT_SENS_MISSING = fecMontantSens([
+  montantSensLine({ journal: "VTE", entry: "1", account: "411000", montant: "1200,00", sens: "" }),
+]);
+
+/**
+ * Contrepassation SIGNÉE et équilibrée. Le texte primaire autorise les valeurs numériques
+ * signées : ces quatre lignes sont valides, et annulent exactement la vente d'origine.
+ */
+export const SIGNED_REVERSAL = fec([
+  line({ journal: "VTE", entry: "1", account: "411000", debit: "1200,00" }),
+  line({ journal: "VTE", entry: "1", account: "701000", credit: "1200,00" }),
+  line({ journal: "VTE", entry: "2", date: "20250228", account: "411000", debit: "-1200,00" }),
+  line({ journal: "VTE", entry: "2", date: "20250228", account: "701000", credit: "-1200,00" }),
+]);
+
+/** Crédit négatif seul, face à un débit positif : équilibré, et parfaitement lisible. */
+export const SIGNED_CREDIT_ONLY = fec([
+  line({ journal: "OD", entry: "1", account: "411000", debit: "-500,00" }),
+  line({ journal: "OD", entry: "1", account: "701000", credit: "-500,00" }),
+]);
+
+/** Montant en devise NÉGATIF, avec son code : signé et valide. */
+export const SIGNED_CURRENCY = fec([
+  line({
+    journal: "BQ",
+    entry: "1",
+    account: "512000",
+    debit: "-100,00",
+    currencyAmount: "-110,00",
+    currency: "USD",
+  }),
+  line({ journal: "BQ", entry: "1", account: "701000", credit: "-100,00" }),
+]);
+
+/**
+ * Participation des salariés (691) ET impôt sur les bénéfices (695) sur le même exercice.
+ * Le résultat net doit soustraire les deux ; la charge d'IMPÔT ne doit porter que 695.
+ */
+export const PROFIT_SHARING_AND_TAX = fec([
+  line({ journal: "VTE", entry: "1", account: "701000", credit: "100000,00" }),
+  line({ journal: "VTE", entry: "1", account: "411000", debit: "100000,00" }),
+  line({
+    journal: "OD",
+    entry: "2",
+    date: "20251231",
+    account: "691000",
+    accountLib: "Participation salaries",
+    debit: "10000,00",
+  }),
+  line({
+    journal: "OD",
+    entry: "2",
+    date: "20251231",
+    account: "428000",
+    accountLib: "Participation a payer",
+    credit: "10000,00",
+  }),
+  line({
+    journal: "OD",
+    entry: "3",
+    date: "20251231",
+    account: "695000",
+    accountLib: "Impot societes",
+    debit: "30000,00",
+  }),
+  line({
+    journal: "OD",
+    entry: "3",
+    date: "20251231",
+    account: "444000",
+    accountLib: "Etat impot",
+    credit: "30000,00",
+  }),
+]);
+
+/**
+ * Référence de pièce laissée blanche : écart de TRAÇABILITÉ réglementaire, et rien d'autre.
+ * Les montants restent parfaitement reconstructibles.
+ */
+export const MISSING_PIECE_REF = fec([
+  line({ journal: "VTE", entry: "1", account: "411000", debit: "1200,00", piece: "" }),
+  line({ journal: "VTE", entry: "1", account: "701000", credit: "1200,00", piece: "" }),
+]);
+
+/** Même contenu que NOMINAL, mais séparé par des points-virgules : lisible, non conforme. */
+export const SEMICOLON_DELIMITED = NOMINAL.split("\t").join(";");
+
 /** Négoce : ventes de marchandises (707), achats (607) et variation de stock (6037). */
 export const TRADING = fec([
   line({

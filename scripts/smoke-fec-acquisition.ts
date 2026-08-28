@@ -8,10 +8,15 @@
  *     produit AUCUN fait Business avant validation ;
  *   * le brut et l'écriture lue sont écrits ATOMIQUEMENT et rattachés par numéro de ligne ;
  *   * ABSENT ≠ ZÉRO : une écriture aux deux côtés absents ne peut exister qu'en BLOCKED ;
- *   * les montants du FEC sont non signés : un montant négatif est refusé par la base ;
+ *   * les montants SIGNÉS sont acceptés : le texte réglementaire les autorise, et une
+ *     contrepassation s'écrit ainsi ;
  *   * un montant en devise sans code devise est refusé : pas de taux implicite égal à 1 ;
- *   * la validation exige une couverture DÉCLARÉE, zéro écriture déséquilibrée et zéro
- *     ligne illisible — chacun de ces refus est porté par la base, pas par l'application ;
+ *   * la validation exige une couverture DÉCLARÉE, zéro écriture déséquilibrée, zéro ligne
+ *     illisible et zéro écriture hors de l'exercice déclaré — chacun de ces refus est porté
+ *     par la base, pas par l'application ;
+ *   * le déséquilibre est RECALCULÉ depuis les lignes persistées : un décompte de session
+ *     remis à zéro ne fait pas passer une comptabilité déséquilibrée ;
+ *   * déclarer une couverture d'exercice sans bornes d'exercice est refusé par la base ;
  *   * la validation écrit l'instantané financier, gèle les écritures et pose le lien de
  *     provenance en une seule transaction ;
  *   * une écriture committée est gelée : ni modifiable, ni supprimable, même sous
@@ -388,16 +393,6 @@ try {
   await rejects(
     `insert into public.fec_entry_lines
        (user_id, session_id, raw_record_id, business_id, journal_code, entry_num, entry_date,
-        account_num, pcg_group, status, debit)
-     values ($1, $2, $3, $4, 'OD', '99', '2025-06-30', '411000', 'TRADE_RECEIVABLES', 'READY', -10)`,
-    [userId, sessionId, probeRawId, businessId],
-    "Un montant NÉGATIF a été accepté : les montants du FEC sont non signés",
-    "fec_entry_lines_amount_sign_ck",
-  );
-
-  await rejects(
-    `insert into public.fec_entry_lines
-       (user_id, session_id, raw_record_id, business_id, journal_code, entry_num, entry_date,
         account_num, pcg_group, status, debit, currency_amount)
      values ($1, $2, $3, $4, 'OD', '99', '2025-06-30', '411000', 'TRADE_RECEIVABLES', 'READY', 10, 12)`,
     [userId, sessionId, probeRawId, businessId],
@@ -467,14 +462,20 @@ try {
     [sessionId],
   );
 
+  // Le décompte de la SESSION n'est plus ce qui décide : seules les lignes persistées le
+  // font. Une colonne gonflée à 2 sur une comptabilité réellement équilibrée ne doit donc
+  // PAS bloquer — le cas inverse, une colonne à 0 sur une comptabilité déséquilibrée, est
+  // couvert plus bas et lui doit bloquer.
   await client.query("update public.import_sessions set unbalanced_entry_count = 2 where id = $1", [
     sessionId,
   ]);
-  await rejects(
-    "select public.lfo_commit_fec_session($1::uuid, $2::jsonb)",
-    [userId, JSON.stringify({ session_id: sessionId, financials: FINANCIALS })],
-    "Une session portant des écritures déséquilibrées a été validée",
-    "déséquilibrée",
+  const derivedBalance = await client.query<{ unbalanced: string }>(
+    "select unbalanced::text as unbalanced from public.lfo_fec_entry_balance($1, $2)",
+    [userId, sessionId],
+  );
+  assert(
+    derivedBalance.rows[0].unbalanced === "0",
+    "Les lignes persistées de cette session sont équilibrées : le contrôle dérivé doit le dire",
   );
   await client.query(
     "update public.import_sessions set unbalanced_entry_count = 0, coverage_declared = false where id = $1",
@@ -592,6 +593,180 @@ try {
     "réception ou analysée",
   );
 
+  // ── 5 bis. Montants SIGNÉS : le texte réglementaire les autorise ─────────────────
+  //
+  // Aucune contrainte de signe ne doit exister : un débit de −100 est une écriture valide,
+  // typiquement une contrepassation. Le refuser rejetterait des FEC parfaitement conformes.
+  const signedSession = await rpc(
+    "lfo_open_fec_session",
+    openPayload({ file_hash: "1".repeat(64) }),
+  );
+  await rpc("lfo_append_fec_lines", {
+    session_id: signedSession,
+    rows: [
+      received({
+        row: 1,
+        journal: "OD",
+        entry: "1",
+        account: "411000",
+        debit: "-100",
+        group: "TRADE_RECEIVABLES",
+      }),
+      received({
+        row: 2,
+        journal: "OD",
+        entry: "1",
+        account: "701000",
+        credit: "-100",
+        group: "REVENUE",
+      }),
+    ],
+  });
+  const signed = await client.query<{ debit: string; credit: string; unbalanced: string }>(
+    `select
+       (select debit::text from public.fec_entry_lines where session_id = $1 and status <> 'BLOCKED' order by created_at limit 1) as debit,
+       (select credit::text from public.fec_entry_lines where session_id = $1 and credit is not null limit 1) as credit,
+       (select unbalanced::text from public.lfo_fec_entry_balance($2, $1)) as unbalanced`,
+    [signedSession, userId],
+  );
+  assert(
+    Number(signed.rows[0].debit) === -100 && Number(signed.rows[0].credit) === -100,
+    "Un montant signé doit être persisté TEL QUEL, sans valeur absolue",
+  );
+  assert(
+    signed.rows[0].unbalanced === "0",
+    "Le contrôle de partie double doit fonctionner avec des montants signés",
+  );
+  await client.query("select public.lfo_discard_import_session($1::uuid, $2::uuid)", [
+    userId,
+    signedSession,
+  ]);
+
+  // ── 5 ter. Le déséquilibre est RECALCULÉ, jamais cru sur parole ──────────────────
+  const forgedSession = await rpc(
+    "lfo_open_fec_session",
+    openPayload({ file_hash: "2".repeat(64) }),
+  );
+  await rpc("lfo_append_fec_lines", {
+    session_id: forgedSession,
+    rows: [
+      received({
+        row: 1,
+        journal: "OD",
+        entry: "1",
+        account: "411000",
+        debit: "1200",
+        group: "TRADE_RECEIVABLES",
+      }),
+      received({
+        row: 2,
+        journal: "OD",
+        entry: "1",
+        account: "701000",
+        credit: "1000",
+        group: "REVENUE",
+      }),
+    ],
+  });
+  // L'appelant ANNONCE un exercice équilibré. La base doit constater le contraire.
+  await rpc("lfo_finalize_fec_session", {
+    session_id: forgedSession,
+    entry_count: 1,
+    unbalanced_entry_count: 0,
+    issues: [],
+  });
+  const derived = await client.query<{ entries: string; unbalanced: string }>(
+    "select entry_count::text as entries, unbalanced_entry_count::text as unbalanced from public.import_sessions where id = $1",
+    [forgedSession],
+  );
+  assert(
+    derived.rows[0].entries === "1" && derived.rows[0].unbalanced === "1",
+    "Les décomptes d'écritures doivent être DÉRIVÉS des lignes, pas repris de la charge d'appel",
+  );
+  await rejects(
+    "select public.lfo_commit_fec_session($1::uuid, $2::jsonb)",
+    [userId, JSON.stringify({ session_id: forgedSession, financials: FINANCIALS })],
+    "Un décompte de session forgé a fait passer une comptabilité déséquilibrée",
+    "déséquilibrée",
+  );
+  // Même en remettant la colonne à zéro à la main : l'invariant ne repose pas sur elle.
+  await client.query("update public.import_sessions set unbalanced_entry_count = 0 where id = $1", [
+    forgedSession,
+  ]);
+  await rejects(
+    "select public.lfo_commit_fec_session($1::uuid, $2::jsonb)",
+    [userId, JSON.stringify({ session_id: forgedSession, financials: FINANCIALS })],
+    "Une colonne de décompte remise à zéro a fait passer une comptabilité déséquilibrée",
+    "déséquilibrée",
+  );
+  await client.query("select public.lfo_discard_import_session($1::uuid, $2::uuid)", [
+    userId,
+    forgedSession,
+  ]);
+
+  // ── 5 quater. Aucune écriture d'une autre période dans un exercice déclaré ────────
+  const outOfPeriod = await rpc("lfo_open_fec_session", openPayload({ file_hash: "3".repeat(64) }));
+  await rpc("lfo_append_fec_lines", {
+    session_id: outOfPeriod,
+    rows: [
+      received({
+        row: 1,
+        journal: "OD",
+        entry: "1",
+        account: "411000",
+        debit: "100",
+        group: "TRADE_RECEIVABLES",
+      }),
+      received({
+        row: 2,
+        journal: "OD",
+        entry: "1",
+        account: "701000",
+        credit: "100",
+        group: "REVENUE",
+      }),
+      received({
+        row: 3,
+        journal: "OD",
+        entry: "2",
+        date: "2026-01-02",
+        account: "411000",
+        debit: "50",
+        group: "TRADE_RECEIVABLES",
+      }),
+      received({
+        row: 4,
+        journal: "OD",
+        entry: "2",
+        date: "2026-01-02",
+        account: "701000",
+        credit: "50",
+        group: "REVENUE",
+      }),
+    ],
+  });
+  await rpc("lfo_finalize_fec_session", { session_id: outOfPeriod, issues: [] });
+  await rejects(
+    "select public.lfo_commit_fec_session($1::uuid, $2::jsonb)",
+    [userId, JSON.stringify({ session_id: outOfPeriod, financials: FINANCIALS })],
+    "Un exercice déclaré complet a accepté une écriture d'une autre période",
+    "hors de l'exercice déclaré",
+  );
+  await client.query("select public.lfo_discard_import_session($1::uuid, $2::uuid)", [
+    userId,
+    outOfPeriod,
+  ]);
+
+  // ── 5 quinquies. Couverture déclarée sans exercice : refusée par la BASE ──────────
+  await rejects(
+    `insert into public.import_sessions
+       (user_id, source_id, parser, parser_version, status, coverage_declared)
+     values ($1, $2, 'fec', '1', 'RECEIVING', true)`,
+    [userId, sourceId],
+    "Une couverture d'exercice a pu être déclarée sans bornes d'exercice",
+    "import_sessions_coverage_shape_ck",
+  );
+
   // ── 6. Piste d'audit : lecture seule pour authenticated ──────────────────────────
   await client.query("reset role");
   await client.query("set local role authenticated");
@@ -635,6 +810,21 @@ try {
     [userId, JSON.stringify(openPayload())],
     "Un fichier déjà validé a pu être réimporté",
     "déjà été importé",
+  );
+
+  // Un TROISIÈME appel, après une panne simulée côté appelant, ne doit pas davantage
+  // créer un second instantané : c'est exactement le cas d'un retry après un échec de
+  // conservation documentaire, où le fait est déjà écrit.
+  await rpc("lfo_commit_fec_session", { session_id: sessionId, financials: FINANCIALS });
+  const afterRetry = await client.query<{ financials: string; links: string }>(
+    `select
+       (select count(*)::text from public.business_financials where business_id = $2) as financials,
+       (select count(*)::text from public.import_record_links where session_id = $1) as links`,
+    [sessionId, businessId],
+  );
+  assert(
+    afterRetry.rows[0].financials === "1" && afterRetry.rows[0].links === "1",
+    "Un retry après validation a créé un second instantané financier",
   );
 
   // ── 8. Une réception inachevée est remplaçable, puis abandonnable ────────────────
@@ -736,7 +926,7 @@ try {
   }
   if (succeeded) {
     console.log(
-      "Smoke FEC Corporate Acquisition : réception fragmentée atomique, brut rattaché ligne à ligne, ABSENT ≠ ZÉRO, montants non signés, devise sans code refusée, validation refusée sans couverture déclarée / sur écriture déséquilibrée / sur ligne illisible, fait Business et provenance écrits en une transaction, aucune valorisation produite, écritures gelées, piste d'audit en lecture seule sous authenticated, instantané non supprimable sans sa provenance, idempotence applicative et de base, réception remplaçable et abandonnable, formes de source refusées, cloisonnement. Aucune donnée persistée.",
+      "Smoke FEC Corporate Acquisition : réception fragmentée atomique, brut rattaché ligne à ligne, ABSENT ≠ ZÉRO, devise sans code refusée, validation refusée sans couverture déclarée / sur écriture déséquilibrée / sur ligne illisible, fait Business et provenance écrits en une transaction, aucune valorisation produite, écritures gelées, piste d'audit en lecture seule sous authenticated, instantané non supprimable sans sa provenance, idempotence applicative et de base, réception remplaçable et abandonnable, montants signés persistés tels quels, déséquilibre recalculé malgré un décompte forgé, écriture hors exercice refusée, couverture sans bornes refusée, retry sans second instantané, formes de source refusées, cloisonnement. Aucune donnée persistée.",
     );
   }
 }

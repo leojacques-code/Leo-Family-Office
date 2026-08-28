@@ -6,14 +6,21 @@
  * n'a pas dit lequel.
  *
  * La convention retenue pour l'excédent brut d'exploitation est celle des Soldes
- * Intermédiaires de Gestion du Plan Comptable Général :
+ * Intermédiaires de Gestion du Plan Comptable Général, et elle en respecte la
+ * DÉCOMPOSITION, pas seulement le résultat :
  *
- *     Production de l'exercice      = 70 + 71 + 72
- *     Consommations de tiers        = 60 + 61 + 62
- *     Valeur ajoutée                = Production − Consommations
+ *     Marge commerciale             = 707 − 607 − 6037
+ *     Production de l'exercice      = production vendue (70 hors 707) + 71 + 72
+ *     Consommations de tiers        = 60 hors 607 et 6037, + 61 + 62
+ *     Valeur ajoutée                = Marge commerciale + Production − Consommations
  *     EBE                           = VA + 74 − 63 − 64
  *
- * Elle exclut donc 65 et 75, comme le veut la définition de l'EBE. Ce n'est pas « l'EBITDA
+ * « Production de l'exercice » n'inclut donc PAS les ventes de marchandises : celles-ci
+ * appartiennent à la marge commerciale, et les mélanger produirait un sous-total juste au
+ * total et faux au libellé. La valeur ajoutée et l'EBE sont inchangés — c'est le même
+ * agrégat, correctement décomposé.
+ *
+ * L'EBE exclut 65 et 75, comme le veut sa définition. Ce n'est pas « l'EBITDA
  * anglo-saxon » ; c'est une convention française nommée, et l'utilisateur voit la
  * construction poste par poste.
  *
@@ -141,13 +148,21 @@ export function buildIncomeStatement(index: GroupIndex): FecIncomeStatement {
     index.has("MERCHANDISE_PURCHASES") ||
     index.has("MERCHANDISE_INVENTORY_CHANGE");
 
+  // Chiffre d'affaires : la classe 70 ENTIÈRE, marchandises incluses. C'est le CA net.
   const revenue = index.creditSide("REVENUE") + merchandiseSales;
+
+  // Production de l'exercice au sens du SIG : production VENDUE (70 hors 707), production
+  // stockée (71) et production immobilisée (72). Les ventes de marchandises n'y entrent
+  // pas — elles sont le terme haut de la marge commerciale.
+  const soldProduction = index.creditSide("REVENUE");
   const productionInventory = index.creditSide("PRODUCTION_INVENTORY_CHANGE");
   const capitalised = index.creditSide("CAPITALISED_PRODUCTION");
-  const production = revenue + productionInventory + capitalised;
+  const production = soldProduction + productionInventory + capitalised;
 
-  const purchases = index.debitSide("PURCHASES") + merchandisePurchases;
-  const inventoryChange = index.debitSide("INVENTORY_CHANGE") + merchandiseInventoryChange;
+  // Consommations en provenance de tiers : 60 hors 607 et 6037 — qui relèvent du coût
+  // d'achat des marchandises vendues — puis 61 et 62.
+  const purchases = index.debitSide("PURCHASES");
+  const inventoryChange = index.debitSide("INVENTORY_CHANGE");
   const externalServices = index.debitSide("EXTERNAL_SERVICES");
   const consumption = purchases + inventoryChange + externalServices;
 
@@ -159,7 +174,10 @@ export function buildIncomeStatement(index: GroupIndex): FecIncomeStatement {
     ? merchandiseSales - merchandisePurchases - merchandiseInventoryChange
     : null;
 
-  const addedValue = production - consumption;
+  // Valeur ajoutée = marge commerciale + production de l'exercice − consommations de tiers.
+  // Une société sans marchandises a une marge commerciale INEXISTANTE, pas nulle : elle ne
+  // contribue simplement pas au solde.
+  const addedValue = (merchandiseMargin ?? 0) + production - consumption;
   const subsidies = index.creditSide("OPERATING_SUBSIDIES");
   const taxes = index.debitSide("TAXES_OTHER_THAN_INCOME");
   const personnel = index.debitSide("PERSONNEL");
@@ -191,8 +209,11 @@ export function buildIncomeStatement(index: GroupIndex): FecIncomeStatement {
   const exceptionalResult = exceptionalIncome - exceptionalExpenses;
 
   const incomeTax = index.debitSide("INCOME_TAX_EXPENSE");
+  // La participation des salariés (691) est une charge du résultat, mais ce n'est PAS un
+  // impôt : elle est soustraite du résultat net, et jamais agrégée à la charge d'impôt.
+  const employeeProfitSharing = index.debitSide("EMPLOYEE_PROFIT_SHARING");
   const currentResult = operatingResult + financialResult;
-  const netResult = currentResult + exceptionalResult - incomeTax;
+  const netResult = currentResult + exceptionalResult - employeeProfitSharing - incomeTax;
 
   return {
     revenue: amount(revenue, "Comptes 70, solde créditeur (chiffre d'affaires net)", [
@@ -207,27 +228,23 @@ export function buildIncomeStatement(index: GroupIndex): FecIncomeStatement {
         ? "Aucun compte de marchandises : la marge commerciale n'existe pas pour cette société. La valeur ajoutée n'en tient pas lieu."
         : "Marge commerciale de REPORTING, sur les marchandises seules.",
     ),
-    production: amount(production, "Comptes 70 + 71 + 72 (production de l'exercice)", [
-      "REVENUE",
-      "PRODUCTION_INVENTORY_CHANGE",
-      "CAPITALISED_PRODUCTION",
-    ]),
+    production: amount(
+      production,
+      "Production vendue (comptes 70 hors 707) + 71 + 72 (production de l'exercice au sens du SIG)",
+      ["REVENUE", "PRODUCTION_INVENTORY_CHANGE", "CAPITALISED_PRODUCTION"],
+      "N'inclut PAS les ventes de marchandises : celles-ci relèvent de la marge commerciale.",
+    ),
     externalConsumption: amount(
       consumption,
-      "Comptes 60 + 61 + 62 (consommations en provenance de tiers)",
-      [
-        "PURCHASES",
-        "MERCHANDISE_PURCHASES",
-        "INVENTORY_CHANGE",
-        "MERCHANDISE_INVENTORY_CHANGE",
-        "EXTERNAL_SERVICES",
-      ],
+      "Comptes 60 hors 607 et 6037, + 61 + 62 (consommations en provenance de tiers)",
+      ["PURCHASES", "INVENTORY_CHANGE", "EXTERNAL_SERVICES"],
+      "607 et 6037 en sont exclus : ils forment le coût d'achat des marchandises vendues, terme de la marge commerciale.",
     ),
-    addedValue: amount(addedValue, "Production − consommations de tiers (valeur ajoutée SIG)", [
-      "REVENUE",
-      "PURCHASES",
-      "EXTERNAL_SERVICES",
-    ]),
+    addedValue: amount(
+      addedValue,
+      "Marge commerciale + production de l'exercice − consommations de tiers (valeur ajoutée SIG)",
+      ["REVENUE", "MERCHANDISE_SALES", "PURCHASES", "MERCHANDISE_PURCHASES", "EXTERNAL_SERVICES"],
+    ),
     grossOperatingSurplus: amount(
       ebe,
       "Valeur ajoutée + 74 − 63 − 64 (EBE au sens du SIG, hors 65 et 75)",
@@ -252,13 +269,22 @@ export function buildIncomeStatement(index: GroupIndex): FecIncomeStatement {
       "EXCEPTIONAL_INCOME",
       "EXCEPTIONAL_EXPENSES",
     ]),
-    incomeTaxExpense: amount(incomeTax, "Comptes 69 (impôts sur les bénéfices)", [
-      "INCOME_TAX_EXPENSE",
-    ]),
+    incomeTaxExpense: amount(
+      incomeTax,
+      "Comptes 695, 696, 698 et 699 (impôts sur les bénéfices, hors 691)",
+      ["INCOME_TAX_EXPENSE"],
+      "Périmètre FISCAL seul. La participation des salariés (691) en est exclue.",
+    ),
     netResult: amount(
       netResult,
-      "Résultat courant + résultat exceptionnel − comptes 69 (résultat net)",
-      ["INCOME_TAX_EXPENSE"],
+      "Résultat courant + résultat exceptionnel − comptes 691 − comptes 69 hors 691 (résultat net)",
+      ["EMPLOYEE_PROFIT_SHARING", "INCOME_TAX_EXPENSE"],
+    ),
+    employeeProfitSharing: amount(
+      employeeProfitSharing,
+      "Comptes 691 (participation des salariés aux résultats)",
+      ["EMPLOYEE_PROFIT_SHARING"],
+      "Charge du résultat, PAS un impôt. Elle n'entre jamais dans la charge d'impôt transmise à Business Equity.",
     ),
     depreciationExpense: amount(depreciation, "Comptes 68 (dotations)", ["DEPRECIATION_EXPENSE"]),
     interestExpense: amount(
@@ -384,6 +410,15 @@ export interface StatementInput {
   periodEnd: string | null;
   /** Nombre d'écritures déséquilibrées : une comptabilité déséquilibrée n'est pas fiable. */
   unbalancedEntries: number;
+  /**
+   * Lignes exploitables dont la date sort de l'exercice DÉCLARÉ.
+   *
+   * Sur une couverture déclarée complète, elles sont BLOQUANTES et non plus signalées :
+   * un exercice « entier » qui contient des écritures d'un autre exercice ne produit le
+   * résultat d'aucune période réelle. Sans déclaration de couverture, elles restent une
+   * simple observation — l'utilisateur n'a rien affirmé sur le périmètre du fichier.
+   */
+  outOfFiscalYear: number;
   /** Devises rencontrées. Plusieurs devises rendent l'agrégat non fondé sans FX. */
   currencies: readonly string[];
 }
@@ -427,6 +462,19 @@ export function buildStatementCandidate(input: StatementInput): FecStatementCand
         "FEC_COVERAGE_NOT_DECLARED",
         "ERROR",
         "La couverture de l'exercice n'est pas déclarée : les totaux sont exacts pour les lignes fournies, mais rien ne prouve qu'ils constituent un exercice complet.",
+      ),
+    );
+  }
+  // Un exercice DÉCLARÉ complet qui contient des écritures d'une autre période ne produit
+  // le résultat d'aucune période réelle. Ce n'était qu'un signalement : c'est un refus.
+  // Sans déclaration de couverture, en revanche, l'utilisateur n'a rien affirmé sur le
+  // périmètre du fichier — l'écart reste alors une simple observation de ligne.
+  if (input.coverage === "DECLARED_COMPLETE" && input.outOfFiscalYear > 0) {
+    blockers.push(
+      issue(
+        "FEC_OUT_OF_FISCAL_YEAR_IN_DECLARED_PERIOD",
+        "ERROR",
+        `${input.outOfFiscalYear} ligne(s) exploitable(s) hors de l'exercice déclaré. Un exercice annoncé complet ne peut pas contenir des écritures d'une autre période : corrigez les bornes de l'exercice, ou n'importez que le fichier de l'exercice.`,
       ),
     );
   }

@@ -239,14 +239,26 @@ sans la dupliquer : mêmes sources, mêmes sessions, même brut immuable, même 
 une colonne cible de plus dans `import_record_links`. Un FEC est une SOURCE COMPTABLE, pas
 une valorisation : FEC ≠ COMPTES ANNUELS, et CLASSIFICATION COMPTABLE ≠ JUGEMENT ÉCONOMIQUE.
 Une ligne de FEC n'est pas une transaction économique indépendante : l'unité est l'écriture,
-et Σdébits = Σcrédits est vérifié par écriture, jamais par ligne. Les états reconstruits sont
-des CANDIDATS, chaque montant portant le NOM de sa convention — EBE au sens du SIG, marge
-commerciale sur les marchandises seules, jamais un EBITDA normatif, qui appartient au ledger
-de Quality of Earnings de Business Equity sur décision humaine. TRÉSORERIE COMPTABLE ≠
+et Σdébits = Σcrédits est vérifié par écriture, jamais par ligne — contrôle DÉRIVÉ des lignes
+persistées, jamais repris d'un décompte fourni par l'appelant. Les valeurs numériques peuvent
+être SIGNÉES : le texte l'autorise, aucune contrainte de signe n'existe donc, et une
+contrepassation est une donnée valide. Deux formes réglementaires coexistent pour les colonnes
+12 et 13, `Debit`/`Credit` et `Montant`/`Sens` : les deux sont lues, un sens inconnu bloque la
+ligne. Séparateur conforme ≠ séparateur lisible : le point-virgule est lu et SIGNALÉ. Les états
+reconstruits sont des CANDIDATS, chaque montant portant le NOM de sa convention — EBE au sens
+du SIG dont la décomposition est respectée (la production de l'exercice exclut les ventes de
+marchandises), marge commerciale sur les marchandises seules, participation des salariés (691)
+jamais agrégée à l'impôt (695 à 699), jamais un EBITDA normatif, qui appartient au ledger de
+Quality of Earnings de Business Equity sur décision humaine. TRÉSORERIE COMPTABLE ≠
 TRÉSORERIE PERSONNELLE, DETTE CORPORATE ≠ DETTE PERSONNELLE, DETTE COMPTABLE ≠ CONTRAT DE
 PRÊT, D&A ≠ CAPEX CASH. Aucun état reconstruit n'est persisté : `fec_entry_lines` porte les
 écritures, les états s'en dérivent à la lecture. La couverture d'un exercice se DÉCLARE :
-sans déclaration, aucun fait Business n'est écrit. Détail dans `docs/FEC_ACQUISITION.md`.
+sans déclaration, aucun fait Business n'est écrit, et une couverture déclarée sans bornes
+d'exercice est refusée par la base. Un exercice déclaré complet ne contient AUCUNE écriture
+d'une autre période. ÉCART DE CONFORMITÉ RÉGLEMENTAIRE ≠ MONTANT NON CALCULABLE : un champ de
+traçabilité blanc est un INFO de fichier, jamais une ligne bloquée. ANALYSER ≠ ARCHIVER : un
+échec de conservation après validation ne transforme jamais un fait écrit en échec, le statut
+du fait et celui de la copie sont distincts. Détail dans `docs/FEC_ACQUISITION.md`.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

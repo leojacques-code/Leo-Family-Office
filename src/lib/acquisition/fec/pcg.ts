@@ -57,6 +57,7 @@ export const PCG_GROUPS = [
   "INTEREST_EXPENSE",
   "FINANCIAL_EXPENSES",
   "EXCEPTIONAL_EXPENSES",
+  "EMPLOYEE_PROFIT_SHARING",
   "INCOME_TAX_EXPENSE",
   // Résultat — produits
   "REVENUE",
@@ -145,6 +146,19 @@ const PREFIX_RULES: ReadonlyArray<readonly [string, PcgGroup]> = [
   ["686", "FINANCIAL_EXPENSES"],
   ["687", "EXCEPTIONAL_EXPENSES"],
   ["68", "DEPRECIATION_EXPENSE"],
+  // PARTICIPATION ≠ IMPÔT SUR LES BÉNÉFICES. Le Plan Comptable Général distingue, dans la
+  // classe 69 : 691 participation des salariés aux résultats, 695 impôts sur les bénéfices,
+  // 696 suppléments d'impôt liés aux distributions, 698 intégration fiscale, 699 produits
+  // du report en arrière des déficits.
+  //
+  // Regrouper 691 avec 695 laisserait le résultat net exact tout en écrivant une charge de
+  // personnel sous l'étiquette « impôt » : le taux d'imposition apparent d'une société
+  // distribuant de la participation en serait faussé, et c'est précisément le genre de
+  // chiffre mal nommé que le produit refuse.
+  //
+  // 696, 698 et 699 restent dans l'impôt : ce sont bien des composantes de la ligne
+  // « impôts sur les bénéfices » du compte de résultat, 699 y jouant en diminution.
+  ["691", "EMPLOYEE_PROFIT_SHARING"],
   ["69", "INCOME_TAX_EXPENSE"],
   // Classe 7 — produits
   ["707", "MERCHANDISE_SALES"],
@@ -204,6 +218,7 @@ const PROFIT_AND_LOSS_GROUPS: ReadonlySet<PcgGroup> = new Set([
   "INTEREST_EXPENSE",
   "FINANCIAL_EXPENSES",
   "EXCEPTIONAL_EXPENSES",
+  "EMPLOYEE_PROFIT_SHARING",
   "INCOME_TAX_EXPENSE",
   "REVENUE",
   "MERCHANDISE_SALES",

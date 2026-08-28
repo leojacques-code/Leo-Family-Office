@@ -115,17 +115,22 @@ Quatre contraintes de base élargies le sont sous un NOUVEAU nom, selon la conve
 Les invariants portés par la BASE, pas par l'application :
 
 * `fec_entry_lines_amount_shape_ck` — une ligne aux deux côtés de montant absents ne peut exister qu'en statut `BLOCKED`. ABSENT ≠ ZÉRO jusque dans la base : le format autorise explicitement un champ vide, et une ligne sans aucun montant n'est pas une ligne à zéro ;
-* `fec_entry_lines_amount_sign_ck` — les montants du FEC sont NON SIGNÉS, le sens étant porté par la colonne. Un négatif signale une lecture fautive, pas une écriture en sens inverse ;
+* AUCUNE contrainte de signe, et c'est le TEXTE PRIMAIRE qui l'impose : l'arrêté du 29 juillet 2013 autorise explicitement des valeurs numériques signées. Un débit de −1 200 est une écriture valide — typiquement une contrepassation — et une contrainte `>= 0` rejetterait des FEC parfaitement conformes ;
 * `fec_entry_lines_currency_ck` — un montant en devise sans code devise est refusé : le supposer égal à la devise de tenue serait un taux de change implicite égal à 1 ;
 * `fec_entry_lines_committable_ck` — une écriture committée a une date et n'est ni bloquée ni ignorée ;
+* `import_sessions_coverage_shape_ck` — déclarer qu'un fichier couvre « l'exercice entier » sans dire QUEL exercice n'a aucun sens. La validation applicative pose déjà la règle ; la base la pose aussi, parce qu'un invariant qui ne vit que dans une API se contourne par la première écriture directe ;
 * trigger `fec_entry_lines_frozen` — une écriture committée est gelée en `UPDATE` comme en `DELETE`, même sous `service_role` ;
 * `fec_entry_lines` rejoint la piste d'audit en LECTURE SEULE : `authenticated` n'y a que le `SELECT`, et le verifier contrôle cet état.
 
-Trois refus de validation sont portés par `lfo_commit_fec_session`, pas par l'application : couverture d'exercice non déclarée, écriture déséquilibrée, ligne illisible. Le fait canonique est ensuite écrit par `lfo_record_business_financials` — un second chemin d'écriture sur `business_financials` serait une seconde vérité sur la même table.
+Quatre refus de validation sont portés par `lfo_commit_fec_session`, pas par l'application : couverture d'exercice non déclarée, écriture déséquilibrée, ligne illisible, écriture hors de l'exercice déclaré. Le fait canonique est ensuite écrit par `lfo_record_business_financials` — un second chemin d'écriture sur `business_financials` serait une seconde vérité sur la même table.
+
+`lfo_fec_entry_balance(uuid, uuid)` dérive des lignes persistées le nombre d'écritures et le nombre d'écritures déséquilibrées. C'est la seule RPC `lfo_*` du dépôt qui ne retourne pas un `uuid`, et l'exception est DÉCLARÉE dans le verifier avec son type de retour : une RPC d'écriture retourne l'identifiant de ce qu'elle a écrit, une RPC de lecture d'invariant ne crée rien. Elle ne déplace AUCUNE formule financière dans la base : Σdébits = Σcrédits par écriture est l'invariant d'intégrité de la source comptable, du même ordre que la quote-part d'un concours plafonnée à 1. Ni `lfo_finalize_fec_session` ni `lfo_commit_fec_session` ne font plus confiance aux décomptes fournis par l'appelant, ni à `import_sessions.unbalanced_entry_count` : cette colonne reste un fait d'audit utile à l'affichage, mais elle est modifiable, et un invariant qui repose sur une valeur modifiable n'est pas un invariant.
 
 `import_record_links_business_session_uk` porte l'unicité sur `(propriétaire, session, instantané)` et NON sur l'instantané seul. Ce n'est pas un relâchement : `lfo_record_business_financials` converge sur `(société, date de clôture)`, donc un FEC réimporté après correction met à jour la MÊME ligne. La provenance d'un agrégat est un HISTORIQUE de sessions, là où celle d'une transaction est un fait unique ; ce que chaque session a lu reste reconstituable depuis ses écritures conservées.
 
 `business_financials_id_user_uidx` est ajouté parce que la clé étrangère composite du lien en a besoin : sans lui, un lien pourrait désigner l'instantané financier d'un AUTRE propriétaire.
+
+Cette migration a été corrigée EN PLACE après la revue du texte primaire Légifrance et du PCG ANC, **avant** son premier push. Même latitude, et mêmes limites, que la migration 25 avant la sienne : tant que rien n'a touché la production, empiler un correctif figerait dans le schéma une contrainte de signe reconnue contraire au texte réglementaire, et laisserait au dépôt deux fichiers pour un seul état voulu. Cette latitude se refermera au premier push.
 
 Gates exécutés : `npm run lint`, `npm run test`, `npx tsc --noEmit`, `npm run build`, `npm run db:local:reset` (28 migrations reconstruites depuis zéro), `npm run db:verify:local`, tous les smokes existants et le nouveau `scripts/smoke-fec-acquisition.ts`, intégralement rollbacké. `npm run db:verify` distant n'a PAS été exécuté : aucun credential de production n'est présent dans cet environnement, et la migration n'est pas poussée.
 

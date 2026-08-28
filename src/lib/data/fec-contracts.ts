@@ -99,11 +99,27 @@ export interface FecPreview {
   linesTruncated: boolean;
 }
 
+/**
+ * État de la CONSERVATION du fichier, distinct de l'état du fait canonique.
+ *
+ * Les deux ne peuvent pas être confondus : le fait financier est écrit en transaction, la
+ * copie d'archive est un dépôt dans un coffre externe qui peut échouer après coup. Rendre
+ * un seul statut pour les deux ferait croire à un échec de validation là où un fait a bien
+ * été écrit — et l'utilisateur réimporterait, ou pire, saisirait à la main.
+ */
+export type FecDocumentStatus = "STORED" | "NOT_REQUESTED" | "FAILED";
+
 export interface FecCommitResult {
   sessionId: string;
+  /** Le FAIT canonique. `COMMITTED` signifie écrit et gelé, sans réserve. */
+  commitStatus: "COMMITTED";
   /** Écritures gelées par cette validation. */
   committedCount: number;
   /** Instantané financier écrit au domaine Business. */
   businessFinancialsId: string;
   periodEnd: string;
+  /** La copie d'archive, qui n'engage EN RIEN le fait ci-dessus. */
+  documentStatus: FecDocumentStatus;
+  /** Ce qui a échoué SANS remettre en cause le fait écrit. */
+  warnings: string[];
 }

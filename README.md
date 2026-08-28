@@ -145,12 +145,15 @@ réglementaires TELS QUELS. AUCUN état financier reconstruit n'y est persisté 
 résultat, bilan, EBE, marge commerciale et BFR sont dérivés à la lecture par
 `src/lib/acquisition/fec/`. `debit` et `credit` sont nullables et une contrainte impose qu'une
 ligne aux deux côtés absents ne puisse exister qu'en `BLOCKED` — ABSENT ≠ ZÉRO jusque dans la
-base. Les montants sont non signés, un montant en devise sans code devise est refusé, et une
-écriture committée est gelée. La validation exige une couverture d'exercice DÉCLARÉE, zéro
-écriture déséquilibrée et zéro ligne illisible, puis délègue l'écriture du fait à
-`lfo_record_business_financials` : un seul chemin d'écriture sur `business_financials`. Aucun
-moteur financier n'est modifié, aucune valorisation n'est produite. Voir
-`docs/FEC_ACQUISITION.md`.
+base. Il n'y a AUCUNE contrainte de signe, parce que le texte réglementaire autorise
+explicitement des valeurs signées : une contrepassation est une écriture valide. Un montant en
+devise sans code devise est refusé, et une écriture committée est gelée. La validation exige
+une couverture d'exercice DÉCLARÉE et bornée, zéro écriture déséquilibrée, zéro ligne illisible
+et zéro écriture hors de l'exercice déclaré ; les deux premiers contrôles sont DÉRIVÉS des
+lignes persistées par `lfo_fec_entry_balance`, jamais repris d'un décompte fourni par
+l'appelant. L'écriture du fait est déléguée à `lfo_record_business_financials` : un seul chemin
+d'écriture sur `business_financials`. Aucun moteur financier n'est modifié, aucune valorisation
+n'est produite. Voir `docs/FEC_ACQUISITION.md`.
 
 La migration 18 installe Real Estate V2 : quatre tables de faits (`real_estate_valuations`, `real_estate_capital_events`, `real_estate_operating_terms`, `real_estate_financing_links`), les colonnes canoniques de `properties`, la colonne d'attribution `transactions.property_id`, neuf RPC et le trigger `real_estate_financing_links_allocation_guard`. Ce trigger est le seul endroit où la règle « la somme des quote-parts d'un même concours ne dépasse jamais 1 » est réellement garantie : il verrouille la ligne de dette, donc il tient sous concurrence et sur une écriture directe hors RPC. Elle ne crée AUCUNE seconde vérité : la dette immobilière reste une ligne de `liabilities` à laquelle le bien se rattache par une quote-part, et les flux réels restent des lignes de `transactions` simplement rattachées à un bien. Rendement, equity, plus-value et coût économique du financement sont dérivés par `src/lib/engine/real-estate.ts`. Les tables héritées `mortgages` et `real_estate_cashflows` y sont marquées obsolètes et ne sont ni lues ni écrites. La migration 19 ajoute les index couvrants dans l'ORDRE des clés étrangères composites `(property_id, user_id)` des trois tables de faits.
 

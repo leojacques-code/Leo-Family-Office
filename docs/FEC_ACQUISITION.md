@@ -26,6 +26,12 @@ son intégration au domaine Business Equity exige une déclaration de couverture
 
 ## 2. Le format réellement supporté
 
+Sources primaires effectivement consultées :
+
+- arrêté du 29 juillet 2013 modifiant l'article A47 A-1 du Livre des procédures fiscales
+  (texte Légifrance) ;
+- Plan Comptable Général, règlement ANC, version applicable au 1er janvier 2025.
+
 Les dix-huit champs réglementaires, dans leur ordre réglementaire :
 
 | # | Champ | Lu comme |
@@ -41,31 +47,104 @@ Les dix-huit champs réglementaires, dans leur ordre réglementaire :
 | 9 | `PieceRef` | référence de la pièce |
 | 10 | `PieceDate` | date de la pièce |
 | 11 | `EcritureLib` | libellé de l'écriture |
-| 12 | `Debit` | débit, **non signé** |
-| 13 | `Credit` | crédit, **non signé** |
+| 12 | `Debit` | débit, **signé possible** |
+| 13 | `Credit` | crédit, **signé possible** |
 | 14 | `EcritureLet` | code de lettrage |
 | 15 | `DateLet` | date de lettrage |
 | 16 | `ValidDate` | date de validation |
-| 17 | `Montantdevise` | montant en devise |
+| 17 | `Montantdevise` | montant en devise, **signé possible** |
 | 18 | `Idevise` | code de la devise |
+
+### Deux formes réglementaires pour les colonnes 12 et 13
+
+Le texte prévoit que, lorsque le système comptable ne tient pas débit et crédit
+séparément, les colonnes 12 et 13 soient remplacées par `Montant` et `Sens`.
+
+```text
+SCHÉMA A   … | EcritureLib | Debit   | Credit | EcritureLet | …
+SCHÉMA B   … | EcritureLib | Montant | Sens   | EcritureLet | …
+```
+
+`Sens` vaut `D`/`C` ou `+1`/`-1`. Les deux schémas sont lus. Dans le schéma B, le montant
+est normalisé vers la représentation interne débit/crédit — une **traduction**, pas une
+interprétation : le brut conserve la forme d'origine, et c'est lui qui répond plus tard à
+« qu'est-ce que la comptabilité a écrit ? ».
+
+Un `Sens` inconnu ou absent **bloque la ligne**. Le deviner inverserait un jour une charge
+et un produit, sans laisser de trace.
+
+Un en-tête portant les DEUX formes est lu en schéma A, et l'ambiguïté est signalée : lire
+les deux additionnerait deux fois le même montant.
+
+### Les valeurs numériques peuvent être SIGNÉES
+
+Le texte l'autorise explicitement. Un débit de −1 200 est donc une **donnée valide** —
+typiquement une contrepassation — et non une erreur de lecture.
+
+En conséquence : aucune contrainte de signe en base, aucune valeur absolue nulle part, le
+signe de la source conservé tel quel, et un contrôle de partie double qui fonctionne
+naturellement sur des montants signés. Une vente et sa contrepassation s'annulent : le
+chiffre d'affaires reconstruit est alors nul, et c'est la vérité.
+
+### Séparateurs : conformes et tolérés
+
+```text
+CONFORMES pour un fichier à plat   tabulation, barre verticale
+LUS mais SIGNALÉS                  point-virgule, virgule
+```
+
+Des exports d'éditeurs emploient le point-virgule, et refuser un fichier par ailleurs
+exploitable serait un purisme coûteux. Mais l'écart est dit, sous
+`FEC_NON_STANDARD_DELIMITER` :
+
+```text
+LISIBLE  ≠  CONFORME
+```
+
+L'utilisateur qui doit répondre à une demande de l'administration a besoin de connaître la
+différence.
+
+### Le reste
 
 L'en-tête est résolu **par nom**, pas par position : un fichier dont les colonnes sont dans
 un ordre inhabituel est lu, et l'écart à l'ordre réglementaire est signalé plutôt que
-d'être une raison de refus. À l'inverse, l'absence d'un champ structurant est une **erreur**
-— sans journal, sans numéro d'écriture, sans date ou sans compte, il n'y a pas d'écriture à
-lire, et il n'y a rien à deviner.
+d'être une raison de refus. À l'inverse, l'absence d'un champ **structurant** est une
+**erreur** — sans journal, sans numéro d'écriture, sans date ou sans compte, il n'y a pas
+d'écriture à lire, et il n'y a rien à deviner.
 
-Sont également lus : les séparateurs `|`, tabulation, `;` et `,` ; les encodages UTF-8,
-UTF-8 avec BOM et Windows-1252 ; le format de date réglementaire `AAAAMMJJ`, et les formats
-non réglementaires courants (`JJ/MM/AAAA`, `AAAA-MM-JJ`) avec un signalement — un fichier
-produit par un logiciel qui s'écarte du texte reste exploitable, mais l'écart se dit.
+Sont également lus : les encodages UTF-8, UTF-8 avec BOM et Windows-1252 ; le format de date
+réglementaire `AAAAMMJJ`, et les formats non réglementaires courants (`JJ/MM/AAAA`,
+`AAAA-MM-JJ`) avec un signalement — un fichier produit par un logiciel qui s'écarte du texte
+reste exploitable, mais l'écart se dit.
 
-**Limite de vérification assumée** : le texte réglementaire primaire (Légifrance, BOFiP)
-n'était pas joignable depuis l'environnement d'exécution, dont le proxy sortant a refusé
-ces domaines. La liste des champs et l'ordre ci-dessus ont donc été établis à partir des
-résultats de recherche concordants et de la spécification fournie avec la mission, non
-d'une lecture directe du texte. Une relecture humaine du texte primaire reste à faire avant
-de considérer ce point comme clos.
+### Ce que cette lecture n'est pas
+
+Elle ne **certifie pas** la conformité fiscale d'un fichier, et ne le fera pas. LFO est un
+moteur d'acquisition et de contrôle : il dit ce qu'il a lu, ce qu'il n'a pas compris et où le
+fichier s'écarte du texte. Une attestation de conformité relève de l'administration et du
+conseil, pas d'un parseur.
+
+## 2 bis. Écart de conformité ≠ montant non calculable
+
+```text
+ÉCART DE CONFORMITÉ RÉGLEMENTAIRE  ≠  MONTANT NON CALCULABLE
+```
+
+Le texte prévoit que certains champs soient laissés **à blanc** quand ils ne sont pas
+employés : compte auxiliaire, lettrage, montant en devise. Leur absence est la forme
+normale, et n'est pas signalée.
+
+Les champs de **traçabilité** — `PieceRef`, `PieceDate`, `ValidDate` — sont différents : leur
+blanc est un écart de conformité, et **rien de plus**. Une référence de pièce absente empêche
+de remonter à un justificatif ; elle n'empêche en aucune façon de reconstruire un chiffre
+d'affaires. Confondre les deux axes conduirait à refuser un exercice entier pour un défaut
+d'archivage, ou à l'inverse à taire un défaut de piste d'audit sous prétexte que les totaux
+tombent juste.
+
+Ces manques sont donc signalés **au niveau du fichier**, en `INFO`, sous
+`FEC_REGULATORY_FIELD_BLANK`, avec le nombre de lignes concernées — et jamais ligne à ligne :
+un exercice n'a pas besoin de 150 000 anomalies identiques, coûteuses en mémoire et noyant
+les vraies.
 
 ## 3. La partie double n'est pas une décoration
 
@@ -98,11 +177,13 @@ les DEUX côtés absents                 →  aucun montant : la ligne est BLOQU
 ```
 
 `fec_entry_lines.debit` et `.credit` sont donc nullables, et une contrainte de base impose
-qu'une ligne aux deux côtés absents ne puisse exister qu'en statut `BLOCKED`. Deux autres
-contraintes ferment le reste : les montants sont **non signés** (le sens est porté par la
-colonne, un négatif signale une lecture fautive), et un montant en devise sans code devise
-est refusé — le supposer égal à la devise de tenue serait un taux de change implicite égal
-à 1.
+qu'une ligne aux deux côtés absents ne puisse exister qu'en statut `BLOCKED`.
+
+Il n'y a en revanche **aucune contrainte de signe**, et c'est le texte primaire qui l'impose
+(voir §2). Une contrainte `>= 0` rejetterait des FEC parfaitement conformes.
+
+Une dernière contrainte ferme le reste : un montant en devise sans code devise est refusé —
+le supposer égal à la devise de tenue serait un taux de change implicite égal à 1.
 
 ## 5. Classification comptable ≠ jugement économique
 
@@ -132,23 +213,49 @@ avant 60, 661 avant 66, 6037 avant 603.
 donc la convention qui l'a produit, affichée à l'écran à côté de la valeur.
 
 La convention retenue pour l'excédent brut d'exploitation est celle des Soldes
-Intermédiaires de Gestion du Plan Comptable Général :
+Intermédiaires de Gestion du Plan Comptable Général, et elle en respecte la
+**décomposition**, pas seulement le résultat :
 
 ```text
-Production de l'exercice = 70 + 71 + 72
-Consommations de tiers   = 60 + 61 + 62
-Valeur ajoutée           = Production − Consommations
+Marge commerciale        = 707 − 607 − 6037
+Production de l'exercice = production vendue (70 hors 707) + 71 + 72
+Consommations de tiers   = 60 hors 607 et 6037, + 61 + 62
+Valeur ajoutée           = Marge commerciale + Production − Consommations
 EBE                      = VA + 74 − 63 − 64
 ```
 
-Elle exclut 65 et 75, comme le veut la définition de l'EBE. Ce n'est pas « l'EBITDA
-anglo-saxon » : c'est une convention française nommée, dont l'utilisateur voit la
-construction poste par poste.
+« Production de l'exercice » n'inclut donc **pas** les ventes de marchandises : celles-ci
+appartiennent à la marge commerciale. Les mélanger produirait un sous-total juste au total
+et faux au libellé — le genre de chiffre qui passe inaperçu jusqu'au jour où quelqu'un
+compare une société de négoce à une société de production.
 
-La **marge commerciale** est calculée sur les marchandises seules (707 − 607 − 6037) et
-vaut `null` quand la société n'a aucun compte de marchandises. La valeur ajoutée n'en tient
-pas lieu : ce sont deux soldes différents, et renommer l'un en l'autre serait un chiffre
-mal nommé. C'est elle, et non la valeur ajoutée, qui alimente `business_financials.gross_profit`.
+Le **chiffre d'affaires**, lui, reste la classe 70 entière, marchandises incluses : c'est le
+CA net.
+
+L'EBE exclut 65 et 75, comme le veut sa définition. Ce n'est pas « l'EBITDA anglo-saxon » :
+c'est une convention française nommée, dont l'utilisateur voit la construction poste par
+poste.
+
+La **marge commerciale** vaut `null` quand la société n'a aucun compte de marchandises. La
+valeur ajoutée n'en tient pas lieu : ce sont deux soldes différents, et renommer l'un en
+l'autre serait un chiffre mal nommé. C'est elle, et non la valeur ajoutée, qui alimente
+`business_financials.gross_profit`.
+
+### Participation des salariés ≠ impôt sur les bénéfices
+
+Le Plan Comptable Général distingue, dans la classe 69 : **691** participation des salariés
+aux résultats, **695** impôts sur les bénéfices, **696** suppléments d'impôt liés aux
+distributions, **698** intégration fiscale, **699** produits du report en arrière des
+déficits.
+
+691 est donc isolé dans son propre groupe. Regrouper toute la classe 69 sous « impôt »
+laisserait le résultat net exact tout en écrivant une charge de personnel sous une étiquette
+fiscale : le taux d'imposition apparent d'une société distribuant de la participation en
+serait faussé. 696, 698 et 699 restent dans l'impôt, 699 y jouant en diminution — ce sont
+bien des composantes de la ligne « impôts sur les bénéfices ».
+
+`business_financials.tax_expense` ne porte donc **jamais** 691. Le résultat net, lui,
+soustrait les deux.
 
 **Aucun EBITDA normatif n'est produit.** Le FEC ne peut pas déterminer seul un salaire
 normatif de dirigeant, une dépense personnelle, une charge non récurrente, un coût de
@@ -199,6 +306,21 @@ reconstruction n'est pas `CALCULABLE`, et le contrat d'intégration Business ref
 Un fichier réduit à son en-tête, ou dont l'en-tête est inexploitable, est
 `NOT_COMPUTABLE` — jamais un exercice à zéro. Des postes à zéro y traduiraient l'absence de
 lecture, pas une comptabilité nulle.
+
+Déclarer une couverture **sans dire quel exercice** n'a aucun sens : la validation applicative
+l'interdit, et `import_sessions_coverage_shape_ck` l'interdit aussi en base — un invariant qui
+ne vit que dans une API se contourne par la première écriture directe.
+
+### Aucune écriture d'une autre période dans un exercice déclaré complet
+
+Une écriture hors des bornes déclarées était signalée ; elle est désormais **bloquante** dès
+que la couverture est déclarée complète. Un exercice annoncé entier qui contient des écritures
+d'une autre période ne produit le résultat d'**aucune** période réelle, et rien dans le fait
+canonique écrit ne permettrait ensuite de s'en apercevoir. Le refus est porté deux fois : par
+la reconstruction pure, et par `lfo_commit_fec_session`.
+
+Sans déclaration de couverture, en revanche, l'écart reste une simple observation de ligne :
+l'utilisateur n'a rien affirmé sur le périmètre du fichier.
 
 ## 9. Contrat d'intégration Business
 
@@ -272,9 +394,29 @@ pas une session analysée, et ses décomptes ne veulent encore rien dire. Les d�
 sont **relus en base** plutôt que crus sur parole — ce que la base contient est la seule
 mesure de ce qui a été reçu.
 
-L'état écrit au commit est **reconstruit depuis les écritures persistées**, pas repris du
-candidat calculé à l'analyse. Sans cela, une requête forgée pourrait écrire un chiffre
-d'affaires qu'aucune écriture ne porte.
+### La frontière de confiance, exactement
+
+```text
+CLIENT      → action, identifiant de session, fichier éventuel.  RIEN D'AUTRE.
+SERVEUR     → reconstruit l'état depuis fec_entry_lines persistées (TypeScript).
+RPC service_role → persiste le résultat atomiquement, et contrôle les invariants de la SOURCE.
+```
+
+PostgreSQL ne recalcule **pas** le chiffre d'affaires, l'EBE ni le BFR : ces formules restent
+en TypeScript, et les dupliquer en SQL créerait deux vérités à garder synchrones. Ce que la
+base contrôle, c'est l'**intégrité de la source comptable** — Σdébits = Σcrédits par écriture,
+lignes illisibles, écritures hors période, couverture déclarée — du même ordre que « la somme
+des quote-parts d'un concours ne dépasse pas 1 ».
+
+Le schéma de commande est `.strict()` : `revenue`, `ebitda`, `cash`, `financials` et tout
+autre montant financier envoyé par un client sont **refusés**, pas ignorés. Accepter en
+silence une clé inconnue laisserait croire qu'elle a servi.
+
+Les décomptes d'écritures et de déséquilibres ne sont **pas** repris de la charge d'appel :
+`lfo_finalize_fec_session` les dérive des lignes, et `lfo_commit_fec_session` les re-dérive au
+moment d'écrire. `import_sessions.unbalanced_entry_count` reste un fait d'audit utile à
+l'affichage, mais il est modifiable — et un invariant qui repose sur une valeur modifiable
+n'est pas un invariant.
 
 ## 12. Idempotence et provenance d'un agrégat
 
@@ -317,6 +459,35 @@ budget d'un gigaoctet, là où 200 000 n'en garde presque aucune.
 Un dépassement **échoue** : il ne tronque pas. Un exercice amputé produirait des états
 financiers faux et d'apparence complète — le pire résultat possible.
 
+### Analyser n'est pas archiver
+
+```text
+ANALYSE       24 Mo
+CONSERVATION   8 Mo (capacité réelle du coffre privé)
+```
+
+Les deux plafonds diffèrent, et les confondre serait pire que les séparer. Un FEC de 15 Mo est
+parfaitement analysable ; il n'est simplement pas archivable ici.
+
+La demande de conservation est donc refusée **en amont** : au dépôt du fichier, et à nouveau
+avant toute écriture canonique. Le refus porte sur la conservation, jamais sur l'import —
+décocher la conservation suffit à valider.
+
+Et si un dépôt échoue malgré tout **après** l'écriture du fait, la validation ne se présente
+pas comme un échec :
+
+```text
+commitStatus     COMMITTED     ← le fait, écrit et gelé, sans réserve
+documentStatus   FAILED        ← la copie d'archive, et elle seule
+warnings         [ … ]
+```
+
+Rendre un seul statut pour les deux ferait croire à un échec de validation là où un instantané
+financier existe : l'utilisateur réimporterait, ou saisirait à la main, et croirait à un
+doublon. Un retry ne crée d'ailleurs aucun second instantané —
+`lfo_record_business_financials` converge sur (société, clôture), et une session déjà
+committée retourne son identifiant sans rien réécrire.
+
 ## 14. Ce qui reste manuel
 
 - le choix de la société concernée ;
@@ -325,7 +496,9 @@ financiers faux et d'apparence complète — le pire résultat possible.
 - les bornes de l'exercice, et la déclaration que le fichier le couvre entièrement ;
 - toute décision de Quality of Earnings : retraitements d'EBITDA, qualification debt-like
   d'un compte courant d'associé, éléments du pont EV → Equity ;
-- le rapprochement d'un emprunt comptable avec un contrat du Debt Engine.
+- le rapprochement d'un emprunt comptable avec un contrat du Debt Engine ;
+- la correction d'un fichier dont le séparateur ou le format de date s'écarte du texte : LFO
+  le lit et le signale, il ne le réécrit pas.
 
 ## 15. Ce qui n'est pas fait, et pourquoi
 
