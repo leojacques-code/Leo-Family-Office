@@ -120,8 +120,23 @@ alter table public.import_sessions
   add column if not exists unbalanced_entry_count integer not null default 0,
   -- Objet de staging privé dont cette session a été lue. Il permet de reprendre le fichier
   -- à la VALIDATION sans le faire retransiter par la route, et de le supprimer quand il
-  -- n'a plus de raison d'exister. `null` = plus aucun objet de staging.
-  add column if not exists staging_storage_path text;
+  -- n'a plus de raison d'exister.
+  --
+  -- `null` signifie EXACTEMENT une chose : plus aucun objet de staging n'existe. La colonne
+  -- n'est donc effacée QU'APRÈS une suppression réussie. Un échec de suppression laisse le
+  -- chemin en place — c'est la seule référence qui permette un nettoyage ultérieur, et un
+  -- FEC est une donnée sensible : la perdre en silence laisserait une comptabilité entière
+  -- au stockage sans que rien ne sache où.
+  add column if not exists staging_storage_path text,
+  -- Dernier échec de suppression de l'objet de staging.
+  --
+  --     ÉCHEC DE NETTOYAGE  ≠  ÉCHEC DE VALIDATION
+  --     ÉCHEC DE NETTOYAGE  ≠  SUCCÈS SILENCIEUX
+  --
+  -- Un fait financier écrit ne se retire pas parce qu'un objet temporaire résiste. Mais
+  -- l'échec reste OBSERVABLE, et requêtable : les objets à balayer sont exactement les
+  -- sessions dont `staging_storage_path` n'est pas nul.
+  add column if not exists staging_cleanup_failed_at timestamptz;
 
 do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'import_sessions_fiscal_year_ck') then
@@ -162,6 +177,67 @@ end $$;
 
 comment on column public.import_sessions.coverage_declared is
   'Couverture de l''exercice DÉCLARÉE par l''utilisateur. Sans elle, aucune reconstruction n''est intégrable au domaine Business.';
+
+-- ---------------------------------------------------------------------------
+-- 3. Storage — STAGING ≠ COFFRE DOCUMENTAIRE
+-- ---------------------------------------------------------------------------
+-- Le coffre `family-office-documents` est plafonné à 8 Mio et n'accepte qu'une liste
+-- fermée de types MIME. C'est cohérent avec ce qu'il est : une archive de pièces
+-- justificatives, à conserver longtemps, dont chaque objet est petit.
+--
+-- Un FEC d'exercice n'a rien de tout cela. Il pèse couramment plus de 8 Mio, il est du
+-- texte à plat, et il n'a de raison d'exister que le temps de l'analyse. Le faire passer
+-- par le coffre documentaire échouerait deux fois — sur la taille, et sur le type — et le
+-- contournement de la limite de corps de requête ne servirait à rien.
+--
+--     STAGING  ≠  COFFRE DOCUMENTAIRE
+--
+-- D'où un bucket dédié, PRIVÉ, aux objets temporaires d'acquisition.
+--
+-- Sa limite est de 32 Mio là où l'application plafonne à 24. La marge n'est pas de la
+-- prudence vague : le client officiel dépose un `File` en `multipart/form-data`, et
+-- l'enveloppe multipart ajoute des octets à la requête que l'objet n'a pas. Le VRAI
+-- plafond reste celui de l'application, mesuré et documenté ; celui du bucket est une
+-- borne d'infrastructure qui ne doit jamais devenir le premier refus rencontré.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'family-office-import-staging',
+  'family-office-import-staging',
+  false,
+  33554432,
+  array['text/plain', 'text/csv', 'text/tab-separated-values']
+)
+on conflict (id) do update set
+  public = false,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+-- AUCUNE policy Storage pour ce bucket, et c'est délibéré.
+--
+-- Le navigateur n'y accède QUE par une URL signée, dont le jeton est l'autorisation. Le
+-- serveur y accède sous `service_role`, qui contourne RLS. Donner à `authenticated` un
+-- droit de lecture ou de liste sur une zone de staging n'ouvrirait aucun usage légitime et
+-- exposerait des comptabilités entières. RLS refuse par défaut : on laisse ce défaut.
+
+-- Le coffre documentaire, lui, doit pouvoir CONSERVER un FEC quand l'utilisateur le
+-- demande et que sa taille le permet. Il n'accepte pas `text/plain` aujourd'hui : un FEC
+-- TXT de 3 Mio échouerait donc à l'archivage, après que les faits ont été écrits.
+--
+-- L'ajout est ADDITIF : les types existants sont conservés, les nouveaux ajoutés, et
+-- l'ensemble dédoublonné. Réécrire la liste en dur figerait ici une décision qui appartient
+-- aux migrations passées et futures.
+--
+-- Sa limite de 8 Mio n'est PAS relevée. L'analyse lourde appartient au staging ; le coffre
+-- garde sa vocation, et `MAX_RETAINED_FEC_FILE_BYTES` la reflète exactement.
+update storage.buckets
+   set allowed_mime_types = (
+     select array_agg(distinct mime order by mime)
+       from unnest(
+         coalesce(allowed_mime_types, array[]::text[])
+         || array['text/plain', 'text/tab-separated-values']
+       ) as mime
+   )
+ where id = 'family-office-documents';
 
 -- ---------------------------------------------------------------------------
 -- 3 bis. Billets d'upload — le fichier ne traverse pas la fonction serveur
@@ -577,12 +653,20 @@ begin
 end;
 $$;
 
--- Oublie le chemin de staging d'une session : l'objet a été supprimé, la référence n'a plus
--- de sens. Une session qui pointerait vers un objet inexistant ferait croire à une copie
--- disponible.
-create or replace function public.lfo_clear_import_staging_path(
+-- Enregistre le SORT de l'objet de staging d'une session.
+--
+--   p_removed = true   la suppression a réussi : la référence n'a plus de sens, et une
+--                      session qui pointerait vers un objet inexistant ferait croire à une
+--                      copie disponible. Le chemin est effacé.
+--
+--   p_removed = false  la suppression a ÉCHOUÉ : le chemin est CONSERVÉ, et l'échec daté.
+--                      C'est la seule référence permettant un nettoyage ultérieur, et un
+--                      FEC est une donnée sensible : l'effacer en silence laisserait une
+--                      comptabilité entière au stockage sans que rien ne sache où.
+create or replace function public.lfo_record_import_staging_cleanup(
   p_user_id uuid,
-  p_session_id uuid
+  p_session_id uuid,
+  p_removed boolean
 ) returns uuid
 language plpgsql
 security invoker
@@ -590,7 +674,8 @@ set search_path = ''
 as $$
 begin
   update public.import_sessions
-     set staging_storage_path = null
+     set staging_storage_path = case when p_removed then null else staging_storage_path end,
+         staging_cleanup_failed_at = case when p_removed then null else now() end
    where id = p_session_id and user_id = p_user_id;
   return p_session_id;
 end;
@@ -1161,7 +1246,7 @@ $$;
 revoke all on function
   public.lfo_issue_import_upload_ticket(uuid, jsonb),
   public.lfo_consume_import_upload_ticket(uuid, uuid),
-  public.lfo_clear_import_staging_path(uuid, uuid),
+  public.lfo_record_import_staging_cleanup(uuid, uuid, boolean),
   public.lfo_fec_entry_balance(uuid, uuid),
   public.lfo_open_fec_session(uuid, jsonb),
   public.lfo_append_fec_lines(uuid, jsonb),
@@ -1173,7 +1258,7 @@ from public, anon, authenticated;
 grant execute on function
   public.lfo_issue_import_upload_ticket(uuid, jsonb),
   public.lfo_consume_import_upload_ticket(uuid, uuid),
-  public.lfo_clear_import_staging_path(uuid, uuid),
+  public.lfo_record_import_staging_cleanup(uuid, uuid, boolean),
   public.lfo_fec_entry_balance(uuid, uuid),
   public.lfo_open_fec_session(uuid, jsonb),
   public.lfo_append_fec_lines(uuid, jsonb),

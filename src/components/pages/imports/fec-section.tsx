@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Ban, Building2, Check, MinusCircle } from "lucide-react";
 
 import { Callout, EmptyState } from "@/components/ui";
+import { uploadToSignedStoragePath } from "@/lib/data/supabase-storage-browser";
 import { NOT_COMPUTABLE } from "@/components/pages/shared";
 import type {
   FecAmount,
@@ -145,17 +146,26 @@ function FecSection({ businesses, refresh }: FecSectionProps) {
         return;
       }
 
-      // 2. Dépôt DIRECT au stockage privé. Cette requête ne traverse aucune fonction
-      //    serveur : c'est ce qui rend un FEC de plusieurs dizaines de mégaoctets possible.
+      // 2. Dépôt DIRECT à la zone de staging privée. Cette requête ne traverse aucune
+      //    fonction serveur : c'est ce qui rend un FEC de plusieurs dizaines de mégaoctets
+      //    possible. Le client officiel est utilisé tel quel — pour un `File`, il construit
+      //    le corps `multipart/form-data` que le service attend, ce qu'un PUT artisanal du
+      //    fichier brut ne fait pas.
       setStage("UPLOAD");
-      const uploaded = await fetch((ticket as FecUploadTicket).uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": "text/plain" },
-        body: pendingFile,
-      });
-      if (!uploaded.ok) {
+      const issued = ticket as FecUploadTicket;
+      try {
+        await uploadToSignedStoragePath({
+          bucket: issued.bucket,
+          path: issued.storagePath,
+          token: issued.token,
+          file: pendingFile,
+          contentType: issued.contentType,
+        });
+      } catch (uploadError) {
         setError(
-          `Le dépôt du fichier a échoué (${uploaded.status}). Rien n'a été analysé, rien n'a été écrit.`,
+          `${
+            uploadError instanceof Error ? uploadError.message : "Le dépôt du fichier a échoué."
+          } Rien n'a été analysé, rien n'a été écrit.`,
         );
         setPreview(null);
         return;
@@ -167,7 +177,7 @@ function FecSection({ businesses, refresh }: FecSectionProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          uploadTicketId: (ticket as FecUploadTicket).ticketId,
+          uploadTicketId: issued.ticketId,
           businessId,
           currency: currency.trim().toUpperCase(),
           fiscalYearStart: fiscalYearStart.length === 10 ? fiscalYearStart : null,

@@ -266,7 +266,13 @@ Un FEC d'exercice ne traverse PAS la fonction serveur : le fichier va directemen
 navigateur au stockage privé, et la route ne reçoit qu'une référence émise par le serveur.
 Le chemin de stockage est CALCULÉ en base, jamais reçu du client ; le billet est à usage
 unique, expirant et cloisonné ; l'empreinte est calculée sur le contenu réellement déposé.
-Détail dans `docs/FEC_ACQUISITION.md`.
+STAGING ≠ COFFRE DOCUMENTAIRE : deux buckets privés distincts, l'un dimensionné pour ce que
+l'application analyse et sans aucune policy, l'autre gardant sa vocation d'archive à 8 Mio.
+AUTORISATION DE STOCKAGE ≠ BILLET LFO : les durées diffèrent, et c'est le billet qui décide
+de ce qui devient analysable. ÉCHEC DE NETTOYAGE ≠ ÉCHEC DE VALIDATION, mais ÉCHEC DE
+NETTOYAGE ≠ SUCCÈS SILENCIEUX non plus : la référence d'un objet non supprimé est CONSERVÉE,
+sans quoi une comptabilité entière resterait au stockage sans que rien ne sache où. Détail
+dans `docs/FEC_ACQUISITION.md`.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

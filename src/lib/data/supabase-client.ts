@@ -8,7 +8,21 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  * Le garde-fou d'accès est le cookie de session vérifié par proxy.ts et les route handlers.
  */
 
+/** Coffre documentaire privé : archives durables, 8 Mio par objet, MIME en liste fermée. */
 export const DOCUMENTS_BUCKET = process.env.SUPABASE_DOCUMENTS_BUCKET ?? "family-office-documents";
+
+/**
+ * Zone de STAGING d'acquisition, privée et temporaire.
+ *
+ *     STAGING  ≠  COFFRE DOCUMENTAIRE
+ *
+ * Un FEC d'exercice pèse couramment plus que ce que le coffre accepte, il est du texte à
+ * plat que le coffre n'autorise pas, et il n'a de raison d'exister que le temps de
+ * l'analyse. Le déposer au coffre échouerait deux fois — sur la taille et sur le type — et
+ * le contournement de la limite de corps de requête ne servirait à rien.
+ */
+export const IMPORT_STAGING_BUCKET =
+  process.env.SUPABASE_IMPORT_STAGING_BUCKET ?? "family-office-import-staging";
 
 function required(name: string): string {
   const value = process.env[name];

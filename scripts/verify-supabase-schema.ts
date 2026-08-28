@@ -156,7 +156,7 @@ const requiredColumns: Record<string, string[]> = {
   import_upload_tickets: ["id", "user_id", "domain", "storage_path", "file_name", "content_type", "byte_size", "created_at", "expires_at", "consumed_at", "consumed_session_id"],
   fec_entry_lines: ["id", "user_id", "session_id", "raw_record_id", "business_id", "journal_code", "journal_lib", "entry_num", "entry_date", "account_num", "account_lib", "aux_account_num", "aux_account_lib", "piece_ref", "piece_date", "entry_label", "debit", "credit", "lettering_code", "lettering_date", "validation_date", "currency_amount", "currency_code", "pcg_class", "pcg_group", "status", "issues", "commit_state", "committed_at", "data_kind", "confidence"],
   import_sources: ["id", "user_id", "kind", "domain", "provider", "label", "target_account_id", "target_business_id", "status", "adapter_version", "coverage_start", "coverage_end", "last_attempt_at", "last_success_at", "last_error", "data_kind", "confidence"],
-  import_sessions: ["id", "user_id", "source_id", "file_name", "file_hash", "file_size_bytes", "content_type", "encoding", "delimiter", "parser", "parser_version", "mapping", "conventions", "declared_currency", "observation_date", "stable_transaction_id_declared", "retain_file_requested", "declared_period_start", "declared_period_end", "observed_period_start", "observed_period_end", "fiscal_year_start", "fiscal_year_end", "coverage_declared", "entry_count", "unbalanced_entry_count", "staging_storage_path", "status", "row_count", "ready_count", "warning_count", "blocked_count", "duplicate_count", "ignored_count", "committed_count", "document_id", "issues", "analyzed_at", "committed_at", "discarded_at"],
+  import_sessions: ["id", "user_id", "source_id", "file_name", "file_hash", "file_size_bytes", "content_type", "encoding", "delimiter", "parser", "parser_version", "mapping", "conventions", "declared_currency", "observation_date", "stable_transaction_id_declared", "retain_file_requested", "declared_period_start", "declared_period_end", "observed_period_start", "observed_period_end", "fiscal_year_start", "fiscal_year_end", "coverage_declared", "entry_count", "unbalanced_entry_count", "staging_storage_path", "staging_cleanup_failed_at", "status", "row_count", "ready_count", "warning_count", "blocked_count", "duplicate_count", "ignored_count", "committed_count", "document_id", "issues", "analyzed_at", "committed_at", "discarded_at"],
   import_raw_records: ["id", "user_id", "session_id", "row_number", "raw_line", "cells"],
   import_normalized_records: ["id", "user_id", "session_id", "raw_record_id", "target_domain", "account_id", "transaction_date", "value_date", "label", "amount", "currency", "external_transaction_id", "reference", "counterparty", "balance_after", "status", "dedupe_verdict", "match_key", "external_key", "matched_transaction_id", "issues", "commit_state", "committed_at", "data_kind", "confidence"],
   import_record_links: ["id", "user_id", "session_id", "normalized_record_id", "target_domain", "transaction_id", "business_financials_id"],
@@ -265,7 +265,7 @@ const requiredRpcs: Record<string, string> = {
   lfo_save_import_mapping: "p_user_id uuid, p_payload jsonb",
   lfo_issue_import_upload_ticket: "p_user_id uuid, p_payload jsonb",
   lfo_consume_import_upload_ticket: "p_user_id uuid, p_ticket_id uuid",
-  lfo_clear_import_staging_path: "p_user_id uuid, p_session_id uuid",
+  lfo_record_import_staging_cleanup: "p_user_id uuid, p_session_id uuid, p_removed boolean",
   lfo_fec_entry_balance: "p_user_id uuid, p_session_id uuid",
   lfo_open_fec_session: "p_user_id uuid, p_payload jsonb",
   lfo_append_fec_lines: "p_user_id uuid, p_payload jsonb",
@@ -331,6 +331,16 @@ function addExactInventory(
 ): void {
   failures.push(...diffExactInventory(label, expected, actual));
 }
+
+/**
+ * Plafond d'analyse d'un FEC, répliqué ici depuis `src/lib/validation/fec-imports.ts`.
+ *
+ * Le gate ne peut pas importer un module applicatif — il tourne sans build. Le chiffre est
+ * donc redit, et c'est précisément ce que le contrôle ci-dessous protège : si l'un des deux
+ * bouge sans l'autre, le bucket devient le premier refus rencontré, et le contournement de
+ * la limite de corps de requête ne sert plus à rien.
+ */
+const MAX_FEC_FILE_BYTES = 24 * 1024 * 1024;
 
 const connectionString = required("SUPABASE_DB_URL");
 const connectionUrl = new URL(connectionString);
@@ -501,22 +511,55 @@ try {
       failures.push(`RPC non exécutable par service_role : ${rpc.name}`);
   }
 
-  const bucket = await client.query<{
+  const buckets = await client.query<{
     id: string;
     public: boolean;
     file_size_limit: number | null;
+    allowed_mime_types: string[] | null;
   }>(
-    `select id, public, file_size_limit from storage.buckets where id = 'family-office-documents'`,
+    `select id, public, file_size_limit, allowed_mime_types from storage.buckets
+      where id in ('family-office-documents', 'family-office-import-staging')`,
   );
-  const documentsBucket = bucket.rows[0];
+  const documentsBucket = buckets.rows.find((row) => row.id === "family-office-documents");
   if (!documentsBucket) failures.push("Bucket Storage absent : family-office-documents");
   else {
     if (documentsBucket.public) failures.push("Bucket Storage public : family-office-documents");
+    // Le coffre garde sa vocation : des archives petites et durables. Sa limite n'est PAS
+    // relevée pour accueillir un FEC — l'analyse lourde appartient au staging.
     if (Number(documentsBucket.file_size_limit) !== 8_388_608)
       failures.push("Limite du bucket Storage invalide : family-office-documents");
+    // Un FEC conservé est du texte à plat. Sans ce type, l'archivage échouerait APRÈS que
+    // les faits ont été écrits — le pire moment pour l'apprendre.
+    for (const mime of ["text/plain", "application/pdf", "text/csv"]) {
+      if (!(documentsBucket.allowed_mime_types ?? []).includes(mime))
+        failures.push(`Type MIME absent du bucket family-office-documents : ${mime}`);
+    }
   }
-  const storagePolicyRows = await client.query<{ policyname: string }>(
-    `select policyname from pg_catalog.pg_policies where schemaname = 'storage' and tablename = 'objects'`,
+
+  // STAGING ≠ COFFRE DOCUMENTAIRE. Le bucket de staging doit pouvoir accueillir ce que
+  // l'application accepte d'analyser, sans quoi le contournement de la limite de corps de
+  // requête ne sert à rien : le fichier éviterait la fonction serveur pour être refusé par
+  // le stockage.
+  const stagingBucket = buckets.rows.find((row) => row.id === "family-office-import-staging");
+  if (!stagingBucket) failures.push("Bucket Storage absent : family-office-import-staging");
+  else {
+    if (stagingBucket.public)
+      failures.push("Bucket Storage public : family-office-import-staging");
+    if (Number(stagingBucket.file_size_limit) < MAX_FEC_FILE_BYTES)
+      failures.push(
+        `Limite du bucket family-office-import-staging (${stagingBucket.file_size_limit}) inférieure au plafond d'analyse (${MAX_FEC_FILE_BYTES})`,
+      );
+    for (const mime of ["text/plain", "text/csv", "text/tab-separated-values"]) {
+      if (!(stagingBucket.allowed_mime_types ?? []).includes(mime))
+        failures.push(`Type MIME absent du bucket family-office-import-staging : ${mime}`);
+    }
+  }
+  const storagePolicyRows = await client.query<{
+    policyname: string;
+    qual: string | null;
+    with_check: string | null;
+  }>(
+    `select policyname, qual, with_check from pg_catalog.pg_policies where schemaname = 'storage' and tablename = 'objects'`,
   );
   addMissing(
     failures,
@@ -524,6 +567,18 @@ try {
     storagePolicies,
     storagePolicyRows.rows.map((row) => row.policyname),
   );
+
+  // AUCUNE policy ne doit ouvrir la zone de staging à `authenticated`. Le navigateur n'y
+  // accède que par une URL signée, le serveur sous `service_role` : un droit de lecture ou
+  // de liste n'ouvrirait aucun usage légitime et exposerait des comptabilités entières.
+  for (const policy of storagePolicyRows.rows) {
+    const expression = `${policy.qual ?? ""} ${policy.with_check ?? ""}`;
+    if (expression.includes("family-office-import-staging")) {
+      failures.push(
+        `Policy Storage ouvrant la zone de staging : ${policy.policyname}. Le staging n'est accessible que par URL signée et sous service_role.`,
+      );
+    }
+  }
 
   const migrations = await client.query<{ version: string }>(
     `select version from supabase_migrations.schema_migrations order by version`,

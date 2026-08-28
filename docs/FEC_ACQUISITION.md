@@ -443,6 +443,42 @@ Aucun corps de requête de cette route ne porte de contenu de fichier. La valida
 ne le retransmet pas : quand la session a demandé la conservation, le serveur **reprend** le
 contenu depuis l'objet de staging qu'il a lui-même écrit.
 
+### STAGING ≠ COFFRE DOCUMENTAIRE
+
+Le coffre `family-office-documents` est plafonné à 8 Mio et n'accepte qu'une liste fermée de
+types MIME. C'est cohérent avec ce qu'il est : une archive de pièces justificatives, à
+conserver longtemps, dont chaque objet est petit.
+
+Un FEC d'exercice n'a rien de tout cela. Il pèse couramment plus de 8 Mio, il est du texte à
+plat, et il n'a de raison d'exister que le temps de l'analyse. Le déposer au coffre
+échouerait **deux fois** — sur la taille et sur le type — et le contournement de la limite de
+corps de requête ne servirait alors à rien : le fichier éviterait la fonction serveur pour
+être refusé par le stockage juste après.
+
+| | `family-office-import-staging` | `family-office-documents` |
+|---|---|---|
+| rôle | objets temporaires d'acquisition | archives durables |
+| public | non | non |
+| plafond par objet | 32 Mio | 8 Mio, **non relevé** |
+| types MIME | `text/plain`, `text/csv`, `text/tab-separated-values` | les types historiques **plus** `text/plain` et `text/tab-separated-values` |
+| policies Storage | **aucune** | `documents_owner_*` |
+
+Le plafond du staging est de 32 Mio là où l'application plafonne à 24. La marge n'est pas de
+la prudence vague : le client officiel dépose un `File` en `multipart/form-data`, et
+l'enveloppe multipart ajoute des octets à la requête que l'objet n'a pas. Le **vrai** plafond
+reste celui de l'application, mesuré et documenté ; celui du bucket est une borne
+d'infrastructure qui ne doit jamais devenir le premier refus rencontré.
+
+L'ajout de `text/plain` au coffre est **additif** : les types existants sont conservés,
+dédoublonnés, et sa limite de 8 Mio n'est pas relevée. L'analyse lourde appartient au
+staging ; le coffre garde sa vocation, et `MAX_RETAINED_FEC_FILE_BYTES` la reflète exactement.
+
+Le staging n'a **aucune policy Storage**, et c'est délibéré : le navigateur n'y accède que
+par URL signée, le serveur sous `service_role`. Donner à `authenticated` un droit de lecture
+ou de liste sur une zone de staging n'ouvrirait aucun usage légitime et exposerait des
+comptabilités entières. RLS refuse par défaut, et le gate de schéma **échoue** si une policy
+mentionne ce bucket.
+
 ### Ce que le client ne décide pas
 
 ```text
@@ -451,6 +487,30 @@ IDENTIFIANT          généré par la base
 EMPREINTE SHA-256    calculée par le serveur sur le contenu RÉELLEMENT déposé
 TAILLE               mesurée sur l'objet, et confrontée à la taille déclarée
 ```
+
+Le navigateur reçoit du serveur le bucket, le chemin, le **jeton** de dépôt et le type MIME
+attendu — et il emploie la primitive officielle `uploadToSignedUrl`. Ce n'est pas un réflexe
+de conformité : pour un `File`, cette primitive construit un corps `multipart/form-data` que
+le service attend, ce qu'un `PUT` du fichier brut ne fait pas. Une implémentation artisanale
+déposerait au mieux un objet dont le contenu diffère de ce que l'utilisateur a choisi.
+
+Deux variables sont exposées au navigateur, `NEXT_PUBLIC_SUPABASE_URL` et
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`. La clé publiable est conçue pour être publique et ne donne
+accès à rien ici : les tables sont sous RLS sans policy pour `anon`, et le staging n'a aucune
+policy. **La clé de service ne franchit jamais cette frontière.**
+
+### Autorisation de stockage ≠ billet LFO
+
+```text
+AUTORISATION DE STOCKAGE   valide 2 heures (contrat du service)
+BILLET LFO                 expire en 30 minutes (règle métier)
+```
+
+Les deux durées sont distinctes, et il serait faux de prétendre que l'URL signée expire au
+bout de trente minutes. Ce qui est garanti est ailleurs : c'est le **billet** qui autorise
+l'analyse, il est consommé côté serveur, et un fichier déposé après son expiration ne devient
+jamais analysable. L'objet déposé « trop tard » reste alors orphelin au staging — voir le
+cycle de vie ci-dessous.
 
 Une API qui croit un chemin fourni par son appelant laisse lire — ou écraser — le fichier
 d'un autre propriétaire. Le billet est donc **émis par le serveur**, **à usage unique** (sous
@@ -471,8 +531,28 @@ retainFile = true   →  conservé jusqu'à la validation, recopié au coffre co
 abandon             →  supprimé avant l'abandon de la session
 ```
 
-Aucun objet n'est jamais public. Un échec de suppression d'un objet résiduel n'est pas
-remonté comme une erreur : le fait est écrit, et un objet oublié n'altère aucune vérité.
+Aucun objet n'est jamais public.
+
+### Échec de nettoyage : ni annulation, ni mensonge
+
+```text
+ÉCHEC DE NETTOYAGE  ≠  ÉCHEC DE VALIDATION
+ÉCHEC DE NETTOYAGE  ≠  SUCCÈS SILENCIEUX
+```
+
+Un fait financier écrit ne se retire pas parce qu'un objet temporaire résiste. Mais ignorer le
+résultat de la suppression, puis effacer la référence, produirait le pire des deux mondes : un
+objet toujours au stockage, et plus rien pour le retrouver. Sur une comptabilité entière, ce
+n'est pas acceptable.
+
+`import_sessions.staging_storage_path` n'est donc effacé qu'**après** une suppression réussie,
+et `staging_cleanup_failed_at` date l'échec. La conséquence est directement exploitable : les
+objets à balayer sont exactement les sessions dont `staging_storage_path` n'est pas nul. Le
+résultat de validation le dit aussi, sous `stagingCleanup: REMOVED | FAILED | NOT_APPLICABLE`,
+avec un warning — sans jamais toucher à `commitStatus`.
+
+C'est aussi ce qui rend récupérable le cas de l'objet déposé après l'expiration du billet :
+il n'est jamais analysé, et il reste identifiable au staging.
 
 ## 11. Réception par lots
 
@@ -604,11 +684,20 @@ ses trois corps de requête sont du JSON de quelques centaines d'octets. Cela se
 lecture du code, et les tests de schéma le verrouillent — un contenu, un chemin ou une
 empreinte envoyés par un client sont refusés, pas ignorés.
 
+Le **dimensionnement réel des deux buckets** est lui aussi vérifié, et par la base : le gate
+de schéma échoue si le staging plafonne sous le plafond applicatif, si le coffre n'accepte pas
+`text/plain`, si l'un des deux devient public, ou si une policy mentionne le staging. Ces
+contrôles ont été éprouvés en les cassant volontairement.
+
 En revanche, le **round-trip réel** vers le stockage privé n'est pas couvert par le gate
 local : celui-ci ne monte que PostgreSQL, sans émulateur de Storage. Le cycle de vie du
-billet est donc testé en base (émission, chemin calculé, usage unique, expiration,
-cloisonnement), mais le dépôt d'un fichier de plus de 5 Mo par URL signée reste à valider sur
-un environnement de preview. C'est une étape humaine, et elle n'est pas faite.
+billet est testé en base (émission, chemin calculé, usage unique, expiration, cloisonnement,
+nettoyage traçable), mais le dépôt effectif d'un fichier de plus de 5 Mio par URL signée
+**reste à valider sur un environnement de preview**. C'est une étape humaine, et elle n'est
+pas faite.
+
+Elle suppose deux variables d'environnement présentes côté déploiement :
+`NEXT_PUBLIC_SUPABASE_URL` et `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 
 ## 15. Ce qui n'est pas fait, et pourquoi
 
@@ -621,6 +710,9 @@ un environnement de preview. C'est une étape humaine, et elle n'est pas faite.
 - **aucun rapprochement** entre la trésorerie comptable de la société et un compte bancaire
   personnel observé : ce sont deux entités économiques distinctes ;
 - **aucune résolution de précédence multi-source** : un conflit est refusé, pas arbitré ;
+- **aucun balayage automatique** des objets de staging orphelins : ils sont identifiables
+  (`staging_storage_path` non nul) mais la purge périodique reste à faire, et elle n'a de sens
+  qu'une fois le volume réel connu ;
 - **aucune détection de doublon entre lignes** de FEC. La déduplication de la fondation
   s'applique au niveau du FICHIER (empreinte SHA-256) et non de la ligne, et c'est
   volontaire : deux écritures identiques dans une comptabilité sont un fait comptable

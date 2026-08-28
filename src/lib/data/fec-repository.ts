@@ -31,7 +31,12 @@ import { MAX_FEC_FILE_BYTES, MAX_RETAINED_FEC_FILE_BYTES } from "@/lib/validatio
 import type { ImportFileInput } from "@/lib/data/import-repository";
 import { readAllPages } from "@/lib/data/pagination";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
-import { DOCUMENTS_BUCKET, ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import {
+  DOCUMENTS_BUCKET,
+  IMPORT_STAGING_BUCKET,
+  ownerId,
+  supabaseAdmin,
+} from "@/lib/data/supabase-client";
 
 type Row = Record<string, unknown>;
 
@@ -228,15 +233,21 @@ export function createFecRepository(): FecRepository {
     if (!ticket) throw new Error("Billet d'upload introuvable après émission");
     const storagePath = str(ticket.storage_path);
 
-    const signed = await db.storage.from(DOCUMENTS_BUCKET).createSignedUploadUrl(storagePath);
+    // Le dépôt visé est la zone de STAGING, pas le coffre documentaire : un FEC d'exercice
+    // dépasse la taille que le coffre accepte, et son type MIME n'y est pas autorisé.
+    const signed = await db.storage.from(IMPORT_STAGING_BUCKET).createSignedUploadUrl(storagePath);
     if (signed.error || !signed.data) {
       throw new Error(`Supabase URL de dépôt : ${signed.error?.message ?? "réponse vide"}`);
     }
 
     return {
       ticketId,
-      uploadUrl: signed.data.signedUrl,
+      bucket: IMPORT_STAGING_BUCKET,
       storagePath,
+      // Le JETON, et non une URL assemblée à la main : le client officiel construit le
+      // corps `multipart/form-data` que le service attend pour un `File`.
+      token: signed.data.token,
+      contentType: FEC_CONTENT_TYPE,
       expiresAt: str(ticket.expires_at),
       retainable: input.byteSize <= MAX_RETAINED_FEC_FILE_BYTES,
     };
@@ -272,7 +283,7 @@ export function createFecRepository(): FecRepository {
     if (!ticket) throw new Error("Billet d'upload introuvable");
 
     const storagePath = str(ticket.storage_path);
-    const downloaded = await db.storage.from(DOCUMENTS_BUCKET).download(storagePath);
+    const downloaded = await db.storage.from(IMPORT_STAGING_BUCKET).download(storagePath);
     if (downloaded.error || !downloaded.data) {
       throw new Error(
         `Fichier de staging introuvable : le dépôt n'a peut-être pas abouti (${
@@ -298,9 +309,29 @@ export function createFecRepository(): FecRepository {
     return { storagePath, fileName: str(ticket.file_name) || "fec.txt", bytes };
   }
 
-  /** Supprime un objet de staging. Un échec ne remet en cause aucun fait écrit. */
-  async function dropStagedFile(storagePath: string): Promise<void> {
-    await db.storage.from(DOCUMENTS_BUCKET).remove([storagePath]);
+  /**
+   * Supprime un objet de staging, et DIT si elle a réussi.
+   *
+   *     ÉCHEC DE NETTOYAGE  ≠  ÉCHEC DE VALIDATION
+   *     ÉCHEC DE NETTOYAGE  ≠  SUCCÈS SILENCIEUX
+   *
+   * Un fait financier écrit ne se retire pas parce qu'un objet temporaire résiste. Mais
+   * ignorer le résultat, puis effacer la référence, produirait le pire des deux mondes : un
+   * objet toujours au stockage et plus rien pour le retrouver. Sur une comptabilité
+   * entière, ce n'est pas acceptable.
+   */
+  async function dropStagedFile(sessionId: string, storagePath: string): Promise<boolean> {
+    const removed = await db.storage.from(IMPORT_STAGING_BUCKET).remove([storagePath]);
+    const success = !removed.error;
+    unwrap(
+      await db.rpc("lfo_record_import_staging_cleanup", {
+        p_user_id: user,
+        p_session_id: sessionId,
+        p_removed: success,
+      }),
+      "enregistrement du nettoyage de staging",
+    );
+    return success;
   }
 
   async function analyze(request: FecAnalyzeRequest): Promise<FecPreview> {
@@ -415,14 +446,7 @@ export function createFecRepository(): FecRepository {
     // d'exister quand l'utilisateur n'a pas demandé la conservation. Le supprimer ici plutôt
     // que « plus tard » évite un coffre qui accumule des copies dont personne ne veut.
     if (!request.retainFile) {
-      await dropStagedFile(staged.storagePath);
-      unwrap(
-        await db.rpc("lfo_clear_import_staging_path", {
-          p_user_id: user,
-          p_session_id: sessionId,
-        }),
-        "oubli du chemin de staging",
-      );
+      await dropStagedFile(sessionId, staged.storagePath);
     }
 
     const lines = await getSessionLines(sessionId);
@@ -667,7 +691,7 @@ export function createFecRepository(): FecRepository {
         try {
           // Le fichier est REPRIS du staging privé : il ne retransite pas par la requête,
           // et une validation n'a donc aucune raison de dépasser la limite de corps entrant.
-          const downloaded = await db.storage.from(DOCUMENTS_BUCKET).download(stagingPath);
+          const downloaded = await db.storage.from(IMPORT_STAGING_BUCKET).download(stagingPath);
           if (downloaded.error || !downloaded.data) {
             throw new Error(downloaded.error?.message ?? "objet de staging introuvable");
           }
@@ -695,14 +719,18 @@ export function createFecRepository(): FecRepository {
     }
 
     // Le staging a fait son office, quel que soit le sort de l'archive : il n'a plus de
-    // raison d'exister. Son échec de suppression n'est pas remonté comme une erreur — le
-    // fait est écrit, et un objet résiduel n'altère aucune vérité.
-    const stagingPath = session ? nullableStr(session.staging_storage_path) : null;
-    if (stagingPath) {
-      await dropStagedFile(stagingPath);
-      await db
-        .rpc("lfo_clear_import_staging_path", { p_user_id: user, p_session_id: sessionId })
-        .then(() => undefined);
+    // raison d'exister. Son échec de suppression n'annule pas le fait écrit — mais il est
+    // DIT, et le chemin reste en base pour qu'un balayage ultérieur puisse le retrouver.
+    let stagingCleanup: FecCommitResult["stagingCleanup"] = "NOT_APPLICABLE";
+    const residualPath = session ? nullableStr(session.staging_storage_path) : null;
+    if (residualPath) {
+      const removed = await dropStagedFile(sessionId, residualPath);
+      stagingCleanup = removed ? "REMOVED" : "FAILED";
+      if (!removed) {
+        warnings.push(
+          "Le fichier temporaire d'analyse n'a pas pu être supprimé du stockage. Le fait financier est écrit et n'est pas remis en cause ; la référence est conservée pour un nettoyage ultérieur.",
+        );
+      }
     }
 
     const links = unwrap(
@@ -725,6 +753,7 @@ export function createFecRepository(): FecRepository {
       businessFinancialsId: links[0] ? str(links[0].business_financials_id) : "",
       periodEnd: candidate.periodEnd,
       documentStatus,
+      stagingCleanup,
       warnings,
     };
   }
@@ -742,7 +771,7 @@ export function createFecRepository(): FecRepository {
       "lecture du chemin de staging",
     ) as Row[];
     const stagingPath = rows[0] ? nullableStr(rows[0].staging_storage_path) : null;
-    if (stagingPath) await dropStagedFile(stagingPath);
+    if (stagingPath) await dropStagedFile(sessionId, stagingPath);
 
     unwrap(
       await db.rpc("lfo_discard_import_session", { p_user_id: user, p_session_id: sessionId }),

@@ -33,10 +33,26 @@ export type {
  */
 export interface FecUploadTicket {
   ticketId: string;
-  /** URL signée à usage unique, à laquelle le navigateur envoie le fichier en PUT. */
-  uploadUrl: string;
+  /** Bucket de STAGING, privé et temporaire. Ce n'est pas le coffre documentaire. */
+  bucket: string;
   /** Chemin de l'objet, CALCULÉ par le serveur. Le client ne le choisit pas. */
   storagePath: string;
+  /**
+   * Jeton d'AUTORISATION du dépôt, émis par le stockage. C'est lui, et lui seul, qui
+   * autorise l'écriture à ce chemin — aucune clé de service ne franchit la frontière.
+   */
+  token: string;
+  /** Type MIME sous lequel l'objet doit être déposé : le bucket a une liste fermée. */
+  contentType: string;
+  /**
+   * Expiration du BILLET MÉTIER, distincte de celle de l'autorisation de stockage.
+   *
+   *     AUTORISATION DE STOCKAGE  ≠  BILLET LFO
+   *
+   * Le stockage tient ses URL signées valides deux heures ; le billet, lui, expire en
+   * trente minutes. Un fichier déposé après l'expiration du billet ne devient donc jamais
+   * analysable : c'est le billet qui décide, et il est consommé côté serveur.
+   */
   expiresAt: string;
   /** Le fichier pourra-t-il être conservé au coffre, à cette taille ? */
   retainable: boolean;
@@ -147,6 +163,16 @@ export interface FecCommitResult {
   periodEnd: string;
   /** La copie d'archive, qui n'engage EN RIEN le fait ci-dessus. */
   documentStatus: FecDocumentStatus;
+  /**
+   * Sort de l'objet temporaire de staging.
+   *
+   *     ÉCHEC DE NETTOYAGE  ≠  ÉCHEC DE VALIDATION
+   *     ÉCHEC DE NETTOYAGE  ≠  SUCCÈS SILENCIEUX
+   *
+   * `FAILED` laisse le chemin en base : c'est la seule référence permettant un nettoyage
+   * ultérieur, et un FEC est une donnée sensible.
+   */
+  stagingCleanup: "REMOVED" | "FAILED" | "NOT_APPLICABLE";
   /** Ce qui a échoué SANS remettre en cause le fait écrit. */
   warnings: string[];
 }

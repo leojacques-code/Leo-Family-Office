@@ -4,8 +4,11 @@
  *
  * Ce que le smoke prouve :
  *
+ *   * le STAGING est un bucket distinct du coffre documentaire, privé, dimensionné pour ce
+ *     que l'application accepte d'analyser, et sans aucune policy Storage ;
  *   * un billet d'upload est émis par le SERVEUR : chemin calculé, usage unique, expirant,
  *     et invisible pour un autre propriétaire ;
+ *   * un échec de nettoyage du staging reste TRAÇABLE et n'annule aucun fait écrit ;
  *   * une session comptable s'ouvre en RECEIVING, reçoit ses écritures par lots et ne
  *     produit AUCUN fait Business avant validation ;
  *   * le brut et l'écriture lue sont écrits ATOMIQUEMENT et rattachés par numéro de ligne ;
@@ -310,6 +313,67 @@ try {
     foreignUser,
     `smoke-fec-${foreignUser}@invalid`,
   ]);
+
+  // ── 0 bis. STAGING ≠ COFFRE DOCUMENTAIRE ─────────────────────────────────────────
+  //
+  // Le contournement de la limite de corps de requête ne sert à rien si le stockage refuse
+  // ensuite le fichier : il faut que les DEUX buckets soient réellement dimensionnés pour
+  // leur rôle. C'est vérifiable en base, donc c'est vérifié ici.
+  const bucketRows = await client.query<{
+    id: string;
+    is_public: boolean;
+    limit_bytes: string;
+    mimes: string[];
+  }>(
+    `select id, public as is_public, file_size_limit::text as limit_bytes,
+            allowed_mime_types as mimes
+       from storage.buckets
+      where id in ('family-office-documents', 'family-office-import-staging')
+      order by id`,
+  );
+  const documentsBucket = bucketRows.rows.find((row) => row.id === "family-office-documents");
+  const stagingBucket = bucketRows.rows.find((row) => row.id === "family-office-import-staging");
+  assert(documentsBucket && stagingBucket, "Les deux buckets doivent exister");
+  assert(
+    stagingBucket!.id !== documentsBucket!.id,
+    "Le staging doit être un bucket DISTINCT du coffre documentaire",
+  );
+  assert(stagingBucket!.is_public === false, "Le bucket de staging ne doit jamais être public");
+  assert(documentsBucket!.is_public === false, "Le coffre documentaire ne doit jamais être public");
+  assert(
+    Number(stagingBucket!.limit_bytes) >= 24 * 1024 * 1024,
+    "Le bucket de staging doit accepter au moins ce que l'application analyse (24 Mio)",
+  );
+  assert(
+    Number(documentsBucket!.limit_bytes) === 8 * 1024 * 1024,
+    "Le coffre documentaire garde sa vocation : 8 Mio, non relevés pour accueillir un FEC",
+  );
+  for (const mime of ["text/plain", "text/csv", "text/tab-separated-values"]) {
+    assert(
+      stagingBucket!.mimes.includes(mime),
+      `Le bucket de staging doit accepter ${mime} : un FEC est du texte à plat`,
+    );
+  }
+  assert(
+    documentsBucket!.mimes.includes("text/plain"),
+    "Le coffre doit accepter text/plain, sans quoi la CONSERVATION d'un FEC échouerait après l'écriture des faits",
+  );
+  for (const mime of ["application/pdf", "image/png", "text/csv"]) {
+    assert(
+      documentsBucket!.mimes.includes(mime),
+      `L'ajout au coffre doit être ADDITIF : ${mime} a disparu`,
+    );
+  }
+  const leakingPolicies = await client.query<{ count: string }>(
+    `select count(*)::text as count
+       from pg_catalog.pg_policies
+      where schemaname = 'storage' and tablename = 'objects'
+        and coalesce(qual, '') || coalesce(with_check, '') like '%family-office-import-staging%'`,
+  );
+  assert(
+    leakingPolicies.rows[0].count === "0",
+    "Aucune policy Storage ne doit ouvrir la zone de staging : URL signée et service_role seulement",
+  );
 
   await client.query("set local role service_role");
 
@@ -975,6 +1039,78 @@ try {
 
   businessId = originalBusinessId;
 
+  // ── 5 septies. NETTOYAGE : ni mensonge, ni annulation ────────────────────────────
+  //
+  //     ÉCHEC DE NETTOYAGE  ≠  ÉCHEC DE VALIDATION
+  //     ÉCHEC DE NETTOYAGE  ≠  SUCCÈS SILENCIEUX
+  //
+  // Une suppression réussie efface la référence. Une suppression ÉCHOUÉE la conserve : c'est
+  // la seule trace permettant un balayage ultérieur, et un FEC est une donnée sensible.
+  const cleanupSession = await rpc(
+    "lfo_open_fec_session",
+    openPayload({ file_hash: "5".repeat(64), staging_storage_path: `${userId}/import-staging/x` }),
+  );
+  const stagedPath = await client.query<{ path: string | null }>(
+    "select staging_storage_path as path from public.import_sessions where id = $1",
+    [cleanupSession],
+  );
+  assert(
+    stagedPath.rows[0].path === `${userId}/import-staging/x`,
+    "Le chemin de staging doit être mémorisé sur la session",
+  );
+
+  // Échec de suppression : le chemin RESTE, et l'échec est daté.
+  await client.query("select public.lfo_record_import_staging_cleanup($1::uuid, $2::uuid, false)", [
+    userId,
+    cleanupSession,
+  ]);
+  const failed = await client.query<{ path: string | null; failed: string | null }>(
+    "select staging_storage_path as path, staging_cleanup_failed_at::text as failed from public.import_sessions where id = $1",
+    [cleanupSession],
+  );
+  assert(
+    failed.rows[0].path === `${userId}/import-staging/x`,
+    "Un échec de nettoyage ne doit PAS effacer la référence : elle est le seul moyen de retrouver l'objet",
+  );
+  assert(
+    failed.rows[0].failed !== null,
+    "Un échec de nettoyage doit être daté, donc observable et requêtable",
+  );
+
+  // Succès : la référence disparaît, l'échec est oublié.
+  await client.query("select public.lfo_record_import_staging_cleanup($1::uuid, $2::uuid, true)", [
+    userId,
+    cleanupSession,
+  ]);
+  const cleared = await client.query<{ path: string | null; failed: string | null }>(
+    "select staging_storage_path as path, staging_cleanup_failed_at::text as failed from public.import_sessions where id = $1",
+    [cleanupSession],
+  );
+  assert(
+    cleared.rows[0].path === null && cleared.rows[0].failed === null,
+    "Une suppression réussie doit effacer la référence et l'échec",
+  );
+  await client.query("select public.lfo_discard_import_session($1::uuid, $2::uuid)", [
+    userId,
+    cleanupSession,
+  ]);
+
+  // Un échec de nettoyage sur la session VALIDÉE n'annule rien du fait écrit.
+  await client.query("select public.lfo_record_import_staging_cleanup($1::uuid, $2::uuid, false)", [
+    userId,
+    sessionId,
+  ]);
+  const stillCommitted = await client.query<{ status: string; financials: string }>(
+    `select
+       (select status from public.import_sessions where id = $1) as status,
+       (select count(*)::text from public.import_record_links where session_id = $1) as financials`,
+    [sessionId],
+  );
+  assert(
+    stillCommitted.rows[0].status === "COMMITTED" && stillCommitted.rows[0].financials === "1",
+    "Un échec de nettoyage de staging ne doit jamais annuler un fait financier écrit",
+  );
+
   // ── 6. Piste d'audit : lecture seule pour authenticated ──────────────────────────
   await client.query("reset role");
   await client.query("set local role authenticated");
@@ -1134,7 +1270,7 @@ try {
   }
   if (succeeded) {
     console.log(
-      "Smoke FEC Corporate Acquisition : réception fragmentée atomique, brut rattaché ligne à ligne, ABSENT ≠ ZÉRO, devise sans code refusée, validation refusée sans couverture déclarée / sur écriture déséquilibrée / sur ligne illisible, fait Business et provenance écrits en une transaction, aucune valorisation produite, écritures gelées, piste d'audit en lecture seule sous authenticated, instantané non supprimable sans sa provenance, idempotence applicative et de base, billet d'upload à chemin serveur, usage unique, expirant et cloisonné, réception remplaçable et abandonnable, conflit de sources refusé sans rien altérer, correction FEC → FEC autorisée, montants signés persistés tels quels, déséquilibre recalculé malgré un décompte forgé, écriture hors exercice refusée, couverture sans bornes refusée, retry sans second instantané, formes de source refusées, cloisonnement. Aucune donnée persistée.",
+      "Smoke FEC Corporate Acquisition : réception fragmentée atomique, brut rattaché ligne à ligne, ABSENT ≠ ZÉRO, devise sans code refusée, validation refusée sans couverture déclarée / sur écriture déséquilibrée / sur ligne illisible, fait Business et provenance écrits en une transaction, aucune valorisation produite, écritures gelées, piste d'audit en lecture seule sous authenticated, instantané non supprimable sans sa provenance, idempotence applicative et de base, staging distinct du coffre et sans policy, buckets dimensionnés, ajout MIME additif, billet d'upload à chemin serveur, usage unique, expirant et cloisonné, nettoyage traçable en succès comme en échec, réception remplaçable et abandonnable, conflit de sources refusé sans rien altérer, correction FEC → FEC autorisée, montants signés persistés tels quels, déséquilibre recalculé malgré un décompte forgé, écriture hors exercice refusée, couverture sans bornes refusée, retry sans second instantané, formes de source refusées, cloisonnement. Aucune donnée persistée.",
     );
   }
 }
