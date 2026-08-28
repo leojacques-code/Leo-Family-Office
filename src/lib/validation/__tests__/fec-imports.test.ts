@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   fecAnalyzeSchema,
   fecCommandSchema,
+  fecUploadTicketSchema,
   MAX_FEC_FILE_BYTES,
   MAX_RETAINED_FEC_FILE_BYTES,
 } from "@/lib/validation/fec-imports";
@@ -17,6 +18,9 @@ import {
  * été observé.
  */
 const VALID_ANALYZE = {
+  // Le fichier est DÉJÀ au stockage privé : la requête d'analyse n'en porte qu'une
+  // référence émise par le serveur.
+  uploadTicketId: "33333333-3333-4333-8333-333333333333",
   businessId: "11111111-1111-4111-8111-111111111111",
   currency: "eur",
   fiscalYearStart: "2025-01-01",
@@ -135,5 +139,83 @@ describe("plafonds · analyser n'est pas archiver", () => {
     // archivable doit être refusé AVANT que le fait canonique soit écrit.
     expect(MAX_RETAINED_FEC_FILE_BYTES).toBeLessThan(MAX_FEC_FILE_BYTES);
     expect(MAX_RETAINED_FEC_FILE_BYTES).toBe(8 * 1024 * 1024);
+  });
+});
+
+describe("billet de dépôt · le client déclare, le serveur décide", () => {
+  const VALID_TICKET = { fileName: "fec-2025.txt", byteSize: 12_000_000, retainFile: false };
+
+  it("accepte une déclaration de dépôt bien formée", () => {
+    expect(fecUploadTicketSchema.safeParse(VALID_TICKET).success).toBe(true);
+  });
+
+  it("refuse un chemin de stockage fourni par le client", () => {
+    // Le chemin est CALCULÉ côté serveur. L'accepter du client laisserait lire — ou
+    // écraser — le fichier d'un autre propriétaire.
+    for (const forged of ["storagePath", "path", "ticketId", "uploadUrl", "userId"]) {
+      const parsed = fecUploadTicketSchema.safeParse({ ...VALID_TICKET, [forged]: "x" });
+      expect(parsed.success).toBe(false);
+    }
+  });
+
+  it("refuse une extension hors format", () => {
+    expect(fecUploadTicketSchema.safeParse({ ...VALID_TICKET, fileName: "fec.xlsx" }).success).toBe(
+      false,
+    );
+    expect(fecUploadTicketSchema.safeParse({ ...VALID_TICKET, fileName: "fec.pdf" }).success).toBe(
+      false,
+    );
+  });
+
+  it("refuse un fichier au-delà du plafond d'analyse", () => {
+    const parsed = fecUploadTicketSchema.safeParse({
+      ...VALID_TICKET,
+      byteSize: MAX_FEC_FILE_BYTES + 1,
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("refuse la CONSERVATION d'un fichier au-delà du coffre, AVANT tout dépôt", () => {
+    // C'est la prévalidation qui ferme le partial success : le refus tombe avant que le
+    // moindre octet soit déposé, et avant a fortiori toute écriture canonique.
+    const parsed = fecUploadTicketSchema.safeParse({
+      ...VALID_TICKET,
+      byteSize: MAX_RETAINED_FEC_FILE_BYTES + 1,
+      retainFile: true,
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0]?.message).toContain("pas conservé");
+    }
+  });
+
+  it("accepte le MÊME fichier sans conservation : analysable, simplement pas archivable", () => {
+    const parsed = fecUploadTicketSchema.safeParse({
+      ...VALID_TICKET,
+      byteSize: MAX_RETAINED_FEC_FILE_BYTES + 1,
+      retainFile: false,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("refuse une taille nulle ou négative", () => {
+    for (const byteSize of [0, -1]) {
+      expect(fecUploadTicketSchema.safeParse({ ...VALID_TICKET, byteSize }).success).toBe(false);
+    }
+  });
+});
+
+describe("analyse · aucun contenu de fichier ne traverse la route", () => {
+  it("exige une référence de billet, pas un fichier", () => {
+    const { uploadTicketId, ...withoutTicket } = VALID_ANALYZE;
+    expect(uploadTicketId).toBeTruthy();
+    expect(fecAnalyzeSchema.safeParse(withoutTicket).success).toBe(false);
+  });
+
+  it("refuse tout ce qui ressemblerait à un fichier ou à un chemin", () => {
+    for (const forged of ["file", "bytes", "content", "storagePath", "fileHash", "byteSize"]) {
+      const parsed = fecAnalyzeSchema.safeParse({ ...VALID_ANALYZE, [forged]: "x" });
+      expect(parsed.success).toBe(false);
+    }
   });
 });

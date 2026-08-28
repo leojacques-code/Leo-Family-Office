@@ -258,7 +258,15 @@ d'exercice est refusée par la base. Un exercice déclaré complet ne contient A
 d'une autre période. ÉCART DE CONFORMITÉ RÉGLEMENTAIRE ≠ MONTANT NON CALCULABLE : un champ de
 traçabilité blanc est un INFO de fichier, jamais une ligne bloquée. ANALYSER ≠ ARCHIVER : un
 échec de conservation après validation ne transforme jamais un fait écrit en échec, le statut
-du fait et celui de la copie sont distincts. Détail dans `docs/FEC_ACQUISITION.md`.
+du fait et celui de la copie sont distincts. CONFLIT DE SOURCES ≠ CHOIX SILENCIEUX D'UNE
+SOURCE : une période financière déjà renseignée par une autre origine n'est jamais écrasée,
+seule une correction FEC → FEC l'est, et la preuve est la provenance, pas un libellé.
+
+Un FEC d'exercice ne traverse PAS la fonction serveur : le fichier va directement du
+navigateur au stockage privé, et la route ne reçoit qu'une référence émise par le serveur.
+Le chemin de stockage est CALCULÉ en base, jamais reçu du client ; le billet est à usage
+unique, expirant et cloisonné ; l'empreinte est calculée sur le contenu réellement déposé.
+Détail dans `docs/FEC_ACQUISITION.md`.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

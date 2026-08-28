@@ -21,6 +21,8 @@ import {
   MONTANT_SENS_LETTERS,
   MONTANT_SENS_MISSING,
   MONTANT_SENS_NUMERIC,
+  MONTANT_SENS_OUT_OF_ORDER,
+  MONTANT_SENS_UNSIGNED_ONE,
   SEMICOLON_DELIMITED,
   SIGNED_CREDIT_ONLY,
   SIGNED_CURRENCY,
@@ -731,5 +733,47 @@ describe("PCG · participation des salariés ≠ impôt sur les bénéfices", ()
     expect(candidate?.taxExpense).toBe(30000);
     expect(candidate?.netIncome).toBe(60000);
     expect(candidate?.basis.taxExpense).toContain("hors 691");
+  });
+});
+
+describe("Sens · les quatre valeurs du texte, et rien d'autre en silence", () => {
+  it("un Sens « 1 » nu est LU mais signalé hors norme", () => {
+    const analysis = analyze(utf8(MONTANT_SENS_UNSIGNED_ONE));
+    // Son sens ne fait aucun doute : la ligne est lue comme un débit.
+    expect(lineAt(analysis, 2).debit).toBe(1200);
+    expect(lineAt(analysis, 2).credit).toBeNull();
+    // Mais le texte exige le signe : l'écart est dit, et la ligne n'est pas « conforme ».
+    expect(codes(lineAt(analysis, 2).issues)).toContain("FEC_AMOUNT_SENS_NON_STANDARD");
+    expect(lineAt(analysis, 2).status).toBe("WARNING");
+    // Le fichier reste exploitable : refuser 150 000 lignes pour un signe absent serait pire.
+    expect(analysis.counts.blocked).toBe(0);
+    expect(analysis.counts.unbalancedEntries).toBe(0);
+  });
+
+  it("les quatre valeurs réglementaires ne produisent AUCUN signalement", () => {
+    for (const fixture of [MONTANT_SENS_LETTERS, MONTANT_SENS_NUMERIC]) {
+      const analysis = analyze(utf8(fixture));
+      const allCodes = analysis.lines.flatMap((line) => codes(line.issues));
+      expect(allCodes).not.toContain("FEC_AMOUNT_SENS_NON_STANDARD");
+      expect(allCodes).not.toContain("FEC_AMOUNT_SENS_INVALID");
+    }
+  });
+});
+
+describe("ordre des colonnes · Montant et Sens sont attendus en 12 et 13", () => {
+  it("Montant et Sens à leur place réglementaire ne produisent aucun signalement d'ordre", () => {
+    const analysis = analyze(utf8(MONTANT_SENS_LETTERS));
+    expect(analysis.amountSchema).toBe("MONTANT_SENS");
+    expect(codes(analysis.issues)).not.toContain("FEC_HEADER_INVALID");
+  });
+
+  it("Montant et Sens DÉPLACÉS sont lus par nom, et l'écart d'ordre est signalé", () => {
+    const analysis = analyze(utf8(MONTANT_SENS_OUT_OF_ORDER));
+    expect(analysis.amountSchema).toBe("MONTANT_SENS");
+    // La lecture par nom reste correcte...
+    expect(lineAt(analysis, 2).debit).toBe(1200);
+    expect(lineAt(analysis, 3).credit).toBe(1200);
+    // ...et l'écart à l'ordre du texte est dit.
+    expect(codes(analysis.issues)).toContain("FEC_HEADER_INVALID");
   });
 });

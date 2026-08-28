@@ -337,6 +337,72 @@ export const MONTANT_SENS_NUMERIC = fecMontantSens([
   }),
 ]);
 
+/** Sens « 1 » sans signe : lisible, mais hors du texte réglementaire. */
+export const MONTANT_SENS_UNSIGNED_ONE = fecMontantSens([
+  montantSensLine({ journal: "VTE", entry: "1", account: "411000", montant: "1200,00", sens: "1" }),
+  montantSensLine({
+    journal: "VTE",
+    entry: "1",
+    account: "701000",
+    montant: "1200,00",
+    sens: "-1",
+  }),
+]);
+
+/**
+ * Variante Montant/Sens dont les colonnes 12 et 13 sont DÉPLACÉES en fin de ligne : le
+ * fichier reste lisible par nom, mais son ordre s'écarte du texte.
+ */
+export const MONTANT_SENS_OUT_OF_ORDER = [
+  [
+    ...FEC_FIELDS.filter((field) => field !== "Debit" && field !== "Credit"),
+    "Montant",
+    "Sens",
+  ].join("\t"),
+  ...[
+    [
+      "VTE",
+      "Ventes",
+      "1",
+      "20250131",
+      "411000",
+      "Clients",
+      "",
+      "",
+      "FA-001",
+      "20250131",
+      "Facture",
+      "",
+      "",
+      "20250210",
+      "",
+      "",
+      "1200,00",
+      "D",
+    ],
+    [
+      "VTE",
+      "Ventes",
+      "1",
+      "20250131",
+      "701000",
+      "Ventes",
+      "",
+      "",
+      "FA-001",
+      "20250131",
+      "Facture",
+      "",
+      "",
+      "20250210",
+      "",
+      "",
+      "1200,00",
+      "C",
+    ],
+  ].map((cells) => cells.join("\t")),
+].join("\n");
+
 /** Sens inconnu : le montant existe, son sens non. */
 export const MONTANT_SENS_INVALID = fecMontantSens([
   montantSensLine({ journal: "VTE", entry: "1", account: "411000", montant: "1200,00", sens: "X" }),

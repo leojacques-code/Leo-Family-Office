@@ -72,16 +72,32 @@ export type FecAmountSchema = "DEBIT_CREDIT" | "MONTANT_SENS";
 /**
  * Sens de la variante `Montant`/`Sens`, normalisé.
  *
- * Le texte prévoit `D`/`C` ou `+1`/`-1`. `1` sans signe est accepté comme `+1` : un export
- * qui omet le plus reste sans ambiguïté. Tout autre contenu est REFUSÉ — un montant dont le
- * sens est inconnu n'est pas un montant, et deviner reviendrait à inverser un jour un
- * produit et une charge.
+ * Le texte primaire prévoit QUATRE valeurs, et quatre seulement : `D`, `C`, `+1`, `-1`. Il
+ * précise que le signe de `+1` et `-1` est présent, sans espace entre le signe et le
+ * chiffre. Un `1` nu n'est donc PAS une valeur réglementaire.
+ *
+ * Il reste LU, et signalé — même doctrine que le point-virgule et que les formats de date
+ * hors norme : refuser un fichier entièrement écrit en `1`/`-1` le rendrait inutilisable
+ * alors que son sens ne fait aucun doute, et l'accepter en silence le présenterait comme
+ * conforme. Le contrat est donc explicite : `conforming` dit si la valeur est celle du
+ * texte, `direction` dit ce qu'elle signifie.
+ *
+ * Tout autre contenu ne produit AUCUNE direction : un montant dont le sens est inconnu
+ * n'est pas un montant, et deviner reviendrait à inverser un jour un produit et une charge.
  */
-export function normalizeFecSens(raw: string): "DEBIT" | "CREDIT" | null {
+export interface FecSensReading {
+  direction: "DEBIT" | "CREDIT" | null;
+  /** La valeur lue est-elle l'une des quatre du texte réglementaire ? */
+  conforming: boolean;
+}
+
+export function normalizeFecSens(raw: string): FecSensReading {
   const value = raw.trim().toUpperCase();
-  if (value === "D" || value === "+1" || value === "1") return "DEBIT";
-  if (value === "C" || value === "-1") return "CREDIT";
-  return null;
+  if (value === "D" || value === "+1") return { direction: "DEBIT", conforming: true };
+  if (value === "C" || value === "-1") return { direction: "CREDIT", conforming: true };
+  // Toléré, jamais présenté comme conforme.
+  if (value === "1") return { direction: "DEBIT", conforming: false };
+  return { direction: null, conforming: false };
 }
 
 /**
@@ -247,12 +263,17 @@ export function resolveFecHeader(headers: readonly string[]): FecHeaderResolutio
     );
   }
 
-  // Nombre de champs reconnus, à la lumière du schéma retenu : dans la variante
-  // Montant/Sens, `Debit` et `Credit` sont ABSENTS À BON DROIT — les compter comme
-  // manquants signalerait un fichier incomplet là où il est parfaitement conforme.
+  // Champs attendus, à la lumière du schéma retenu, ET DANS L'ORDRE RÉGLEMENTAIRE.
+  //
+  // La substitution se fait EN PLACE : `Montant` occupe la position 12 et `Sens` la 13,
+  // exactement là où le texte les attend. Les mettre en fin de liste aurait deux effets
+  // faux à la fois — signaler un fichier conforme comme désordonné, et laisser passer sans
+  // rien dire un fichier où ces deux colonnes sont réellement ailleurs.
   const expectedFields: readonly FecField[] =
     amountSchema === "MONTANT_SENS"
-      ? [...FEC_FIELDS.filter((field) => field !== "Debit" && field !== "Credit"), "Montant", "Sens"]
+      ? FEC_FIELDS.map((field) =>
+          field === "Debit" ? "Montant" : field === "Credit" ? "Sens" : field,
+        )
       : FEC_FIELDS;
   const recognised = expectedFields.filter((field) => positions[field] !== undefined).length;
   if (recognised > 0 && recognised < expectedFields.length) {
@@ -265,7 +286,7 @@ export function resolveFecHeader(headers: readonly string[]): FecHeaderResolutio
     );
   }
 
-  const expectedOrder = FEC_FIELDS.filter((field) => positions[field] !== undefined);
+  const expectedOrder = expectedFields.filter((field) => positions[field] !== undefined);
   const actualOrder = [...expectedOrder].sort(
     (left, right) => (positions[left] ?? 0) - (positions[right] ?? 0),
   );

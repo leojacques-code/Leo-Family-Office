@@ -4,6 +4,8 @@
  *
  * Ce que le smoke prouve :
  *
+ *   * un billet d'upload est émis par le SERVEUR : chemin calculé, usage unique, expirant,
+ *     et invisible pour un autre propriétaire ;
  *   * une session comptable s'ouvre en RECEIVING, reçoit ses écritures par lots et ne
  *     produit AUCUN fait Business avant validation ;
  *   * le brut et l'écriture lue sont écrits ATOMIQUEMENT et rattachés par numéro de ligne ;
@@ -24,6 +26,9 @@
  *   * `fec_entry_lines` est en LECTURE SEULE pour `authenticated` ;
  *   * un instantané financier importé n'est pas supprimable en laissant sa provenance
  *     orpheline ;
+ *   * une période financière issue d'une AUTRE source n'est jamais écrasée : le conflit est
+ *     refusé, et rien de l'existant n'est modifié ;
+ *   * une période financière issue d'un import FEC antérieur reste corrigeable ;
  *   * un second commit de la même session ne réécrit rien (idempotence applicative) ;
  *   * réimporter le même fichier déjà validé est refusé (idempotence de base) ;
  *   * une session encore en réception portant la même empreinte est REMPLACÉE ;
@@ -77,6 +82,7 @@ async function rpc(name: string, payload: unknown): Promise<string> {
 }
 
 type Counts = {
+  tickets: string;
   sources: string;
   sessions: string;
   raw: string;
@@ -89,6 +95,7 @@ type Counts = {
 async function counts(): Promise<Counts> {
   const result = await client.query<Counts>(`
     select
+      (select count(*) from public.import_upload_tickets)::text as tickets,
       (select count(*) from public.import_sources)::text as sources,
       (select count(*) from public.import_sessions)::text as sessions,
       (select count(*) from public.import_raw_records)::text as raw,
@@ -315,12 +322,89 @@ try {
   );
 
   businessId = randomUUID();
+  const originalBusinessId = businessId;
   await client.query(
     `insert into public.businesses
        (id, user_id, name, status, business_type, functional_currency, data_kind, confidence)
      values ($1, $2, 'Smoke societe', 'ACTIVE', 'SME', 'EUR', 'ACTUAL', 'HIGH')`,
     [businessId, userId],
   );
+
+  // ── 0. Billets d'upload : le fichier ne traverse pas la fonction serveur ─────────
+  //
+  // Le chemin est CALCULÉ par la base à partir du propriétaire et de l'identifiant du
+  // billet. Un chemin fourni par un client laisserait lire — ou écraser — le fichier d'un
+  // autre propriétaire.
+  const ticketId = await rpc("lfo_issue_import_upload_ticket", {
+    domain: "BUSINESS_ACCOUNTING",
+    file_name: "fec-2025.txt",
+    content_type: "text/plain",
+    byte_size: 12_000_000,
+    ttl_minutes: 30,
+  });
+  const ticket = await client.query<{ path: string; consumed: string | null; expires: string }>(
+    "select storage_path as path, consumed_at::text as consumed, expires_at::text as expires from public.import_upload_tickets where id = $1",
+    [ticketId],
+  );
+  assert(
+    ticket.rows[0].path === `${userId}/import-staging/${ticketId}`,
+    "Le chemin de staging doit être dérivé du propriétaire et du billet, jamais fourni",
+  );
+  assert(ticket.rows[0].consumed === null, "Un billet neuf ne doit pas être consommé");
+
+  await client.query("select public.lfo_consume_import_upload_ticket($1::uuid, $2::uuid)", [
+    userId,
+    ticketId,
+  ]);
+  // À USAGE UNIQUE : un même objet de staging n'alimente pas deux sessions, donc pas deux
+  // vérités sur le même fichier.
+  await rejects(
+    "select public.lfo_consume_import_upload_ticket($1::uuid, $2::uuid)",
+    [userId, ticketId],
+    "Un billet d'upload a pu être consommé deux fois",
+    "déjà consommé",
+  );
+
+  // Un billet d'un AUTRE propriétaire est introuvable, même en connaissant son UUID.
+  await rejects(
+    "select public.lfo_consume_import_upload_ticket($1::uuid, $2::uuid)",
+    [foreignUser, ticketId],
+    "Un billet d'upload d'un autre propriétaire a pu être consommé",
+    "introuvable",
+  );
+
+  // Un billet EXPIRÉ n'est pas une porte ouverte indéfiniment.
+  const staleTicket = await rpc("lfo_issue_import_upload_ticket", {
+    file_name: "vieux.txt",
+    byte_size: 1024,
+    ttl_minutes: 1,
+  });
+  // Le billet est vieilli des deux côtés : `import_upload_tickets_expiry_ck` impose une
+  // expiration postérieure à la création, et cette contrainte est juste — c'est le TEMPS
+  // qu'on simule ici, pas un billet incohérent.
+  await client.query(
+    `update public.import_upload_tickets
+        set created_at = now() - interval '2 hours',
+            expires_at = now() - interval '1 hour'
+      where id = $1`,
+    [staleTicket],
+  );
+  await rejects(
+    "select public.lfo_consume_import_upload_ticket($1::uuid, $2::uuid)",
+    [userId, staleTicket],
+    "Un billet d'upload expiré a pu être consommé",
+    "expiré",
+  );
+
+  // Une taille nulle ne produit aucun billet : il n'y a rien à déposer.
+  await rejects(
+    "select public.lfo_issue_import_upload_ticket($1::uuid, $2::jsonb)",
+    [userId, JSON.stringify({ file_name: "vide.txt", byte_size: 0 })],
+    "Un billet a pu être émis pour un fichier de taille nulle",
+    "absente ou nulle",
+  );
+
+  await client.query("delete from public.import_upload_tickets where user_id = $1", [userId]);
 
   // ── 1. Ouverture et réception par lots ────────────────────────────────────────────
   const sessionId = await rpc("lfo_open_fec_session", openPayload());
@@ -767,6 +851,130 @@ try {
     "import_sessions_coverage_shape_ck",
   );
 
+  // ── 5 sexies. CONFLIT DE SOURCES : aucune autre vérité n'est écrasée ─────────────
+  //
+  //     CONFLIT DE SOURCES  ≠  CHOIX SILENCIEUX D'UNE SOURCE
+  //
+  // Une période financière saisie à la main, ou venue de comptes annuels vérifiés, n'a
+  // AUCUNE provenance d'import comptable. Un FEC portant la même clôture doit donc être
+  // refusé — et laisser l'existant intact.
+  const manualBusinessId = randomUUID();
+  await client.query(
+    `insert into public.businesses
+       (id, user_id, name, status, business_type, functional_currency, data_kind, confidence)
+     values ($1, $2, 'Smoke societe saisie', 'ACTIVE', 'SME', 'EUR', 'ACTUAL', 'HIGH')`,
+    [manualBusinessId, userId],
+  );
+  const manualFinancialsId = await client.query<{ value: string }>(
+    "select public.lfo_record_business_financials($1::uuid, $2::jsonb) as value",
+    [
+      userId,
+      JSON.stringify({
+        business_id: manualBusinessId,
+        period_end: "2025-12-31",
+        period_start: "2025-01-01",
+        revenue: 999_999,
+        ebitda: 111_111,
+        currency: "EUR",
+        data_kind: "ACTUAL",
+        confidence: "HIGH",
+        source: "Comptes annuels verifies",
+      }),
+    ],
+  );
+  const manualId = manualFinancialsId.rows[0].value;
+
+  businessId = manualBusinessId;
+  const conflictSession = await rpc(
+    "lfo_open_fec_session",
+    openPayload({ file_hash: "4".repeat(64) }),
+  );
+  await rpc("lfo_append_fec_lines", {
+    session_id: conflictSession,
+    rows: [
+      received({
+        row: 1,
+        journal: "OD",
+        entry: "1",
+        account: "411000",
+        debit: "100",
+        group: "TRADE_RECEIVABLES",
+      }),
+      received({
+        row: 2,
+        journal: "OD",
+        entry: "1",
+        account: "701000",
+        credit: "100",
+        group: "REVENUE",
+      }),
+    ],
+  });
+  await rpc("lfo_finalize_fec_session", { session_id: conflictSession, issues: [] });
+  await rejects(
+    "select public.lfo_commit_fec_session($1::uuid, $2::jsonb)",
+    [userId, JSON.stringify({ session_id: conflictSession, financials: FINANCIALS })],
+    "Un import FEC a écrasé une période financière venue d'une autre source",
+    "BUSINESS_FINANCIALS_SOURCE_CONFLICT",
+  );
+
+  // Le refus ne doit RIEN altérer : ni la valeur existante, ni sa source, ni la provenance.
+  const untouched = await client.query<{
+    revenue: string;
+    source: string;
+    links: string;
+    count: string;
+  }>(
+    `select
+       (select revenue::text from public.business_financials where id = $1) as revenue,
+       (select source from public.business_financials where id = $1) as source,
+       (select count(*)::text from public.import_record_links where business_financials_id = $1) as links,
+       (select count(*)::text from public.business_financials where business_id = $2) as count`,
+    [manualId, manualBusinessId],
+  );
+  assert(
+    Number(untouched.rows[0].revenue) === 999_999,
+    "Le refus de conflit a modifié la valeur existante",
+  );
+  assert(
+    untouched.rows[0].source === "Comptes annuels verifies",
+    "Le refus de conflit a modifié la source existante",
+  );
+  assert(
+    untouched.rows[0].links === "0",
+    "Le refus de conflit a laissé une provenance derrière lui",
+  );
+  assert(
+    untouched.rows[0].count === "1",
+    "Le refus de conflit a créé une seconde période financière",
+  );
+
+  // Une période DÉJÀ issue d'un import comptable reste corrigeable : même source, la
+  // nouvelle lecture remplace l'ancienne.
+  await client.query(
+    `insert into public.import_record_links
+       (user_id, session_id, normalized_record_id, target_domain, transaction_id, business_financials_id)
+     values ($1, $2, null, 'BUSINESS_ACCOUNTING', null, $3)`,
+    [userId, conflictSession, manualId],
+  );
+  await rpc("lfo_commit_fec_session", { session_id: conflictSession, financials: FINANCIALS });
+  const corrected = await client.query<{ revenue: string; count: string }>(
+    `select
+       (select revenue::text from public.business_financials where id = $1) as revenue,
+       (select count(*)::text from public.business_financials where business_id = $2) as count`,
+    [manualId, manualBusinessId],
+  );
+  assert(
+    Number(corrected.rows[0].revenue) === 1200,
+    "Une correction FEC → FEC doit mettre à jour le même instantané",
+  );
+  assert(
+    corrected.rows[0].count === "1",
+    "Une correction FEC → FEC ne doit pas créer un second instantané",
+  );
+
+  businessId = originalBusinessId;
+
   // ── 6. Piste d'audit : lecture seule pour authenticated ──────────────────────────
   await client.query("reset role");
   await client.query("set local role authenticated");
@@ -926,7 +1134,7 @@ try {
   }
   if (succeeded) {
     console.log(
-      "Smoke FEC Corporate Acquisition : réception fragmentée atomique, brut rattaché ligne à ligne, ABSENT ≠ ZÉRO, devise sans code refusée, validation refusée sans couverture déclarée / sur écriture déséquilibrée / sur ligne illisible, fait Business et provenance écrits en une transaction, aucune valorisation produite, écritures gelées, piste d'audit en lecture seule sous authenticated, instantané non supprimable sans sa provenance, idempotence applicative et de base, réception remplaçable et abandonnable, montants signés persistés tels quels, déséquilibre recalculé malgré un décompte forgé, écriture hors exercice refusée, couverture sans bornes refusée, retry sans second instantané, formes de source refusées, cloisonnement. Aucune donnée persistée.",
+      "Smoke FEC Corporate Acquisition : réception fragmentée atomique, brut rattaché ligne à ligne, ABSENT ≠ ZÉRO, devise sans code refusée, validation refusée sans couverture déclarée / sur écriture déséquilibrée / sur ligne illisible, fait Business et provenance écrits en une transaction, aucune valorisation produite, écritures gelées, piste d'audit en lecture seule sous authenticated, instantané non supprimable sans sa provenance, idempotence applicative et de base, billet d'upload à chemin serveur, usage unique, expirant et cloisonné, réception remplaçable et abandonnable, conflit de sources refusé sans rien altérer, correction FEC → FEC autorisée, montants signés persistés tels quels, déséquilibre recalculé malgré un décompte forgé, écriture hors exercice refusée, couverture sans bornes refusée, retry sans second instantané, formes de source refusées, cloisonnement. Aucune donnée persistée.",
     );
   }
 }

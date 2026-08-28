@@ -3,15 +3,30 @@ import { NextResponse } from "next/server";
 import { requireAuthenticated } from "@/lib/auth";
 import { getFecRepository } from "@/lib/data/fec-repository";
 import {
-  ACCEPTED_FEC_EXTENSIONS,
   fecAnalyzeSchema,
   fecCommandSchema,
-  MAX_FEC_FILE_BYTES,
-  MAX_RETAINED_FEC_FILE_BYTES,
+  fecUploadTicketSchema,
 } from "@/lib/validation/fec-imports";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+/**
+ * ACQUISITION COMPTABLE — le fichier ne traverse JAMAIS cette route.
+ *
+ * Un FEC d'exercice pèse couramment plusieurs mégaoctets, et une fonction serverless
+ * plafonne le corps de requête entrant bien en dessous. Un fichier envoyé ici serait refusé
+ * par la plateforme AVANT que ce code s'exécute : la lecture à 150 000 lignes n'existerait
+ * pas en production, quelle que soit la qualité du parseur.
+ *
+ *   POST ?ticket=1   → le serveur ÉMET un billet et une URL de dépôt signée
+ *   (navigateur)     → PUT du fichier DIRECTEMENT au stockage privé
+ *   POST             → analyse, ne recevant qu'un identifiant de billet (quelques octets)
+ *   PATCH            → validation ou abandon, sans fichier : le serveur reprend le staging
+ *
+ * Aucun corps de requête de cette route ne porte donc de contenu de fichier, et aucun ne
+ * dépasse quelques centaines d'octets.
+ */
 
 function failure(error: unknown, fallback: string) {
   const unauthorized = error instanceof Error && error.message === "UNAUTHORIZED";
@@ -41,35 +56,31 @@ export async function GET(request: Request) {
 }
 
 /**
- * Dépôt d'un FEC : DRY-RUN. Les écritures sont mises en staging et le brut est conservé,
- * mais AUCUN fait Business n'est écrit — la validation est un acte distinct (PATCH).
+ * `?ticket=1` : émission d'un billet de dépôt.
+ * Sinon : DRY-RUN comptable sur le fichier déjà déposé.
+ *
+ * Les deux corps sont du JSON de quelques octets. Le contenu du fichier n'apparaît dans
+ * aucun des deux.
  */
 export async function POST(request: Request) {
   try {
     await requireAuthenticated();
-    const formData = await request.formData();
-    const file = formData.get("file");
-    if (!(file instanceof File) || file.size === 0) {
-      return NextResponse.json({ error: "Fichier absent ou vide." }, { status: 400 });
-    }
-    if (file.size > MAX_FEC_FILE_BYTES) {
-      return NextResponse.json(
-        { error: `Fichier supérieur à ${MAX_FEC_FILE_BYTES / (1024 * 1024)} Mo.` },
-        { status: 400 },
-      );
-    }
-    const lowerName = file.name.toLowerCase();
-    if (!ACCEPTED_FEC_EXTENSIONS.some((extension) => lowerName.endsWith(extension))) {
-      return NextResponse.json(
-        { error: `Extension non acceptée. Formats lus : ${ACCEPTED_FEC_EXTENSIONS.join(", ")}.` },
-        { status: 400 },
-      );
+    const wantsTicket = new URL(request.url).searchParams.get("ticket") === "1";
+    const body = await request.json().catch(() => null);
+
+    if (wantsTicket) {
+      const parsed = fecUploadTicketSchema.safeParse(body);
+      if (!parsed.success) {
+        return NextResponse.json(
+          { error: parsed.error.issues[0]?.message ?? "Demande de dépôt invalide" },
+          { status: 400 },
+        );
+      }
+      const ticket = await getFecRepository().issueUploadTicket(parsed.data);
+      return NextResponse.json(ticket, { status: 201 });
     }
 
-    const rawOptions = formData.get("options");
-    const parsed = fecAnalyzeSchema.safeParse(
-      typeof rawOptions === "string" ? JSON.parse(rawOptions) : null,
-    );
+    const parsed = fecAnalyzeSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Paramètres d'import invalides", issues: parsed.error.flatten() },
@@ -77,24 +88,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Le plafond d'ANALYSE et le plafond de CONSERVATION diffèrent, et l'écart se dit dès
-    // le dépôt : découvrir à la validation qu'un fichier n'est pas archivable, alors que le
-    // fait est déjà écrit, est le mauvais moment pour l'apprendre.
-    if (parsed.data.retainFile && file.size > MAX_RETAINED_FEC_FILE_BYTES) {
-      return NextResponse.json(
-        {
-          error: `Ce fichier de ${Math.round(file.size / (1024 * 1024))} Mo peut être analysé mais pas conservé : le coffre privé est limité à ${MAX_RETAINED_FEC_FILE_BYTES / (1024 * 1024)} Mo. Décochez la conservation du fichier pour l'importer.`,
-        },
-        { status: 400 },
-      );
-    }
-
-    const preview = await getFecRepository().analyze(parsed.data, {
-      name: file.name,
-      contentType: "text/plain",
-      size: file.size,
-      bytes: new Uint8Array(await file.arrayBuffer()),
-    });
+    const preview = await getFecRepository().analyze(parsed.data);
     return NextResponse.json(preview, { status: 201 });
   } catch (error) {
     return failure(error, "Analyse de FEC impossible");
@@ -104,6 +98,9 @@ export async function POST(request: Request) {
 /**
  * Validation ou abandon d'une session comptable. Seul endroit qui écrit un fait.
  *
+ * Aucun fichier n'accompagne la commande : quand la session a demandé sa conservation, le
+ * serveur reprend le contenu depuis l'objet de staging privé qu'il a lui-même écrit.
+ *
  * L'état écrit n'est PAS celui que le client a reçu au preview : il est reconstruit depuis
  * les écritures persistées. Une charge forgée ne peut donc pas écrire un chiffre qu'aucune
  * écriture ne porte.
@@ -111,31 +108,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     await requireAuthenticated();
-    const contentType = request.headers.get("content-type") ?? "";
-    let command: unknown;
-    let file: { name: string; contentType: string; size: number; bytes: Uint8Array } | undefined;
-
-    if (contentType.includes("multipart/form-data")) {
-      const formData = await request.formData();
-      const raw = formData.get("command");
-      command = typeof raw === "string" ? JSON.parse(raw) : null;
-      const upload = formData.get("file");
-      if (upload instanceof File && upload.size > 0) {
-        if (upload.size > MAX_FEC_FILE_BYTES) {
-          return NextResponse.json({ error: "Fichier trop volumineux." }, { status: 400 });
-        }
-        file = {
-          name: upload.name,
-          contentType: "text/plain",
-          size: upload.size,
-          bytes: new Uint8Array(await upload.arrayBuffer()),
-        };
-      }
-    } else {
-      command = await request.json().catch(() => null);
-    }
-
-    const parsed = fecCommandSchema.safeParse(command);
+    const parsed = fecCommandSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Commande d'import invalide", issues: parsed.error.flatten() },
@@ -144,7 +117,7 @@ export async function PATCH(request: Request) {
     }
     const repository = getFecRepository();
     if (parsed.data.action === "commit") {
-      return NextResponse.json(await repository.commit(parsed.data.sessionId, file));
+      return NextResponse.json(await repository.commit(parsed.data.sessionId));
     }
     return NextResponse.json({ sessionId: await repository.discard(parsed.data.sessionId) });
   } catch (error) {

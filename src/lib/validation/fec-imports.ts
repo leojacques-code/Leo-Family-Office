@@ -40,8 +40,46 @@ const date = z
     return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
   }, "Date inexistante au calendrier");
 
+/**
+ * Demande d'un billet d'upload. Le client déclare la TAILLE et le NOM du fichier ; il ne
+ * choisit ni le chemin de stockage, ni l'identifiant du billet — les deux sont calculés
+ * côté serveur. Une API qui croit un chemin fourni par son appelant laisse lire, ou
+ * écraser, le fichier d'un autre.
+ */
+export const fecUploadTicketSchema = z
+  .object({
+    // L'extension est contrôlée ICI : le fichier ne traverse plus la route, donc c'est le
+    // seul moment où le serveur voit son nom avant qu'un objet soit déposé.
+    fileName: z
+      .string()
+      .min(1)
+      .max(240)
+      .refine(
+        (value) =>
+          ACCEPTED_FEC_EXTENSIONS.some((extension) => value.toLowerCase().endsWith(extension)),
+        `Extension non acceptée. Formats lus : ${ACCEPTED_FEC_EXTENSIONS.join(", ")}.`,
+      ),
+    byteSize: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_FEC_FILE_BYTES, `Fichier supérieur à ${MAX_FEC_FILE_BYTES / (1024 * 1024)} Mo.`),
+    /**
+     * L'utilisateur demandera-t-il la conservation du fichier ? Déclaré ici pour que le
+     * refus tombe AVANT le dépôt, et non après l'écriture des faits.
+     */
+    retainFile: z.boolean(),
+  })
+  .strict()
+  .refine((value) => value.retainFile === false || value.byteSize <= MAX_RETAINED_FEC_FILE_BYTES, {
+    message: `Ce fichier peut être analysé mais pas conservé : le coffre privé est limité à ${MAX_RETAINED_FEC_FILE_BYTES / (1024 * 1024)} Mo. Décochez la conservation du fichier.`,
+  });
+
 export const fecAnalyzeSchema = z
   .object({
+    // Le fichier est DÉJÀ au stockage privé : cette requête n'en porte qu'une référence
+    // émise par le serveur. Aucun chemin, aucun contenu, aucune taille ne vient du client.
+    uploadTicketId: z.uuid(),
     businessId: z.uuid(),
     /**
      * Devise de TENUE, déclarée. Le FEC n'en porte pas : la supposer serait un taux de

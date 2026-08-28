@@ -30,7 +30,12 @@ Sources primaires effectivement consultées :
 
 - arrêté du 29 juillet 2013 modifiant l'article A47 A-1 du Livre des procédures fiscales
   (texte Légifrance) ;
-- Plan Comptable Général, règlement ANC, version applicable au 1er janvier 2025.
+- Plan Comptable Général, règlement ANC, **version consolidée au 1er janvier 2026**.
+
+Le mapping PCG de cette V1 correspond à la nomenclature de référence **actuelle**. Il n'est
+pas universel dans le temps : les différences historiques de plan de comptes devront être
+versionnées si un cas réel d'import ancien l'exige. Aucun moteur PCG historique n'est
+construit ici.
 
 Les dix-huit champs réglementaires, dans leur ordre réglementaire :
 
@@ -65,10 +70,16 @@ SCHÉMA A   … | EcritureLib | Debit   | Credit | EcritureLet | …
 SCHÉMA B   … | EcritureLib | Montant | Sens   | EcritureLet | …
 ```
 
-`Sens` vaut `D`/`C` ou `+1`/`-1`. Les deux schémas sont lus. Dans le schéma B, le montant
-est normalisé vers la représentation interne débit/crédit — une **traduction**, pas une
-interprétation : le brut conserve la forme d'origine, et c'est lui qui répond plus tard à
-« qu'est-ce que la comptabilité a écrit ? ».
+`Sens` vaut `D`, `C`, `+1` ou `-1` — quatre valeurs, et quatre seulement, le signe de `+1`
+et `-1` étant présent sans espace. Un `1` nu n'est **pas** une valeur réglementaire : il est
+lu, parce que son sens ne fait aucun doute et que refuser un exercice entier pour un signe
+absent le rendrait inutilisable, mais il est **signalé** (`FEC_AMOUNT_SENS_NON_STANDARD`) et
+n'est jamais présenté comme conforme. Même doctrine que le point-virgule et que les formats
+de date hors norme.
+
+Les deux schémas sont lus. Dans le schéma B, le montant est normalisé vers la représentation
+interne débit/crédit — une **traduction**, pas une interprétation : le brut conserve la forme
+d'origine, et c'est lui qui répond plus tard à « qu'est-ce que la comptabilité a écrit ? ».
 
 Un `Sens` inconnu ou absent **bloque la ligne**. Le deviner inverserait un jour une charge
 et un produit, sans laisser de trace.
@@ -108,7 +119,10 @@ différence.
 
 L'en-tête est résolu **par nom**, pas par position : un fichier dont les colonnes sont dans
 un ordre inhabituel est lu, et l'écart à l'ordre réglementaire est signalé plutôt que
-d'être une raison de refus. À l'inverse, l'absence d'un champ **structurant** est une
+d'être une raison de refus. Le contrôle d'ordre porte sur le schéma **retenu**, avec
+`Montant` en position 12 et `Sens` en 13 : un fichier conforme n'est donc pas signalé comme
+désordonné, et un fichier où ces deux colonnes sont réellement ailleurs ne passe pas sans un
+mot. À l'inverse, l'absence d'un champ **structurant** est une
 **erreur** — sans journal, sans numéro d'écriture, sans date ou sans compte, il n'y a pas
 d'écriture à lire, et il n'y a rien à deviner.
 
@@ -348,6 +362,36 @@ synchrone.
 Business Equity n'est pas modifié : aucune valorisation, aucun multiple, aucun retraitement
 n'est produit par cette couche.
 
+### Conflit de sources : jamais d'arbitrage silencieux
+
+```text
+CONFLIT DE SOURCES  ≠  CHOIX SILENCIEUX D'UNE SOURCE
+```
+
+`lfo_record_business_financials` converge sur (société, date de clôture). Sans garde-fou,
+importer le FEC 2025 **écraserait sans un mot** une période saisie à la main, des comptes
+annuels vérifiés ou une autre source externe — et rien, dans la ligne écrite, ne permettrait
+ensuite de s'en apercevoir.
+
+`lfo_commit_fec_session` cherche donc, avant d'écrire, une période financière existante pour
+(propriétaire, société, clôture) :
+
+| Situation | Décision |
+|---|---|
+| aucune période existante | création normale |
+| période portant déjà une provenance `BUSINESS_ACCOUNTING` | **correction FEC → FEC autorisée** |
+| période sans provenance d'import comptable | **REFUS** `BUSINESS_FINANCIALS_SOURCE_CONFLICT` |
+
+La preuve est la **provenance**, pas un libellé de source : un lien `BUSINESS_ACCOUNTING` vers
+cette ligne. Son absence signifie une autre origine, et l'import s'arrête sans rien altérer —
+ni la valeur, ni la source, ni la provenance existantes.
+
+Ce n'est pas un moteur de fusion de sources, et ce n'en sera pas un ici : pour une V1, un
+**refus sûr** vaut mieux qu'un arbitrage automatique. La résolution de précédence
+multi-source est un chantier distinct, et il demandera une décision humaine. Le contrôle vit
+dans la RPC : dans l'interface ou le repository, il se contournerait par le premier appel
+direct.
+
 ## 10. Ce que la base porte
 
 ```text
@@ -376,6 +420,59 @@ TypeScript calcule.
 Une écriture committée est **gelée** : ni modifiable, ni supprimable, même sous
 `service_role`. `fec_entry_lines` rejoint la piste d'audit en lecture seule — `authenticated`
 n'y a que le `SELECT`, et le gate de schéma refuse toute réouverture de ce privilège.
+
+## 10 bis. Le fichier ne traverse pas la fonction serveur
+
+Une fonction serverless plafonne le corps de requête ENTRANT bien en dessous de la taille
+d'un FEC d'exercice. Envoyer le fichier à la route d'API le condamnerait à être refusé par la
+plateforme **avant que le code s'exécute** : la lecture à 150 000 lignes n'existerait pas en
+production, quelle que soit la qualité du parseur, et les mesures de performance du §13
+seraient trompeuses — le moteur saurait traiter un fichier qui ne peut pas l'atteindre.
+
+Le chemin est donc :
+
+```text
+NAVIGATEUR  → POST /api/imports/fec?ticket=1   { fileName, byteSize, retainFile }
+SERVEUR     → lfo_issue_import_upload_ticket   chemin CALCULÉ, URL signée, expiration
+NAVIGATEUR  → PUT <url signée>                 le FICHIER, directement au stockage privé
+NAVIGATEUR  → POST /api/imports/fec            { uploadTicketId, … }  ← quelques octets
+SERVEUR     → consomme le billet, télécharge l'objet, calcule le SHA-256, analyse, stage
+```
+
+Aucun corps de requête de cette route ne porte de contenu de fichier. La validation non plus
+ne le retransmet pas : quand la session a demandé la conservation, le serveur **reprend** le
+contenu depuis l'objet de staging qu'il a lui-même écrit.
+
+### Ce que le client ne décide pas
+
+```text
+CHEMIN DE STOCKAGE   calculé par la base : <propriétaire>/import-staging/<billet>
+IDENTIFIANT          généré par la base
+EMPREINTE SHA-256    calculée par le serveur sur le contenu RÉELLEMENT déposé
+TAILLE               mesurée sur l'objet, et confrontée à la taille déclarée
+```
+
+Une API qui croit un chemin fourni par son appelant laisse lire — ou écraser — le fichier
+d'un autre propriétaire. Le billet est donc **émis par le serveur**, **à usage unique** (sous
+verrou de ligne, pour que deux analyses simultanées ne puissent pas conclure toutes les deux
+qu'il est libre), **expirant**, et **cloisonné** : un billet d'un autre propriétaire est
+introuvable, même en connaissant son UUID.
+
+La taille déclarée à l'émission et la taille mesurée à la lecture doivent coïncider. Une
+déclaration n'est pas une mesure, et c'est la seconde qui décide de ce qui est analysable et
+de ce qui est archivable.
+
+### Cycle de vie de l'objet de staging
+
+```text
+retainFile = false  →  supprimé dès que RAW + fec_entry_lines sont persistés
+retainFile = true   →  conservé jusqu'à la validation, recopié au coffre content-addressed,
+                       puis supprimé
+abandon             →  supprimé avant l'abandon de la session
+```
+
+Aucun objet n'est jamais public. Un échec de suppression d'un objet résiduel n'est pas
+remonté comme une erreur : le fait est écrit, et un objet oublié n'altère aucune vérité.
 
 ## 11. Réception par lots
 
@@ -469,9 +566,9 @@ CONSERVATION   8 Mo (capacité réelle du coffre privé)
 Les deux plafonds diffèrent, et les confondre serait pire que les séparer. Un FEC de 15 Mo est
 parfaitement analysable ; il n'est simplement pas archivable ici.
 
-La demande de conservation est donc refusée **en amont** : au dépôt du fichier, et à nouveau
-avant toute écriture canonique. Le refus porte sur la conservation, jamais sur l'import —
-décocher la conservation suffit à valider.
+La demande de conservation est donc refusée **en amont**, à l'émission du billet : le refus
+tombe avant que le moindre octet soit déposé, et a fortiori avant toute écriture canonique.
+Il porte sur la conservation, jamais sur l'import — décocher la conservation suffit.
 
 Et si un dépôt échoue malgré tout **après** l'écriture du fait, la validation ne se présente
 pas comme un échec :
@@ -500,6 +597,19 @@ committée retourne son identifiant sans rien réécrire.
 - la correction d'un fichier dont le séparateur ou le format de date s'écarte du texte : LFO
   le lit et le signale, il ne le réécrit pas.
 
+## 14 bis. Limite de vérification restante
+
+Le chemin de dépôt direct est **structurel** : la route d'API ne lit plus aucun fichier, et
+ses trois corps de requête sont du JSON de quelques centaines d'octets. Cela se vérifie par
+lecture du code, et les tests de schéma le verrouillent — un contenu, un chemin ou une
+empreinte envoyés par un client sont refusés, pas ignorés.
+
+En revanche, le **round-trip réel** vers le stockage privé n'est pas couvert par le gate
+local : celui-ci ne monte que PostgreSQL, sans émulateur de Storage. Le cycle de vie du
+billet est donc testé en base (émission, chemin calculé, usage unique, expiration,
+cloisonnement), mais le dépôt d'un fichier de plus de 5 Mo par URL signée reste à valider sur
+un environnement de preview. C'est une étape humaine, et elle n'est pas faite.
+
 ## 15. Ce qui n'est pas fait, et pourquoi
 
 - **aucune trajectoire projetée** depuis un FEC : le domaine Business Equity n'entre pas
@@ -510,6 +620,7 @@ committée retourne son identifiant sans rien réécrire.
   et déclarés complets. Le chantier est distinct ;
 - **aucun rapprochement** entre la trésorerie comptable de la société et un compte bancaire
   personnel observé : ce sont deux entités économiques distinctes ;
+- **aucune résolution de précédence multi-source** : un conflit est refusé, pas arbitré ;
 - **aucune détection de doublon entre lignes** de FEC. La déduplication de la fondation
   s'applique au niveau du FICHIER (empreinte SHA-256) et non de la ligne, et c'est
   volontaire : deux écritures identiques dans une comptabilité sont un fait comptable

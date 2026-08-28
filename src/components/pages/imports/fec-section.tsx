@@ -10,6 +10,7 @@ import type {
   FecCommitResult,
   FecPreview,
   FecPreviewLine,
+  FecUploadTicket,
 } from "@/lib/data/fec-contracts";
 import type { ImportRowStatus } from "@/lib/data/import-contracts";
 
@@ -90,6 +91,8 @@ function FecSection({ businesses, refresh }: FecSectionProps) {
   const [preview, setPreview] = useState<FecPreview | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [showLines, setShowLines] = useState(false);
+  /** Étape du dépôt. Le dire évite de laisser croire qu'un long upload est un blocage. */
+  const [stage, setStage] = useState<"IDLE" | "TICKET" | "UPLOAD" | "ANALYZE">("IDLE");
 
   const businessId = chosenBusinessId ?? businesses[0]?.id ?? "";
   const selected = businesses.find((business) => business.id === businessId) ?? null;
@@ -105,6 +108,15 @@ function FecSection({ businesses, refresh }: FecSectionProps) {
     [preview],
   );
 
+  /**
+   * Dépôt puis analyse, en TROIS temps.
+   *
+   * Le fichier ne passe JAMAIS par `/api/imports/fec`. Une fonction serverless plafonne le
+   * corps de requête entrant bien en dessous de la taille d'un FEC d'exercice : un envoi
+   * par la route serait refusé par la plateforme avant que le serveur voie quoi que ce
+   * soit. Le navigateur demande donc un billet, dépose le fichier DIRECTEMENT au stockage
+   * privé, puis n'envoie au serveur qu'une référence de quelques octets.
+   */
   async function analyze(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!pendingFile) {
@@ -114,50 +126,82 @@ function FecSection({ businesses, refresh }: FecSectionProps) {
     setBusy(true);
     setError("");
     setNotice("");
-    const body = new FormData();
-    body.set("file", pendingFile);
-    body.set(
-      "options",
-      JSON.stringify({
-        businessId,
-        currency: currency.trim().toUpperCase(),
-        fiscalYearStart: fiscalYearStart.length === 10 ? fiscalYearStart : null,
-        fiscalYearEnd: fiscalYearEnd.length === 10 ? fiscalYearEnd : null,
-        coverageDeclared,
-        retainFile,
-      }),
-    );
-    const response = await fetch("/api/imports/fec", { method: "POST", body });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setError(payload.error ?? "Analyse impossible");
-      setPreview(null);
-    } else {
-      setPreview(payload as FecPreview);
-      setShowLines(false);
+    setStage("TICKET");
+    try {
+      // 1. Billet : le serveur calcule le chemin et signe l'autorisation de dépôt.
+      const ticketResponse = await fetch("/api/imports/fec?ticket=1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: pendingFile.name,
+          byteSize: pendingFile.size,
+          retainFile,
+        }),
+      });
+      const ticket = await ticketResponse.json().catch(() => ({}));
+      if (!ticketResponse.ok) {
+        setError(ticket.error ?? "Dépôt impossible");
+        setPreview(null);
+        return;
+      }
+
+      // 2. Dépôt DIRECT au stockage privé. Cette requête ne traverse aucune fonction
+      //    serveur : c'est ce qui rend un FEC de plusieurs dizaines de mégaoctets possible.
+      setStage("UPLOAD");
+      const uploaded = await fetch((ticket as FecUploadTicket).uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "text/plain" },
+        body: pendingFile,
+      });
+      if (!uploaded.ok) {
+        setError(
+          `Le dépôt du fichier a échoué (${uploaded.status}). Rien n'a été analysé, rien n'a été écrit.`,
+        );
+        setPreview(null);
+        return;
+      }
+
+      // 3. Analyse : la requête ne porte qu'un identifiant de billet.
+      setStage("ANALYZE");
+      const response = await fetch("/api/imports/fec", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uploadTicketId: (ticket as FecUploadTicket).ticketId,
+          businessId,
+          currency: currency.trim().toUpperCase(),
+          fiscalYearStart: fiscalYearStart.length === 10 ? fiscalYearStart : null,
+          fiscalYearEnd: fiscalYearEnd.length === 10 ? fiscalYearEnd : null,
+          coverageDeclared,
+          retainFile,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(payload.error ?? "Analyse impossible");
+        setPreview(null);
+      } else {
+        setPreview(payload as FecPreview);
+        setShowLines(false);
+      }
+    } finally {
+      setStage("IDLE");
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   async function command(action: "commit" | "discard") {
     if (!preview) return;
     setBusy(true);
     setError("");
-    const request = { action, sessionId: preview.sessionId };
-
-    // Le fichier accompagne la VALIDATION, pas l'analyse : sa copie au coffre n'a lieu
-    // qu'après l'écriture du fait, donc une analyse abandonnée n'en laisse aucune.
-    const sendsFile = action === "commit" && retainFile && pendingFile !== null;
-    const body = sendsFile ? new FormData() : JSON.stringify(request);
-    if (body instanceof FormData) {
-      body.set("command", JSON.stringify(request));
-      body.set("file", pendingFile!);
-    }
+    // Aucun fichier n'accompagne la commande : quand la session a demandé sa conservation,
+    // le serveur reprend le contenu depuis l'objet de staging privé qu'il a lui-même écrit.
+    // La copie au coffre n'a lieu qu'après l'écriture du fait, donc une analyse abandonnée
+    // n'en laisse aucune.
     const response = await fetch("/api/imports/fec", {
       method: "PATCH",
-      ...(body instanceof FormData
-        ? { body }
-        : { headers: { "Content-Type": "application/json" }, body }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, sessionId: preview.sessionId }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) setError(payload.error ?? "Commande impossible");
@@ -198,6 +242,11 @@ function FecSection({ businesses, refresh }: FecSectionProps) {
           </span>
           <h2>Déposer un FEC</h2>
           <p>Fichier des écritures comptables · TXT, CSV ou TSV · 24 Mo analysés, 8 Mo conservés</p>
+          <small className="field-hint">
+            Le fichier est déposé directement au coffre privé, sans passer par le serveur
+            d’application : c’est ce qui rend un exercice complet de plusieurs dizaines de
+            mégaoctets réellement importable.
+          </small>
           <input
             id="fec-file"
             type="file"
@@ -295,7 +344,13 @@ function FecSection({ businesses, refresh }: FecSectionProps) {
             className="button secondary"
             disabled={busy || !businessId || !pendingFile || currency.trim().length !== 3}
           >
-            {busy ? "Analyse…" : "Analyser sans rien écrire"}
+            {stage === "TICKET"
+              ? "Préparation du dépôt…"
+              : stage === "UPLOAD"
+                ? "Dépôt du fichier…"
+                : stage === "ANALYZE"
+                  ? "Analyse…"
+                  : "Analyser sans rien écrire"}
           </button>
           {error ? <div className="form-error">{error}</div> : null}
           {notice ? <div className="form-notice">{notice}</div> : null}

@@ -277,6 +277,10 @@ Aucun état reconstruit n'est persisté : `fec_entry_lines` porte les écritures
 
 La frontière de confiance est explicite. Le client n'envoie qu'une action, un identifiant de session et éventuellement le fichier ; le schéma `.strict()` REFUSE tout montant financier au lieu de l'ignorer. Le serveur reconstruit les états en TypeScript depuis le staging, et la RPC `service_role` persiste atomiquement. PostgreSQL ne recalcule ni CA, ni EBE, ni BFR — ces formules resteraient deux vérités à synchroniser. Ce que la base contrôle, c'est l'INTÉGRITÉ de la source : `lfo_fec_entry_balance` dérive des lignes le nombre d'écritures et de déséquilibres, et ni le finalize ni le commit ne font confiance à un décompte fourni par l'appelant.
 
+Le FICHIER ne traverse PAS la fonction serveur : une fonction serverless plafonne le corps de requête entrant bien en dessous de la taille d'un FEC d'exercice, donc un envoi par la route serait refusé par la plateforme avant que le code s'exécute — la lecture à 150 000 lignes n'existerait pas en production. Le navigateur demande un billet, dépose le fichier DIRECTEMENT au stockage privé par URL signée, puis n'envoie qu'une référence de quelques octets. Le chemin de stockage est calculé en base, le billet est à usage unique, expirant et cloisonné, et l'empreinte SHA-256 est calculée par le serveur sur le contenu réellement déposé.
+
+CONFLIT DE SOURCES ≠ CHOIX SILENCIEUX D'UNE SOURCE : une période financière déjà renseignée par une autre origine n'est jamais écrasée. La preuve d'une origine comptable est la provenance, pas un libellé ; une correction FEC → FEC est autorisée, tout le reste est refusé. Pour une V1, un refus sûr vaut mieux qu'un arbitrage automatique.
+
 ANALYSER ≠ ARCHIVER : l'analyse accepte 24 Mo, le coffre privé 8. La conservation d'un fichier trop lourd est refusée AVANT toute écriture canonique, et un échec de dépôt APRÈS l'écriture ne se présente jamais comme un échec de validation — `commitStatus` et `documentStatus` sont deux statuts distincts.
 
 Détail complet, format supporté, plafonds mesurés et limites : `docs/FEC_ACQUISITION.md`.

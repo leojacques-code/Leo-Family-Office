@@ -25,8 +25,9 @@ import type {
   FecDocumentStatus,
   FecPreview,
   FecPreviewLine,
+  FecUploadTicket,
 } from "@/lib/data/fec-contracts";
-import { MAX_RETAINED_FEC_FILE_BYTES } from "@/lib/validation/fec-imports";
+import { MAX_FEC_FILE_BYTES, MAX_RETAINED_FEC_FILE_BYTES } from "@/lib/validation/fec-imports";
 import type { ImportFileInput } from "@/lib/data/import-repository";
 import { readAllPages } from "@/lib/data/pagination";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
@@ -38,6 +39,16 @@ const PARSER = "fec";
 const PARSER_VERSION = "1";
 const PROVIDER = "FEC_FR";
 const ADAPTER_VERSION = `${PARSER}/${PARSER_VERSION}`;
+
+/** Le format réglementaire est un fichier texte à plat. */
+const FEC_CONTENT_TYPE = "text/plain";
+
+/**
+ * Durée de vie d'un billet d'upload. Assez longue pour déposer un fichier de plusieurs
+ * dizaines de mégaoctets sur une connexion médiocre, assez courte pour qu'un billet oublié
+ * ne reste pas une porte ouverte.
+ */
+const UPLOAD_TICKET_TTL_MINUTES = 30;
 
 /**
  * Taille d'un lot de réception.
@@ -115,12 +126,22 @@ function financialsPayload(
  */
 export interface FecRepository {
   readonly adapter: "supabase";
-  analyze(request: FecAnalyzeRequest, file: ImportFileInput): Promise<FecPreview>;
   /**
-   * Valide une session. `file` n'est nécessaire que si la session a demandé la conservation
-   * du fichier : la copie au coffre n'a lieu qu'ICI, après l'écriture du fait.
+   * Émet un billet d'upload : le navigateur déposera le fichier DIRECTEMENT au stockage
+   * privé, et la route d'analyse n'en recevra qu'une référence.
    */
-  commit(sessionId: string, file?: ImportFileInput): Promise<FecCommitResult>;
+  issueUploadTicket(input: {
+    fileName: string;
+    byteSize: number;
+    retainFile: boolean;
+  }): Promise<FecUploadTicket>;
+  /** Analyse le fichier déjà déposé, désigné par son billet. Aucun contenu ne transite. */
+  analyze(request: FecAnalyzeRequest): Promise<FecPreview>;
+  /**
+   * Valide une session. Le fichier n'est PAS retransmis : quand la session a demandé sa
+   * conservation, le serveur le reprend depuis l'objet de staging qu'il a lui-même écrit.
+   */
+  commit(sessionId: string): Promise<FecCommitResult>;
   discard(sessionId: string): Promise<string>;
   getSessionLines(sessionId: string): Promise<FecPreviewLine[]>;
 }
@@ -172,8 +193,127 @@ export function createFecRepository(): FecRepository {
     };
   }
 
-  async function analyze(request: FecAnalyzeRequest, file: ImportFileInput): Promise<FecPreview> {
+  /**
+   * Billet d'upload. Le chemin est calculé par la RPC à partir du propriétaire et de
+   * l'identifiant du billet ; l'URL signée n'autorise qu'un dépôt, à ce chemin, et expire.
+   */
+  async function issueUploadTicket(input: {
+    fileName: string;
+    byteSize: number;
+    retainFile: boolean;
+  }): Promise<FecUploadTicket> {
+    const ticketId = unwrap(
+      await db.rpc("lfo_issue_import_upload_ticket", {
+        p_user_id: user,
+        p_payload: {
+          domain: "BUSINESS_ACCOUNTING",
+          file_name: input.fileName.slice(0, 240),
+          content_type: FEC_CONTENT_TYPE,
+          byte_size: input.byteSize,
+          ttl_minutes: UPLOAD_TICKET_TTL_MINUTES,
+        },
+      }),
+      "émission du billet d'upload",
+    ) as string;
+
+    const rows = unwrap(
+      await db
+        .from("import_upload_tickets")
+        .select("storage_path, expires_at")
+        .eq("user_id", user)
+        .eq("id", ticketId),
+      "lecture du billet d'upload",
+    ) as Row[];
+    const ticket = rows[0];
+    if (!ticket) throw new Error("Billet d'upload introuvable après émission");
+    const storagePath = str(ticket.storage_path);
+
+    const signed = await db.storage.from(DOCUMENTS_BUCKET).createSignedUploadUrl(storagePath);
+    if (signed.error || !signed.data) {
+      throw new Error(`Supabase URL de dépôt : ${signed.error?.message ?? "réponse vide"}`);
+    }
+
+    return {
+      ticketId,
+      uploadUrl: signed.data.signedUrl,
+      storagePath,
+      expiresAt: str(ticket.expires_at),
+      retainable: input.byteSize <= MAX_RETAINED_FEC_FILE_BYTES,
+    };
+  }
+
+  /**
+   * Reprend l'objet de staging désigné par un billet.
+   *
+   * Le chemin vient de la BASE, jamais de la requête. Le billet est consommé d'abord : à
+   * usage unique, sous verrou de ligne, de sorte que deux analyses simultanées du même
+   * dépôt ne puissent pas conclure toutes les deux qu'il est libre.
+   */
+  async function claimStagedFile(
+    ticketId: string,
+  ): Promise<{ storagePath: string; fileName: string; bytes: Uint8Array }> {
+    unwrap(
+      await db.rpc("lfo_consume_import_upload_ticket", {
+        p_user_id: user,
+        p_ticket_id: ticketId,
+      }),
+      "consommation du billet d'upload",
+    );
+
+    const rows = unwrap(
+      await db
+        .from("import_upload_tickets")
+        .select("storage_path, file_name, byte_size")
+        .eq("user_id", user)
+        .eq("id", ticketId),
+      "lecture du billet d'upload",
+    ) as Row[];
+    const ticket = rows[0];
+    if (!ticket) throw new Error("Billet d'upload introuvable");
+
+    const storagePath = str(ticket.storage_path);
+    const downloaded = await db.storage.from(DOCUMENTS_BUCKET).download(storagePath);
+    if (downloaded.error || !downloaded.data) {
+      throw new Error(
+        `Fichier de staging introuvable : le dépôt n'a peut-être pas abouti (${
+          downloaded.error?.message ?? "réponse vide"
+        }).`,
+      );
+    }
+    const bytes = new Uint8Array(await downloaded.data.arrayBuffer());
+
+    // La taille annoncée à l'émission du billet et la taille RÉELLE de l'objet déposé
+    // doivent coïncider : une déclaration n'est pas une mesure, et c'est la seconde qui
+    // décide de ce qui est analysable et de ce qui est archivable.
+    const declared = finiteNumber(ticket.byte_size, "import_upload_tickets.byte_size");
+    if (bytes.byteLength !== declared) {
+      throw new Error(
+        `Le fichier déposé pèse ${bytes.byteLength} octets, ${declared} avaient été annoncés. Redéposez-le.`,
+      );
+    }
+    if (bytes.byteLength > MAX_FEC_FILE_BYTES) {
+      throw new Error(`Fichier supérieur à ${MAX_FEC_FILE_BYTES / (1024 * 1024)} Mo.`);
+    }
+
+    return { storagePath, fileName: str(ticket.file_name) || "fec.txt", bytes };
+  }
+
+  /** Supprime un objet de staging. Un échec ne remet en cause aucun fait écrit. */
+  async function dropStagedFile(storagePath: string): Promise<void> {
+    await db.storage.from(DOCUMENTS_BUCKET).remove([storagePath]);
+  }
+
+  async function analyze(request: FecAnalyzeRequest): Promise<FecPreview> {
     const business = await businessOf(request.businessId);
+    const staged = await claimStagedFile(request.uploadTicketId);
+    const file: ImportFileInput = {
+      name: staged.fileName,
+      contentType: FEC_CONTENT_TYPE,
+      size: staged.bytes.byteLength,
+      bytes: staged.bytes,
+    };
+    // L'empreinte est calculée par le SERVEUR sur le contenu réellement déposé. Une
+    // empreinte fournie par le client ne prouverait rien de ce que le stockage contient.
     const fileHash = createHash("sha256").update(file.bytes).digest("hex");
     const coverage: FecCoverage = request.coverageDeclared ? "DECLARED_COMPLETE" : "OBSERVED_ONLY";
 
@@ -217,6 +357,8 @@ export function createFecRepository(): FecRepository {
             fiscal_year_start: request.fiscalYearStart,
             fiscal_year_end: request.fiscalYearEnd,
             coverage_declared: request.coverageDeclared,
+            staging_storage_path: staged.storagePath,
+            upload_ticket_id: request.uploadTicketId,
             declared_period_start: request.fiscalYearStart,
             declared_period_end: request.fiscalYearEnd,
             issues: analysis.issues,
@@ -268,6 +410,20 @@ export function createFecRepository(): FecRepository {
       await db.from("import_sessions").select("source_id").eq("user_id", user).eq("id", sessionId),
       "lecture de la session comptable",
     ) as Row[];
+
+    // Le brut et les écritures sont persistés : l'objet de staging n'a plus de raison
+    // d'exister quand l'utilisateur n'a pas demandé la conservation. Le supprimer ici plutôt
+    // que « plus tard » évite un coffre qui accumule des copies dont personne ne veut.
+    if (!request.retainFile) {
+      await dropStagedFile(staged.storagePath);
+      unwrap(
+        await db.rpc("lfo_clear_import_staging_path", {
+          p_user_id: user,
+          p_session_id: sessionId,
+        }),
+        "oubli du chemin de staging",
+      );
+    }
 
     const lines = await getSessionLines(sessionId);
     const candidate = toBusinessFinancialCandidate(analysis.statement);
@@ -459,7 +615,7 @@ export function createFecRepository(): FecRepository {
     );
   }
 
-  async function commit(sessionId: string, file?: ImportFileInput): Promise<FecCommitResult> {
+  async function commit(sessionId: string): Promise<FecCommitResult> {
     const statement = await rebuildStatement(sessionId);
     const candidate = toBusinessFinancialCandidate(statement);
     if (!candidate) {
@@ -469,19 +625,6 @@ export function createFecRepository(): FecRepository {
     }
     if (candidate.blockers.length > 0) {
       throw new Error(candidate.blockers.map((entry: ImportIssue) => entry.message).join(" "));
-    }
-
-    // PRÉVALIDATION de la conservation, AVANT toute écriture canonique.
-    //
-    // Le coffre privé plafonne à 8 Mo, l'analyse à 24. Un FEC de 15 Mo est analysable et
-    // non archivable : le dire maintenant est la seule façon de ne pas laisser l'utilisateur
-    // choisir entre un fait écrit et une erreur affichée. Le refus porte sur la CONSERVATION,
-    // pas sur l'import : décocher la conservation suffit.
-    const retainRequested = await retainRequestedFor(sessionId);
-    if (retainRequested && file && file.size > MAX_RETAINED_FEC_FILE_BYTES) {
-      throw new Error(
-        `Ce fichier de ${Math.round(file.size / (1024 * 1024))} Mo peut être analysé mais pas conservé : le coffre privé est limité à ${MAX_RETAINED_FEC_FILE_BYTES / (1024 * 1024)} Mo. Désactivez la conservation du fichier pour valider cet import.`,
-      );
     }
 
     unwrap(
@@ -507,7 +650,9 @@ export function createFecRepository(): FecRepository {
     const rows = unwrap(
       await db
         .from("import_sessions")
-        .select("committed_count, retain_file_requested, document_id, file_hash")
+        .select(
+          "committed_count, retain_file_requested, document_id, file_hash, file_name, staging_storage_path",
+        )
         .eq("user_id", user)
         .eq("id", sessionId),
       "lecture du résultat d'import comptable",
@@ -516,9 +661,23 @@ export function createFecRepository(): FecRepository {
 
     if (session && session.retain_file_requested === true) {
       documentStatus = session.document_id === null ? "FAILED" : "STORED";
-      if (file && session.document_id === null && nullableStr(session.file_hash)) {
+      const stagingPath = nullableStr(session.staging_storage_path);
+      const fileHash = nullableStr(session.file_hash);
+      if (session.document_id === null && stagingPath && fileHash) {
         try {
-          await retainSessionFile(sessionId, str(session.file_hash), file);
+          // Le fichier est REPRIS du staging privé : il ne retransite pas par la requête,
+          // et une validation n'a donc aucune raison de dépasser la limite de corps entrant.
+          const downloaded = await db.storage.from(DOCUMENTS_BUCKET).download(stagingPath);
+          if (downloaded.error || !downloaded.data) {
+            throw new Error(downloaded.error?.message ?? "objet de staging introuvable");
+          }
+          const bytes = new Uint8Array(await downloaded.data.arrayBuffer());
+          await retainSessionFile(sessionId, fileHash, {
+            name: nullableStr(session.file_name) ?? "fec.txt",
+            contentType: FEC_CONTENT_TYPE,
+            size: bytes.byteLength,
+            bytes,
+          });
           documentStatus = "STORED";
         } catch (error) {
           documentStatus = "FAILED";
@@ -530,9 +689,20 @@ export function createFecRepository(): FecRepository {
         }
       } else if (session.document_id === null) {
         warnings.push(
-          "L'instantané financier est bien écrit, mais le fichier n'a pas été transmis avec la validation : aucune copie n'a été conservée.",
+          "L'instantané financier est bien écrit, mais aucun objet de staging n'était disponible : aucune copie n'a été conservée.",
         );
       }
+    }
+
+    // Le staging a fait son office, quel que soit le sort de l'archive : il n'a plus de
+    // raison d'exister. Son échec de suppression n'est pas remonté comme une erreur — le
+    // fait est écrit, et un objet résiduel n'altère aucune vérité.
+    const stagingPath = session ? nullableStr(session.staging_storage_path) : null;
+    if (stagingPath) {
+      await dropStagedFile(stagingPath);
+      await db
+        .rpc("lfo_clear_import_staging_path", { p_user_id: user, p_session_id: sessionId })
+        .then(() => undefined);
     }
 
     const links = unwrap(
@@ -559,20 +729,21 @@ export function createFecRepository(): FecRepository {
     };
   }
 
-  /** La session a-t-elle demandé la conservation du fichier ? Lu avant toute écriture. */
-  async function retainRequestedFor(sessionId: string): Promise<boolean> {
+  async function discard(sessionId: string): Promise<string> {
+    // Le staging est libéré AVANT l'abandon : une analyse abandonnée ne doit laisser ni
+    // ligne de staging, ni objet dans le coffre. Même doctrine que la conservation, qui
+    // n'a lieu qu'à la validation.
     const rows = unwrap(
       await db
         .from("import_sessions")
-        .select("retain_file_requested")
+        .select("staging_storage_path")
         .eq("user_id", user)
         .eq("id", sessionId),
-      "lecture de l'intention de conservation",
+      "lecture du chemin de staging",
     ) as Row[];
-    return rows[0]?.retain_file_requested === true;
-  }
+    const stagingPath = rows[0] ? nullableStr(rows[0].staging_storage_path) : null;
+    if (stagingPath) await dropStagedFile(stagingPath);
 
-  async function discard(sessionId: string): Promise<string> {
     unwrap(
       await db.rpc("lfo_discard_import_session", { p_user_id: user, p_session_id: sessionId }),
       "abandon d'import comptable",
@@ -626,7 +797,7 @@ export function createFecRepository(): FecRepository {
     return mapped.sort((left, right) => left.rowNumber - right.rowNumber);
   }
 
-  return { adapter: "supabase", analyze, commit, discard, getSessionLines };
+  return { adapter: "supabase", issueUploadTicket, analyze, commit, discard, getSessionLines };
 }
 
 let cached: FecRepository | undefined;

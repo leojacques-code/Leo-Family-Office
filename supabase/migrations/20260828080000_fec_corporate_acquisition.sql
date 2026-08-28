@@ -117,7 +117,11 @@ alter table public.import_sessions
   -- Décomptes propres à la partie double. Une comptabilité déséquilibrée n'est pas
   -- fiable, et le nombre d'écritures concernées est un fait d'audit.
   add column if not exists entry_count integer not null default 0,
-  add column if not exists unbalanced_entry_count integer not null default 0;
+  add column if not exists unbalanced_entry_count integer not null default 0,
+  -- Objet de staging privé dont cette session a été lue. Il permet de reprendre le fichier
+  -- à la VALIDATION sans le faire retransiter par la route, et de le supprimer quand il
+  -- n'a plus de raison d'exister. `null` = plus aucun objet de staging.
+  add column if not exists staging_storage_path text;
 
 do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'import_sessions_fiscal_year_ck') then
@@ -158,6 +162,76 @@ end $$;
 
 comment on column public.import_sessions.coverage_declared is
   'Couverture de l''exercice DÉCLARÉE par l''utilisateur. Sans elle, aucune reconstruction n''est intégrable au domaine Business.';
+
+-- ---------------------------------------------------------------------------
+-- 3 bis. Billets d'upload — le fichier ne traverse pas la fonction serveur
+-- ---------------------------------------------------------------------------
+-- Un FEC d'exercice pèse couramment plus que ce qu'une fonction serverless accepte en corps
+-- de requête. Le faire transiter par la route d'API le condamnerait à être refusé AVANT
+-- même que le code s'exécute : la fonctionnalité annoncée à 150 000 lignes n'existerait
+-- pas en production.
+--
+-- Le fichier va donc DIRECTEMENT du navigateur au stockage privé, et la route ne reçoit
+-- qu'une RÉFÉRENCE. Cette table est cette référence, et elle est ÉMISE PAR LE SERVEUR :
+--
+--   * le chemin de stockage est CALCULÉ ici, jamais reçu du client. Une API qui croit un
+--     chemin fourni par son appelant laisse lire — ou écraser — le fichier d'un autre ;
+--   * le billet appartient à un propriétaire, et un billet d'un autre propriétaire est
+--     invisible sous RLS comme il est introuvable sous `service_role` filtré ;
+--   * il est À USAGE UNIQUE : `consumed_at` non nul le retire du jeu. Sans cela, un même
+--     objet de staging pourrait alimenter deux sessions et deux vérités ;
+--   * il EXPIRE. Un billet oublié n'est pas une porte ouverte indéfiniment.
+create table if not exists public.import_upload_tickets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  -- Domaine d'acquisition auquel ce billet est destiné. Un billet FEC ne sert pas un
+  -- import bancaire : la cible se déclare, elle ne se déduit pas du contenu.
+  domain text not null,
+  -- Chemin CALCULÉ par le serveur dans le bucket privé. Jamais reçu du client.
+  storage_path text not null,
+  file_name text,
+  content_type text,
+  byte_size bigint not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  consumed_session_id uuid,
+  constraint import_upload_tickets_domain_ck check (domain in ('BUSINESS_ACCOUNTING')),
+  constraint import_upload_tickets_path_uk unique (user_id, storage_path),
+  constraint import_upload_tickets_size_ck check (byte_size > 0),
+  constraint import_upload_tickets_expiry_ck check (expires_at > created_at),
+  -- Un billet rattaché à une session est nécessairement consommé. L'inverse n'est PAS vrai,
+  -- et c'est important : un billet est consommé À LA LECTURE du fichier, avant que la
+  -- session existe. Si l'analyse échoue ensuite — en-tête inexploitable, dépôt incomplet —
+  -- le billet reste consommé sans session, et c'est la vérité : l'objet a bien été réclamé
+  -- une fois, et il ne doit pas pouvoir l'être une seconde.
+  constraint import_upload_tickets_consumed_shape_ck check (
+    consumed_session_id is null or consumed_at is not null
+  ),
+  constraint import_upload_tickets_session_fk
+    foreign key (consumed_session_id, user_id)
+    references public.import_sessions(id, user_id) on delete set null (consumed_session_id)
+);
+
+create unique index if not exists import_upload_tickets_id_user_uidx
+  on public.import_upload_tickets(id, user_id);
+create index if not exists import_upload_tickets_user_idx
+  on public.import_upload_tickets(user_id, created_at desc);
+create index if not exists import_upload_tickets_open_idx
+  on public.import_upload_tickets(user_id, expires_at)
+  where consumed_at is null;
+
+comment on table public.import_upload_tickets is
+  'Référence serveur d''un fichier déposé DIRECTEMENT au stockage privé. Le chemin est calculé côté serveur, le billet est à usage unique et expire : la route d''API ne reçoit jamais le fichier, ni un chemin fourni par le client.';
+
+alter table public.import_upload_tickets enable row level security;
+drop policy if exists owner_all on public.import_upload_tickets;
+create policy owner_all on public.import_upload_tickets
+  for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+revoke all on table public.import_upload_tickets from anon, authenticated;
+grant select on table public.import_upload_tickets to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 4. Écritures comptables — staging du domaine, et source des postes dérivés
@@ -427,6 +501,101 @@ grant select on table public.fec_entry_lines to authenticated;
 -- 8. RPC — réception fragmentée, puis validation atomique
 -- ---------------------------------------------------------------------------
 
+-- Émet un billet d'upload. Le chemin de stockage est CALCULÉ ici, à partir du propriétaire
+-- et de l'identifiant du billet : il ne peut donc désigner ni le fichier d'un autre
+-- propriétaire, ni un chemin choisi par l'appelant.
+create or replace function public.lfo_issue_import_upload_ticket(
+  p_user_id uuid,
+  p_payload jsonb
+) returns uuid
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_id uuid := gen_random_uuid();
+  v_size bigint := nullif(p_payload ->> 'byte_size', '')::bigint;
+  v_ttl_minutes integer := coalesce(nullif(p_payload ->> 'ttl_minutes', '')::integer, 30);
+begin
+  if v_size is null or v_size <= 0 then
+    raise exception 'Taille de fichier absente ou nulle : aucun billet d''upload émis';
+  end if;
+
+  insert into public.import_upload_tickets (
+    id, user_id, domain, storage_path, file_name, content_type, byte_size, expires_at
+  ) values (
+    v_id,
+    p_user_id,
+    coalesce(nullif(p_payload ->> 'domain', ''), 'BUSINESS_ACCOUNTING'),
+    -- Chemin dérivé du propriétaire et du billet. Aucune part n'en vient du client.
+    p_user_id::text || '/import-staging/' || v_id::text,
+    nullif(p_payload ->> 'file_name', ''),
+    nullif(p_payload ->> 'content_type', ''),
+    v_size,
+    now() + make_interval(mins => v_ttl_minutes)
+  );
+
+  return v_id;
+end;
+$$;
+
+-- Consomme un billet. À USAGE UNIQUE, et le verrou de ligne le garantit sous concurrence :
+-- deux analyses simultanées du même billet ne peuvent pas conclure toutes les deux qu'il
+-- est libre. Un billet expiré, déjà consommé, ou d'un autre propriétaire est introuvable.
+create or replace function public.lfo_consume_import_upload_ticket(
+  p_user_id uuid,
+  p_ticket_id uuid
+) returns uuid
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_consumed timestamptz;
+  v_expires timestamptz;
+begin
+  select consumed_at, expires_at into v_consumed, v_expires
+    from public.import_upload_tickets
+   where id = p_ticket_id and user_id = p_user_id
+     for update;
+
+  if v_expires is null then
+    raise exception 'Billet d''upload introuvable';
+  end if;
+  if v_consumed is not null then
+    raise exception 'Billet d''upload déjà consommé : un objet de staging n''alimente qu''une session';
+  end if;
+  if v_expires <= now() then
+    raise exception 'Billet d''upload expiré : redéposez le fichier';
+  end if;
+
+  update public.import_upload_tickets
+     set consumed_at = now()
+   where id = p_ticket_id and user_id = p_user_id;
+
+  return p_ticket_id;
+end;
+$$;
+
+-- Oublie le chemin de staging d'une session : l'objet a été supprimé, la référence n'a plus
+-- de sens. Une session qui pointerait vers un objet inexistant ferait croire à une copie
+-- disponible.
+create or replace function public.lfo_clear_import_staging_path(
+  p_user_id uuid,
+  p_session_id uuid
+) returns uuid
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  update public.import_sessions
+     set staging_storage_path = null
+   where id = p_session_id and user_id = p_user_id;
+  return p_session_id;
+end;
+$$;
+
 -- Ouvre une session comptable et enregistre la source. Aucune ligne n'est encore reçue.
 --
 -- Idempotence : le même contenu de fichier déjà COMMITTÉ pour la même source est refusé.
@@ -506,7 +675,8 @@ begin
     user_id, source_id, file_name, file_hash, file_size_bytes, content_type,
     encoding, delimiter, parser, parser_version, conventions, declared_currency,
     observation_date, retain_file_requested, fiscal_year_start, fiscal_year_end,
-    coverage_declared, declared_period_start, declared_period_end, status, issues
+    coverage_declared, declared_period_start, declared_period_end, status, issues,
+    staging_storage_path
   ) values (
     p_user_id, v_source_id,
     nullif(v_session ->> 'file_name', ''),
@@ -527,9 +697,18 @@ begin
     nullif(v_session ->> 'declared_period_start', '')::date,
     nullif(v_session ->> 'declared_period_end', '')::date,
     'RECEIVING',
-    coalesce(v_session -> 'issues', '[]'::jsonb)
+    coalesce(v_session -> 'issues', '[]'::jsonb),
+    nullif(v_session ->> 'staging_storage_path', '')
   )
   returning id into v_session_id;
+
+  -- Le billet consommé désigne la session qu'il a alimentée : la provenance d'un objet de
+  -- staging se lit dans les deux sens.
+  if nullif(v_session ->> 'upload_ticket_id', '') is not null then
+    update public.import_upload_tickets
+       set consumed_session_id = v_session_id
+     where id = (v_session ->> 'upload_ticket_id')::uuid and user_id = p_user_id;
+  end if;
 
   return v_session_id;
 end;
@@ -752,7 +931,22 @@ $$;
 --   * ligne BLOQUÉE : un montant illisible dans le fichier rend l'agrégat faux, et un
 --     agrégat faux d'apparence complète est le pire résultat possible ;
 --   * écriture HORS de l'exercice déclaré : un exercice annoncé complet qui contient des
---     écritures d'une autre période ne produit le résultat d'AUCUNE période réelle.
+--     écritures d'une autre période ne produit le résultat d'AUCUNE période réelle ;
+--   * PÉRIODE FINANCIÈRE DÉJÀ RENSEIGNÉE PAR UNE AUTRE SOURCE.
+--
+--         CONFLIT DE SOURCES  ≠  CHOIX SILENCIEUX D'UNE SOURCE
+--
+--     `lfo_record_business_financials` converge sur (société, date de clôture). Sans le
+--     contrôle ci-dessous, importer le FEC 2025 ÉCRASERAIT sans un mot une période saisie
+--     à la main, des comptes annuels vérifiés ou une autre source externe — et rien, dans
+--     la ligne écrite, ne permettrait ensuite de s'en apercevoir.
+--
+--     Une réimportation FEC → FEC est une CORRECTION, et elle reste autorisée : la source
+--     est la même, la nouvelle lecture remplace l'ancienne. Tout le reste est REFUSÉ.
+--
+--     Ce n'est pas un moteur de fusion de sources, et ce n'en sera pas un ici : pour une
+--     V1, un REFUS SÛR vaut mieux qu'un arbitrage automatique. La résolution de précédence
+--     multi-source est un chantier distinct, et il demandera une décision humaine.
 --
 -- La valorisation n'est pas touchée : ce qui est écrit est un FAIT financier daté. Aucune
 -- Enterprise Value, aucun multiple, aucun retraitement normatif d'EBITDA.
@@ -777,6 +971,8 @@ declare
   v_blocked integer;
   v_out_of_period integer;
   v_financials_id uuid;
+  v_existing_financials_id uuid;
+  v_financials_period_end date;
   v_committed integer := 0;
   v_period_start date;
   v_period_end date;
@@ -836,6 +1032,36 @@ begin
 
   if v_financials is null then
     raise exception 'Charge de validation incomplète : l''instantané financier est obligatoire';
+  end if;
+
+  -- ── CONFLIT DE SOURCES ────────────────────────────────────────────────────────────
+  --
+  -- Une période financière déjà renseignée n'est écrasée que si elle vient DÉJÀ d'un import
+  -- comptable. La preuve est la provenance : un lien `BUSINESS_ACCOUNTING` vers cette ligne.
+  -- Son absence signifie une autre origine — saisie, comptes annuels, source externe — et
+  -- l'import s'arrête. Le contrôle vit ICI, dans la RPC : dans l'interface ou le
+  -- repository, il se contournerait par le premier appel direct.
+  v_financials_period_end := (v_financials ->> 'period_end')::date;
+  if v_financials_period_end is null then
+    raise exception 'Instantané financier sans date de clôture : rien à écrire';
+  end if;
+
+  select bf.id into v_existing_financials_id
+    from public.business_financials bf
+   where bf.user_id = p_user_id
+     and bf.business_id = v_business_id
+     and bf.period_end = v_financials_period_end;
+
+  if v_existing_financials_id is not null and not exists (
+    select 1
+      from public.import_record_links link
+     where link.user_id = p_user_id
+       and link.business_financials_id = v_existing_financials_id
+       and link.target_domain = 'BUSINESS_ACCOUNTING'
+  ) then
+    raise exception
+      'BUSINESS_FINANCIALS_SOURCE_CONFLICT : une période financière existe déjà au % pour cette société, depuis une autre source. LFO ne l''écrase pas automatiquement.',
+      v_financials_period_end;
   end if;
 
   -- Le fait canonique est écrit par la RPC Business existante, et par elle seule : un
@@ -933,6 +1159,9 @@ $$;
 -- 9. Privilèges des RPC
 -- ---------------------------------------------------------------------------
 revoke all on function
+  public.lfo_issue_import_upload_ticket(uuid, jsonb),
+  public.lfo_consume_import_upload_ticket(uuid, uuid),
+  public.lfo_clear_import_staging_path(uuid, uuid),
   public.lfo_fec_entry_balance(uuid, uuid),
   public.lfo_open_fec_session(uuid, jsonb),
   public.lfo_append_fec_lines(uuid, jsonb),
@@ -942,6 +1171,9 @@ revoke all on function
 from public, anon, authenticated;
 
 grant execute on function
+  public.lfo_issue_import_upload_ticket(uuid, jsonb),
+  public.lfo_consume_import_upload_ticket(uuid, uuid),
+  public.lfo_clear_import_staging_path(uuid, uuid),
   public.lfo_fec_entry_balance(uuid, uuid),
   public.lfo_open_fec_session(uuid, jsonb),
   public.lfo_append_fec_lines(uuid, jsonb),

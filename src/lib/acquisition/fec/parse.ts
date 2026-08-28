@@ -302,21 +302,33 @@ export function normalizeFecLine(
     const amount = readAmount("Montant");
     const rawSens = cell(row.cells, positions.Sens);
     const sens = normalizeFecSens(rawSens);
-    if (amount !== null && sens === null) {
+    if (amount !== null && sens.direction === null) {
       issues.push(
         issue(
           "FEC_AMOUNT_SENS_INVALID",
           "ERROR",
           rawSens.trim().length === 0
             ? "Montant renseigné sans sens : le sens ne se devine pas, il inverserait une charge et un produit."
-            : `Sens « ${rawSens.trim()} » non reconnu : les valeurs prévues sont D, C, +1 ou -1.`,
+            : `Sens « ${rawSens.trim()} » non reconnu : les seules valeurs du texte réglementaire sont D, C, +1 et -1.`,
+          "Sens",
+          rawSens,
+        ),
+      );
+    } else if (sens.direction !== null && !sens.conforming) {
+      // Lu, parce que son sens ne fait aucun doute ; signalé, parce que le texte exige le
+      // signe. Le taire présenterait comme conforme un fichier qui ne l'est pas.
+      issues.push(
+        issue(
+          "FEC_AMOUNT_SENS_NON_STANDARD",
+          "WARNING",
+          `Sens « ${rawSens.trim()} » hors norme : le texte réglementaire prévoit +1 avec son signe. La ligne est lue comme un débit, mais le fichier n'est pas conforme sur ce point.`,
           "Sens",
           rawSens,
         ),
       );
     }
-    debit = sens === "DEBIT" ? amount : null;
-    credit = sens === "CREDIT" ? amount : null;
+    debit = sens.direction === "DEBIT" ? amount : null;
+    credit = sens.direction === "CREDIT" ? amount : null;
     if (amount === null) {
       issues.push(
         issue("FEC_AMOUNT_MISSING", "ERROR", "Colonne « Montant » non renseignée.", "Montant", null),

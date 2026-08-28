@@ -23,8 +23,35 @@ export type {
   FecStatementStatus,
 } from "@/lib/acquisition/fec";
 
-/** Paramètres d'un dépôt de FEC. Le contenu du fichier voyage à part, en FormData. */
+/**
+ * Billet d'upload : ce que le serveur remet au navigateur pour qu'il dépose le fichier
+ * DIRECTEMENT au stockage privé.
+ *
+ * Le fichier ne traverse jamais la route d'API. Une fonction serverless plafonne le corps
+ * de requête entrant bien en dessous de la taille d'un FEC d'exercice — le faire transiter
+ * par la route le condamnerait à être refusé avant même que le code s'exécute.
+ */
+export interface FecUploadTicket {
+  ticketId: string;
+  /** URL signée à usage unique, à laquelle le navigateur envoie le fichier en PUT. */
+  uploadUrl: string;
+  /** Chemin de l'objet, CALCULÉ par le serveur. Le client ne le choisit pas. */
+  storagePath: string;
+  expiresAt: string;
+  /** Le fichier pourra-t-il être conservé au coffre, à cette taille ? */
+  retainable: boolean;
+}
+
+/**
+ * Paramètres d'un dépôt de FEC.
+ *
+ * `uploadTicketId` remplace le fichier : le contenu est déjà au stockage privé quand cette
+ * requête arrive. Aucun chemin n'est accepté du client — le serveur relit celui que le
+ * billet porte.
+ */
 export interface FecAnalyzeRequest {
+  /** Billet émis par le serveur, déjà honoré par un dépôt direct au stockage. */
+  uploadTicketId: string;
   /** Société visée. Une écriture comptable appartient toujours à une société connue. */
   businessId: string;
   /**
