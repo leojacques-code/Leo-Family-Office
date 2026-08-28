@@ -238,6 +238,32 @@ La piste d'audit est en lecture seule pour `authenticated` : le brut est immuabl
 
 Détail complet, formats supportés et limites : `docs/DATA_ACQUISITION.md`.
 
+## Acquisition comptable (FEC)
+
+`src/lib/acquisition/fec/` est la deuxième verticale de cette fondation, et sa raison d'être est de prouver que la première était universelle : elle ÉTEND le registre de sources, les sessions, le brut immuable, la piste d'audit et les liens de provenance, elle n'en crée pas un second jeu.
+
+```text
+FICHIER → RAW (immuable) → ÉCRITURES LUES (fec_entry_lines) → RECONSTRUCTION → PREVIEW → business_financials
+```
+
+Un FEC est une SOURCE COMPTABLE : FEC ≠ COMPTES ANNUELS, FEC ≠ VALORISATION, FEC ≠ DUE DILIGENCE. L'en-tête réglementaire est résolu par NOM et non par position, l'écart à l'ordre du texte est signalé, mais l'absence d'un champ structurant est une erreur — sans journal, numéro, date ou compte, il n'y a rien à deviner.
+
+L'unité comptable est l'ÉCRITURE, pas la ligne : une vente de 1 200 € TTC produit trois lignes, et compter chaque ligne comme un flux produirait trois fois la même opération. Σdébits est donc comparé à Σcrédits par `(JournalCode, EcritureNum)`, et le déséquilibre est reporté sur CHACUNE des lignes de l'écriture — l'utilisateur ne corrige pas une écriture en regardant une ligne isolée.
+
+ABSENT ≠ ZÉRO va jusque dans la base : un côté vide face à un côté renseigné vaut zéro par la CONVENTION du format, un zéro transmis est une valeur, et une ligne aux deux côtés absents n'a pas de montant — une contrainte impose qu'elle ne puisse exister qu'en `BLOCKED`.
+
+`pcg.ts` classe par préfixe de compte, la règle la plus spécifique gagnant toujours, et s'arrête EXACTEMENT là : CLASSIFICATION COMPTABLE ≠ JUGEMENT ÉCONOMIQUE. Un compte 625 est un poste « déplacements et missions », pas une « dépense personnelle du dirigeant » ; le retraitement appartient au ledger de Quality of Earnings de Business Equity, sur décision humaine documentée.
+
+Chaque montant reconstruit porte le NOM de sa convention, parce qu'« EBITDA » ne veut rien dire tant qu'on n'a pas dit lequel : EBE au sens du SIG (VA + 74 − 63 − 64, hors 65 et 75), marge commerciale sur les marchandises seules (707 − 607 − 6037) et `null` sans compte de marchandises, la valeur ajoutée n'en tenant pas lieu. AUCUN EBITDA NORMATIF n'est produit.
+
+Quatre isolements servent l'aval : trésorerie hors concours bancaires courants (519) — un solde négatif est un DÉCOUVERT ; comptes courants d'associés isolés et JAMAIS qualifiés `DEBT_LIKE`, qui est une convention de deal ; dette comptable distinguée d'un contrat du Debt Engine, et jamais portée au passif personnel ; D&A distinguée du CAPEX CASH, d'où `capex` et `free_cash_flow` volontairement `null`.
+
+Période observée ≠ couverture DÉCLARÉE : sans déclaration, les totaux restent exacts pour les lignes fournies mais ne constituent pas un exercice, et `lfo_commit_fec_session` refuse d'écrire. Un fichier réduit à son en-tête est `NOT_COMPUTABLE`, jamais un exercice à zéro.
+
+Aucun état reconstruit n'est persisté : `fec_entry_lines` porte les écritures, les états s'en dérivent à la lecture. Le fait canonique est écrit par `lfo_record_business_financials`, et par elle seule — et il est reconstruit depuis les écritures PERSISTÉES au moment du commit, jamais repris de la charge du client.
+
+Détail complet, format supporté, plafonds mesurés et limites : `docs/FEC_ACQUISITION.md`.
+
 ## Lecture paginée des ledgers
 
 `readAllPages` (`src/lib/data/pagination.ts`) lit une source page par page et **refuse** de

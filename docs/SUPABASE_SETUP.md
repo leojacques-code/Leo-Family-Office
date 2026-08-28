@@ -98,6 +98,37 @@ Cette migration a été corrigée EN PLACE à deux reprises après revue, **avan
 
 Contrôles passés en production après application : six tables d'acquisition présentes ; RLS actif sur les six ; `anon` sans aucun accès ; `authenticated` en SELECT seul, sans INSERT, UPDATE ni DELETE ; cinq RPC d'acquisition réservées à `service_role` ; triggers d'immuabilité présents ; smoke analyse → validation réussi puis intégralement rollbacké ; UPDATE et DELETE d'un enregistrement brut refusés ; modification d'une ligne normalisée committée refusée ; DELETE d'un lien de provenance refusé ; suppression d'une transaction liée refusée ; isolation RLS vérifiée sous claim `authenticated` réel — propriétaire visible, autre UUID invisible. Aucune fixture persistée. L'advisor sécurité ne remonte que le warning Auth historique `Leaked Password Protection Disabled` ; l'advisor performance ne remonte aucune clé étrangère d'acquisition non indexée.
 
+## Migration 26 — FEC / Corporate Data Acquisition
+
+La migration `20260827180000_fec_corporate_acquisition` étend la fondation d'acquisition au domaine comptable. Elle est **présente dans le dépôt et NON appliquée en production** : `supabase_migrations.schema_migrations` en porte 25, `supabase/migrations/` en porte 26, et `npm run db:verify` échouera donc tant que le push n'a pas eu lieu. Le gate local, lui, reconstruit les 26 depuis zéro sans aucun credential.
+
+Elle est strictement ADDITIVE et ne crée aucun second pipeline :
+
+* `import_sources` reçoit `target_business_id` et le domaine `BUSINESS_ACCOUNTING`. Une source vise une enveloppe bancaire OU une société, jamais les deux ;
+* `import_record_links` reçoit `business_financials_id`, avec une clé étrangère composite vers `business_financials(id, user_id)` en `restrict`, et `normalized_record_id` devient nullable — un instantané financier annuel est l'agrégat d'une session entière, pas d'une ligne ;
+* `import_sessions` reçoit l'exercice déclaré, la couverture déclarée, les décomptes de partie double, et le statut `RECEIVING` — un FEC d'exercice se reçoit par lots, et une session qui reçoit encore n'est pas une session analysée ;
+* `fec_entry_lines` conserve les dix-huit champs réglementaires TELS QUELS, y compris `PieceRef`, `EcritureLet` et `ValidDate`, qu'aucun calcul n'utilise aujourd'hui ;
+* quatre RPC : `lfo_open_fec_session`, `lfo_append_fec_lines`, `lfo_finalize_fec_session`, `lfo_commit_fec_session`. `lfo_discard_import_session` est étendue au staging comptable et à l'état de réception.
+
+Quatre contraintes de base élargies le sont sous un NOUVEAU nom, selon la convention déjà suivie par Business Equity V2.1 : `import_sources_domain_v2_ck`, `import_sources_domain_shape_v2_ck`, `import_sessions_status_v2_ck`, `import_record_links_domain_v2_ck` et `import_record_links_target_v2_ck`. Le contenu SQL de la migration 25 n'est PAS touché.
+
+Les invariants portés par la BASE, pas par l'application :
+
+* `fec_entry_lines_amount_shape_ck` — une ligne aux deux côtés de montant absents ne peut exister qu'en statut `BLOCKED`. ABSENT ≠ ZÉRO jusque dans la base : le format autorise explicitement un champ vide, et une ligne sans aucun montant n'est pas une ligne à zéro ;
+* `fec_entry_lines_amount_sign_ck` — les montants du FEC sont NON SIGNÉS, le sens étant porté par la colonne. Un négatif signale une lecture fautive, pas une écriture en sens inverse ;
+* `fec_entry_lines_currency_ck` — un montant en devise sans code devise est refusé : le supposer égal à la devise de tenue serait un taux de change implicite égal à 1 ;
+* `fec_entry_lines_committable_ck` — une écriture committée a une date et n'est ni bloquée ni ignorée ;
+* trigger `fec_entry_lines_frozen` — une écriture committée est gelée en `UPDATE` comme en `DELETE`, même sous `service_role` ;
+* `fec_entry_lines` rejoint la piste d'audit en LECTURE SEULE : `authenticated` n'y a que le `SELECT`, et le verifier contrôle cet état.
+
+Trois refus de validation sont portés par `lfo_commit_fec_session`, pas par l'application : couverture d'exercice non déclarée, écriture déséquilibrée, ligne illisible. Le fait canonique est ensuite écrit par `lfo_record_business_financials` — un second chemin d'écriture sur `business_financials` serait une seconde vérité sur la même table.
+
+`import_record_links_business_session_uk` porte l'unicité sur `(propriétaire, session, instantané)` et NON sur l'instantané seul. Ce n'est pas un relâchement : `lfo_record_business_financials` converge sur `(société, date de clôture)`, donc un FEC réimporté après correction met à jour la MÊME ligne. La provenance d'un agrégat est un HISTORIQUE de sessions, là où celle d'une transaction est un fait unique ; ce que chaque session a lu reste reconstituable depuis ses écritures conservées.
+
+`business_financials_id_user_uidx` est ajouté parce que la clé étrangère composite du lien en a besoin : sans lui, un lien pourrait désigner l'instantané financier d'un AUTRE propriétaire.
+
+Gates exécutés : `npm run lint`, `npm run test`, `npx tsc --noEmit`, `npm run build`, `npm run db:local:reset` (26 migrations reconstruites depuis zéro), `npm run db:verify:local`, tous les smokes existants et le nouveau `scripts/smoke-fec-acquisition.ts`, intégralement rollbacké. `npm run db:verify` distant n'a PAS été exécuté : aucun credential de production n'est présent dans cet environnement, et la migration n'est pas poussée.
+
 C'est le seul contrôle que le gate local ne peut pas produire : `auth.uid()` y reste nul.
 
 La migration `20260825193427_portfolio_data_foundation` ajoute le ledger portefeuille et ses trois RPC (`lfo_record_portfolio_event`, `lfo_delete_portfolio_event`, `lfo_set_portfolio_envelope_policy`). Elle crée aussi trois index uniques `(id, user_id)` sur `financial_accounts`, `securities` et `transactions` : ce sont les cibles des clés étrangères composites qui empêchent un événement de référencer l'objet d'un autre utilisateur. La migration `20260825193606_portfolio_fk_covering_indexes` couvre le côté référençant des deux clés étrangères signalées par l'advisor Postgres. Les deux sont appliquées en production et vérifiées par assertions SQL transactionnelles.

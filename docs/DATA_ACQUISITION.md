@@ -11,7 +11,8 @@ provenance et sans lien avec un fait financier. Chaque intégration future — r
 bancaire, FEC, avis d'opéré, données publiques — aurait donc réinventé son propre staging,
 sa propre déduplication, son propre historique et ses propres erreurs.
 
-Cette couche pose le tuyau commun, et l'éprouve sur un cas réel : le relevé bancaire CSV.
+Cette couche pose le tuyau commun, et l'éprouve sur deux cas réels : le relevé bancaire CSV
+(ce document) et le Fichier des Écritures Comptables (`docs/FEC_ACQUISITION.md`).
 
 ## 2. La chaîne
 
@@ -289,10 +290,15 @@ Lus aujourd'hui :
 Plafonds : 8 Mo par fichier (limite du bucket privé), 20 000 lignes par session. Un
 dépassement **échoue** : il ne tronque pas.
 
-Pas encore lus, et volontairement hors de cette couche : XLSX, OFX/QFX, CAMT, FEC,
-documents PDF, connecteurs bancaires. La fondation existe pour qu'ils s'y branchent sans
-refonte — un adaptateur produit des `NormalizedBankRow` ou l'équivalent de son domaine, et
-réutilise le staging, la déduplication, l'historique et l'audit.
+Le **FEC** est la deuxième verticale branchée sur cette fondation, et elle en a prouvé
+l'universalité : registre de sources, sessions, brut immuable, piste d'audit en lecture
+seule et liens de provenance ont été ÉTENDUS, pas dupliqués. Détail dans
+`docs/FEC_ACQUISITION.md`.
+
+Pas encore lus, et volontairement hors de cette couche : XLSX, OFX/QFX, CAMT, documents
+PDF, connecteurs bancaires. La fondation existe pour qu'ils s'y branchent sans refonte —
+un adaptateur produit des `NormalizedBankRow` ou l'équivalent de son domaine, et réutilise
+le staging, la déduplication, l'historique et l'audit.
 
 ## 9 bis. Conservation du fichier
 

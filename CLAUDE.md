@@ -126,12 +126,15 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Production alignée sur **25 migrations** au 27 août 2026. Les dernières versions sont :
+Production alignée sur **25 migrations** au 27 août 2026. Le dépôt en porte **26** : la 26e,
+`20260827180000_fec_corporate_acquisition`, n'est PAS appliquée en production, et le gate
+distant échouera tant qu'elle ne l'est pas. Les dernières versions sont :
 
 - `20260826194551_business_equity_v2_1` ;
 - `20260826194605_business_equity_v2_1_indexes` ;
 - `20260826194644_business_equity_v2_1_blocking_invariants` ;
-- `20260827155134_data_acquisition_foundation`.
+- `20260827155134_data_acquisition_foundation` ;
+- `20260827180000_fec_corporate_acquisition` (dépôt uniquement, non poussée).
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
@@ -168,7 +171,7 @@ Correctness → données → intégration → calculs → tests → produit → 
 ```text
 faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données + analytics)
                Real Estate (faits + scénarios) · Business Equity (faits + valorisation dérivée)
-               Data Acquisition (staging + provenance + relevé bancaire CSV)
+               Data Acquisition (staging + provenance + relevé bancaire CSV + FEC)
 en cours       vérité de schéma · vérité des consommateurs
 suivant        Career + Tax
 puis           Event Engine → Scenarios V2 → Goals → Decision Lab
@@ -228,6 +231,20 @@ s'appuie donc sur une clé de ressemblance.
 La date d'observation d'un import n'est pas `AS_OF_DATE` : une opération bookée hier est un
 fait, même si le reporting est arrêté le mois précédent. L'acquisition ingère, les moteurs
 aval arbitrent à leur date. Détail dans `docs/DATA_ACQUISITION.md`.
+
+L'acquisition comptable (FEC) est la deuxième verticale de cette fondation, et elle l'ÉTEND
+sans la dupliquer : mêmes sources, mêmes sessions, même brut immuable, même piste d'audit,
+une colonne cible de plus dans `import_record_links`. Un FEC est une SOURCE COMPTABLE, pas
+une valorisation : FEC ≠ COMPTES ANNUELS, et CLASSIFICATION COMPTABLE ≠ JUGEMENT ÉCONOMIQUE.
+Une ligne de FEC n'est pas une transaction économique indépendante : l'unité est l'écriture,
+et Σdébits = Σcrédits est vérifié par écriture, jamais par ligne. Les états reconstruits sont
+des CANDIDATS, chaque montant portant le NOM de sa convention — EBE au sens du SIG, marge
+commerciale sur les marchandises seules, jamais un EBITDA normatif, qui appartient au ledger
+de Quality of Earnings de Business Equity sur décision humaine. TRÉSORERIE COMPTABLE ≠
+TRÉSORERIE PERSONNELLE, DETTE CORPORATE ≠ DETTE PERSONNELLE, DETTE COMPTABLE ≠ CONTRAT DE
+PRÊT, D&A ≠ CAPEX CASH. Aucun état reconstruit n'est persisté : `fec_entry_lines` porte les
+écritures, les états s'en dérivent à la lecture. La couverture d'un exercice se DÉCLARE :
+sans déclaration, aucun fait Business n'est écrit. Détail dans `docs/FEC_ACQUISITION.md`.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger
