@@ -70,6 +70,7 @@ import {
   type TaxRuleSet,
 } from "@/lib/engine/tax";
 import { toCareerTaxCashFlow } from "@/lib/engine/career-tax-cash-flow";
+import { buildDashboardEventTimeline } from "@/lib/engine/event-adapters";
 import {
   enumValue,
   finiteNumber,
@@ -1642,7 +1643,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       transactions,
       AS_OF_DATE,
     );
-    return {
+    const dashboardState: DashboardState = {
       asOfDate: AS_OF_DATE,
       reportingCurrency,
       ledgerCoverageStart: coverage.start,
@@ -1702,6 +1703,13 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       metrics: composeDashboardMetrics({ balanceSheet, balanceSheetMetrics, flow: flowMetrics }),
       assumptions,
     };
+    const horizonYear = Number(AS_OF_DATE.slice(0, 4)) + 40;
+    dashboardState.eventTimeline = buildDashboardEventTimeline({
+      state: dashboardState,
+      startDate: AS_OF_DATE,
+      endDate: `${horizonYear}${AS_OF_DATE.slice(4)}`,
+    });
+    return dashboardState;
   }
 
   async function mutateState(mutation: Mutation): Promise<DashboardState> {
