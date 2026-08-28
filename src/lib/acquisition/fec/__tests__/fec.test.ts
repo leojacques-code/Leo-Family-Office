@@ -16,7 +16,9 @@ import {
   EXPLICIT_ZERO,
   FEC_HEADER,
   FINANCIAL_EXPENSES_SPLIT,
+  MERCHANDISE_SALES_ONLY,
   MISSING_PIECE_REF,
+  NO_SALES_AT_ALL,
   MONTANT_SENS_INVALID,
   MONTANT_SENS_LETTERS,
   MONTANT_SENS_MISSING,
@@ -39,6 +41,7 @@ import {
   NON_STANDARD_DATE,
   OVERDRAFT_ACCOUNT,
   PIPE_DELIMITED,
+  PRODUCTION_SALES_ONLY,
   PROFIT_SHARING_AND_TAX,
   TRADING,
   TWO_FISCAL_YEARS,
@@ -775,5 +778,45 @@ describe("ordre des colonnes · Montant et Sens sont attendus en 12 et 13", () =
     expect(lineAt(analysis, 3).credit).toBe(1200);
     // ...et l'écart à l'ordre du texte est dit.
     expect(codes(analysis.issues)).toContain("FEC_HEADER_INVALID");
+  });
+});
+
+describe("absence d'un poste · le contrôle porte sur TOUS ses groupes", () => {
+  // Un avertissement qui contredit le chiffre affiché juste au-dessus est pire qu'un
+  // avertissement absent : il apprend à l'utilisateur à ne plus les lire.
+  it("un négoce dont le CA ne vient que de 707 n'est PAS signalé sans chiffre d'affaires", () => {
+    const analysis = analyze(utf8(MERCHANDISE_SALES_ONLY));
+    expect(analysis.statement.income.revenue.value).toBe(2343500);
+    expect(codes(analysis.statement.blockers)).not.toContain("FEC_ACCOUNT_GROUP_ABSENT");
+  });
+
+  it("une société de services dont le CA ne vient que de 706 n'est pas signalée non plus", () => {
+    const analysis = analyze(utf8(PRODUCTION_SALES_ONLY));
+    expect(analysis.statement.income.revenue.value).toBe(5000);
+    expect(codes(analysis.statement.blockers)).not.toContain("FEC_ACCOUNT_GROUP_ABSENT");
+  });
+
+  it("sans AUCUN produit d'exploitation, l'absence est bien signalée", () => {
+    const analysis = analyze(utf8(NO_SALES_AT_ALL));
+    expect(analysis.statement.income.revenue.value).toBe(0);
+    const absent = analysis.statement.blockers.filter(
+      (entry) => entry.code === "FEC_ACCOUNT_GROUP_ABSENT",
+    );
+    expect(absent).toHaveLength(1);
+    expect(absent[0].message).toContain("chiffre d'affaires");
+  });
+
+  it("l'absence de trésorerie reste signalée indépendamment", () => {
+    // NOMINAL porte des comptes 512 : aucun signalement de trésorerie.
+    expect(codes(analyze(utf8(NOMINAL)).statement.blockers)).not.toContain(
+      "FEC_ACCOUNT_GROUP_ABSENT",
+    );
+    // TRADING n'en porte aucun : la trésorerie est signalée, le chiffre d'affaires non.
+    const trading = analyze(utf8(TRADING));
+    const absent = trading.statement.blockers.filter(
+      (entry) => entry.code === "FEC_ACCOUNT_GROUP_ABSENT",
+    );
+    expect(absent).toHaveLength(1);
+    expect(absent[0].message).toContain("trésorerie");
   });
 });

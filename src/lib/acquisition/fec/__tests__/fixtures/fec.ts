@@ -445,6 +445,99 @@ export const SIGNED_CURRENCY = fec([
 ]);
 
 /**
+ * Négoce PUR : le chiffre d'affaires ne vient QUE de 707. Aucun compte 70 hors marchandises.
+ * C'est le cas qui affichait un chiffre d'affaires ET « aucune ligne de chiffre d'affaires ».
+ */
+export const MERCHANDISE_SALES_ONLY = fec([
+  line({
+    journal: "VTE",
+    entry: "1",
+    account: "707000",
+    accountLib: "Ventes marchandises",
+    credit: "2343500,00",
+  }),
+  line({
+    journal: "VTE",
+    entry: "1",
+    account: "411000",
+    accountLib: "Clients",
+    debit: "2343500,00",
+  }),
+  line({
+    journal: "BQ",
+    entry: "2",
+    date: "20250630",
+    account: "512000",
+    accountLib: "Banque",
+    debit: "100,00",
+  }),
+  line({
+    journal: "BQ",
+    entry: "2",
+    date: "20250630",
+    account: "411000",
+    accountLib: "Clients",
+    credit: "100,00",
+  }),
+]);
+
+/** Production seule : le chiffre d'affaires ne vient QUE de 706, sans aucune marchandise. */
+export const PRODUCTION_SALES_ONLY = fec([
+  line({
+    journal: "VTE",
+    entry: "1",
+    account: "706000",
+    accountLib: "Prestations",
+    credit: "5000,00",
+  }),
+  line({ journal: "VTE", entry: "1", account: "411000", accountLib: "Clients", debit: "5000,00" }),
+  line({
+    journal: "BQ",
+    entry: "2",
+    date: "20250630",
+    account: "512000",
+    accountLib: "Banque",
+    debit: "100,00",
+  }),
+  line({
+    journal: "BQ",
+    entry: "2",
+    date: "20250630",
+    account: "411000",
+    accountLib: "Clients",
+    credit: "100,00",
+  }),
+]);
+
+/** Aucun produit d'exploitation : ni 70 hors marchandises, ni 707. */
+export const NO_SALES_AT_ALL = fec([
+  line({ journal: "ACH", entry: "1", account: "601000", accountLib: "Achats", debit: "800,00" }),
+  line({
+    journal: "ACH",
+    entry: "1",
+    account: "401000",
+    accountLib: "Fournisseurs",
+    credit: "800,00",
+  }),
+  line({
+    journal: "BQ",
+    entry: "2",
+    date: "20250630",
+    account: "512000",
+    accountLib: "Banque",
+    debit: "100,00",
+  }),
+  line({
+    journal: "BQ",
+    entry: "2",
+    date: "20250630",
+    account: "411000",
+    accountLib: "Clients",
+    credit: "100,00",
+  }),
+]);
+
+/**
  * Participation des salariés (691) ET impôt sur les bénéfices (695) sur le même exercice.
  * Le résultat net doit soustraire les deux ; la charge d'IMPÔT ne doit porter que 695.
  */

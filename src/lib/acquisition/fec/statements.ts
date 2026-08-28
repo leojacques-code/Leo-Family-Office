@@ -500,11 +500,19 @@ export function buildStatementCandidate(input: StatementInput): FecStatementCand
 
   // Une classe entièrement absente n'est pas une erreur, mais elle change ce que l'on peut
   // lire : sans compte de classe 7, il n'y a pas de chiffre d'affaires à reconstruire.
-  for (const [group, label] of [
-    ["REVENUE", "chiffre d'affaires (comptes 70)"],
-    ["CASH", "trésorerie (comptes 51, 53, 54)"],
-  ] as const) {
-    if (!index.has(group)) {
+  //
+  // Le contrôle porte sur TOUS les groupes qui alimentent le poste, pas sur un seul. Le
+  // chiffre d'affaires agrège `REVENUE` et `MERCHANDISE_SALES` — 707 vit dans le second
+  // depuis l'isolement de la marge commerciale — et ne tester que `REVENUE` produisait une
+  // contradiction visible à l'écran : un négoce affichait 2 343 500 € de chiffre d'affaires
+  // ET « aucune ligne de chiffre d'affaires ». Un avertissement qui contredit le chiffre
+  // affiché juste au-dessus est pire qu'un avertissement absent : il apprend à l'utilisateur
+  // à ne plus les lire.
+  for (const [groups, label] of [
+    [["REVENUE", "MERCHANDISE_SALES"], "chiffre d'affaires (comptes 70)"],
+    [["CASH"], "trésorerie (comptes 51, 53, 54)"],
+  ] as ReadonlyArray<readonly [readonly PcgGroup[], string]>) {
+    if (groups.every((group) => !index.has(group))) {
       blockers.push(
         issue(
           "FEC_ACCOUNT_GROUP_ABSENT",
