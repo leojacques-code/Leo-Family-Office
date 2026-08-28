@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { Callout, EmptyState, SectionHeader } from "@/components/ui";
+import FecSection from "@/components/pages/imports/fec-section";
 import { formatDate, NOT_COMPUTABLE } from "@/components/pages/shared";
 import type { SectionProps } from "@/components/pages/shared";
 import type {
@@ -49,6 +50,7 @@ const STATUS_ICONS: Record<ImportRowStatus, typeof Check> = {
 };
 
 const SESSION_STATUS_LABELS: Record<ImportSessionSummary["status"], string> = {
+  RECEIVING: "Réception en cours",
   ANALYZED: "En attente de validation",
   COMMITTED: "Validée",
   DISCARDED: "Abandonnée",
@@ -115,6 +117,8 @@ type StatusFilter = "ALL" | ImportRowStatus;
 function ImportsPage({ state, refresh }: SectionProps) {
   // Choix explicites de l'utilisateur. `null` = « pas encore choisi » : la valeur affichée
   // est alors DÉRIVÉE des comptes, sans effet de bord ni rendu en cascade.
+  /** Domaine d'acquisition affiché. Un seul écran, deux sources : la fondation est commune. */
+  const [domain, setDomain] = useState<"BANK" | "FEC">("BANK");
   const [chosenAccountId, setChosenAccountId] = useState<string | null>(null);
   const [chosenCurrency, setChosenCurrency] = useState<string | null>(null);
   const [retainFile, setRetainFile] = useState(true);
@@ -283,380 +287,420 @@ function ImportsPage({ state, refresh }: SectionProps) {
 
   const committable = preview ? preview.counts.ready + included.size : 0;
 
+  // Les sociétés viennent de l'état du cockpit déjà chargé, comme les comptes : cette page
+  // ne lit aucune donnée de domaine par elle-même.
+  const businesses = useMemo(
+    () =>
+      (state.businesses ?? [])
+        .filter((business) => !business.archived)
+        .map((business) => ({
+          id: business.id,
+          name: business.name,
+          functionalCurrency: business.functionalCurrency,
+        })),
+    [state.businesses],
+  );
+
   return (
     <div className="page-stack">
       <SectionHeader
         eyebrow="Acquisition"
         title="Imports"
-        description="Un relevé bancaire CSV devient des opérations observées. Rien n'est écrit avant votre validation, et aucune catégorie de flux n'est inventée."
+        description="Une source devient des faits observés. Rien n'est écrit avant votre validation, et rien n'est inventé : ni catégorie de flux, ni valorisation."
       />
 
-      <section className="import-layout">
-        <form className="panel upload-panel" onSubmit={analyze}>
-          <span className="upload-icon">
-            <UploadCloud size={24} />
-          </span>
-          <h2>Déposer un relevé</h2>
-          <p>CSV, TSV ou TXT délimité · 8 Mo maximum</p>
-          <input
-            id="import-file"
-            type="file"
-            name="file"
-            accept=".csv,.tsv,.txt"
-            onChange={(event) => {
-              setPendingFile(event.target.files?.[0] ?? null);
-              setMappingDraft(null);
-            }}
-          />
-          <label htmlFor="import-file" className="button primary">
-            {pendingFile ? pendingFile.name : "Choisir un fichier"}
-          </label>
-          <label className="field-label" htmlFor="import-account">
-            Compte alimenté
-          </label>
-          <select
-            id="import-account"
-            className="text-input"
-            value={accountId}
-            onChange={(event) => {
-              setChosenAccountId(event.target.value);
-              // Changer de compte reprend la devise de ce compte, sauf déclaration explicite.
-              setChosenCurrency(null);
-            }}
+      <div className="import-filters">
+        {(
+          [
+            ["BANK", "Relevé bancaire"],
+            ["FEC", "Comptabilité (FEC)"],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            className={`button ${domain === value ? "primary" : "secondary"}`}
+            onClick={() => setDomain(value)}
           >
-            {accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name}
-              </option>
-            ))}
-          </select>
-          <label className="field-label" htmlFor="import-currency">
-            Devise déclarée si le fichier n’en porte pas
-          </label>
-          <input
-            id="import-currency"
-            className="text-input"
-            value={declaredCurrency}
-            maxLength={3}
-            onChange={(event) => setChosenCurrency(event.target.value.toUpperCase())}
-          />
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={retainFile}
-              onChange={(event) => setRetainFile(event.target.checked)}
-            />
-            Conserver le fichier au coffre privé
-          </label>
-          <small className="field-hint">
-            La copie n’est déposée qu’à la validation : une analyse abandonnée ou relancée après
-            correction du mapping ne laisse aucun fichier derrière elle.
-          </small>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={rememberMapping}
-              onChange={(event) => setRememberMapping(event.target.checked)}
-            />
-            Mémoriser le mapping pour ce format
-          </label>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={stableIdDeclared}
-              onChange={(event) => setStableIdDeclared(event.target.checked)}
-            />
-            La colonne d’identifiant porte un identifiant unique et stable
-          </label>
-          <small className="field-hint">
-            À ne cocher que si votre banque garantit un identifiant propre à chaque opération. Sans
-            cette déclaration, une opération identique à une opération connue est signalée pour
-            confirmation au lieu d’être écartée : une référence répétée chaque mois ferait
-            disparaître de vraies dépenses.
-          </small>
-          <button className="button secondary" disabled={busy || !accountId || !pendingFile}>
-            {busy ? "Analyse…" : "Analyser sans rien écrire"}
+            {label}
           </button>
-          {error ? <div className="form-error">{error}</div> : null}
-          {notice ? <div className="form-notice">{notice}</div> : null}
-        </form>
+        ))}
+      </div>
 
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Historique</span>
-              <h2>Imports passés</h2>
-            </div>
-            <span className="nav-count">{sessions.length}</span>
-          </div>
-          {sessions.length ? (
-            <div className="import-history">
-              {sessions.map((session) => (
-                <div key={session.id}>
-                  <span className="document-icon">
-                    <FileSpreadsheet size={17} />
-                  </span>
-                  <span>
-                    <strong>{session.fileName ?? session.sourceLabel}</strong>
-                    <small>
-                      {session.accountName} · {formatDate(session.analyzedAt.slice(0, 10))} ·{" "}
-                      {session.counts.total} ligne(s) · {session.committedCount} écrite(s)
-                      {session.observedPeriodStart && session.observedPeriodEnd
-                        ? ` · observé du ${session.observedPeriodStart} au ${session.observedPeriodEnd}`
-                        : ""}
-                    </small>
-                  </span>
-                  <span className="status-outline">{SESSION_STATUS_LABELS[session.status]}</span>
+      {domain === "FEC" ? <FecSection businesses={businesses} refresh={refresh} /> : null}
+
+      {domain === "BANK" ? (
+        <>
+          <section className="import-layout">
+            <form className="panel upload-panel" onSubmit={analyze}>
+              <span className="upload-icon">
+                <UploadCloud size={24} />
+              </span>
+              <h2>Déposer un relevé</h2>
+              <p>CSV, TSV ou TXT délimité · 8 Mo maximum</p>
+              <input
+                id="import-file"
+                type="file"
+                name="file"
+                accept=".csv,.tsv,.txt"
+                onChange={(event) => {
+                  setPendingFile(event.target.files?.[0] ?? null);
+                  setMappingDraft(null);
+                }}
+              />
+              <label htmlFor="import-file" className="button primary">
+                {pendingFile ? pendingFile.name : "Choisir un fichier"}
+              </label>
+              <label className="field-label" htmlFor="import-account">
+                Compte alimenté
+              </label>
+              <select
+                id="import-account"
+                className="text-input"
+                value={accountId}
+                onChange={(event) => {
+                  setChosenAccountId(event.target.value);
+                  // Changer de compte reprend la devise de ce compte, sauf déclaration explicite.
+                  setChosenCurrency(null);
+                }}
+              >
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
+              <label className="field-label" htmlFor="import-currency">
+                Devise déclarée si le fichier n’en porte pas
+              </label>
+              <input
+                id="import-currency"
+                className="text-input"
+                value={declaredCurrency}
+                maxLength={3}
+                onChange={(event) => setChosenCurrency(event.target.value.toUpperCase())}
+              />
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={retainFile}
+                  onChange={(event) => setRetainFile(event.target.checked)}
+                />
+                Conserver le fichier au coffre privé
+              </label>
+              <small className="field-hint">
+                La copie n’est déposée qu’à la validation : une analyse abandonnée ou relancée après
+                correction du mapping ne laisse aucun fichier derrière elle.
+              </small>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={rememberMapping}
+                  onChange={(event) => setRememberMapping(event.target.checked)}
+                />
+                Mémoriser le mapping pour ce format
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={stableIdDeclared}
+                  onChange={(event) => setStableIdDeclared(event.target.checked)}
+                />
+                La colonne d’identifiant porte un identifiant unique et stable
+              </label>
+              <small className="field-hint">
+                À ne cocher que si votre banque garantit un identifiant propre à chaque opération.
+                Sans cette déclaration, une opération identique à une opération connue est signalée
+                pour confirmation au lieu d’être écartée : une référence répétée chaque mois ferait
+                disparaître de vraies dépenses.
+              </small>
+              <button className="button secondary" disabled={busy || !accountId || !pendingFile}>
+                {busy ? "Analyse…" : "Analyser sans rien écrire"}
+              </button>
+              {error ? <div className="form-error">{error}</div> : null}
+              {notice ? <div className="form-notice">{notice}</div> : null}
+            </form>
+
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <span className="eyebrow">Historique</span>
+                  <h2>Imports passés</h2>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              title="Aucun import"
-              detail="Le premier relevé analysé apparaîtra ici, avec ce qui a été écrit et ce qui a été écarté."
-            />
-          )}
-        </article>
-      </section>
+                <span className="nav-count">{sessions.length}</span>
+              </div>
+              {sessions.length ? (
+                <div className="import-history">
+                  {sessions.map((session) => (
+                    <div key={session.id}>
+                      <span className="document-icon">
+                        <FileSpreadsheet size={17} />
+                      </span>
+                      <span>
+                        <strong>{session.fileName ?? session.sourceLabel}</strong>
+                        <small>
+                          {session.accountName} · {formatDate(session.analyzedAt.slice(0, 10))} ·{" "}
+                          {session.counts.total} ligne(s) · {session.committedCount} écrite(s)
+                          {session.observedPeriodStart && session.observedPeriodEnd
+                            ? ` · observé du ${session.observedPeriodStart} au ${session.observedPeriodEnd}`
+                            : ""}
+                        </small>
+                      </span>
+                      <span className="status-outline">
+                        {SESSION_STATUS_LABELS[session.status]}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="Aucun import"
+                  detail="Le premier relevé analysé apparaîtra ici, avec ce qui a été écrit et ce qui a été écarté."
+                />
+              )}
+            </article>
+          </section>
 
-      {preview ? (
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Preview · aucune écriture</span>
-              <h2>{preview.fileName}</h2>
-            </div>
-            <span className="nav-count">{preview.counts.total}</span>
-          </div>
+          {preview ? (
+            <section className="panel">
+              <div className="panel-header">
+                <div>
+                  <span className="eyebrow">Preview · aucune écriture</span>
+                  <h2>{preview.fileName}</h2>
+                </div>
+                <span className="nav-count">{preview.counts.total}</span>
+              </div>
 
-          <div className="import-facts">
-            <span>
-              <small>Encodage</small>
-              <strong>{ENCODING_LABELS[preview.encoding] ?? preview.encoding}</strong>
-            </span>
-            <span>
-              <small>Séparateur</small>
-              <strong>{delimiterLabel(preview.delimiter)}</strong>
-            </span>
-            <span>
-              <small>Montants</small>
-              <strong>
-                {CONVENTION_LABELS[preview.conventions.amount] ?? preview.conventions.amount}
-              </strong>
-            </span>
-            <span>
-              <small>Dates</small>
-              <strong>
-                {CONVENTION_LABELS[preview.conventions.date] ?? preview.conventions.date}
-              </strong>
-            </span>
-            <span>
-              <small>Déjà présentes (probable)</small>
-              <strong>{preview.verdicts.probableDuplicate}</strong>
-            </span>
-            <span>
-              <small>Identité démontrée</small>
-              <strong>{preview.verdicts.exactDuplicate}</strong>
-            </span>
-            <span>
-              <small>Période observée</small>
-              <strong>
-                {preview.observedPeriod
-                  ? `${preview.observedPeriod.start} → ${preview.observedPeriod.end}`
-                  : NOT_COMPUTABLE}
-              </strong>
-            </span>
-          </div>
+              <div className="import-facts">
+                <span>
+                  <small>Encodage</small>
+                  <strong>{ENCODING_LABELS[preview.encoding] ?? preview.encoding}</strong>
+                </span>
+                <span>
+                  <small>Séparateur</small>
+                  <strong>{delimiterLabel(preview.delimiter)}</strong>
+                </span>
+                <span>
+                  <small>Montants</small>
+                  <strong>
+                    {CONVENTION_LABELS[preview.conventions.amount] ?? preview.conventions.amount}
+                  </strong>
+                </span>
+                <span>
+                  <small>Dates</small>
+                  <strong>
+                    {CONVENTION_LABELS[preview.conventions.date] ?? preview.conventions.date}
+                  </strong>
+                </span>
+                <span>
+                  <small>Déjà présentes (probable)</small>
+                  <strong>{preview.verdicts.probableDuplicate}</strong>
+                </span>
+                <span>
+                  <small>Identité démontrée</small>
+                  <strong>{preview.verdicts.exactDuplicate}</strong>
+                </span>
+                <span>
+                  <small>Période observée</small>
+                  <strong>
+                    {preview.observedPeriod
+                      ? `${preview.observedPeriod.start} → ${preview.observedPeriod.end}`
+                      : NOT_COMPUTABLE}
+                  </strong>
+                </span>
+              </div>
 
-          {mappingDraft &&
-          (preview.mappingConfidence !== "CERTAIN" || preview.counts.blocked > 0) ? (
-            <div className="import-mapping">
-              <p className="panel-note">
-                Associer chaque champ à sa colonne, puis relire le fichier. Une colonne laissée sur
-                « — » n’alimente rien : aucune valeur n’est déduite d’une autre.
-              </p>
-              <div className="import-mapping-grid">
-                {MAPPABLE_FIELDS.map((entry) => (
-                  <label key={entry.field}>
-                    <span className="field-label">
-                      {entry.label}
-                      {entry.required ? " *" : ""}
-                    </span>
-                    <select
-                      className="text-input"
-                      value={mappingDraft[entry.field] ?? ""}
-                      onChange={(event) => {
-                        const raw = event.target.value;
-                        setMappingDraft((current) => {
-                          const next = { ...(current ?? {}) };
-                          if (raw === "") delete next[entry.field];
-                          else next[entry.field] = Number(raw);
-                          return next;
-                        });
+              {mappingDraft &&
+              (preview.mappingConfidence !== "CERTAIN" || preview.counts.blocked > 0) ? (
+                <div className="import-mapping">
+                  <p className="panel-note">
+                    Associer chaque champ à sa colonne, puis relire le fichier. Une colonne laissée
+                    sur « — » n’alimente rien : aucune valeur n’est déduite d’une autre.
+                  </p>
+                  <div className="import-mapping-grid">
+                    {MAPPABLE_FIELDS.map((entry) => (
+                      <label key={entry.field}>
+                        <span className="field-label">
+                          {entry.label}
+                          {entry.required ? " *" : ""}
+                        </span>
+                        <select
+                          className="text-input"
+                          value={mappingDraft[entry.field] ?? ""}
+                          onChange={(event) => {
+                            const raw = event.target.value;
+                            setMappingDraft((current) => {
+                              const next = { ...(current ?? {}) };
+                              if (raw === "") delete next[entry.field];
+                              else next[entry.field] = Number(raw);
+                              return next;
+                            });
+                          }}
+                        >
+                          <option value="">—</option>
+                          {preview.headers.map((header, index) => (
+                            <option key={`${header}-${index}`} value={index}>
+                              {header.length ? header : `Colonne ${index + 1}`}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      className="button secondary"
+                      disabled={busy || !pendingFile}
+                      onClick={() => {
+                        if (pendingFile) void runAnalysis(pendingFile, mappingDraft);
                       }}
                     >
-                      <option value="">—</option>
-                      {preview.headers.map((header, index) => (
-                        <option key={`${header}-${index}`} value={index}>
-                          {header.length ? header : `Colonne ${index + 1}`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      {busy ? "Relecture…" : "Relire avec ce mapping"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {preview.mappingRestored ? (
+                <Callout tone="info" title="Mapping mémorisé appliqué">
+                  Ce format avait déjà été confirmé : la même association de colonnes a été
+                  réutilisée, parce que la signature du fichier est identique.
+                </Callout>
+              ) : null}
+              {preview.mappingConfidence === "INCOMPLETE" ? (
+                <Callout tone="warning" title="Colonnes non résolues">
+                  Aucune ligne n’a été lue : le fichier ne permet pas d’identifier avec certitude la
+                  date, le libellé ou le montant. Rien n’a été deviné.
+                </Callout>
+              ) : null}
+              {preview.issues.length ? (
+                <div className="import-issues">
+                  {preview.issues.map((issue, index) => (
+                    <p
+                      key={`${issue.code}-${index}`}
+                      className={issue.severity === "ERROR" ? "warning-text" : undefined}
+                    >
+                      <strong>{issue.code}</strong> · {issue.message}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="import-filters">
+                {(
+                  ["ALL", "READY", "WARNING", "BLOCKED", "DUPLICATE", "IGNORED"] as StatusFilter[]
+                ).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`button ${filter === value ? "primary" : "secondary"}`}
+                    onClick={() => setFilter(value)}
+                  >
+                    {value === "ALL"
+                      ? `Toutes ${preview.counts.total}`
+                      : `${STATUS_LABELS[value]} ${
+                          value === "READY"
+                            ? preview.counts.ready
+                            : value === "WARNING"
+                              ? preview.counts.warning
+                              : value === "BLOCKED"
+                                ? preview.counts.blocked
+                                : value === "DUPLICATE"
+                                  ? preview.counts.duplicate
+                                  : preview.counts.ignored
+                        }`}
+                  </button>
                 ))}
               </div>
+
+              <div className="import-table">
+                <div className="table-head">
+                  <span>Ligne</span>
+                  <span>Statut</span>
+                  <span>Date</span>
+                  <span>Libellé</span>
+                  <span>Montant</span>
+                  <span>Anomalie</span>
+                </div>
+                {visibleRows.map((row) => {
+                  const Icon = STATUS_ICONS[row.status];
+                  const includable = row.status === "WARNING";
+                  return (
+                    <div className="table-row" key={`${row.rowNumber}-${row.id}`}>
+                      <span>{row.rowNumber}</span>
+                      <span>
+                        {includable ? (
+                          <label className="checkbox-row">
+                            <input
+                              type="checkbox"
+                              checked={included.has(row.id)}
+                              onChange={() => toggle(row)}
+                            />
+                            <Icon size={14} /> {STATUS_LABELS[row.status]}
+                          </label>
+                        ) : (
+                          <span className="status-outline">
+                            <Icon size={14} /> {STATUS_LABELS[row.status]}
+                          </span>
+                        )}
+                      </span>
+                      <span>{row.transactionDate ?? <span className="warning-text">—</span>}</span>
+                      <span>{row.label ?? <span className="warning-text">—</span>}</span>
+                      <span>
+                        <RowAmount row={row} />
+                      </span>
+                      <span>
+                        {row.issues.length ? (
+                          row.issues.map((issue, index) => (
+                            <small
+                              key={`${issue.code}-${index}`}
+                              className={issue.severity === "ERROR" ? "warning-text" : undefined}
+                            >
+                              {issue.message}
+                            </small>
+                          ))
+                        ) : (
+                          <small>—</small>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              {preview.readyRowsTruncated ? (
+                <p className="panel-note">
+                  Seules les 200 premières lignes prêtes sont affichées. Toutes seront écrites à la
+                  validation : le plafond est un plafond d’affichage, pas de traitement.
+                </p>
+              ) : null}
+
               <div className="form-actions">
                 <button
                   type="button"
-                  className="button secondary"
-                  disabled={busy || !pendingFile}
-                  onClick={() => {
-                    if (pendingFile) void runAnalysis(pendingFile, mappingDraft);
-                  }}
+                  className="button primary"
+                  disabled={busy || committable === 0}
+                  onClick={() => void command("commit")}
                 >
-                  {busy ? "Relecture…" : "Relire avec ce mapping"}
+                  {busy ? "Écriture…" : `Écrire ${committable} opération(s)`}
+                </button>
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={() => void command("discard")}
+                >
+                  Abandonner
                 </button>
               </div>
-            </div>
+              <p className="panel-note">
+                Les lignes prêtes sont écrites. Les lignes à confirmer ne le sont que si vous les
+                cochez. Les lignes bloquées, les doublons et les lignes ignorées ne sont jamais
+                écrits, et aucun solde de compte n’est modifié.
+              </p>
+            </section>
           ) : null}
-
-          {preview.mappingRestored ? (
-            <Callout tone="info" title="Mapping mémorisé appliqué">
-              Ce format avait déjà été confirmé : la même association de colonnes a été réutilisée,
-              parce que la signature du fichier est identique.
-            </Callout>
-          ) : null}
-          {preview.mappingConfidence === "INCOMPLETE" ? (
-            <Callout tone="warning" title="Colonnes non résolues">
-              Aucune ligne n’a été lue : le fichier ne permet pas d’identifier avec certitude la
-              date, le libellé ou le montant. Rien n’a été deviné.
-            </Callout>
-          ) : null}
-          {preview.issues.length ? (
-            <div className="import-issues">
-              {preview.issues.map((issue, index) => (
-                <p
-                  key={`${issue.code}-${index}`}
-                  className={issue.severity === "ERROR" ? "warning-text" : undefined}
-                >
-                  <strong>{issue.code}</strong> · {issue.message}
-                </p>
-              ))}
-            </div>
-          ) : null}
-
-          <div className="import-filters">
-            {(["ALL", "READY", "WARNING", "BLOCKED", "DUPLICATE", "IGNORED"] as StatusFilter[]).map(
-              (value) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={`button ${filter === value ? "primary" : "secondary"}`}
-                  onClick={() => setFilter(value)}
-                >
-                  {value === "ALL"
-                    ? `Toutes ${preview.counts.total}`
-                    : `${STATUS_LABELS[value]} ${
-                        value === "READY"
-                          ? preview.counts.ready
-                          : value === "WARNING"
-                            ? preview.counts.warning
-                            : value === "BLOCKED"
-                              ? preview.counts.blocked
-                              : value === "DUPLICATE"
-                                ? preview.counts.duplicate
-                                : preview.counts.ignored
-                      }`}
-                </button>
-              ),
-            )}
-          </div>
-
-          <div className="import-table">
-            <div className="table-head">
-              <span>Ligne</span>
-              <span>Statut</span>
-              <span>Date</span>
-              <span>Libellé</span>
-              <span>Montant</span>
-              <span>Anomalie</span>
-            </div>
-            {visibleRows.map((row) => {
-              const Icon = STATUS_ICONS[row.status];
-              const includable = row.status === "WARNING";
-              return (
-                <div className="table-row" key={`${row.rowNumber}-${row.id}`}>
-                  <span>{row.rowNumber}</span>
-                  <span>
-                    {includable ? (
-                      <label className="checkbox-row">
-                        <input
-                          type="checkbox"
-                          checked={included.has(row.id)}
-                          onChange={() => toggle(row)}
-                        />
-                        <Icon size={14} /> {STATUS_LABELS[row.status]}
-                      </label>
-                    ) : (
-                      <span className="status-outline">
-                        <Icon size={14} /> {STATUS_LABELS[row.status]}
-                      </span>
-                    )}
-                  </span>
-                  <span>{row.transactionDate ?? <span className="warning-text">—</span>}</span>
-                  <span>{row.label ?? <span className="warning-text">—</span>}</span>
-                  <span>
-                    <RowAmount row={row} />
-                  </span>
-                  <span>
-                    {row.issues.length ? (
-                      row.issues.map((issue, index) => (
-                        <small
-                          key={`${issue.code}-${index}`}
-                          className={issue.severity === "ERROR" ? "warning-text" : undefined}
-                        >
-                          {issue.message}
-                        </small>
-                      ))
-                    ) : (
-                      <small>—</small>
-                    )}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          {preview.readyRowsTruncated ? (
-            <p className="panel-note">
-              Seules les 200 premières lignes prêtes sont affichées. Toutes seront écrites à la
-              validation : le plafond est un plafond d’affichage, pas de traitement.
-            </p>
-          ) : null}
-
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button primary"
-              disabled={busy || committable === 0}
-              onClick={() => void command("commit")}
-            >
-              {busy ? "Écriture…" : `Écrire ${committable} opération(s)`}
-            </button>
-            <button
-              type="button"
-              className="button secondary"
-              disabled={busy}
-              onClick={() => void command("discard")}
-            >
-              Abandonner
-            </button>
-          </div>
-          <p className="panel-note">
-            Les lignes prêtes sont écrites. Les lignes à confirmer ne le sont que si vous les
-            cochez. Les lignes bloquées, les doublons et les lignes ignorées ne sont jamais écrits,
-            et aucun solde de compte n’est modifié.
-          </p>
-        </section>
+        </>
       ) : null}
     </div>
   );

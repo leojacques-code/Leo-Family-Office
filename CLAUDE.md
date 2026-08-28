@@ -126,14 +126,17 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Production alignée sur **27 migrations** au 27 août 2026. Les dernières versions sont :
+Production et dépôt alignés sur **29 migrations** au 28 août 2026. Les dernières versions
+sont :
 
 - `20260826194551_business_equity_v2_1` ;
 - `20260826194605_business_equity_v2_1_indexes` ;
 - `20260826194644_business_equity_v2_1_blocking_invariants` ;
 - `20260827155134_data_acquisition_foundation` ;
 - `20260827215014_career_tax_v2` ;
-- `20260827215600_career_tax_v2_fk_indexes`.
+- `20260827215600_career_tax_v2_fk_indexes` ;
+- `20260828131216_fec_corporate_acquisition` ;
+- `20260828131433_fec_corporate_acquisition_fk_indexes`.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
@@ -170,7 +173,7 @@ Correctness → données → intégration → calculs → tests → produit → 
 ```text
 faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données + analytics)
                Real Estate (faits + scénarios) · Business Equity (faits + valorisation dérivée)
-               Data Acquisition (staging + provenance + relevé bancaire CSV)
+               Data Acquisition (staging + provenance + relevé bancaire CSV + FEC)
                Career + Tax (faits datés + règles fiscales déclarées + calculs dérivés)
 en cours       vérité de schéma · vérité des consommateurs
 suivant        Event Engine → Scenarios V2 → Goals → Decision Lab
@@ -230,6 +233,46 @@ s'appuie donc sur une clé de ressemblance.
 La date d'observation d'un import n'est pas `AS_OF_DATE` : une opération bookée hier est un
 fait, même si le reporting est arrêté le mois précédent. L'acquisition ingère, les moteurs
 aval arbitrent à leur date. Détail dans `docs/DATA_ACQUISITION.md`.
+
+L'acquisition comptable (FEC) est la deuxième verticale de cette fondation, et elle l'ÉTEND
+sans la dupliquer : mêmes sources, mêmes sessions, même brut immuable, même piste d'audit,
+une colonne cible de plus dans `import_record_links`. Un FEC est une SOURCE COMPTABLE, pas
+une valorisation : FEC ≠ COMPTES ANNUELS, et CLASSIFICATION COMPTABLE ≠ JUGEMENT ÉCONOMIQUE.
+Une ligne de FEC n'est pas une transaction économique indépendante : l'unité est l'écriture,
+et Σdébits = Σcrédits est vérifié par écriture, jamais par ligne — contrôle DÉRIVÉ des lignes
+persistées, jamais repris d'un décompte fourni par l'appelant. Les valeurs numériques peuvent
+être SIGNÉES : le texte l'autorise, aucune contrainte de signe n'existe donc, et une
+contrepassation est une donnée valide. Deux formes réglementaires coexistent pour les colonnes
+12 et 13, `Debit`/`Credit` et `Montant`/`Sens` : les deux sont lues, un sens inconnu bloque la
+ligne. Séparateur conforme ≠ séparateur lisible : le point-virgule est lu et SIGNALÉ. Les états
+reconstruits sont des CANDIDATS, chaque montant portant le NOM de sa convention — EBE au sens
+du SIG dont la décomposition est respectée (la production de l'exercice exclut les ventes de
+marchandises), marge commerciale sur les marchandises seules, participation des salariés (691)
+jamais agrégée à l'impôt (695 à 699), jamais un EBITDA normatif, qui appartient au ledger de
+Quality of Earnings de Business Equity sur décision humaine. TRÉSORERIE COMPTABLE ≠
+TRÉSORERIE PERSONNELLE, DETTE CORPORATE ≠ DETTE PERSONNELLE, DETTE COMPTABLE ≠ CONTRAT DE
+PRÊT, D&A ≠ CAPEX CASH. Aucun état reconstruit n'est persisté : `fec_entry_lines` porte les
+écritures, les états s'en dérivent à la lecture. La couverture d'un exercice se DÉCLARE :
+sans déclaration, aucun fait Business n'est écrit, et une couverture déclarée sans bornes
+d'exercice est refusée par la base. Un exercice déclaré complet ne contient AUCUNE écriture
+d'une autre période. ÉCART DE CONFORMITÉ RÉGLEMENTAIRE ≠ MONTANT NON CALCULABLE : un champ de
+traçabilité blanc est un INFO de fichier, jamais une ligne bloquée. ANALYSER ≠ ARCHIVER : un
+échec de conservation après validation ne transforme jamais un fait écrit en échec, le statut
+du fait et celui de la copie sont distincts. CONFLIT DE SOURCES ≠ CHOIX SILENCIEUX D'UNE
+SOURCE : une période financière déjà renseignée par une autre origine n'est jamais écrasée,
+seule une correction FEC → FEC l'est, et la preuve est la provenance, pas un libellé.
+
+Un FEC d'exercice ne traverse PAS la fonction serveur : le fichier va directement du
+navigateur au stockage privé, et la route ne reçoit qu'une référence émise par le serveur.
+Le chemin de stockage est CALCULÉ en base, jamais reçu du client ; le billet est à usage
+unique, expirant et cloisonné ; l'empreinte est calculée sur le contenu réellement déposé.
+STAGING ≠ COFFRE DOCUMENTAIRE : deux buckets privés distincts, l'un dimensionné pour ce que
+l'application analyse et sans aucune policy, l'autre gardant sa vocation d'archive à 8 Mio.
+AUTORISATION DE STOCKAGE ≠ BILLET LFO : les durées diffèrent, et c'est le billet qui décide
+de ce qui devient analysable. ÉCHEC DE NETTOYAGE ≠ ÉCHEC DE VALIDATION, mais ÉCHEC DE
+NETTOYAGE ≠ SUCCÈS SILENCIEUX non plus : la référence d'un objet non supprimé est CONSERVÉE,
+sans quoi une comptabilité entière resterait au stockage sans que rien ne sache où. Détail
+dans `docs/FEC_ACQUISITION.md`.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

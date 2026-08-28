@@ -76,7 +76,11 @@ npm run db:local:up
 npm run gate:local
 ```
 
-La production et le dépôt sont alignés sur **27 migrations**. La 25e installe Data Acquisition Foundation ; les 26e et 27e installent Career + Tax V2 puis ses index couvrants. Elles ont été appliquées en production le 27 août 2026. Career + Tax a été prévalidée par application transactionnelle rollbackée, puis contrôlée après application par inventaire exact, smoke rollbacké, isolation cross-user, permissions RPC, RLS et advisors Supabase. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique et la procédure à reprendre si une autre apparaît.
+La production et le dépôt sont alignés sur **29 migrations**. Les 28e et 29e,
+`20260828131216_fec_corporate_acquisition` et
+`20260828131433_fec_corporate_acquisition_fk_indexes`, étendent la fondation d'acquisition au
+domaine comptable puis couvrent ses clés étrangères composites ; elles ont été appliquées en
+production le 28 août 2026. La 25e installe Data Acquisition Foundation ; les 26e et 27e installent Career + Tax V2 puis ses index couvrants. Elles ont été appliquées en production le 27 août 2026. Career + Tax a été prévalidée par application transactionnelle rollbackée, puis contrôlée après application par inventaire exact, smoke rollbacké, isolation cross-user, permissions RPC, RLS et advisors Supabase. Le registre des divergences de `docs/SUPABASE_SETUP.md` conserve l'historique et la procédure à reprendre si une autre apparaît.
 
 ## Fonctionnalités
 
@@ -122,6 +126,8 @@ Les migrations sont appliquées dans cet ordre, sans modification rétroactive :
 25. `20260827155134_data_acquisition_foundation.sql`
 26. `20260827215014_career_tax_v2.sql`
 27. `20260827215600_career_tax_v2_fk_indexes.sql`
+28. `20260828131216_fec_corporate_acquisition.sql`
+29. `20260828131433_fec_corporate_acquisition_fk_indexes.sql`
 
 La migration 005 ajoute uniquement les fonctions RPC transactionnelles de persistance. Elle ne déplace aucune formule financière dans la base.
 Les migrations Canonical Balance Sheet V2 enrichissent et versionnent les snapshots, sans supprimer ni écraser les données historiques ; toutes les formules restent dans les engines TypeScript.
@@ -131,6 +137,32 @@ Les migrations 14 et 15 ne portent que des index de `net_worth_snapshot_items` :
 Les migrations 20 et 21 installent les faits Business Equity et leur vérité datée. La migration 22 installe le VALUATION ENGINE et porte l'invariant central du domaine : **une valorisation dérivée n'est jamais persistée**. `business_valuations_basis_v2_ck` interdit une Enterprise Value ou une Equity Value sur une méthode dérivée ; la base ne stocke qu'un multiple, une base financière, des retraitements d'EBITDA (`business_ebitda_adjustments`), des éléments de pont (`business_bridge_items`), des paramètres de DCF (`business_dcf_assumptions`, `business_dcf_periods`) et les termes d'un tour de table. EV, Equity Value, fourchette, valeur attribuable, MOIC et XIRR sont dérivés par `src/lib/engine/business-valuation.ts` et ses voisins. Elle relâche aussi la détention à 0 % — une cession totale est un fait — et remplace l'unicité par date des valorisations par une unicité par date ET méthode, pour qu'une expertise et une transaction divergentes coexistent au lieu de s'écraser. La migration 23 ajoute les index couvrants dans l'ORDRE des clés étrangères composites `(business_id, user_id)`. La migration 24 ajoute la complétude explicite du bridge EV → Equity, les changements de détention atomiques avec leur événement et le Quick Start strict : une donnée inconnue ne devient jamais zéro.
 
 La migration 25 installe la Data Acquisition Foundation : six tables de staging (`import_sources`, `import_sessions`, `import_raw_records`, `import_normalized_records`, `import_record_links`, `import_column_mappings`), le trigger d'immuabilité `import_raw_records_immutable` et quatre RPC. Elle ne touche à AUCUN domaine financier : son seul point de contact est l'écriture de `transactions` avec `category_id` nul, donc une opération importée reste NON CLASSÉE et le Cash Flow Engine la compte comme telle. L'idempotence est portée aux deux seuls endroits où l'identité est démontrable : un contenu de fichier ne se valide qu'une fois par source, et un identifiant de transaction dont la stabilité est DÉCLARÉE ne s'écrit qu'une fois — cherché dans tout l'historique, sans filtre de date. Aucune unicité ne pèse sur une simple égalité de tuple — elle refuserait un troisième achat réellement identique. La piste d'audit est en lecture seule pour `authenticated`, le brut est immuable, la provenance d'un fait écrit est gelée, et la clé étrangère du lien de provenance est en `restrict` : une transaction importée ne peut pas perdre son origine. Voir `docs/DATA_ACQUISITION.md`.
+
+La migration 28 étend cette fondation au domaine comptable, sans la dupliquer : le domaine
+`BUSINESS_ACCOUNTING` et `target_business_id` sur `import_sources`, une colonne cible de plus
+sur `import_record_links` avec sa clé étrangère composite vers `business_financials` en
+`restrict`, l'exercice et la couverture déclarés sur `import_sessions`, le statut `RECEIVING`
+pour une réception par lots, et une table `fec_entry_lines` qui conserve les dix-huit champs
+réglementaires TELS QUELS. AUCUN état financier reconstruit n'y est persisté : compte de
+résultat, bilan, EBE, marge commerciale et BFR sont dérivés à la lecture par
+`src/lib/acquisition/fec/`. `debit` et `credit` sont nullables et une contrainte impose qu'une
+ligne aux deux côtés absents ne puisse exister qu'en `BLOCKED` — ABSENT ≠ ZÉRO jusque dans la
+base. Il n'y a AUCUNE contrainte de signe, parce que le texte réglementaire autorise
+explicitement des valeurs signées : une contrepassation est une écriture valide. Un montant en
+devise sans code devise est refusé, et une écriture committée est gelée. La validation exige
+une couverture d'exercice DÉCLARÉE et bornée, zéro écriture déséquilibrée, zéro ligne illisible
+et zéro écriture hors de l'exercice déclaré ; les deux premiers contrôles sont DÉRIVÉS des
+lignes persistées par `lfo_fec_entry_balance`, jamais repris d'un décompte fourni par
+l'appelant. L'écriture du fait est déléguée à `lfo_record_business_financials` : un seul chemin
+d'écriture sur `business_financials`. Une période financière déjà renseignée par une AUTRE
+source n'est jamais écrasée : seule une correction FEC → FEC l'est, et la preuve d'une origine
+comptable est la provenance, pas un libellé. Le fichier ne traverse pas la fonction serveur :
+`import_upload_tickets` porte la référence d'un objet déposé directement au stockage privé,
+dont le chemin est calculé en base et le billet à usage unique, expirant et cloisonné. Aucun
+moteur financier n'est modifié, aucune valorisation n'est produite. La migration 29 ajoute
+les index couvrants dans l'ORDRE des clés étrangères composites `(business_id, user_id)` de
+`fec_entry_lines` et `(consumed_session_id, user_id)` de `import_upload_tickets`. Voir
+`docs/FEC_ACQUISITION.md`.
 
 La migration 18 installe Real Estate V2 : quatre tables de faits (`real_estate_valuations`, `real_estate_capital_events`, `real_estate_operating_terms`, `real_estate_financing_links`), les colonnes canoniques de `properties`, la colonne d'attribution `transactions.property_id`, neuf RPC et le trigger `real_estate_financing_links_allocation_guard`. Ce trigger est le seul endroit où la règle « la somme des quote-parts d'un même concours ne dépasse jamais 1 » est réellement garantie : il verrouille la ligne de dette, donc il tient sous concurrence et sur une écriture directe hors RPC. Elle ne crée AUCUNE seconde vérité : la dette immobilière reste une ligne de `liabilities` à laquelle le bien se rattache par une quote-part, et les flux réels restent des lignes de `transactions` simplement rattachées à un bien. Rendement, equity, plus-value et coût économique du financement sont dérivés par `src/lib/engine/real-estate.ts`. Les tables héritées `mortgages` et `real_estate_cashflows` y sont marquées obsolètes et ne sont ni lues ni écrites. La migration 19 ajoute les index couvrants dans l'ORDRE des clés étrangères composites `(property_id, user_id)` des trois tables de faits.
 

@@ -42,8 +42,20 @@ export const IMPORT_SOURCE_STATUSES = [
 ] as const;
 export type ImportSourceStatus = (typeof IMPORT_SOURCE_STATUSES)[number];
 
-/** Cycle de vie d'une session d'import. `COMMITTED` est terminal et irréversible. */
-export const IMPORT_SESSION_STATUSES = ["ANALYZED", "COMMITTED", "DISCARDED", "FAILED"] as const;
+/**
+ * Cycle de vie d'une session d'import. `COMMITTED` est terminal et irréversible.
+ *
+ * `RECEIVING` n'existe que pour les sources volumineuses reçues par lots : une session qui
+ * reçoit encore ses lignes n'est pas une session analysée, et ses décomptes ne veulent
+ * encore rien dire.
+ */
+export const IMPORT_SESSION_STATUSES = [
+  "RECEIVING",
+  "ANALYZED",
+  "COMMITTED",
+  "DISCARDED",
+  "FAILED",
+] as const;
 export type ImportSessionStatus = (typeof IMPORT_SESSION_STATUSES)[number];
 
 /**
@@ -142,6 +154,42 @@ export const IMPORT_ISSUE_CODES = [
   "CURRENCY_FROM_SESSION_DECLARATION",
   "VALUE_DATE_UNPARSEABLE",
   "BALANCE_AFTER_UNPARSEABLE",
+  // FEC — format et structure
+  "FEC_HEADER_INVALID",
+  "FEC_HEADER_MISSING_FIELD",
+  "FEC_HEADER_UNEXPECTED_FIELD",
+  "FEC_FIELD_COUNT_MISMATCH",
+  "FEC_NON_STANDARD_DATE_FORMAT",
+  "FEC_LINE_COUNT_EXCEEDED",
+  // FEC — ligne
+  "FEC_JOURNAL_MISSING",
+  "FEC_ENTRY_NUMBER_MISSING",
+  "FEC_ENTRY_DATE_MISSING",
+  "FEC_ENTRY_DATE_INVALID",
+  "FEC_ACCOUNT_MISSING",
+  "FEC_ACCOUNT_UNKNOWN_CLASS",
+  "FEC_AMOUNT_MISSING",
+  "FEC_AMOUNT_UNPARSEABLE",
+  "FEC_AMOUNT_BOTH_SIDES",
+  "FEC_AMOUNT_SENS_INVALID",
+  "FEC_AMOUNT_SENS_NON_STANDARD",
+  "FEC_AMOUNT_SCHEMA_AMBIGUOUS",
+  "FEC_NON_STANDARD_DELIMITER",
+  "FEC_REGULATORY_FIELD_BLANK",
+  "FEC_PIECE_MISSING",
+  "FEC_LETTER_DATE_WITHOUT_CODE",
+  "FEC_VALID_DATE_BEFORE_ENTRY",
+  "FEC_CURRENCY_AMOUNT_WITHOUT_CODE",
+  "FEC_DATE_OUT_OF_FISCAL_YEAR",
+  // FEC — écriture et reconstruction
+  "FEC_ENTRY_UNBALANCED",
+  "FEC_NO_EXPLOITABLE_LINE",
+  "FEC_COVERAGE_NOT_DECLARED",
+  "FEC_CASH_NEGATIVE",
+  "FEC_UNEXPECTED_SIGN",
+  "FEC_OUT_OF_FISCAL_YEAR_IN_DECLARED_PERIOD",
+  "FEC_ACCOUNT_GROUP_ABSENT",
+  "FEC_MULTI_CURRENCY",
   // Déduplication
   "DUPLICATE_EXACT",
   "DUPLICATE_PROBABLE",
