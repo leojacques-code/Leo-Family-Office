@@ -549,4 +549,26 @@ describe("Goals V2", () => {
     });
     expect(result).toMatchObject({ status: "COMPUTABLE", probability: 0.5, successfulSamples: 1, totalSamples: 2 });
   });
+
+  it("42. cherche la première atteinte d'une target window uniquement dans sa fenêtre", () => {
+    const result = evaluateGoalAgainstTrajectory({
+      goal: goal({
+        target: target("NET_WORTH", 250_000),
+        targetDate: null,
+        targetWindow: { startDate: "2027-01-01", endDate: "2028-12-31" },
+      }),
+      trajectory: trajectory(),
+      reportingCurrency: "EUR",
+    });
+    expect(result.firstProjectedAttainmentDate).toBe("2027-12-31");
+  });
+
+  it("43. refuse une dette spécifique sans identifiant canonique", () => {
+    expect(
+      isGoalVersionDefinition({
+        ...goal(),
+        target: target("SPECIFIC_DEBT_BALANCE", 0, "AT_MOST", null),
+      }),
+    ).toBe(false);
+  });
 });

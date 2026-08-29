@@ -196,7 +196,7 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
       ...current,
       metric,
       operator: definition.allowedOperators[0],
-      entityId: definition.entityRequirement === "NONE" ? "" : current.entityId,
+      entityId: "",
     }));
   }
 
@@ -257,6 +257,35 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
 
   const modalOpen = creating || editing !== null;
   const metricDefinition = GOAL_METRIC_REGISTRY[form.metric];
+  const entityTarget =
+    form.metric === "SPECIFIC_DEBT_BALANCE"
+      ? {
+          label: "Dette ciblée",
+          placeholder: "Sélectionner une dette",
+          required: true,
+          options: state.liabilities.map((liability) => ({
+            id: liability.id,
+            name: liability.name,
+          })),
+        }
+      : form.metric === "REAL_ESTATE_VALUE"
+        ? {
+            label: "Bien ciblé (optionnel)",
+            placeholder: "Tous les biens",
+            required: false,
+            options: state.realEstateAssets.map((asset) => ({ id: asset.id, name: asset.name })),
+          }
+        : form.metric === "BUSINESS_EQUITY"
+          ? {
+              label: "Entreprise ciblée (optionnel)",
+              placeholder: "Toutes les entreprises",
+              required: false,
+              options: (state.businesses ?? []).map((business) => ({
+                id: business.id,
+                name: business.name,
+              })),
+            }
+          : null;
 
   return (
     <div className="page-stack">
@@ -517,6 +546,7 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
             Cible ({state.reportingCurrency})
             <input
               required
+              type="number"
               min="0"
               step="0.01"
               inputMode="decimal"
@@ -559,18 +589,18 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
               ))}
             </select>
           </label>
-          {form.metric === "SPECIFIC_DEBT_BALANCE" ? (
+          {entityTarget ? (
             <label className="full">
-              Dette ciblée
+              {entityTarget.label}
               <select
-                required
+                required={entityTarget.required}
                 value={form.entityId}
                 onChange={(event) => setForm({ ...form, entityId: event.target.value })}
               >
-                <option value="">Sélectionner une dette</option>
-                {state.liabilities.map((liability) => (
-                  <option key={liability.id} value={liability.id}>
-                    {liability.name}
+                <option value="">{entityTarget.placeholder}</option>
+                {entityTarget.options.map((entity) => (
+                  <option key={entity.id} value={entity.id}>
+                    {entity.name}
                   </option>
                 ))}
               </select>

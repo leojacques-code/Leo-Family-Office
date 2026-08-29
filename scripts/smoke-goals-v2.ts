@@ -72,6 +72,37 @@ try {
     createdAt: now,
     legacyCompatibility: false,
   };
+
+  await client.query("savepoint invalid_contract");
+  try {
+    const { status: _status, ...missingStatus } = definition;
+    await client.query("select public.lfo_create_goal_v2($1,$2,$3)", [
+      userId,
+      missingStatus,
+      now,
+    ]);
+    throw new Error("Une définition sans status a été acceptée");
+  } catch (error) {
+    await client.query("rollback to savepoint invalid_contract");
+    assert(String(error).includes("status invalide"), `Mauvais refus contrat : ${String(error)}`);
+  }
+
+  await client.query("savepoint null_target_value");
+  try {
+    await client.query("select public.lfo_create_goal_v2($1,$2,$3)", [
+      userId,
+      { ...definition, target: { ...definition.target, value: null } },
+      now,
+    ]);
+    throw new Error("Une définition sans valeur cible a été acceptée");
+  } catch (error) {
+    await client.query("rollback to savepoint null_target_value");
+    assert(
+      String(error).includes("target value invalide"),
+      `Mauvais refus valeur cible : ${String(error)}`,
+    );
+  }
+
   const created = await client.query<{ id: string }>(
     "select public.lfo_create_goal_v2($1,$2,$3) as id",
     [userId, definition, now],
@@ -217,7 +248,7 @@ try {
 
   await client.query("rollback");
   console.log(
-    "Smoke Goals V2 vert : backfill, création ACTIVE, UPDATE/DELETE service_role refusés sur les versions immuables, verrou optimiste, ownership, cycle de vie versionné, aucune évaluation persistée et rollback intégral.",
+    "Smoke Goals V2 vert : contrat strict, backfill, création ACTIVE, UPDATE/DELETE service_role refusés sur les versions immuables, verrou optimiste, ownership, cycle de vie versionné, aucune évaluation persistée et rollback intégral.",
   );
 } catch (error) {
   await client.query("rollback").catch(() => undefined);

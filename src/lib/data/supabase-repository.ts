@@ -219,6 +219,11 @@ export function mapGoal(
   const priority = finiteNumber(row.priority, `${context}.priority`);
   const status = str(row.status) as Goal["status"];
   const version = finiteNumber(row.current_version ?? 1, `${context}.current_version`);
+  if (row.current_version !== null && row.current_version !== undefined && !definition) {
+    throw new Error(
+      `Supabase donnée invalide (${context}) : snapshot Goals V2 courant absent ou invalide`,
+    );
+  }
   const current =
     definition ??
     legacyGoalDefinition({

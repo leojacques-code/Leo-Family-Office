@@ -56,6 +56,10 @@ describe("Goals V2 persistence contracts", () => {
     });
   });
 
+  it("refuse de remplacer silencieusement un snapshot V2 courant absent par le legacy", () => {
+    expect(() => mapGoal(row, undefined, "EUR")).toThrow(/snapshot Goals V2 courant absent/);
+  });
+
   it("accepte une création V2 complète", () => {
     const definition = createGoalVersion({
       goalId: row.id,

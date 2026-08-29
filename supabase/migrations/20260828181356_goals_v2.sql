@@ -87,7 +87,7 @@ begin
   ) then
     alter table public.goal_versions add constraint goal_versions_owner_fk
       foreign key (goal_id, user_id)
-      references public.goals(id, user_id) on delete restrict;
+      references public.goals(id, user_id) on delete cascade;
   end if;
 end $$;
 
@@ -112,6 +112,7 @@ grant select, insert, update on public.goal_versions to service_role;
 -- modifier l'identité sans créer la version correspondante.
 revoke insert, update, delete, truncate, references, trigger on public.goals from authenticated;
 grant select on public.goals to authenticated;
+revoke delete, truncate on public.goals from service_role;
 
 -- Les objectifs legacy deviennent une version V2 explicite. La devise vient du profil
 -- du propriétaire ; si elle manque, JSON null est conservé et le moteur remontera
@@ -162,31 +163,58 @@ declare
   v_operator text := p_definition #>> '{target,operator}';
   v_currency text := p_definition #>> '{target,currency}';
   v_value numeric;
+  v_priority integer;
+  v_version integer;
+  v_goal_id uuid;
+  v_created_at timestamptz;
+  v_target_date date;
+  v_window_start date;
+  v_window_end date;
 begin
-  if pg_catalog.jsonb_typeof(p_definition) <> 'object' then
+  if p_definition is null or pg_catalog.jsonb_typeof(p_definition) <> 'object' then
     raise exception 'Goal V2 definition doit être un objet JSON';
   end if;
-  if p_definition ->> 'schemaVersion' <> '2'
-     or p_definition ->> 'methodologyVersion' <> 'GOALS_V2_CANONICAL_TRAJECTORY_1' then
+  if p_definition ->> 'schemaVersion' is distinct from '2'
+     or p_definition ->> 'methodologyVersion' is distinct from 'GOALS_V2_CANONICAL_TRAJECTORY_1' then
     raise exception 'Contrat Goals V2 invalide';
   end if;
   if coalesce(pg_catalog.btrim(p_definition ->> 'name'), '') = '' then
     raise exception 'Goal name requis';
   end if;
-  if p_definition ->> 'status' not in ('ACTIVE', 'PAUSED', 'ACHIEVED', 'ARCHIVED') then
+  if pg_catalog.jsonb_typeof(p_definition -> 'description') is null
+     or pg_catalog.jsonb_typeof(p_definition -> 'description') not in ('string', 'null') then
+    raise exception 'Goal description invalide';
+  end if;
+  begin
+    v_goal_id := (p_definition ->> 'goalId')::uuid;
+    v_version := (p_definition ->> 'version')::integer;
+    v_created_at := (p_definition ->> 'createdAt')::timestamptz;
+  exception when others then
+    raise exception 'Métadonnées Goals V2 invalides';
+  end;
+  if v_goal_id is null or v_version is null or v_version < 1 or v_created_at is null
+     or pg_catalog.jsonb_typeof(p_definition -> 'legacyCompatibility') is distinct from 'boolean' then
+    raise exception 'Métadonnées Goals V2 invalides';
+  end if;
+  if p_definition ->> 'status' is null
+     or p_definition ->> 'status' not in ('ACTIVE', 'PAUSED', 'ACHIEVED', 'ARCHIVED') then
     raise exception 'Goal status invalide';
   end if;
-  if p_definition ->> 'constraintStrength' not in ('HARD', 'SOFT') then
+  if p_definition ->> 'constraintStrength' is null
+     or p_definition ->> 'constraintStrength' not in ('HARD', 'SOFT') then
     raise exception 'Goal constraint strength invalide';
   end if;
-  if v_metric not in (
+  if pg_catalog.jsonb_typeof(p_definition -> 'target') <> 'object' then
+    raise exception 'Goal target invalide';
+  end if;
+  if v_metric is null or v_metric not in (
     'NET_WORTH', 'LIQUID_NET_WORTH', 'IMMEDIATE_CASH', 'LIQUID_ASSETS',
     'INVESTMENT_ASSETS', 'TOTAL_LIABILITIES', 'CONTRACTUAL_DEBT', 'FUNDING_GAP',
     'SPECIFIC_DEBT_BALANCE', 'REAL_ESTATE_VALUE', 'BUSINESS_EQUITY'
   ) then
     raise exception 'Goal target metric invalide';
   end if;
-  if v_operator not in ('AT_LEAST', 'AT_MOST', 'EQUAL') then
+  if v_operator is null or v_operator not in ('AT_LEAST', 'AT_MOST', 'EQUAL') then
     raise exception 'Goal target operator invalide';
   end if;
   if v_metric in (
@@ -204,6 +232,14 @@ begin
      and nullif(p_definition #>> '{target,entityId}', '') is null then
     raise exception 'Cette métrique exige une entité';
   end if;
+  if pg_catalog.jsonb_typeof(p_definition #> '{target,entityId}') is null
+     or pg_catalog.jsonb_typeof(p_definition #> '{target,entityId}') not in ('string', 'null')
+     or (
+       pg_catalog.jsonb_typeof(p_definition #> '{target,entityId}') = 'string'
+       and nullif(pg_catalog.btrim(p_definition #>> '{target,entityId}'), '') is null
+     ) then
+    raise exception 'Goal target entityId invalide';
+  end if;
   if v_currency is null or v_currency !~ '^[A-Z]{3}$' then
     raise exception 'Goal currency invalide';
   end if;
@@ -212,18 +248,57 @@ begin
   exception when others then
     raise exception 'Goal target value invalide';
   end;
+  if v_value is null or v_value::text in ('NaN', 'Infinity', '-Infinity') then
+    raise exception 'Goal target value invalide';
+  end if;
   if v_value < 0 then raise exception 'Goal target value doit être positive ou nulle'; end if;
+  if not (p_definition ? 'targetDate') or not (p_definition ? 'targetWindow') then
+    raise exception 'Goal targetDate et targetWindow doivent être déclarés';
+  end if;
   if (p_definition -> 'targetDate') <> 'null'::jsonb
      and (p_definition -> 'targetWindow') <> 'null'::jsonb then
     raise exception 'Goal targetDate et targetWindow sont mutuellement exclusifs';
   end if;
+  if (p_definition -> 'targetDate') <> 'null'::jsonb then
+    if pg_catalog.jsonb_typeof(p_definition -> 'targetDate') <> 'string'
+       or (p_definition ->> 'targetDate') !~ '^\d{4}-\d{2}-\d{2}$' then
+      raise exception 'Goal targetDate invalide';
+    end if;
+    begin
+      v_target_date := (p_definition ->> 'targetDate')::date;
+    exception when others then
+      raise exception 'Goal targetDate invalide';
+    end;
+    if pg_catalog.to_char(v_target_date, 'YYYY-MM-DD') <> (p_definition ->> 'targetDate') then
+      raise exception 'Goal targetDate invalide';
+    end if;
+  end if;
   if (p_definition -> 'targetWindow') <> 'null'::jsonb then
-    if (p_definition #>> '{targetWindow,startDate}')::date
-       > (p_definition #>> '{targetWindow,endDate}')::date then
+    if pg_catalog.jsonb_typeof(p_definition -> 'targetWindow') <> 'object'
+       or (p_definition #>> '{targetWindow,startDate}') !~ '^\d{4}-\d{2}-\d{2}$'
+       or (p_definition #>> '{targetWindow,endDate}') !~ '^\d{4}-\d{2}-\d{2}$' then
+      raise exception 'Goal target window invalide';
+    end if;
+    begin
+      v_window_start := (p_definition #>> '{targetWindow,startDate}')::date;
+      v_window_end := (p_definition #>> '{targetWindow,endDate}')::date;
+    exception when others then
+      raise exception 'Goal target window invalide';
+    end;
+    if pg_catalog.to_char(v_window_start, 'YYYY-MM-DD')
+         <> (p_definition #>> '{targetWindow,startDate}')
+      or pg_catalog.to_char(v_window_end, 'YYYY-MM-DD')
+         <> (p_definition #>> '{targetWindow,endDate}')
+       or v_window_start > v_window_end then
       raise exception 'Goal target window invalide';
     end if;
   end if;
-  if (p_definition ->> 'priority')::integer not between 1 and 99 then
+  begin
+    v_priority := (p_definition ->> 'priority')::integer;
+  exception when others then
+    raise exception 'Goal priority invalide';
+  end;
+  if v_priority is null or v_priority not between 1 and 99 then
     raise exception 'Goal priority invalide';
   end if;
 end;
@@ -402,22 +477,6 @@ drop trigger if exists goal_versions_immutable_update on public.goal_versions;
 create trigger goal_versions_immutable_update
 before update on public.goal_versions
 for each row execute function public.lfo_guard_goal_version_update();
-
-create or replace function public.lfo_guard_goal_version_delete()
-returns trigger
-language plpgsql
-security invoker
-set search_path = ''
-as $$
-begin
-  raise exception 'Goal versions are immutable and cannot be deleted';
-end;
-$$;
-
-drop trigger if exists goal_versions_immutable_delete on public.goal_versions;
-create trigger goal_versions_immutable_delete
-before delete on public.goal_versions
-for each row execute function public.lfo_guard_goal_version_delete();
 
 create or replace function public.lfo_guard_goal_v2_update()
 returns trigger

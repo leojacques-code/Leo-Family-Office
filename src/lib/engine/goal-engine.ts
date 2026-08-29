@@ -70,7 +70,10 @@ export function isGoalVersionDefinition(value: unknown): value is GoalVersionDef
     Number.isFinite(target.value) &&
     target.value >= 0 &&
     (target.currency === null || /^[A-Z]{3}$/.test(target.currency)) &&
-    (target.entityId === null || typeof target.entityId === "string") &&
+    (target.entityId === null ||
+      (typeof target.entityId === "string" && target.entityId.trim().length > 0)) &&
+    (definition.entityRequirement !== "REQUIRED" ||
+      (typeof target.entityId === "string" && target.entityId.trim().length > 0)) &&
     !(item.targetDate && item.targetWindow) &&
     dateShape &&
     typeof item.createdAt === "string" &&
@@ -386,8 +389,10 @@ export function evaluateGoalAgainstTrajectory(input: {
       input.baselineFingerprint ?? null,
     );
   }
-  const firstAttainment = input.trajectory.monthly
-    .filter((point) => point.date >= input.trajectory.asOfDate)
+  const attainmentCandidates = input.goal.targetWindow
+    ? selected.candidates
+    : input.trajectory.monthly.filter((point) => point.date >= input.trajectory.asOfDate);
+  const firstAttainment = attainmentCandidates
     .find((point) => {
       const metric = resolveProjectedGoalMetric(input.goal.target, point, input.reportingCurrency);
       return metric.value !== null && targetSatisfied(metric.value, input.goal.target);
