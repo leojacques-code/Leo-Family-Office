@@ -40,8 +40,9 @@ const canonicalMigrations = [
   "20260827215600",
   "20260828131216",
   "20260828131433",
-  "20260828180000",
-  "20260828181356",
+  "20260829234017",
+  "20260829234053",
+  "20260829234259",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -209,6 +210,7 @@ const requiredIndexes = [
   "fec_entry_lines_business_owner_fk_idx", "import_upload_tickets_session_owner_fk_idx",
   "income_sources_id_user_uidx", "tax_profiles_id_user_uidx", "tax_profiles_owner_effective_uidx", "tax_rules_id_user_uidx", "income_sources_user_idx", "tax_profiles_user_idx", "tax_rules_user_idx", "career_roles_user_date_idx", "career_compensation_role_owner_idx", "career_events_role_owner_idx", "career_events_paid_idx", "career_equity_role_owner_idx", "career_scenarios_role_owner_idx", "tax_rule_sets_user_year_idx", "tax_rules_rule_set_owner_idx", "tax_observations_user_year_idx", "tax_observations_transaction_owner_idx", "tax_income_role_owner_idx", "tax_income_event_owner_idx", "tax_income_transaction_owner_idx", "career_equity_grants_user_idx", "career_scenarios_user_idx", "tax_income_items_user_idx", "tax_observations_document_owner_idx",
   "goals_id_user_uidx", "goal_versions_id_user_uidx", "goals_user_status_priority_idx", "goal_versions_user_goal_version_idx",
+  "scenario_versions_scenario_owner_fk_idx", "scenario_assumptions_scenario_owner_fk_idx", "simulation_runs_scenario_owner_fk_idx", "simulation_results_run_owner_fk_idx", "goal_versions_goal_owner_fk_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx", "business_valuations_effective_uk"] as const;
 const requiredTriggers = ["real_estate_financing_links_allocation_guard", "import_raw_records_immutable", "import_normalized_records_frozen", "import_record_links_immutable", "fec_entry_lines_frozen", "goal_versions_immutable_update", "goals_v2_update_guard"] as const;

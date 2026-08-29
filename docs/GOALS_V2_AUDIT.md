@@ -15,10 +15,10 @@ Point de départ : `main` au merge `52ce813137d8fd25f2dba11ff3d5dd5f0b186b2e`
 - Today ne lit que le premier objectif trié par priorité et réutilise la même hypothèse Net Worth.
 - Timeline et Decision Cases ne calculent actuellement aucun état Goal.
 
-La production possède 29 migrations, jusqu'à
-`20260828131433_fec_corporate_acquisition_fk_indexes`. La migration Scenarios V2
-`20260828180000_scenarios_v2.sql` est présente dans le repository mergé mais sa promotion
-reste un chantier d'infrastructure séparé. Goals V2 ne la modifie pas.
+Avant promotion, la production possédait 29 migrations, jusqu'à
+`20260828131433_fec_corporate_acquisition_fk_indexes`. Scenarios V2 puis Goals V2 ont été
+promus dans cet ordre ; leurs versions canoniques sont respectivement
+`20260829234017_scenarios_v2.sql` et `20260829234053_goals_v2.sql`.
 
 ## Matrice de décision
 
@@ -48,4 +48,3 @@ reste un chantier d'infrastructure séparé. Goals V2 ne la modifie pas.
   aucune interpolation n'est créée.
 - Une dette, une entreprise ou un bien ciblé exige un `entityId` réel.
 - Les percentiles Monte Carlo existants ne sont jamais transformés en probabilité.
-

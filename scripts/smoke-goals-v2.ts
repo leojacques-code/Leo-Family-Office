@@ -20,7 +20,7 @@ try {
   await client.query("set local statement_timeout='15s'");
   if (process.env.LFO_SMOKE_APPLY_MIGRATION === "1") {
     const migration = await readFile(
-      new URL("../supabase/migrations/20260828181356_goals_v2.sql", import.meta.url),
+      new URL("../supabase/migrations/20260829234053_goals_v2.sql", import.meta.url),
       "utf8",
     );
     await client.query(migration);
