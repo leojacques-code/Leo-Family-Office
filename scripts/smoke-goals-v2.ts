@@ -1,5 +1,6 @@
 /** Smoke PostgreSQL Goals V2. Toutes les écritures sont rollbackées. */
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import pg from "pg";
 
 const { Client } = pg;
@@ -17,6 +18,13 @@ await client.connect();
 try {
   await client.query("begin");
   await client.query("set local statement_timeout='15s'");
+  if (process.env.LFO_SMOKE_APPLY_MIGRATION === "1") {
+    const migration = await readFile(
+      new URL("../supabase/migrations/20260828181356_goals_v2.sql", import.meta.url),
+      "utf8",
+    );
+    await client.query(migration);
+  }
   const owner = await client.query<{ id: string }>(
     "select id from auth.users order by created_at nulls last limit 1",
   );
@@ -96,6 +104,26 @@ try {
     await client.query("rollback to savepoint immutable_version");
     assert(String(error).includes("immutable"), `Mauvais refus immutabilité : ${String(error)}`);
   }
+
+  await client.query("savepoint immutable_version_delete");
+  try {
+    await client.query("delete from public.goal_versions where goal_id=$1", [goalId]);
+    throw new Error("Une version immuable a été supprimée sous service_role");
+  } catch (error) {
+    await client.query("rollback to savepoint immutable_version_delete");
+    assert(
+      String(error).includes("permission denied") || String(error).includes("immutable"),
+      `Mauvais refus de suppression immuable : ${String(error)}`,
+    );
+  }
+  const versionsAfterDeleteRefusal = await client.query<{ count: string }>(
+    "select count(*)::text from public.goal_versions where goal_id=$1",
+    [goalId],
+  );
+  assert(
+    versionsAfterDeleteRefusal.rows[0].count === "1",
+    "Le refus DELETE a supprimé silencieusement une version Goals V2",
+  );
 
   const saved = await client.query<{ version: number }>(
     "select public.lfo_save_goal_version_v2($1,$2,1,$3,$4) as version",
@@ -189,7 +217,7 @@ try {
 
   await client.query("rollback");
   console.log(
-    "Smoke Goals V2 vert : backfill, création ACTIVE, versions immuables, verrou optimiste, ownership, cycle de vie versionné, aucune évaluation persistée et rollback intégral.",
+    "Smoke Goals V2 vert : backfill, création ACTIVE, UPDATE/DELETE service_role refusés sur les versions immuables, verrou optimiste, ownership, cycle de vie versionné, aucune évaluation persistée et rollback intégral.",
   );
 } catch (error) {
   await client.query("rollback").catch(() => undefined);

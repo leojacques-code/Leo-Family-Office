@@ -211,8 +211,8 @@ const requiredIndexes = [
   "goals_id_user_uidx", "goal_versions_id_user_uidx", "goals_user_status_priority_idx", "goal_versions_user_goal_version_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx", "business_valuations_effective_uk"] as const;
-const requiredTriggers = ["real_estate_financing_links_allocation_guard", "import_raw_records_immutable", "import_normalized_records_frozen", "import_record_links_immutable", "fec_entry_lines_frozen", "goal_versions_immutable_update", "goals_v2_update_guard"] as const;
-const requiredTriggerFunctions = ["real_estate_allocation_guard", "import_raw_record_immutable", "import_normalized_record_frozen", "import_record_link_immutable", "fec_entry_line_frozen", "lfo_guard_goal_version_update", "lfo_guard_goal_v2_update"] as const;
+const requiredTriggers = ["real_estate_financing_links_allocation_guard", "import_raw_records_immutable", "import_normalized_records_frozen", "import_record_links_immutable", "fec_entry_lines_frozen", "goal_versions_immutable_update", "goal_versions_immutable_delete", "goals_v2_update_guard"] as const;
+const requiredTriggerFunctions = ["real_estate_allocation_guard", "import_raw_record_immutable", "import_normalized_record_frozen", "import_record_link_immutable", "fec_entry_line_frozen", "lfo_guard_goal_version_update", "lfo_guard_goal_version_delete", "lfo_guard_goal_v2_update"] as const;
 
 const requiredConstraints = [
   "scenarios_status_ck", "scenarios_archive_shape_ck", "simulation_runs_mode_ck", "simulation_runs_horizon_ck", "scenario_versions_owner_fk", "scenario_assumptions_owner_fk", "simulation_runs_owner_fk", "simulation_runs_scenario_version_fk", "simulation_results_owner_fk",
@@ -527,6 +527,22 @@ try {
       failures.push(`Piste d'audit inscriptible par authenticated : public.${table} (${writes.join(", ")})`);
     }
   }
+
+  const goalVersionImmutability = await client.query<{
+    service_role_delete: boolean;
+    foreign_key_delete_action: string;
+  }>(`
+    select pg_catalog.has_table_privilege(
+             'service_role', 'public.goal_versions', 'DELETE'
+           ) as service_role_delete,
+           constraint.confdeltype::text as foreign_key_delete_action
+      from pg_catalog.pg_constraint constraint
+     where constraint.conname = 'goal_versions_owner_fk'
+       and constraint.conrelid = 'public.goal_versions'::regclass`);
+  if (goalVersionImmutability.rows[0]?.service_role_delete)
+    failures.push("DELETE service_role interdit attendu : public.goal_versions");
+  if (goalVersionImmutability.rows[0]?.foreign_key_delete_action !== "r")
+    failures.push("FK goal_versions_owner_fk doit refuser la suppression d'un Goal");
 
   const rpcs = await client.query<{ name: string; arguments: string; result_type: string; security_definer: boolean; settings: string[] | null; anon_execute: boolean; authenticated_execute: boolean; service_role_execute: boolean }>(`
     select proc.proname as name,

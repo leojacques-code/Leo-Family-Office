@@ -87,7 +87,7 @@ begin
   ) then
     alter table public.goal_versions add constraint goal_versions_owner_fk
       foreign key (goal_id, user_id)
-      references public.goals(id, user_id) on delete cascade;
+      references public.goals(id, user_id) on delete restrict;
   end if;
 end $$;
 
@@ -105,7 +105,8 @@ create policy goal_versions_owner_select on public.goal_versions
 
 revoke all on public.goal_versions from anon, authenticated;
 grant select on public.goal_versions to authenticated;
-grant select, insert, update, delete on public.goal_versions to service_role;
+revoke delete, truncate on public.goal_versions from service_role;
+grant select, insert, update on public.goal_versions to service_role;
 
 -- La couche applicative écrit via des RPC serveur. Cela empêche un client authentifié de
 -- modifier l'identité sans créer la version correspondante.
@@ -401,6 +402,22 @@ drop trigger if exists goal_versions_immutable_update on public.goal_versions;
 create trigger goal_versions_immutable_update
 before update on public.goal_versions
 for each row execute function public.lfo_guard_goal_version_update();
+
+create or replace function public.lfo_guard_goal_version_delete()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  raise exception 'Goal versions are immutable and cannot be deleted';
+end;
+$$;
+
+drop trigger if exists goal_versions_immutable_delete on public.goal_versions;
+create trigger goal_versions_immutable_delete
+before delete on public.goal_versions
+for each row execute function public.lfo_guard_goal_version_delete();
 
 create or replace function public.lfo_guard_goal_v2_update()
 returns trigger

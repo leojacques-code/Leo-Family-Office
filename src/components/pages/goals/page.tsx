@@ -4,10 +4,11 @@ import { useMemo, useState } from "react";
 import { Archive, Edit3, Flag, Pause, Play, Plus, Save } from "lucide-react";
 import { Callout, Currency, EmptyState, Modal, SectionHeader } from "@/components/ui";
 import { type SectionProps, formatDate, inputNumber } from "@/components/pages/shared";
-import type { Goal } from "@/lib/types";
+import type { DashboardState, Goal, Scenario } from "@/lib/types";
 import {
   GOAL_CONSTRAINT_STRENGTHS,
   GOAL_TARGET_METRICS,
+  type GoalBlocker,
   type GoalConstraintStrength,
   type GoalEvaluationStatus,
   type GoalTargetMetric,
@@ -22,6 +23,10 @@ import {
 import { GOAL_METRIC_REGISTRY } from "@/lib/engine/goal-metrics";
 import { buildOpeningBalanceSheet } from "@/lib/engine/monthly-financial-model";
 import { buildBaselineReference, runScenarioComparison } from "@/lib/engine/scenario-engine";
+import type {
+  ScenarioBaselineReference,
+  ScenarioComparison,
+} from "@/lib/engine/scenario-contracts";
 
 type GoalForm = {
   name: string;
@@ -83,7 +88,80 @@ function formFromGoal(goal: Goal): GoalForm {
   };
 }
 
-function GoalsPage({ state, mutate, busy }: SectionProps) {
+export type GoalsTrajectoryContext =
+  | {
+      status: "READY" | "PARTIAL";
+      baseline: ScenarioBaselineReference;
+      comparison: ScenarioComparison;
+      blockers: GoalBlocker[];
+    }
+  | {
+      status: "NOT_COMPUTABLE";
+      baseline: null;
+      comparison: null;
+      blockers: GoalBlocker[];
+    };
+
+function unavailableTrajectory(message: string): GoalsTrajectoryContext {
+  return {
+    status: "NOT_COMPUTABLE",
+    baseline: null,
+    comparison: null,
+    blockers: [
+      {
+        code: "TRAJECTORY_NOT_COMPUTABLE",
+        message,
+        blocking: true,
+        source: "GOALS_V2",
+      },
+    ],
+  };
+}
+
+/** Boundary Goals : une projection impossible devient un résultat explicite, jamais un crash. */
+export function buildGoalsTrajectoryContext(
+  state: DashboardState,
+  selectedScenario: Scenario | undefined,
+): GoalsTrajectoryContext {
+  if (!selectedScenario?.definition || !state.eventTimeline) {
+    return unavailableTrajectory(
+      "Un scénario V2 actif et sa timeline canonique sont nécessaires pour l’évaluation future.",
+    );
+  }
+  try {
+    const opening = buildOpeningBalanceSheet(state);
+    const baseline = buildBaselineReference({ opening, timeline: state.eventTimeline });
+    const comparison = runScenarioComparison({
+      baselineEvents: state.eventTimeline.events,
+      opening,
+      definition: selectedScenario.definition,
+      reportingCurrency: state.reportingCurrency,
+    });
+    if (comparison.completeness === "NOT_COMPUTABLE") {
+      return unavailableTrajectory(
+        comparison.blockers.map((item) => item.message).join(" · ") ||
+          "La trajectoire Scenarios V2 n’est pas calculable.",
+      );
+    }
+    return {
+      status: comparison.completeness,
+      baseline,
+      comparison,
+      blockers: comparison.blockers.map((item) => ({
+        code: item.code,
+        message: item.message,
+        blocking: item.blocking,
+        source: "SCENARIOS_V2",
+      })),
+    };
+  } catch {
+    return unavailableTrajectory(
+      "Le bilan canonique ne permet pas de construire la trajectoire. Les évaluations projetées restent non calculables.",
+    );
+  }
+}
+
+export function GoalsPage({ state, mutate, busy }: SectionProps) {
   const [selectedScenarioId, setSelectedScenarioId] = useState(
     state.scenarios.find((scenario) => scenario.name === "Central")?.id ??
       state.scenarios[0]?.id ??
@@ -95,18 +173,10 @@ function GoalsPage({ state, mutate, busy }: SectionProps) {
 
   const selectedScenario =
     state.scenarios.find((scenario) => scenario.id === selectedScenarioId) ?? state.scenarios[0];
-  const trajectoryContext = useMemo(() => {
-    if (!selectedScenario?.definition || !state.eventTimeline) return null;
-    const opening = buildOpeningBalanceSheet(state);
-    const baseline = buildBaselineReference({ opening, timeline: state.eventTimeline });
-    const comparison = runScenarioComparison({
-      baselineEvents: state.eventTimeline.events,
-      opening,
-      definition: selectedScenario.definition,
-      reportingCurrency: state.reportingCurrency,
-    });
-    return { baseline, comparison };
-  }, [selectedScenario, state]);
+  const trajectoryContext = useMemo(
+    () => buildGoalsTrajectoryContext(state, selectedScenario),
+    [selectedScenario, state],
+  );
 
   function openCreate() {
     setEditing(null);
@@ -226,9 +296,9 @@ function GoalsPage({ state, mutate, busy }: SectionProps) {
           La projection est recalculée à la lecture. Aucun statut, gap ou résultat de scénario n’est
           persisté comme fait.
         </p>
-        {!trajectoryContext ? (
+        {trajectoryContext.status === "NOT_COMPUTABLE" ? (
           <Callout tone="warning" title="Trajectoire indisponible">
-            Un scénario V2 actif et sa timeline canonique sont nécessaires pour l’évaluation future.
+            {trajectoryContext.blockers.map((item) => item.message).join(" · ")}
           </Callout>
         ) : null}
       </section>
@@ -244,15 +314,16 @@ function GoalsPage({ state, mutate, busy }: SectionProps) {
               reportingCurrency: state.reportingCurrency,
               asOfDate: state.asOfDate,
             });
-            const projected = trajectoryContext
-              ? evaluateGoalAgainstTrajectory({
-                  goal: definition,
-                  trajectory: trajectoryContext.comparison.scenario,
-                  reportingCurrency: state.reportingCurrency,
-                  baselineFingerprint: trajectoryContext.baseline.openingFingerprint,
-                  currentBaselineFingerprint: trajectoryContext.baseline.openingFingerprint,
-                })
-              : null;
+            const projected =
+              trajectoryContext.status !== "NOT_COMPUTABLE"
+                ? evaluateGoalAgainstTrajectory({
+                    goal: definition,
+                    trajectory: trajectoryContext.comparison.scenario,
+                    reportingCurrency: state.reportingCurrency,
+                    baselineFingerprint: trajectoryContext.baseline.openingFingerprint,
+                    currentBaselineFingerprint: trajectoryContext.baseline.openingFingerprint,
+                  })
+                : null;
             const metric = GOAL_METRIC_REGISTRY[definition.target.metric];
             return (
               <article className="panel goal-card-large" key={goal.id}>
