@@ -29,6 +29,8 @@ import {
   toAnnualPoints,
 } from "@/lib/engine/monthly-financial-model";
 import { buildCanonicalAllocation, canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
+import { evaluateGoalCurrent } from "@/lib/engine/goal-engine";
+import { GOAL_METRIC_REGISTRY } from "@/lib/engine/goal-metrics";
 import {
   Currency,
   DataBadge,
@@ -115,6 +117,17 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           }),
         );
   const primaryGoal = state.goals[0];
+  const primaryGoalEvaluation = primaryGoal?.definition
+    ? evaluateGoalCurrent({
+        goal: primaryGoal.definition,
+        balanceSheet: state.balanceSheet ?? null,
+        reportingCurrency: state.reportingCurrency,
+        asOfDate: state.asOfDate,
+      })
+    : null;
+  const primaryGoalMetric = primaryGoal?.definition
+    ? GOAL_METRIC_REGISTRY[primaryGoal.definition.target.metric]
+    : null;
 
   return (
     <div className="page-stack">
@@ -469,22 +482,35 @@ function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
           {primaryGoal ? (
             <>
               <div className="goal-number">
-                <Currency
-                  value={
-                    state.metrics.netWorth === null ? null : Math.max(0, state.metrics.netWorth)
-                  }
-                />
+                <Currency value={primaryGoalEvaluation?.observation.value ?? null} />
                 <span>
-                  sur <Currency value={primaryGoal.targetAmount} />
+                  {primaryGoal?.definition?.target.operator === "AT_MOST" ? " au plus " : " sur "}
+                  <Currency
+                    value={primaryGoal.definition?.target.value ?? primaryGoal.targetAmount}
+                  />
                 </span>
               </div>
-              {state.metrics.netWorth === null ? null : (
+              {primaryGoalEvaluation?.observation.value !== null &&
+              primaryGoal.definition?.target.operator === "AT_LEAST" &&
+              primaryGoal.definition.target.value > 0 &&
+              primaryGoalEvaluation?.observation.value !== undefined ? (
                 <ProgressBar
-                  value={Math.max(0, state.metrics.netWorth) / primaryGoal.targetAmount}
+                  value={
+                    Math.max(0, primaryGoalEvaluation.observation.value) /
+                    primaryGoal.definition.target.value
+                  }
                 />
-              )}
+              ) : null}
               <p className="muted-copy">
-                Le patrimoine net est négatif ; le premier jalon est le retour à zéro.
+                {primaryGoalMetric?.label ?? "Métrique historique"} · statut calculé :{" "}
+                {primaryGoalEvaluation?.status ?? "NOT_COMPUTABLE"}
+                {primaryGoalEvaluation?.gap
+                  ? ` · écart ${new Intl.NumberFormat("fr-FR", {
+                      style: "currency",
+                      currency: state.reportingCurrency,
+                      maximumFractionDigits: 0,
+                    }).format(primaryGoalEvaluation.gap.shortfall)}`
+                  : ""}
               </p>
             </>
           ) : null}

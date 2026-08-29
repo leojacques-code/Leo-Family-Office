@@ -41,6 +41,7 @@ const canonicalMigrations = [
   "20260828131216",
   "20260828131433",
   "20260828180000",
+  "20260828181356",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -54,6 +55,22 @@ const requiredColumns: Record<string, string[]> = {
     "annual_volatility",
     "monthly_savings",
   ],
+  goals: [
+    "id",
+    "user_id",
+    "name",
+    "description",
+    "target_amount",
+    "target_date",
+    "priority",
+    "status",
+    "current_version",
+    "constraint_strength",
+    "archived_at",
+    "created_at",
+    "updated_at",
+  ],
+  goal_versions: ["id", "user_id", "goal_id", "version", "payload", "created_at"],
   expense_categories: ["id", "cash_flow_kind", "essentiality", "expense_behavior", "archived"],
   transactions: ["id", "kind_override", "transfer_group_id", "property_id"],
   currency_rates: [
@@ -181,7 +198,7 @@ const userOwnedTables = [
   "profiles", "institutions", "asset_classes", "financial_accounts", "account_balances", "expense_categories", "transactions", "securities", "positions", "position_snapshots", "liabilities", "loan_schedules", "income_sources", "budgets", "properties", "mortgages", "real_estate_cashflows", "businesses", "business_ownership", "business_financials", "business_valuations", "tax_profiles", "tax_rules", "economic_assumptions", "market_assumptions", "scenarios", "scenario_versions", "scenario_assumptions", "goals", "net_worth_snapshots", "documents", "document_metadata", "alerts", "external_sources", "currency_rates", "simulation_runs", "simulation_results", "decision_cases", "monthly_closes", "recurring_cash_flow_rules", "cash_flow_monthly_closes", "loan_early_repayments", "loan_charges", "loan_rate_changes", "loan_payment_changes", "liability_balance_observations", "net_worth_snapshot_items", "portfolio_events", "portfolio_envelope_policies", "real_estate_valuations", "real_estate_capital_events", "real_estate_operating_terms", "real_estate_financing_links", "business_capital_events", "business_holdings", "business_ebitda_adjustments", "business_bridge_items", "business_bridge_declarations", "business_dcf_assumptions", "business_dcf_periods",
   "import_sources", "import_sessions", "import_raw_records", "import_normalized_records", "import_record_links", "import_column_mappings",
   "career_roles", "career_compensation_terms", "career_events", "career_equity_grants", "career_scenarios", "tax_rule_sets", "tax_observations", "tax_income_items",
-  "fec_entry_lines", "import_upload_tickets",
+  "fec_entry_lines", "import_upload_tickets", "goal_versions",
 ] as const;
 
 const requiredIndexes = [
@@ -191,10 +208,11 @@ const requiredIndexes = [
   "business_financials_id_user_uidx", "import_sources_business_provider_uidx", "import_sources_business_idx", "import_record_links_business_idx", "fec_entry_lines_id_user_uidx", "fec_entry_lines_session_idx", "fec_entry_lines_raw_idx", "fec_entry_lines_business_idx", "fec_entry_lines_account_idx", "fec_entry_lines_group_idx", "fec_entry_lines_entry_idx", "fec_entry_lines_user_idx", "import_upload_tickets_id_user_uidx", "import_upload_tickets_user_idx", "import_upload_tickets_open_idx",
   "fec_entry_lines_business_owner_fk_idx", "import_upload_tickets_session_owner_fk_idx",
   "income_sources_id_user_uidx", "tax_profiles_id_user_uidx", "tax_profiles_owner_effective_uidx", "tax_rules_id_user_uidx", "income_sources_user_idx", "tax_profiles_user_idx", "tax_rules_user_idx", "career_roles_user_date_idx", "career_compensation_role_owner_idx", "career_events_role_owner_idx", "career_events_paid_idx", "career_equity_role_owner_idx", "career_scenarios_role_owner_idx", "tax_rule_sets_user_year_idx", "tax_rules_rule_set_owner_idx", "tax_observations_user_year_idx", "tax_observations_transaction_owner_idx", "tax_income_role_owner_idx", "tax_income_event_owner_idx", "tax_income_transaction_owner_idx", "career_equity_grants_user_idx", "career_scenarios_user_idx", "tax_income_items_user_idx", "tax_observations_document_owner_idx",
+  "goals_id_user_uidx", "goal_versions_id_user_uidx", "goals_user_status_priority_idx", "goal_versions_user_goal_version_idx",
 ] as const;
 const forbiddenIndexes = ["net_worth_snapshot_items_owner_snapshot_idx", "business_valuations_effective_uk"] as const;
-const requiredTriggers = ["real_estate_financing_links_allocation_guard", "import_raw_records_immutable", "import_normalized_records_frozen", "import_record_links_immutable", "fec_entry_lines_frozen"] as const;
-const requiredTriggerFunctions = ["real_estate_allocation_guard", "import_raw_record_immutable", "import_normalized_record_frozen", "import_record_link_immutable", "fec_entry_line_frozen"] as const;
+const requiredTriggers = ["real_estate_financing_links_allocation_guard", "import_raw_records_immutable", "import_normalized_records_frozen", "import_record_links_immutable", "fec_entry_lines_frozen", "goal_versions_immutable_update", "goals_v2_update_guard"] as const;
+const requiredTriggerFunctions = ["real_estate_allocation_guard", "import_raw_record_immutable", "import_normalized_record_frozen", "import_record_link_immutable", "fec_entry_line_frozen", "lfo_guard_goal_version_update", "lfo_guard_goal_v2_update"] as const;
 
 const requiredConstraints = [
   "scenarios_status_ck", "scenarios_archive_shape_ck", "simulation_runs_mode_ck", "simulation_runs_horizon_ck", "scenario_versions_owner_fk", "scenario_assumptions_owner_fk", "simulation_runs_owner_fk", "simulation_runs_scenario_version_fk", "simulation_results_owner_fk",
@@ -208,6 +226,7 @@ const requiredConstraints = [
   "import_upload_tickets_domain_ck", "import_upload_tickets_path_uk", "import_upload_tickets_size_ck", "import_upload_tickets_expiry_ck", "import_upload_tickets_consumed_shape_ck", "import_upload_tickets_session_fk",
   "import_column_mappings_signature_uk", "import_column_mappings_headers_ck", "import_column_mappings_mapping_ck", "import_column_mappings_version_ck",
   "career_roles_type_ck", "career_roles_status_ck", "career_roles_dates_ck", "career_roles_data_kind_ck", "career_roles_id_user_uk", "career_compensation_role_fk", "career_compensation_frequency_ck", "career_compensation_dates_ck", "career_compensation_amounts_ck", "career_compensation_data_kind_ck", "career_compensation_effective_uk", "career_events_role_fk", "career_events_type_ck", "career_events_variable_state_ck", "career_events_paid_shape_ck", "career_events_amount_ck", "career_events_data_kind_ck", "career_events_id_user_uk", "career_equity_role_fk", "career_equity_type_ck", "career_equity_liquidity_ck", "career_equity_amounts_ck", "career_equity_expiry_ck", "career_scenarios_role_fk", "career_scenarios_type_ck", "career_scenarios_kind_ck", "tax_profiles_dates_ck", "tax_profiles_dependants_ck", "tax_rule_sets_dates_ck", "tax_rule_sets_status_ck", "tax_rule_sets_effective_uk", "tax_rule_sets_id_user_uk", "tax_rules_rule_set_fk", "tax_rules_type_ck", "tax_rules_category_ck", "tax_rules_dates_ck", "tax_observations_transaction_fk", "tax_observations_document_fk", "tax_observations_type_ck", "tax_observations_amount_ck", "tax_observations_kind_ck", "tax_income_role_fk", "tax_income_event_fk", "tax_income_transaction_fk", "tax_income_category_ck", "tax_income_amount_ck", "tax_income_kind_ck",
+  "goals_status_ck", "goals_priority_ck", "goals_current_version_ck", "goals_constraint_strength_ck", "goals_archive_shape_ck", "goal_versions_version_ck", "goal_versions_goal_version_uk", "goal_versions_payload_ck", "goal_versions_owner_fk",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
@@ -287,6 +306,12 @@ const requiredRpcs: Record<string, string> = {
   lfo_set_tax_profile: "p_user_id uuid, p_payload jsonb",
   lfo_save_tax_rule_set: "p_user_id uuid, p_payload jsonb",
   lfo_record_tax_observation: "p_user_id uuid, p_payload jsonb",
+  lfo_validate_goal_definition_v2: "p_definition jsonb",
+  lfo_create_goal_v2: "p_user_id uuid, p_definition jsonb, p_now timestamp with time zone",
+  lfo_save_goal_version_v2:
+    "p_user_id uuid, p_goal_id uuid, p_expected_version integer, p_definition jsonb, p_updated_at timestamp with time zone",
+  lfo_set_goal_status_v2:
+    "p_user_id uuid, p_goal_id uuid, p_expected_version integer, p_status text, p_updated_at timestamp with time zone",
 };
 
 /**
@@ -310,6 +335,9 @@ const requiredRpcs: Record<string, string> = {
 const declaredReturnTypeRpcs: Record<string, string> = {
   lfo_fec_entry_balance: "TABLE(entries integer, unbalanced integer)",
   lfo_save_scenario_version_v2: "integer",
+  lfo_validate_goal_definition_v2: "void",
+  lfo_save_goal_version_v2: "integer",
+  lfo_set_goal_status_v2: "integer",
 };
 
 /**
@@ -331,6 +359,7 @@ const readOnlyAuditTables = [
   "import_column_mappings",
   "fec_entry_lines",
   "import_upload_tickets",
+  "goal_versions",
 ] as const;
 
 const storagePolicies = ["documents_owner_select", "documents_owner_insert", "documents_owner_update", "documents_owner_delete"] as const;
@@ -450,6 +479,21 @@ try {
     `select tablename, policyname, roles::text[], cmd, qual, with_check from pg_catalog.pg_policies where schemaname = 'public'`,
   );
   for (const table of userOwnedTables) {
+    if (table === "goal_versions") {
+      const policy = policies.rows.find(
+        (row) => row.tablename === table && row.policyname === "goal_versions_owner_select",
+      );
+      if (
+        !policy ||
+        policy.cmd !== "SELECT" ||
+        !policy.roles.includes("authenticated") ||
+        !policy.qual?.includes("auth.uid()") ||
+        !policy.qual.includes("user_id")
+      ) {
+        failures.push("Policy de lecture propriétaire invalide : public.goal_versions");
+      }
+      continue;
+    }
     const policy = policies.rows.find(
       (row) => row.tablename === table && row.policyname === "owner_all",
     );
@@ -482,6 +526,17 @@ try {
     if (writes.length > 0) {
       failures.push(`Piste d'audit inscriptible par authenticated : public.${table} (${writes.join(", ")})`);
     }
+  }
+
+  const serviceRoleGoalDeletes = await client.query<{ table_name: string }>(`
+    select table_name
+      from information_schema.role_table_grants
+     where table_schema = 'public'
+       and grantee = 'service_role'
+       and privilege_type = 'DELETE'
+       and table_name in ('goals', 'goal_versions')`);
+  for (const row of serviceRoleGoalDeletes.rows) {
+    failures.push(`Suppression Goals V2 ouverte à service_role : public.${row.table_name}`);
   }
 
   const rpcs = await client.query<{ name: string; arguments: string; result_type: string; security_definer: boolean; settings: string[] | null; anon_execute: boolean; authenticated_execute: boolean; service_role_execute: boolean }>(`
