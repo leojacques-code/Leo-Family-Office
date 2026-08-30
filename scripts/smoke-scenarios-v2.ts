@@ -144,7 +144,7 @@ try {
       "Smoke transactionnel",
       "SCENARIOS_V2_EVENT_MONTHLY_1",
       currentDefinition,
-      [{ year: 2026, p10: 1, p25: 2, p50: 3, p75: 4, p90: 5 }],
+      JSON.stringify([{ year: 2026, p10: 1, p25: 2, p50: 3, p75: 4, p90: 5 }]),
     ],
   );
   const storedRun = await client.query<{ scenario_version: number; points: string }>(

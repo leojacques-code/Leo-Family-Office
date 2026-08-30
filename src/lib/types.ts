@@ -883,6 +883,14 @@ export interface DashboardState {
   cashFlowCloses: CashFlowMonthlyClose[];
   scenarios: Scenario[];
   goals: Goal[];
+  /** Identités et snapshots Decision Lab V2 ; résultats dérivés, jamais état canonique. */
+  decisionCases?: Array<
+    import("@/lib/engine/decision-contracts").DecisionCase & {
+      definition?: import("@/lib/engine/decision-contracts").DecisionCaseVersion;
+      latestRun?: import("@/lib/engine/decision-contracts").DecisionRun;
+      latestResult?: import("@/lib/engine/decision-contracts").DecisionEvaluation;
+    }
+  >;
   alerts: Alert[];
   monthlyCloses: MonthlyClose[];
   netWorthSnapshots?: NetWorthSnapshot[];

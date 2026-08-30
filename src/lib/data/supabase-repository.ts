@@ -73,11 +73,9 @@ import { toCareerTaxCashFlow } from "@/lib/engine/career-tax-cash-flow";
 import { buildDashboardEventTimeline } from "@/lib/engine/event-adapters";
 import { isScenarioVersionDefinition } from "@/lib/engine/scenario-engine";
 import type { ScenarioVersionDefinition } from "@/lib/engine/scenario-contracts";
-import {
-  isGoalVersionDefinition,
-  legacyGoalDefinition,
-} from "@/lib/engine/goal-engine";
+import { isGoalVersionDefinition, legacyGoalDefinition } from "@/lib/engine/goal-engine";
 import type { GoalVersionDefinition } from "@/lib/engine/goal-contracts";
+import type { DecisionEvaluation } from "@/lib/engine/decision-contracts";
 import {
   enumValue,
   finiteNumber,
@@ -1007,7 +1005,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     for (const row of goalVersionRows) {
       const identity = goalRows.find((item) => str(item.id) === str(row.goal_id));
       const currentVersion = identity
-        ? finiteNumber(identity.current_version ?? 1, `goals[id=${str(identity.id)}].current_version`)
+        ? finiteNumber(
+            identity.current_version ?? 1,
+            `goals[id=${str(identity.id)}].current_version`,
+          )
         : null;
       if (
         identity &&
@@ -2760,6 +2761,47 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             p_updated_at: now,
           }),
           "cycle de vie atomique d'objectif V2",
+        );
+        break;
+      }
+      case "create_decision_case_v2": {
+        unwrap(
+          await db.rpc("lfo_create_decision_case_v2", {
+            p_user_id: user,
+            p_definition: mutation.definition,
+            p_now: now,
+          }),
+          "création atomique de Decision Case V2",
+        );
+        break;
+      }
+      case "save_decision_case_version_v2": {
+        unwrap(
+          await db.rpc("lfo_save_decision_case_version_v2", {
+            p_user_id: user,
+            p_case_id: mutation.caseId,
+            p_expected_version: mutation.expectedVersion,
+            p_definition: mutation.definition,
+            p_updated_at: now,
+          }),
+          "versionnement atomique de Decision Case V2",
+        );
+        break;
+      }
+      case "save_decision_run_v2": {
+        // Le résultat est un snapshot dérivé. On retire sa duplication du contrat de cas
+        // dans la colonne de résultat ; la version exacte reste référencée par case/version.
+        const resultSnapshot: DecisionEvaluation = structuredClone(mutation.result);
+        unwrap(
+          await db.rpc("lfo_save_decision_run_v2", {
+            p_user_id: user,
+            p_case_id: mutation.caseId,
+            p_case_version: mutation.caseVersion,
+            p_run: mutation.run,
+            p_result: resultSnapshot,
+            p_now: now,
+          }),
+          "enregistrement atomique de Decision Run V2",
         );
         break;
       }
