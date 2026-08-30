@@ -21,6 +21,12 @@ import { isScenarioVersionDefinition } from "@/lib/engine/scenario-engine";
 import type { ScenarioVersionDefinition } from "@/lib/engine/scenario-contracts";
 import { isGoalVersionDefinition } from "@/lib/engine/goal-engine";
 import type { GoalVersionDefinition } from "@/lib/engine/goal-contracts";
+import { isDecisionCaseVersion } from "@/lib/engine/decision-lab";
+import type {
+  DecisionCaseVersion,
+  DecisionEvaluation,
+  DecisionRun,
+} from "@/lib/engine/decision-contracts";
 import {
   LEDGER_COVERAGE_SOURCES,
   LOT_MATCHING_METHODS,
@@ -87,6 +93,31 @@ const scenarioDefinitionSchema = z
 const goalDefinitionSchema = z.custom<GoalVersionDefinition>(
   isGoalVersionDefinition,
   "Définition Goals V2 invalide",
+);
+const decisionCaseVersionSchema = z.custom<DecisionCaseVersion>(
+  isDecisionCaseVersion,
+  "Définition Decision Lab V2 invalide",
+);
+const decisionRunSchema = z.custom<DecisionRun>(
+  (value) =>
+    Boolean(
+      value &&
+      typeof value === "object" &&
+      typeof (value as DecisionRun).id === "string" &&
+      (value as DecisionRun).methodologyVersion === "DECISION_LAB_V2_SCENARIOS_GOALS_1" &&
+      ["DETERMINISTIC", "MONTE_CARLO"].includes((value as DecisionRun).runMode),
+    ),
+  "Run Decision Lab V2 invalide",
+);
+const decisionEvaluationSchema = z.custom<DecisionEvaluation>(
+  (value) =>
+    Boolean(
+      value &&
+      typeof value === "object" &&
+      ["READY", "PARTIAL", "NOT_COMPUTABLE"].includes((value as DecisionEvaluation).completeness) &&
+      Array.isArray((value as DecisionEvaluation).options),
+    ),
+  "Résultat Decision Lab V2 invalide",
 );
 const nullableMoney = finite.nonnegative().nullable();
 const datedTermKind = z.enum(["CONTRACTUAL", "ASSUMPTION"]);
@@ -1231,6 +1262,29 @@ export const mutationSchema = z.discriminatedUnion("action", [
       goalId: z.uuid(),
       expectedVersion: z.number().int().positive(),
       status: z.enum(["ACTIVE", "PAUSED", "ACHIEVED", "ARCHIVED"]),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("create_decision_case_v2"),
+      definition: decisionCaseVersionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("save_decision_case_version_v2"),
+      caseId: z.uuid(),
+      expectedVersion: z.number().int().positive(),
+      definition: decisionCaseVersionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("save_decision_run_v2"),
+      caseId: z.uuid(),
+      caseVersion: z.number().int().positive(),
+      run: decisionRunSchema,
+      result: decisionEvaluationSchema,
     })
     .strict(),
   z.object({
