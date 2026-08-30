@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./level2-preview.css";
 
 export const metadata: Metadata = {
-  title: "Léo Family Office",
+  title: "Léo Family Office — Private Wealth Cockpit",
   description: "Cockpit patrimonial privé, projections et décisions financières.",
   robots: { index: false, follow: false },
 };

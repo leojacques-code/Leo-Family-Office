@@ -14,7 +14,7 @@ export interface NavigationItem {
 export const DEFAULT_SECTION = "today";
 
 export const NAV_ITEMS: readonly NavigationItem[] = [
-  { id: "today", label: "Today", href: "/" },
+  { id: "today", label: "Today", href: "/today" },
   { id: "net-worth", label: "Net Worth", href: "/net-worth" },
   { id: "cash-flow", label: "Cash Flow", href: "/cash-flow" },
   { id: "investments", label: "Investments", href: "/investments" },
@@ -32,17 +32,15 @@ export const NAV_ITEMS: readonly NavigationItem[] = [
   { id: "settings", label: "Settings", href: "/settings" },
 ];
 
-/** Sections adressables par /[section]. La racine "today" est servie par /. */
-export const ROUTED_SECTION_IDS: readonly string[] = NAV_ITEMS
-  .filter((item) => item.id !== DEFAULT_SECTION)
-  .map((item) => item.id);
+/** Toutes les sections du cockpit sont adressables par /[section] dans cette preview. */
+export const ROUTED_SECTION_IDS: readonly string[] = NAV_ITEMS.map((item) => item.id);
 
 export function isValidSection(section: string): boolean {
   return NAV_ITEMS.some((item) => item.id === section);
 }
 
 export function isRoutedSection(section: string): boolean {
-  return isValidSection(section) && section !== DEFAULT_SECTION;
+  return isValidSection(section);
 }
 
 export function sectionLabel(section: string): string {

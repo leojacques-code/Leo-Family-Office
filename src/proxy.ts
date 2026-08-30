@@ -10,13 +10,13 @@ function base64url(bytes: ArrayBuffer): string {
 
 async function expectedToken(secret: string) {
   const bytes = new TextEncoder().encode(`leo-family-office:${secret}`);
-  // Buffer n'est pas garanti hors runtime Node : encodage manuel pour rester portable.
   return base64url(await crypto.subtle.digest("SHA-256", bytes));
 }
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
-  const isPublic = pathname === "/login"
+  const isPublic = pathname === "/"
+    || pathname === "/login"
     || pathname.startsWith("/api/auth")
     || pathname.startsWith("/_next")
     || pathname === "/favicon.ico"
