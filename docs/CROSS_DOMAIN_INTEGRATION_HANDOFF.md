@@ -28,13 +28,19 @@
 
 ## Gates
 
-À compléter après le gate final :
-
 - TypeScript : PASS
 - lint zéro warning : PASS
 - tests : PASS — 64 fichiers / 1 252 tests
 - build : PASS — Next.js 16.3.3
-- PostgreSQL local jetable / schema verifier / smokes : PENDING
+- PostgreSQL local jetable : PASS — PostgreSQL 17.10 (Postgres.app), uniquement sur
+  `127.0.0.1:55435`, base reconstruite puis environnement détruit.
+- migrations : PASS — 33/33 appliquées depuis zéro, 79 tables publiques.
+- schema verifier : PASS — 262 contraintes, 74 RPC, 9 triggers d'invariant, 11 tables
+  d'audit en lecture seule, RLS/policies, Storage et inventaire exacts.
+- smokes PostgreSQL : PASS — Balance Sheet V2, Debt Contract, Portfolio Ledger, Real Estate,
+  Business Equity, Data Acquisition, Career + Tax, FEC, Scenarios V2, Goals V2, Decision
+  Lab V2 et concurrence Real Estate. Rollback intégral ou zéro donnée persistante confirmé
+  par chaque smoke.
 - Vercel preview : PENDING
 - Supabase production : jamais contactée
 
