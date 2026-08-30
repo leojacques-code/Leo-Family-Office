@@ -21,8 +21,7 @@ import {
   evaluateGoalCurrent,
 } from "@/lib/engine/goal-engine";
 import { GOAL_METRIC_REGISTRY } from "@/lib/engine/goal-metrics";
-import { buildOpeningBalanceSheet } from "@/lib/engine/monthly-financial-model";
-import { buildBaselineReference, runScenarioComparison } from "@/lib/engine/scenario-engine";
+import { evaluateGlobalScenario } from "@/lib/engine/global-financial-model";
 import type {
   ScenarioBaselineReference,
   ScenarioComparison,
@@ -123,20 +122,11 @@ export function buildGoalsTrajectoryContext(
   state: DashboardState,
   selectedScenario: Scenario | undefined,
 ): GoalsTrajectoryContext {
-  if (!selectedScenario?.definition || !state.eventTimeline) {
-    return unavailableTrajectory(
-      "Un scénario V2 actif et sa timeline canonique sont nécessaires pour l’évaluation future.",
-    );
+  if (!selectedScenario?.definition) {
+    return unavailableTrajectory("Un scénario V2 actif est nécessaire pour l’évaluation future.");
   }
   try {
-    const opening = buildOpeningBalanceSheet(state);
-    const baseline = buildBaselineReference({ opening, timeline: state.eventTimeline });
-    const comparison = runScenarioComparison({
-      baselineEvents: state.eventTimeline.events,
-      opening,
-      definition: selectedScenario.definition,
-      reportingCurrency: state.reportingCurrency,
-    });
+    const { baseline, comparison } = evaluateGlobalScenario(state, selectedScenario.definition);
     if (comparison.completeness === "NOT_COMPUTABLE") {
       return unavailableTrajectory(
         comparison.blockers.map((item) => item.message).join(" · ") ||

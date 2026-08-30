@@ -27,8 +27,11 @@ import type { CanonicalMonthlyConsequence } from "@/lib/engine/event-contracts";
  * lieu de capitaliser un scalaire. Projection déterministe et Monte-Carlo partagent
  * exactement cette transition : seule la fonction de rendement mensuel change.
  *
- * PÉRIMÈTRE DE CE SPRINT : actifs financiers uniquement. Ni immobilier patrimonial, ni
- * business equity, ni fiscalité future, ni revenus de carrière.
+ * PÉRIMÈTRE CANONIQUE : le bilan d'ouverture porte les actifs financiers, l'immobilier,
+ * le Business Equity et les passifs connus. Les conséquences Event Engine font ensuite
+ * évoluer Career → Tax → Cash Flow, Debt, Portfolio, Real Estate et Business sans que ce
+ * moteur réimplémente leurs formules. Une valeur non financière sans trajectoire reste
+ * constante et explicitement signalée ; elle ne reçoit jamais un rendement inventé.
  *
  * CONVENTION DE SURPLUS, arrêtée pour ce sprint
  * ---------------------------------------------
@@ -45,8 +48,9 @@ import type { CanonicalMonthlyConsequence } from "@/lib/engine/event-contracts";
  * ce qui romprait l'interconnexion que le produit cherche précisément à établir. Aucune
  * dette ne doit être implicitement absorbée dans une hypothèse exogène.
  *
- * Ce n'est pas encore un résultat de Career → Tax → Cash Flow. La colonne persistée
- * garde son nom `monthly_savings` pour éviter une migration inutile.
+ * En Scenarios V2, cette valeur est remplacée par les conséquences Career → Tax → Cash
+ * Flow de la timeline canonique. La colonne persistée `monthly_savings` ne subsiste que
+ * pour la compatibilité explicite Scenarios V1.
  *
  * CONVENTIONS COMPTABLES
  * ----------------------
@@ -77,7 +81,7 @@ export interface OpeningBalanceSheet {
   otherFinancialAssets: number;
   grossFinancialAssets: number;
   /**
-   * Actifs NON financiers au bilan canonique : immobilier, et demain business equity. Ils
+   * Actifs NON financiers au bilan canonique : immobilier et Business Equity. Ils
    * sont portés CONSTANTS sur toute la projection, faute de termes projetables — même
    * traitement que `otherLiabilityBalance`, et pour la même raison. Les faire disparaître
    * au mois 1 reviendrait à traiter un inconnu comme un zéro ; leur appliquer une

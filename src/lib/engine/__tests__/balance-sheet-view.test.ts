@@ -3,6 +3,7 @@ import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
 import {
   accountGroupTotal,
   buildCanonicalAllocation,
+  businessEquityOf,
   canonicalBalanceSheetOf,
   envelopeExposureOf,
   knownEnvelopeCash,
@@ -10,8 +11,20 @@ import {
   marketPositionLines,
   unrealisedPnL,
 } from "@/lib/engine/balance-sheet-view";
+import {
+  business,
+  ownership,
+  valuation as businessValuation,
+} from "@/lib/engine/__tests__/fixtures/business";
 import type { CurrencyRate } from "@/lib/engine/fx";
-import type { DashboardState, FinancialAccount, Position, Provenance } from "@/lib/types";
+import type {
+  DashboardState,
+  FinancialAccount,
+  Position,
+  Provenance,
+  RealEstateAsset,
+  RealEstateValuation,
+} from "@/lib/types";
 
 // Toutes les valeurs de ce fichier sont des fixtures synthétiques.
 const provenance: Provenance = { kind: "ACTUAL", confidence: "HIGH", effectiveDate: "2026-08-19" };
@@ -144,6 +157,82 @@ describe("expositions par enveloppe — une enveloppe incohérente n’invalide 
     const allocation = buildCanonicalAllocation(sheet);
     const actions = allocation.slices.find((item) => item.key === "Actions");
     expect(actions?.accountIds).toEqual(["pea"]);
+  });
+});
+
+describe("reconstruction cross-domain du bilan", () => {
+  it("reconstruit immobilier et Business Equity comme le repository", () => {
+    const property: RealEstateAsset = {
+      id: "property",
+      name: "Bien synthétique",
+      location: "Paris",
+      surfaceSqm: 40,
+      usage: "PRIMARY_RESIDENCE",
+      ownershipShare: 1,
+      isDebtFinanced: false,
+      acquisitionDate: "2020-01-01",
+      disposalDate: null,
+      archived: false,
+      notes: null,
+      provenance,
+    };
+    const propertyValuation: RealEstateValuation = {
+      id: "property-valuation",
+      propertyId: property.id,
+      valuedAt: AS_OF,
+      value: 260_000,
+      currency: "EUR",
+      method: "AGENT_ESTIMATE",
+      notes: null,
+      provenance,
+    };
+    const company = business({ id: "company", name: "Société synthétique" });
+    const companyOwnership = ownership({
+      id: "company-ownership",
+      businessId: company.id,
+      effectiveDate: "2020-01-01",
+      legalRate: 1,
+    });
+    const companyValuation = businessValuation({
+      id: "company-valuation",
+      businessId: company.id,
+      valuationDate: AS_OF,
+      method: "EXTERNAL_APPRAISAL",
+      equityValue: 50_000,
+    });
+    const state = {
+      asOfDate: AS_OF,
+      reportingCurrency: "EUR",
+      accounts: [account("bank", 10_000, "BANK")],
+      positions: [],
+      liabilities: [],
+      currencyRates: [],
+      realEstateAssets: [property],
+      realEstateValuations: [propertyValuation],
+      realEstateCapitalEvents: [],
+      realEstateOperatingTerms: [],
+      realEstateFinancingLinks: [],
+      transactions: [],
+      expenseCategories: [],
+      ledgerCoverageStart: null,
+      businesses: [company],
+      businessOwnership: [companyOwnership],
+      businessFinancials: [],
+      businessValuations: [companyValuation],
+      businessCapitalEvents: [],
+      businessHoldings: [],
+      businessEbitdaAdjustments: [],
+      businessBridgeItems: [],
+      businessBridgeDeclarations: [],
+      businessDcfAssumptions: [],
+    } as unknown as DashboardState;
+
+    const businessPortfolio = businessEquityOf(state);
+    const sheet = canonicalBalanceSheetOf(state);
+    expect(businessPortfolio.directPositions[0].attributableValue.central.value).toBe(50_000);
+    expect(sheet.contributions.some((line) => line.domain === "REAL_ESTATE")).toBe(true);
+    expect(sheet.contributions.some((line) => line.domain === "BUSINESS_EQUITY")).toBe(true);
+    expect(sheet.grossAssets.value).toBe(320_000);
   });
 });
 

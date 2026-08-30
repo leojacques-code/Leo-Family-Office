@@ -11,7 +11,16 @@ import {
   deriveCanonicalBalanceSheetMetrics,
   type CanonicalBalanceSheetMetrics,
 } from "@/lib/engine/balance-sheet-metrics";
-import { buildRealEstatePortfolio, type RealEstatePortfolio } from "@/lib/engine/real-estate";
+import {
+  buildBusinessEquityPortfolio,
+  businessEquityBalanceSheetContributions,
+  type BusinessEquityPortfolio,
+} from "@/lib/engine/business-equity";
+import {
+  buildRealEstatePortfolio,
+  realEstateBalanceSheetContributions,
+  type RealEstatePortfolio,
+} from "@/lib/engine/real-estate";
 import type { DashboardState } from "@/lib/types";
 
 /**
@@ -34,6 +43,10 @@ export function canonicalBalanceSheetOf(state: DashboardState): CanonicalBalance
       accounts: state.accounts,
       positions: state.positions,
       liabilities: state.liabilities,
+      contributions: [
+        ...realEstateBalanceSheetContributions(realEstateOf(state)),
+        ...businessEquityBalanceSheetContributions(businessEquityOf(state)),
+      ],
       currencyRates: state.currencyRates ?? [],
     })
   );
@@ -74,6 +87,28 @@ export function realEstateOf(state: DashboardState): RealEstatePortfolio {
       transactions: state.transactions,
       expenseCategories: state.expenseCategories,
       ledgerCoverageStart: state.ledgerCoverageStart,
+      currencyRates: state.currencyRates ?? [],
+    })
+  );
+}
+
+/** Le domaine Business Equity, reconstruit avec les mêmes entrées que le repository. */
+export function businessEquityOf(state: DashboardState): BusinessEquityPortfolio {
+  return (
+    state.businessEquity ??
+    buildBusinessEquityPortfolio({
+      asOfDate: state.asOfDate,
+      reportingCurrency: state.reportingCurrency,
+      businesses: state.businesses ?? [],
+      ownership: state.businessOwnership ?? [],
+      financials: state.businessFinancials ?? [],
+      valuations: state.businessValuations ?? [],
+      capitalEvents: state.businessCapitalEvents ?? [],
+      holdings: state.businessHoldings ?? [],
+      ebitdaAdjustments: state.businessEbitdaAdjustments ?? [],
+      bridgeItems: state.businessBridgeItems ?? [],
+      bridgeDeclarations: state.businessBridgeDeclarations ?? [],
+      dcfAssumptions: state.businessDcfAssumptions ?? [],
       currencyRates: state.currencyRates ?? [],
     })
   );

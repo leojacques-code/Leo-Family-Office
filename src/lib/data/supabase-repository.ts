@@ -1821,11 +1821,11 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       metrics: composeDashboardMetrics({ balanceSheet, balanceSheetMetrics, flow: flowMetrics }),
       assumptions,
     };
-    const horizonYear = Number(AS_OF_DATE.slice(0, 4)) + 40;
+    const horizonYear = Number(dashboardState.asOfDate.slice(0, 4)) + 40;
     dashboardState.eventTimeline = buildDashboardEventTimeline({
       state: dashboardState,
-      startDate: AS_OF_DATE,
-      endDate: `${horizonYear}${AS_OF_DATE.slice(4)}`,
+      startDate: dashboardState.asOfDate,
+      endDate: `${horizonYear}${dashboardState.asOfDate.slice(4)}`,
     });
     return dashboardState;
   }
