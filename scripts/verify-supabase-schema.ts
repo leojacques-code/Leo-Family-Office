@@ -550,7 +550,9 @@ try {
            pg_catalog.has_function_privilege('service_role', proc.oid, 'EXECUTE') as service_role_execute
       from pg_catalog.pg_proc proc
       join pg_catalog.pg_namespace ns on ns.oid = proc.pronamespace
-     where ns.nspname = 'public' and proc.proname like 'lfo\\_%' escape '\\'`);
+     where ns.nspname = 'public'
+       and proc.proname like 'lfo\\_%' escape '\\'
+       and proc.prorettype <> 'pg_catalog.trigger'::pg_catalog.regtype`);
   addMissing(
     failures,
     "RPC lfo_*",
