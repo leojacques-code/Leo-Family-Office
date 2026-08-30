@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./level2-preview.css";
+import "./level2-motion.css";
 
 export const metadata: Metadata = {
   title: "Léo Family Office — Private Wealth Cockpit",
