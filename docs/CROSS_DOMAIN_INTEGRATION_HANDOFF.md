@@ -41,7 +41,9 @@
   Business Equity, Data Acquisition, Career + Tax, FEC, Scenarios V2, Goals V2, Decision
   Lab V2 et concurrence Real Estate. Rollback intégral ou zéro donnée persistante confirmé
   par chaque smoke.
-- Vercel preview : PENDING
+- Vercel preview : READY —
+  `https://leo-family-office-git-feature-cross-domain-integration-lech1.vercel.app`,
+  réponse HTTP 200 et page de connexion Next.js servie.
 - Supabase production : jamais contactée
 
 ## Étape suivante
