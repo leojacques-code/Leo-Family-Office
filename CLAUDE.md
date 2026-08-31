@@ -138,6 +138,19 @@ sont :
 - `20260828131216_fec_corporate_acquisition` ;
 - `20260828131433_fec_corporate_acquisition_fk_indexes`.
 
+Cet alignement n'est PLUS vrai au 31 août 2026, et le dire est plus utile que de mettre un
+chiffre à jour. Le dépôt porte **34 migrations**, la production **32** telles que déclarées
+par le propriétaire du schéma — cet écart n'a pas été vérifié depuis un environnement d'agent,
+qui n'a aucun credential de production. Deux migrations sont donc au dépôt sans être
+appliquées :
+
+- `20260830154315_decision_lab_v2` ;
+- `20260831101500_company_registry_acquisition`.
+
+Aucune des deux ne dépend de l'autre. L'ordre d'application se décide avec le propriétaire du
+schéma : `npm run db:verify` distant exige la liste EXACTE des versions, et il échouera tant
+que les deux historiques diffèrent, dans les deux sens.
+
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
 permissions RPC, RLS/policies et advisors Supabase. Les données Business existantes ont été
@@ -273,6 +286,30 @@ de ce qui devient analysable. ÉCHEC DE NETTOYAGE ≠ ÉCHEC DE VALIDATION, mais
 NETTOYAGE ≠ SUCCÈS SILENCIEUX non plus : la référence d'un objet non supprimé est CONSERVÉE,
 sans quoi une comptabilité entière resterait au stockage sans que rien ne sache où. Détail
 dans `docs/FEC_ACQUISITION.md`.
+
+L'acquisition du REGISTRE D'ENTREPRISES est la troisième verticale de cette fondation, et
+elle ne réutilise volontairement PAS ses tables : l'unité d'un import est un FICHIER DE
+LIGNES, celle d'un registre un INSTANTANÉ D'ENTITÉ. Ce qu'elle réutilise est la chaîne, le
+vocabulaire de provenance, les clés composites `(id, user_id)`, la discipline « le client lit,
+les RPC écrivent » et `businesses(id, user_id)` comme unique porte du domaine Business. La
+table `external_sources`, présente depuis la migration initiale sans usage, est ADOPTÉE comme
+registre des connexions externes.
+
+SNAPSHOT ≠ VÉRITÉ CANONIQUE : écrire un instantané ne change rien au patrimoine. CAPACITÉ NON
+SERVIE ≠ DONNÉE ABSENTE ≠ ZÉRO : un fournisseur qui ne publie pas le capital social ne dit
+rien du capital, et la capacité est DÉCLARÉE par la connexion. ACCEPTER UN VIDE N'EST PAS UN
+ENRICHISSEMENT : une décision acceptée sans valeur effacerait une saisie de l'utilisateur au
+motif que la source est muette, et la base la refuse. PROVENANCE PAR CHAMP ≠ PROVENANCE DE
+LIGNE : `businesses.data_kind` qualifie la ligne, il ne bascule donc pas en `EXTERNAL_DATA`
+parce qu'un champ vient du registre — la provenance par champ vit dans
+`business_enrichment_decisions`. UN SIREN, UNE SOCIÉTÉ : deux rattachements du même SIREN
+compteraient deux fois la même participation, et c'est un invariant de la base. Un ÉCHEC de
+fournisseur est un instantané daté, jamais un trou. Une observation PÉRIMÉE reste lisible et
+signalée, jamais corrigée : la péremption est DÉRIVÉE à la lecture et n'est jamais persistée,
+un état qui dépend de l'heure pourrissant en silence dès qu'il est figé. Un registre publie
+une IDENTITÉ, pas une finance : capital social, effectifs et catégorie d'entreprise restent
+des observations et n'entrent pas dans `businesses`. Détail dans
+`docs/COMPANY_REGISTRY_ACQUISITION.md`.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

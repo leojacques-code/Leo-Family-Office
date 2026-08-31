@@ -175,6 +175,7 @@ Une divergence se documente, elle ne se comble pas par une hypothèse. Reconstit
 | Constaté le | Divergence                                                                                                                                    | État                                                                                                                                     |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-08-25  | `20260825063626_snapshot_item_owner_fk_index` et `20260825063831_snapshot_item_fk_covering_index` appliquées en production, absentes du dépôt | Clôturée le 2026-08-25 : SQL réel extrait de la production en lecture seule, committé verbatim, historique canonique porté à 15 versions |
+| 2026-08-31  | Deux migrations au DÉPÔT, absentes de la production : `20260830154315_decision_lab_v2` et `20260831101500_company_registry_acquisition` | OUVERTE. Divergence dans l'autre sens que celle de 2026-08-25 : le dépôt est en avance, pas la production. La procédure d'extraction ci-dessous ne s'applique donc PAS — il n'y a rien à extraire, il y a un `supabase db push` à décider. `npm run db:verify` distant échouera tant que l'écart persiste, et c'est le comportement voulu |
 
 Procédure appliquée, à reprendre telle quelle en cas de nouvelle divergence :
 
@@ -192,6 +193,8 @@ select version, name, statements
 5. datter la clôture dans le registre et dans le message de commit.
 
 Tant que l'étape 1 n'est pas faite, ne créer aucun fichier de migration : le dépôt doit déclarer une divergence connue plutôt qu'une migration inventée.
+
+Une divergence dans l'autre sens — le dépôt en avance sur la production — ne se traite pas de la même façon : il n'y a aucun SQL à extraire, seulement une application à décider. La règle est alors de ne RIEN faire depuis un environnement d'agent : aucun `supabase db push`, aucune correction d'une migration que la production porte peut-être déjà, aucune renumérotation. Une migration additive préparée dans une branche est légitime ; l'appliquer est une décision humaine, prise avec le propriétaire du schéma, après alignement des deux historiques.
 
 Ces deux migrations ne portent que des index. La seconde remplace l'index de la première : l'état final ne contient que `net_worth_snapshot_items_snapshot_owner_idx`, sur `(snapshot_id, user_id)`, qui couvre la FK composite posée par `20260825021742`. Le verifier contrôle désormais cet état final, et refuse une base qui porterait encore l'index intermédiaire : une base peut inscrire les deux versions dans son historique sans avoir appliqué la seconde.
 
