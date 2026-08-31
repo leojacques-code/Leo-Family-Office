@@ -1,6 +1,6 @@
 "use client";
 
-import TodayPage from "@/components/pages/today/page";
+import GuidedHome from "@/components/pages/today/guided-home";
 import NetWorthPage from "@/components/pages/net-worth/page";
 import CashFlowPage from "@/components/pages/cash-flow/page";
 import InvestmentsPage from "@/components/pages/investments/page";
@@ -51,6 +51,6 @@ export function SectionContent(props: SectionProps) {
     case "settings":
       return <SettingsPage {...props} />;
     default:
-      return <TodayPage {...props} />;
+      return <GuidedHome {...props} />;
   }
 }
