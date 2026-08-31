@@ -44,6 +44,7 @@ const canonicalMigrations = [
   "20260829234053",
   "20260829234259",
   "20260830154315",
+  "20260831154500",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -776,6 +777,93 @@ const requiredColumns: Record<string, string[]> = {
     "source",
     "notes",
   ],
+  // ── Document Intelligence, et première verticale : la liasse fiscale ────────────────
+  // Colonnes dont la disparition changerait un invariant : provenance géométrique, valeur
+  // brute, correction, cycle de vie, exercice lu.
+  document_extraction_runs: [
+    "id",
+    "user_id",
+    "business_id",
+    "document_family",
+    "detected_kind",
+    "detected_variant",
+    "detection_basis",
+    "extractor",
+    "extractor_version",
+    "schema_version",
+    "pdf_kind",
+    "page_count",
+    "text_char_count",
+    "file_hash",
+    "staging_storage_path",
+    "staging_cleanup_failed_at",
+    "document_id",
+    "siren",
+    "fiscal_year_start",
+    "fiscal_year_end",
+    "status",
+    "field_count",
+    "unknown_box_count",
+    "blocked_field_count",
+    "corrected_field_count",
+    "failed_check_count",
+    "not_computable_check_count",
+    "supersedes_run_id",
+    "issues",
+    "validated_at",
+    "linked_at",
+    "rejected_at",
+  ],
+  document_extraction_fields: [
+    "id",
+    "user_id",
+    "run_id",
+    "page_number",
+    "form_code",
+    "form_part",
+    "box_code",
+    "occurrence",
+    "label",
+    "bbox_x",
+    "bbox_y",
+    "bbox_width",
+    "bbox_height",
+    "raw_value",
+    "normalized_value",
+    "unit",
+    "extraction_method",
+    "confidence",
+    "confidence_score",
+    "validation_status",
+    "user_value",
+    "user_corrected_at",
+    "user_reason",
+    "issues",
+  ],
+  document_extraction_checks: [
+    "id",
+    "user_id",
+    "run_id",
+    "check_code",
+    "severity",
+    "status",
+    "expected_value",
+    "actual_value",
+    "difference",
+    "tolerance",
+    "operands",
+    "message",
+  ],
+  // Troisième forme du pont de provenance : son unité est un RUN, pas une ligne.
+  import_record_links: [
+    "id",
+    "session_id",
+    "normalized_record_id",
+    "business_financials_id",
+    "extraction_run_id",
+    "target_domain",
+  ],
+  import_upload_tickets: ["id", "domain", "storage_path", "consumed_session_id", "consumed_run_id"],
 };
 
 const userOwnedTables = [
@@ -858,6 +946,9 @@ const userOwnedTables = [
   "goal_versions",
   "decision_case_versions",
   "decision_runs",
+  "document_extraction_runs",
+  "document_extraction_fields",
+  "document_extraction_checks",
 ] as const;
 
 const requiredIndexes = [
@@ -1001,6 +1092,26 @@ const requiredIndexes = [
   "decision_case_versions_case_owner_fk_idx",
   "decision_runs_user_case_created_idx",
   "decision_runs_case_version_idx",
+  // Document Intelligence. `document_extraction_runs_linked_file_uidx` est l'invariant le
+  // plus important : il empêche qu'un même document produise deux fois un fait canonique
+  // pour la même société.
+  "document_extraction_runs_id_user_uidx",
+  "document_extraction_runs_linked_file_uidx",
+  "document_extraction_runs_business_idx",
+  "document_extraction_runs_document_idx",
+  "document_extraction_runs_supersedes_idx",
+  "document_extraction_runs_open_idx",
+  "document_extraction_runs_user_idx",
+  "document_extraction_fields_id_user_uidx",
+  "document_extraction_fields_run_idx",
+  "document_extraction_fields_code_idx",
+  "document_extraction_fields_attention_idx",
+  "document_extraction_fields_user_idx",
+  "document_extraction_checks_id_user_uidx",
+  "document_extraction_checks_run_idx",
+  "document_extraction_checks_user_idx",
+  "import_upload_tickets_run_idx",
+  "import_record_links_run_idx",
 ] as const;
 const forbiddenIndexes = [
   "net_worth_snapshot_items_owner_snapshot_idx",
@@ -1016,6 +1127,7 @@ const requiredTriggers = [
   "goals_v2_update_guard",
   "decision_case_versions_immutable",
   "decision_runs_immutable",
+  "document_extraction_fields_frozen",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1026,6 +1138,7 @@ const requiredTriggerFunctions = [
   "lfo_guard_goal_version_update",
   "lfo_guard_goal_v2_update",
   "lfo_guard_decision_snapshot_immutable",
+  "document_extraction_field_frozen",
 ] as const;
 
 const requiredConstraints = [
@@ -1195,8 +1308,6 @@ const requiredConstraints = [
   "import_record_links_normalized_uk",
   "import_record_links_transaction_uk",
   "import_record_links_business_session_uk",
-  "import_record_links_domain_v2_ck",
-  "import_record_links_target_v2_ck",
   "fec_entry_lines_session_fk",
   "fec_entry_lines_raw_fk",
   "fec_entry_lines_business_fk",
@@ -1209,7 +1320,6 @@ const requiredConstraints = [
   "fec_entry_lines_amount_shape_ck",
   "fec_entry_lines_currency_ck",
   "fec_entry_lines_committable_ck",
-  "import_upload_tickets_domain_ck",
   "import_upload_tickets_path_uk",
   "import_upload_tickets_size_ck",
   "import_upload_tickets_expiry_ck",
@@ -1291,9 +1401,67 @@ const requiredConstraints = [
   "decision_runs_stale_ck",
   "decision_runs_completeness_ck",
   "decision_runs_snapshot_ck",
+  // ── Document Intelligence ───────────────────────────────────────────────────────────
+  "document_extraction_runs_business_fk",
+  "document_extraction_runs_document_fk",
+  "document_extraction_runs_supersedes_fk",
+  "document_extraction_runs_family_ck",
+  "document_extraction_runs_pdf_kind_ck",
+  "document_extraction_runs_status_ck",
+  "document_extraction_runs_counts_ck",
+  "document_extraction_runs_validated_shape_ck",
+  "document_extraction_runs_linked_shape_ck",
+  "document_extraction_runs_rejected_shape_ck",
+  // Un scan n'a rien lu : une lecture OCR_REQUIRED portant des cases est refusée.
+  "document_extraction_runs_ocr_shape_ck",
+  "document_extraction_runs_file_hash_ck",
+  "document_extraction_runs_siren_ck",
+  "document_extraction_runs_fiscal_order_ck",
+  "document_extraction_runs_supersedes_self_ck",
+  "document_extraction_fields_run_fk",
+  "document_extraction_fields_box_uk",
+  "document_extraction_fields_page_ck",
+  "document_extraction_fields_occurrence_ck",
+  "document_extraction_fields_unit_ck",
+  "document_extraction_fields_method_ck",
+  "document_extraction_fields_confidence_ck",
+  "document_extraction_fields_confidence_score_ck",
+  "document_extraction_fields_validation_ck",
+  "document_extraction_fields_corrected_shape_ck",
+  "document_extraction_fields_user_value_shape_ck",
+  // CASE VIDE ≠ CASE À ZÉRO, et une valeur normalisée sans valeur brute sortirait de nulle part.
+  "document_extraction_fields_raw_shape_ck",
+  "document_extraction_fields_bbox_shape_ck",
+  "document_extraction_fields_bbox_size_ck",
+  "document_extraction_checks_run_fk",
+  "document_extraction_checks_code_uk",
+  "document_extraction_checks_severity_ck",
+  "document_extraction_checks_status_ck",
+  // Un contrôle passé ou échoué a comparé deux nombres. Sinon c'est NOT_COMPUTABLE.
+  "document_extraction_checks_values_ck",
+  "document_extraction_checks_tolerance_ck",
+  "document_extraction_checks_operands_ck",
+  "import_upload_tickets_run_fk",
+  "import_upload_tickets_domain_v2_ck",
+  "import_upload_tickets_single_target_ck",
+  "import_record_links_run_fk",
+  "import_record_links_run_uk",
+  // Les noms remplacés — `import_record_links_domain_v2_ck`, `..._target_v2_ck` et
+  // `import_upload_tickets_domain_ck` — ne figurent PLUS dans cette liste : une contrainte
+  // remplacée qu'on continue d'exiger ferait échouer le gate sur une base à jour.
+  "import_record_links_domain_v3_ck",
+  "import_record_links_target_v3_ck",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
+  lfo_open_document_extraction: "p_user_id uuid, p_payload jsonb",
+  lfo_append_document_extraction_fields: "p_user_id uuid, p_payload jsonb",
+  lfo_evaluate_document_extraction_checks: "p_user_id uuid, p_payload jsonb",
+  lfo_correct_document_extraction_field: "p_user_id uuid, p_payload jsonb",
+  lfo_validate_document_extraction: "p_user_id uuid, p_run_id uuid",
+  lfo_link_document_extraction_financials: "p_user_id uuid, p_payload jsonb",
+  lfo_reject_document_extraction: "p_user_id uuid, p_run_id uuid, p_reason text",
+  lfo_record_document_staging_cleanup: "p_user_id uuid, p_run_id uuid, p_removed boolean",
   lfo_add_account:
     "p_user_id uuid, p_institution text, p_name text, p_account_type text, p_balance numeric, p_currency text, p_as_of_date date",
   lfo_add_transaction:
@@ -1414,6 +1582,11 @@ const declaredReturnTypeRpcs: Record<string, string> = {
   lfo_set_goal_status_v2: "integer",
   lfo_validate_decision_case_version_v2: "void",
   lfo_save_decision_case_version_v2: "integer",
+  // Ces deux RPC rendent un DÉCOMPTE : « combien de cases reçues » et « combien de contrôles
+  // évalués » sont l'information utile à l'appelant, davantage qu'un identifiant parmi
+  // plusieurs centaines de lignes touchées.
+  lfo_append_document_extraction_fields: "integer",
+  lfo_evaluate_document_extraction_checks: "integer",
 };
 
 /**
@@ -1438,6 +1611,11 @@ const readOnlyAuditTables = [
   "goal_versions",
   "decision_case_versions",
   "decision_runs",
+  // La lecture documentaire rejoint la même règle : une case, un contrôle et une lecture
+  // sont des observations, pas des données que le client réécrit.
+  "document_extraction_runs",
+  "document_extraction_fields",
+  "document_extraction_checks",
 ] as const;
 
 const storagePolicies = [
@@ -1719,7 +1897,10 @@ try {
       failures.push(
         `Limite du bucket family-office-import-staging (${stagingBucket.file_size_limit}) inférieure au plafond d'analyse (${MAX_FEC_FILE_BYTES})`,
       );
-    for (const mime of ["text/plain", "text/csv", "text/tab-separated-values"]) {
+    // `application/pdf` s'y ajoute pour la lecture documentaire. Sans lui, le dépôt direct
+    // échouerait au stockage APRÈS que le serveur a émis un billet, et le contournement de
+    // la limite de corps de requête ne servirait à rien.
+    for (const mime of ["text/plain", "text/csv", "text/tab-separated-values", "application/pdf"]) {
       if (!(stagingBucket.allowed_mime_types ?? []).includes(mime))
         failures.push(`Type MIME absent du bucket family-office-import-staging : ${mime}`);
     }
