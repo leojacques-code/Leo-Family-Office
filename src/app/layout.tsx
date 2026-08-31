@@ -5,6 +5,7 @@ import "./level2-motion.css";
 import "./lfo-experience-v3.css";
 import "./lfo-guided-v4.css";
 import "./lfo-visual-v5.css";
+import "./lfo-rigorous-v6.css";
 
 export const metadata: Metadata = {
   title: "Léo Family Office — Private Wealth Cockpit",
