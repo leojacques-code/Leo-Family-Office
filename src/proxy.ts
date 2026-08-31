@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const COOKIE_NAME = "lfo_session";
+const PUBLIC_PAGES = new Set(["/", "/login", "/purpose", "/method", "/possibilities", "/about", "/pricing"]);
 
 function base64url(bytes: ArrayBuffer): string {
   let binary = "";
@@ -15,8 +16,7 @@ async function expectedToken(secret: string) {
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
-  const isPublic = pathname === "/"
-    || pathname === "/login"
+  const isPublic = PUBLIC_PAGES.has(pathname)
     || pathname.startsWith("/api/auth")
     || pathname.startsWith("/_next")
     || pathname === "/favicon.ico"
