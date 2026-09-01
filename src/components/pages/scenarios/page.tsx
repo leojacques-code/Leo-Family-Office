@@ -35,7 +35,8 @@ import {
   scenarioAssumptions,
   toAnnualPoints,
 } from "@/lib/engine/monthly-financial-model";
-import { createScenarioVersion, runScenarioComparison } from "@/lib/engine/scenario-engine";
+import { evaluateGlobalScenario } from "@/lib/engine/global-financial-model";
+import { createScenarioVersion } from "@/lib/engine/scenario-engine";
 
 function ScenariosPage({
   state,
@@ -237,14 +238,9 @@ function ScenariosPage({
     scenarioAssumptions(selected),
     30 * 12,
   );
-  const comparison =
-    selected.definition && state.eventTimeline
-      ? runScenarioComparison({
-          baselineEvents: state.eventTimeline.events,
-          opening,
-          definition: selected.definition,
-        })
-      : null;
+  const comparison = selected.definition
+    ? evaluateGlobalScenario(state, selected.definition).comparison
+    : null;
   const deterministic = comparison?.scenario.annual ?? toAnnualPoints(legacyMonthly);
   const horizon = deterministic.at(-1);
   // Le pic se lit sur le déroulé mensuel : les points annuels le sous-échantillonnent.

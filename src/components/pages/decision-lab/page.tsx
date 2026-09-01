@@ -2,13 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { GitCompareArrows, Play, Save } from "lucide-react";
-import {
-  createDecisionCaseVersion,
-  createDecisionOption,
-  evaluateDecisionCase,
-} from "@/lib/engine/decision-lab";
+import { createDecisionCaseVersion, createDecisionOption } from "@/lib/engine/decision-lab";
 import type { DecisionEvaluation, DecisionMetricSnapshot } from "@/lib/engine/decision-contracts";
-import { buildOpeningBalanceSheet } from "@/lib/engine/monthly-financial-model";
+import {
+  buildGlobalFinancialContext,
+  evaluateGlobalDecisionCase,
+} from "@/lib/engine/global-financial-model";
 import { Callout, Currency, EmptyState, SectionHeader } from "@/components/ui";
 import {
   NOT_COMPUTABLE,
@@ -113,7 +112,6 @@ export default function DecisionLabPage({ state, mutate, busy }: SectionProps) {
   };
 
   const buildEvaluation = () => {
-    if (!state.eventTimeline) throw new Error("La timeline canonique est indisponible.");
     const chosenScenarios = scenarioIds
       .map((id) => availableScenarios.find((scenario) => scenario.id === id))
       .filter((scenario) => scenario?.definition);
@@ -139,29 +137,19 @@ export default function DecisionLabPage({ state, mutate, busy }: SectionProps) {
         constraintStrength: goal!.definition!.constraintStrength,
         definition: goal!.definition!,
       }));
-    const opening = buildOpeningBalanceSheet(state);
+    const firstDefinition = chosenScenarios[0]!.definition!;
+    const context = buildGlobalFinancialContext(state, firstDefinition.horizonMonths);
     const caseVersion = createDecisionCaseVersion({
       caseId,
       name,
       description: "Comparaison canonique de trajectoires Scenarios V2 contre les mêmes Goals V2.",
       status: "DRAFT",
-      opening,
-      baselineEvents: state.eventTimeline.events,
+      opening: context.opening,
+      baselineEvents: context.timeline.events,
       options,
       selectedGoals,
     });
-    return evaluateDecisionCase({
-      caseVersion,
-      baselineEvents: state.eventTimeline.events,
-      opening,
-      reportingCurrency: state.reportingCurrency,
-      currentScenarioVersions: Object.fromEntries(
-        state.scenarios.map((scenario) => [scenario.id, scenario.version]),
-      ),
-      currentGoalVersions: Object.fromEntries(
-        state.goals.map((goal) => [goal.id, goal.definition?.version ?? goal.version ?? 1]),
-      ),
-    });
+    return evaluateGlobalDecisionCase(state, caseVersion).evaluation;
   };
 
   const run = () => {

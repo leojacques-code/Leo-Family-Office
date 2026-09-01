@@ -3,11 +3,9 @@ import { z } from "zod";
 import { requireAuthenticated } from "@/lib/auth";
 import { getRepository } from "@/lib/data/repository";
 import { runMonteCarlo, runScenarioMonteCarlo } from "@/lib/engine/monte-carlo";
-import { buildDashboardEventTimeline } from "@/lib/engine/event-adapters";
-import { buildBaselineReference, runScenarioComparison } from "@/lib/engine/scenario-engine";
+import { evaluateGlobalScenario } from "@/lib/engine/global-financial-model";
 import {
   buildOpeningBalanceSheet,
-  projectedMonthWindow,
   runDeterministicModel,
   scenarioAssumptions,
   toAnnualPoints,
@@ -35,20 +33,10 @@ export async function POST(request: Request) {
     if (!scenario) return NextResponse.json({ error: "Scénario introuvable" }, { status: 404 });
     // Une seule source temporelle : le Personal Monthly Financial Model. Le déterministe
     // et le Monte-Carlo partagent le bilan d'ouverture, l'échéancier et la transition.
-    const opening = buildOpeningBalanceSheet(state);
     if (scenario.definition) {
       const definition = scenario.definition;
-      const window = projectedMonthWindow(definition.asOfDate, definition.horizonMonths);
-      const baselineTimeline = buildDashboardEventTimeline({
-        state,
-        startDate: definition.asOfDate,
-        endDate: window.end,
-      });
-      const comparison = runScenarioComparison({
-        baselineEvents: baselineTimeline.events,
-        opening,
-        definition,
-      });
+      const global = evaluateGlobalScenario(state, definition);
+      const comparison = global.comparison;
       if (comparison.completeness === "NOT_COMPUTABLE") {
         return NextResponse.json(
           { error: "Scénario non calculable", blockers: comparison.blockers },
@@ -57,12 +45,12 @@ export async function POST(request: Request) {
       }
       const result = runScenarioMonteCarlo({
         definition,
-        baselineEvents: baselineTimeline.events,
-        opening,
+        baselineEvents: global.context.timeline.events,
+        opening: global.context.opening,
         simulations: parsed.data.simulations,
         seed: parsed.data.seed,
       });
-      const baselineReference = buildBaselineReference({ opening, timeline: baselineTimeline });
+      const baselineReference = global.baseline;
       const runId = await repository.saveSimulation({
         scenarioId: scenario.id,
         seed: parsed.data.seed,
@@ -84,7 +72,7 @@ export async function POST(request: Request) {
         ...result,
         runId,
         deterministic: comparison.scenario.annual,
-        openingNetWorth: opening.netWorth,
+        openingNetWorth: global.context.opening.netWorth,
         comparison,
         baselineReference,
         assumptions: {
@@ -94,6 +82,7 @@ export async function POST(request: Request) {
         },
       });
     }
+    const opening = buildOpeningBalanceSheet(state);
     const assumptions = scenarioAssumptions(scenario);
     const deterministic = toAnnualPoints(
       runDeterministicModel(opening, state.liabilities, assumptions, parsed.data.years * 12),
