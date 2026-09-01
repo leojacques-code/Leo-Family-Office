@@ -157,7 +157,10 @@ export function groupTimelineItems(items: TimelineItem[]): TimelineGroup[] {
 
 export function timelineWindow(groups: TimelineGroup[], offset: number, size: number) {
   const safeSize = Math.max(1, Math.floor(size));
-  const safeOffset = Math.min(Math.max(0, Math.floor(offset)), Math.max(0, groups.length - 1));
+  const safeOffset = Math.min(
+    Math.max(0, Math.floor(offset)),
+    Math.max(0, groups.length - safeSize),
+  );
   return {
     groups: groups.slice(safeOffset, safeOffset + safeSize),
     offset: safeOffset,

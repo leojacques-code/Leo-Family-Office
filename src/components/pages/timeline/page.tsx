@@ -9,6 +9,7 @@ import { buildTodayCockpit } from "@/lib/presentation/today-cockpit";
 import {
   buildTimelineView,
   groupTimelineItems,
+  timelineWindow,
   type TimelineZone,
 } from "@/lib/presentation/timeline-view";
 
@@ -40,6 +41,10 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
       (nature === "ALL" || item.nature === nature) &&
       (status === "ALL" || item.status === status),
   );
+  function resetWindows() {
+    setGroupOffset({ PAST: 0, TODAY: 0, FUTURE: 0 });
+    setVisibleGroups({ PAST: 12, TODAY: 12, FUTURE: 12 });
+  }
   return (
     <div className="page-stack">
       <SectionHeader
@@ -61,7 +66,13 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
         <div className="form-grid three" aria-label="Filtres Timeline">
           <label>
             Domaine
-            <select value={domain} onChange={(event) => setDomain(event.target.value)}>
+            <select
+              value={domain}
+              onChange={(event) => {
+                setDomain(event.target.value);
+                resetWindows();
+              }}
+            >
               <option value="ALL">Tous</option>
               {[...new Set(items.map((item) => item.domain))].map((value) => (
                 <option key={value}>{value}</option>
@@ -70,7 +81,13 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
           </label>
           <label>
             Nature
-            <select value={nature} onChange={(event) => setNature(event.target.value)}>
+            <select
+              value={nature}
+              onChange={(event) => {
+                setNature(event.target.value);
+                resetWindows();
+              }}
+            >
               <option value="ALL">Toutes</option>
               {[...new Set(items.map((item) => item.nature))].map((value) => (
                 <option key={value}>{value}</option>
@@ -79,7 +96,13 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
           </label>
           <label>
             Statut
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
+            <select
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                resetWindows();
+              }}
+            >
               <option value="ALL">Tous</option>
               {[...new Set(items.map((item) => item.status))].map((value) => (
                 <option key={value}>{value}</option>
@@ -91,10 +114,8 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
       {ZONES.map((zone) => {
         const rows = filtered.filter((item) => item.zone === zone.id);
         const groups = groupTimelineItems(rows);
-        const shown = groups.slice(
-          groupOffset[zone.id],
-          groupOffset[zone.id] + visibleGroups[zone.id],
-        );
+        const window = timelineWindow(groups, groupOffset[zone.id], visibleGroups[zone.id]);
+        const shown = window.groups;
         return (
           <section className="panel" key={zone.id} aria-labelledby={`zone-${zone.id}`}>
             <div className="panel-header">
@@ -166,31 +187,47 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
                     </div>
                   ))}
                 </div>
-                {groupOffset[zone.id] + shown.length < groups.length ? (
+                {window.offset > 0 || window.offset + shown.length < groups.length ? (
                   <div className="quick-actions">
-                    <button
-                      className="button secondary"
-                      onClick={() =>
-                        setVisibleGroups((current) => ({
-                          ...current,
-                          [zone.id]: current[zone.id] + 12,
-                        }))
-                      }
-                    >
-                      Afficher 12 dates de plus
-                    </button>
-                    <button
-                      className="button secondary"
-                      onClick={() => {
-                        setGroupOffset((current) => ({
-                          ...current,
-                          [zone.id]: Math.max(0, groups.length - 12),
-                        }));
-                        setVisibleGroups((current) => ({ ...current, [zone.id]: 12 }));
-                      }}
-                    >
-                      Aller aux événements les plus lointains
-                    </button>
+                    {window.offset > 0 ? (
+                      <button
+                        className="button secondary"
+                        onClick={() => {
+                          setGroupOffset((current) => ({ ...current, [zone.id]: 0 }));
+                          setVisibleGroups((current) => ({ ...current, [zone.id]: 12 }));
+                        }}
+                      >
+                        Revenir aux événements les plus proches
+                      </button>
+                    ) : null}
+                    {window.offset + shown.length < groups.length ? (
+                      <>
+                        <button
+                          className="button secondary"
+                          onClick={() =>
+                            setVisibleGroups((current) => ({
+                              ...current,
+                              [zone.id]: current[zone.id] + 12,
+                            }))
+                          }
+                        >
+                          Afficher 12 dates de plus
+                        </button>
+                        <button
+                          className="button secondary"
+                          onClick={() => {
+                            const last = timelineWindow(groups, groups.length, 12);
+                            setGroupOffset((current) => ({
+                              ...current,
+                              [zone.id]: last.offset,
+                            }));
+                            setVisibleGroups((current) => ({ ...current, [zone.id]: 12 }));
+                          }}
+                        >
+                          Aller aux événements les plus lointains
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 ) : null}
               </>

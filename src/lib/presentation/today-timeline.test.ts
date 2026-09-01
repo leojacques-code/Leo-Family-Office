@@ -270,6 +270,45 @@ describe("Timeline V2 — registre canonique", () => {
       items.map((item) => item.id),
     );
   });
+  it("borne la fenêtre après un saut lointain puis une réduction par filtres", () => {
+    const input = state();
+    const items = buildTimelineView(input, buildTodayCockpit(input));
+    const future = items.filter((item) => item.zone === "FUTURE");
+    const allGroups = groupTimelineItems(future);
+    const initial = timelineWindow(allGroups, 0, 12);
+    expect(initial.offset).toBe(0);
+    const last = timelineWindow(allGroups, allGroups.length, 12);
+    expect(last.groups.length).toBeGreaterThan(0);
+
+    const apply = (domain: string, nature: string, status: string) =>
+      groupTimelineItems(
+        future.filter(
+          (item) =>
+            (domain === "ALL" || item.domain === domain) &&
+            (nature === "ALL" || item.nature === nature) &&
+            (status === "ALL" || item.status === status),
+        ),
+      );
+    const debt = apply("DEBT", "ALL", "ALL");
+    expect(debt.length).toBeGreaterThan(0);
+    const afterDomainFilter = timelineWindow(debt, last.offset, 12);
+    expect(afterDomainFilter.offset).toBeLessThanOrEqual(Math.max(0, debt.length - 12));
+    expect(afterDomainFilter.groups.length).toBeGreaterThan(0);
+
+    const nature = future.find((item) => item.domain === "DEBT")?.nature ?? "OBSERVED";
+    const status =
+      future.find((item) => item.domain === "DEBT" && item.nature === nature)?.status ?? "ACTIVE";
+    const afterThreeFilters = timelineWindow(apply("DEBT", nature, status), last.offset, 12);
+    expect(afterThreeFilters.offset).toBeGreaterThanOrEqual(0);
+    const afterRemovingFilter = timelineWindow(apply("DEBT", "ALL", status), last.offset, 12);
+    expect(afterRemovingFilter.groups.length).toBeGreaterThan(0);
+
+    const empty = timelineWindow([], last.offset, 12);
+    expect(empty).toEqual({ groups: [], offset: 0, totalGroups: 0 });
+    const back = timelineWindow(debt, 0, 12);
+    expect(back.offset).toBe(0);
+    expect(back.groups.length).toBeGreaterThan(0);
+  });
   it("gère honnêtement dette absente, bilan partiel et FX absent", () => {
     const input = state();
     input.liabilities = [];
