@@ -3,13 +3,17 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { CalendarCheck } from "lucide-react";
-import { Callout, Currency, EmptyState, SectionHeader } from "@/components/ui";
-import { type SectionProps, formatDate } from "@/components/pages/shared";
+import { Callout, EmptyState, SectionHeader } from "@/components/ui";
+import { type SectionProps, formatDate, formatNative } from "@/components/pages/shared";
 import { buildTodayCockpit } from "@/lib/presentation/today-cockpit";
-import { buildTimelineView, type TimelineZone } from "@/lib/presentation/timeline-view";
+import {
+  buildTimelineView,
+  groupTimelineItems,
+  type TimelineZone,
+} from "@/lib/presentation/timeline-view";
 
 const ZONES: Array<{ id: TimelineZone; title: string; detail: string }> = [
-  { id: "PAST", title: "Passé observé", detail: "Clôtures et événements observés" },
+  { id: "PAST", title: "Passé", detail: "Faits et anciennes attentes, nature d’origine conservée" },
   { id: "TODAY", title: "Aujourd’hui", detail: "Date zéro et snapshot canonique" },
   { id: "FUTURE", title: "Futur", detail: "Contrats, projections et hypothèses identifiées" },
 ];
@@ -20,6 +24,16 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
   const [domain, setDomain] = useState("ALL");
   const [nature, setNature] = useState("ALL");
   const [status, setStatus] = useState("ALL");
+  const [visibleGroups, setVisibleGroups] = useState<Record<TimelineZone, number>>({
+    PAST: 12,
+    TODAY: 12,
+    FUTURE: 12,
+  });
+  const [groupOffset, setGroupOffset] = useState<Record<TimelineZone, number>>({
+    PAST: 0,
+    TODAY: 0,
+    FUTURE: 0,
+  });
   const filtered = items.filter(
     (item) =>
       (domain === "ALL" || item.domain === domain) &&
@@ -76,6 +90,11 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
       </section>
       {ZONES.map((zone) => {
         const rows = filtered.filter((item) => item.zone === zone.id);
+        const groups = groupTimelineItems(rows);
+        const shown = groups.slice(
+          groupOffset[zone.id],
+          groupOffset[zone.id] + visibleGroups[zone.id],
+        );
         return (
           <section className="panel" key={zone.id} aria-labelledby={`zone-${zone.id}`}>
             <div className="panel-header">
@@ -97,42 +116,84 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
               </Callout>
             )}
             {rows.length ? (
-              <div className="full-timeline">
-                {rows.map((item) => (
-                  <div
-                    key={item.id}
-                    className={
-                      item.conflict || item.blockers.length
-                        ? "warning"
-                        : item.nature === "PROJECTED" || item.nature.includes("ASSUMPTION")
-                          ? "model"
-                          : "actual"
-                    }
-                  >
-                    <div className="timeline-date">{formatDate(item.effectiveDate)}</div>
-                    <i />
-                    <div>
-                      <span>
-                        {item.nature} · {item.domain} · {item.status}
-                      </span>
-                      <h3>{item.title}</h3>
-                      <p>
-                        Événement {formatDate(item.eventDate)} · effet{" "}
-                        {formatDate(item.effectiveDate)} ·{" "}
-                        {item.amountKnown ? <Currency value={item.amount} /> : "sans montant"} ·
-                        source {item.provenance}
-                      </p>
-                      {(item.conflict || item.blockers.length > 0) && (
-                        <p className="warning-text">
-                          {item.conflict ? "Conflit Event Engine. " : ""}
-                          {item.blockers.join(", ") || "À arbitrer"}
-                        </p>
-                      )}
-                      <Link href={item.href}>Ouvrir le domaine propriétaire</Link>
+              <>
+                <p className="muted-copy">
+                  {shown.reduce((sum, group) => sum + group.items.length, 0)} élément(s) visible(s)
+                  sur {rows.length} · {shown.length} date(s) sur {groups.length}
+                </p>
+                <div className="full-timeline">
+                  {shown.map((group) => (
+                    <div key={group.effectiveDate} className="timeline-date-group">
+                      <div className="timeline-date">{formatDate(group.effectiveDate)}</div>
+                      <i />
+                      <div>
+                        <h3>{group.items.length} événement(s)</h3>
+                        {group.items.map((item) => (
+                          <div
+                            key={item.id}
+                            className={
+                              item.conflict || item.blockers.length
+                                ? "warning"
+                                : item.nature === "PROJECTED" || item.nature.includes("ASSUMPTION")
+                                  ? "model"
+                                  : "actual"
+                            }
+                          >
+                            <div>
+                              <span>
+                                {item.nature} · {item.domain} · {item.status}
+                              </span>
+                              <h3>{item.title}</h3>
+                              <p>
+                                Événement {formatDate(item.eventDate)} · effet{" "}
+                                {formatDate(item.effectiveDate)} ·{" "}
+                                {item.amountKnown && item.amount !== null && item.currency
+                                  ? formatNative(item.amount, item.currency)
+                                  : "montant non calculable"}{" "}
+                                · source {item.provenance}
+                              </p>
+                              {(item.conflict || item.blockers.length > 0) && (
+                                <p className="warning-text">
+                                  {item.conflict ? "Conflit Event Engine. " : ""}
+                                  {item.blockers.join(", ") || "À arbitrer"}
+                                </p>
+                              )}
+                              <Link href={item.href}>Ouvrir le domaine propriétaire</Link>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
+                  ))}
+                </div>
+                {groupOffset[zone.id] + shown.length < groups.length ? (
+                  <div className="quick-actions">
+                    <button
+                      className="button secondary"
+                      onClick={() =>
+                        setVisibleGroups((current) => ({
+                          ...current,
+                          [zone.id]: current[zone.id] + 12,
+                        }))
+                      }
+                    >
+                      Afficher 12 dates de plus
+                    </button>
+                    <button
+                      className="button secondary"
+                      onClick={() => {
+                        setGroupOffset((current) => ({
+                          ...current,
+                          [zone.id]: Math.max(0, groups.length - 12),
+                        }));
+                        setVisibleGroups((current) => ({ ...current, [zone.id]: 12 }));
+                      }}
+                    >
+                      Aller aux événements les plus lointains
+                    </button>
                   </div>
-                ))}
-              </div>
+                ) : null}
+              </>
             ) : (
               <EmptyState
                 title="Aucun élément"

@@ -37,6 +37,7 @@ import {
 } from "@/lib/engine/monthly-financial-model";
 import { evaluateGlobalScenario } from "@/lib/engine/global-financial-model";
 import { createScenarioVersion } from "@/lib/engine/scenario-engine";
+import { scenarioCutOffStatus } from "@/lib/presentation/scenario-view";
 
 function ScenariosPage({
   state,
@@ -231,24 +232,24 @@ function ScenariosPage({
   // surplus modifie immédiatement le bilan projeté, sans relancer le Monte-Carlo.
   const selected =
     state.scenarios.find((scenario) => scenario.id === selectedId) ?? state.scenarios[0];
+  const cutOff = scenarioCutOffStatus(selected, state.asOfDate);
   const opening = buildOpeningBalanceSheet(state);
-  const legacyMonthly = runDeterministicModel(
-    opening,
-    state.liabilities,
-    scenarioAssumptions(selected),
-    30 * 12,
-  );
-  const comparison = selected.definition
-    ? evaluateGlobalScenario(state, selected.definition).comparison
+  const legacyMonthly = !selected.definition
+    ? runDeterministicModel(opening, state.liabilities, scenarioAssumptions(selected), 30 * 12)
     : null;
-  const deterministic = comparison?.scenario.annual ?? toAnnualPoints(legacyMonthly);
+  const comparison =
+    selected.definition && cutOff.computable
+      ? evaluateGlobalScenario(state, selected.definition).comparison
+      : null;
+  const deterministic =
+    comparison?.scenario.annual ?? (legacyMonthly ? toAnnualPoints(legacyMonthly) : []);
   const horizon = deterministic.at(-1);
   // Le pic se lit sur le déroulé mensuel : les points annuels le sous-échantillonnent.
-  const peakFundingGap = Math.max(
-    ...(comparison?.scenario.monthly.map((month) => month.fundingGap) ??
-      legacyMonthly.states.map((month) => month.fundingGap)),
-    0,
-  );
+  const fundingGaps =
+    comparison?.scenario.monthly.map((month) => month.fundingGap) ??
+    legacyMonthly?.states.map((month) => month.fundingGap) ??
+    [];
+  const peakFundingGap = fundingGaps.length ? Math.max(...fundingGaps) : null;
   return (
     <div className="page-stack">
       <SectionHeader
@@ -331,6 +332,13 @@ function ScenariosPage({
           </article>
         ))}
       </div>
+      {!cutOff.computable ? (
+        <Callout tone="warning" title="NOT_COMPUTABLE · version à rebaser">
+          Cette version est datée du {cutOff.scenarioDate}, alors que la date canonique actuelle est
+          le {cutOff.canonicalDate}. Elle est conservée sans modification : créez une nouvelle
+          version depuis « Modifier les hypothèses » pour la rebaser explicitement.
+        </Callout>
+      ) : null}
       {comparison ? (
         <section className="panel">
           <div className="panel-header">
@@ -368,14 +376,14 @@ function ScenariosPage({
             <div>
               <span>Δ patrimoine net</span>
               <strong>
-                <Currency value={comparison.points.at(-1)?.delta.netWorth ?? 0} sign compact />
+                <Currency value={comparison.points.at(-1)?.delta.netWorth ?? null} sign compact />
               </strong>
             </div>
             <div>
               <span>Δ liquidité</span>
               <strong>
                 <Currency
-                  value={comparison.points.at(-1)?.delta.liquidNetWorth ?? 0}
+                  value={comparison.points.at(-1)?.delta.liquidNetWorth ?? null}
                   sign
                   compact
                 />
@@ -462,28 +470,28 @@ function ScenariosPage({
           <div>
             <span>Patrimoine net</span>
             <strong>
-              <Currency value={horizon?.netWorth ?? 0} compact />
+              <Currency value={horizon?.netWorth ?? null} compact />
             </strong>
             <small>À l’horizon, périmètre financier</small>
           </div>
           <div>
             <span>Actifs financiers</span>
             <strong>
-              <Currency value={horizon?.grossFinancialAssets ?? 0} compact />
+              <Currency value={horizon?.grossFinancialAssets ?? null} compact />
             </strong>
             <small>
-              dont marché <Currency value={horizon?.marketInvestedAssets ?? 0} compact /> · dont
-              cash <Currency value={horizon?.bankCash ?? 0} compact />
+              dont marché <Currency value={horizon?.marketInvestedAssets ?? null} compact /> · dont
+              cash <Currency value={horizon?.bankCash ?? null} compact />
             </small>
           </div>
           <div>
             <span>Dette restante</span>
             <strong>
-              <Currency value={horizon?.debt ?? 0} compact />
+              <Currency value={horizon?.debt ?? null} compact />
             </strong>
             <small>
               Coûts de dette cumulés{" "}
-              <Currency value={horizon?.cumulativeEconomicDebtCosts ?? 0} compact />
+              <Currency value={horizon?.cumulativeEconomicDebtCosts ?? null} compact />
             </small>
           </div>
         </div>
@@ -581,21 +589,21 @@ function ScenariosPage({
               <div>
                 <span>P10</span>
                 <strong>
-                  <Currency value={finalPoint?.p10 ?? 0} compact />
+                  <Currency value={finalPoint?.p10 ?? null} compact />
                 </strong>
                 <small>Patrimoine net dépassé dans ~90 % des simulations</small>
               </div>
               <div>
                 <span>P50</span>
                 <strong>
-                  <Currency value={finalPoint?.p50 ?? 0} compact />
+                  <Currency value={finalPoint?.p50 ?? null} compact />
                 </strong>
                 <small>Patrimoine net médian des simulations</small>
               </div>
               <div>
                 <span>P90</span>
                 <strong>
-                  <Currency value={finalPoint?.p90 ?? 0} compact />
+                  <Currency value={finalPoint?.p90 ?? null} compact />
                 </strong>
                 <small>Patrimoine net atteint ou dépassé dans ~10 % des simulations</small>
               </div>

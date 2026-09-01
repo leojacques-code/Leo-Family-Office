@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { createGoalVersion } from "@/lib/engine/goal-engine";
 import { eventEngineCrossDomainFixture } from "@/lib/engine/__tests__/fixtures/event-engine";
-import type { DashboardState, Goal, MonthlyClose } from "@/lib/types";
+import type { DashboardState, Goal, MonthlyClose, Scenario } from "@/lib/types";
 import { buildTodayCockpit, rankGoals } from "@/lib/presentation/today-cockpit";
-import { buildTimelineView } from "@/lib/presentation/timeline-view";
+import {
+  buildTimelineView,
+  eventAmount,
+  groupTimelineItems,
+  timelineWindow,
+} from "@/lib/presentation/timeline-view";
+import { scenarioCutOffStatus } from "@/lib/presentation/scenario-view";
+import { createScenarioVersion } from "@/lib/engine/scenario-engine";
 
 function state(): DashboardState {
   return eventEngineCrossDomainFixture();
@@ -94,6 +101,104 @@ describe("Today V2 — présentation canonique", () => {
 });
 
 describe("Timeline V2 — registre canonique", () => {
+  it("respecte NULL ≠ ZERO, inclusion et homogénéité de devise", () => {
+    const event = buildTodayCockpit(state()).context.timeline.events.find(
+      (item) => item.consequences.length,
+    )!;
+    const base = event.consequences[0]!;
+    const withConsequences = (consequences: typeof event.consequences) => ({
+      ...event,
+      consequences,
+    });
+    expect(
+      eventAmount(
+        withConsequences([
+          { ...base, included: true, currency: "EUR", cashIn: 100, cashOut: null },
+        ]),
+      ),
+    ).toEqual({ value: null, known: false, currency: "EUR" });
+    expect(
+      eventAmount(
+        withConsequences([{ ...base, included: true, currency: "EUR", cashIn: 0, cashOut: 0 }]),
+      ),
+    ).toEqual({ value: 0, known: true, currency: "EUR" });
+    expect(
+      eventAmount(
+        withConsequences([
+          { ...base, included: true, currency: "EUR", cashIn: 100, cashOut: 0 },
+          {
+            ...base,
+            id: `${base.id}:2`,
+            included: true,
+            currency: "EUR",
+            cashIn: null,
+            cashOut: 0,
+          },
+        ]),
+      ).known,
+    ).toBe(false);
+    expect(
+      eventAmount(
+        withConsequences([
+          { ...base, included: true, currency: "EUR", cashIn: 100, cashOut: 0 },
+          {
+            ...base,
+            id: `${base.id}:usd`,
+            included: true,
+            currency: "USD",
+            cashIn: 10,
+            cashOut: 0,
+          },
+        ]),
+      ),
+    ).toEqual({ value: null, known: false, currency: null });
+    expect(
+      eventAmount(withConsequences([{ ...base, included: false, cashIn: 100, cashOut: 0 }])).known,
+    ).toBe(false);
+    expect(eventAmount(withConsequences([])).known).toBe(false);
+  });
+  it("classe chaque nature uniquement selon la date d'effet", () => {
+    const input = state();
+    const cockpit = buildTodayCockpit(input);
+    const template = cockpit.context.timeline.events[0]!;
+    const kinds = [
+      "OBSERVED",
+      "CONTRACTUAL",
+      "PROJECTED",
+      "USER_ASSUMPTION",
+      "MODEL_ASSUMPTION",
+    ] as const;
+    cockpit.context.timeline.events = kinds.flatMap((dataKind, index) => [
+      {
+        ...template,
+        id: `${index}:past`,
+        dataKind,
+        eventDate: "2025-01-01",
+        effectiveDate: "2025-01-01",
+      },
+      {
+        ...template,
+        id: `${index}:today`,
+        dataKind,
+        eventDate: input.asOfDate,
+        effectiveDate: input.asOfDate,
+      },
+      {
+        ...template,
+        id: `${index}:future`,
+        dataKind,
+        eventDate: "2027-01-01",
+        effectiveDate: "2027-01-01",
+      },
+    ]);
+    const items = buildTimelineView(input, cockpit);
+    for (const kind of kinds)
+      expect(items.filter((item) => item.nature === kind).map((item) => item.zone)).toEqual([
+        "PAST",
+        "TODAY",
+        "FUTURE",
+      ]);
+  });
   it("conserve événements observés/projetés, sans montant, conflits et plusieurs domaines le même jour", () => {
     const input = state();
     const cockpit = buildTodayCockpit(input);
@@ -149,6 +254,22 @@ describe("Timeline V2 — registre canonique", () => {
       first,
     );
   });
+  it("regroupe une date, pagine les groupes et conserve l'événement lointain", () => {
+    const input = state();
+    const items = buildTimelineView(input, buildTodayCockpit(input));
+    const groups = groupTimelineItems(items);
+    const first = timelineWindow(groups, 0, 2);
+    expect(first.groups).toHaveLength(2);
+    expect(first.totalGroups).toBe(groups.length);
+    expect(
+      groups.every((group) =>
+        group.items.every((item) => item.effectiveDate === group.effectiveDate),
+      ),
+    ).toBe(true);
+    expect(groups.flatMap((group) => group.items).map((item) => item.id)).toEqual(
+      items.map((item) => item.id),
+    );
+  });
   it("gère honnêtement dette absente, bilan partiel et FX absent", () => {
     const input = state();
     input.liabilities = [];
@@ -157,5 +278,24 @@ describe("Timeline V2 — registre canonique", () => {
     const cockpit = buildTodayCockpit(input);
     expect(cockpit.debt === null || cockpit.debt === 0).toBe(true);
     expect(cockpit.context.completeness).not.toBeUndefined();
+  });
+});
+
+describe("Scenarios — cut-off canonique", () => {
+  it("rend une ancienne version NOT_COMPUTABLE sans la modifier", () => {
+    const input = state();
+    const definition = createScenarioVersion({
+      scenarioId: "stale",
+      asOfDate: "2025-01-01",
+      horizonMonths: 12,
+    });
+    const stale = { definition } as Scenario;
+    const before = structuredClone(stale);
+    expect(scenarioCutOffStatus(stale, input.asOfDate)).toEqual({
+      computable: false,
+      scenarioDate: "2025-01-01",
+      canonicalDate: input.asOfDate,
+    });
+    expect(stale).toEqual(before);
   });
 });

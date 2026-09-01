@@ -15,6 +15,7 @@ export interface TimelineItem {
   title: string;
   amount: number | null;
   amountKnown: boolean;
+  currency: string | null;
   blockers: string[];
   conflict: boolean;
   href: string;
@@ -32,14 +33,35 @@ const OWNER_LINK: Record<EventDomain, string> = {
   PERSONAL: "/timeline",
 };
 
-function eventAmount(event: CanonicalEvent): { value: number | null; known: boolean } {
-  if (!event.consequences.length) return { value: null, known: false };
-  const values = event.consequences
-    .flatMap((item) => [item.cashIn, item.cashOut === null ? null : -item.cashOut])
-    .filter((value): value is number => value !== null);
-  return values.length
-    ? { value: values.reduce((sum, value) => sum + value, 0), known: true }
-    : { value: null, known: false };
+export interface TimelineGroup {
+  effectiveDate: string;
+  items: TimelineItem[];
+}
+
+function zoneOf(effectiveDate: string, asOfDate: string): TimelineZone {
+  return effectiveDate < asOfDate ? "PAST" : effectiveDate === asOfDate ? "TODAY" : "FUTURE";
+}
+
+/** Un net cash n'existe que si toutes ses composantes incluses sont connues et homogènes. */
+export function eventAmount(event: CanonicalEvent): {
+  value: number | null;
+  known: boolean;
+  currency: string | null;
+} {
+  const consequences = event.consequences.filter((item) => item.included);
+  if (!consequences.length) return { value: null, known: false, currency: null };
+  const currencies = [...new Set(consequences.map((item) => item.currency))];
+  if (
+    currencies.length !== 1 ||
+    consequences.some((item) => item.cashIn === null || item.cashOut === null)
+  ) {
+    return { value: null, known: false, currency: currencies.length === 1 ? currencies[0]! : null };
+  }
+  return {
+    value: consequences.reduce((sum, item) => sum + item.cashIn! - item.cashOut!, 0),
+    known: true,
+    currency: currencies[0]!,
+  };
 }
 
 export function buildTimelineView(state: DashboardState, cockpit: TodayCockpit): TimelineItem[] {
@@ -54,12 +76,7 @@ export function buildTimelineView(state: DashboardState, cockpit: TodayCockpit):
       const amount = eventAmount(event);
       return {
         id: event.id,
-        zone:
-          event.dataKind === "OBSERVED" && event.effectiveDate < context.asOfDate
-            ? "PAST"
-            : event.effectiveDate <= context.asOfDate
-              ? "TODAY"
-              : "FUTURE",
+        zone: zoneOf(event.effectiveDate, context.asOfDate),
         eventDate: event.eventDate,
         effectiveDate: event.effectiveDate,
         domain: event.domain,
@@ -68,6 +85,7 @@ export function buildTimelineView(state: DashboardState, cockpit: TodayCockpit):
         title: event.type.replaceAll("_", " "),
         amount: amount.value,
         amountKnown: amount.known,
+        currency: amount.currency,
         blockers: [
           ...new Set([...event.blockers, ...event.consequences.flatMap((item) => item.blockers)]),
         ].sort(),
@@ -78,7 +96,7 @@ export function buildTimelineView(state: DashboardState, cockpit: TodayCockpit):
     });
   const closes: TimelineItem[] = state.monthlyCloses.map((close) => ({
     id: `close:${close.id}`,
-    zone: close.closeDate < context.asOfDate ? "PAST" : "TODAY",
+    zone: zoneOf(close.closeDate, context.asOfDate),
     eventDate: close.closeDate,
     effectiveDate: close.closeDate,
     domain: "SYSTEM",
@@ -87,6 +105,7 @@ export function buildTimelineView(state: DashboardState, cockpit: TodayCockpit):
     title: "Clôture patrimoniale",
     amount: close.netWorth,
     amountKnown: true,
+    currency: state.reportingCurrency,
     blockers: [],
     conflict: false,
     href: "/net-worth",
@@ -100,7 +119,7 @@ export function buildTimelineView(state: DashboardState, cockpit: TodayCockpit):
         ? [
             {
               id: `goal:${goal.id}`,
-              zone: date < context.asOfDate ? ("PAST" as const) : ("FUTURE" as const),
+              zone: zoneOf(date, context.asOfDate),
               eventDate: date,
               effectiveDate: date,
               domain: "GOALS" as const,
@@ -109,6 +128,7 @@ export function buildTimelineView(state: DashboardState, cockpit: TodayCockpit):
               title: `Échéance Goal · ${goal.name}`,
               amount: goal.definition?.target.value ?? goal.targetAmount,
               amountKnown: true,
+              currency: goal.definition?.target.currency ?? state.reportingCurrency,
               blockers: [],
               conflict: false,
               href: "/goals",
@@ -124,4 +144,23 @@ export function buildTimelineView(state: DashboardState, cockpit: TodayCockpit):
       a.domain.localeCompare(b.domain) ||
       a.id.localeCompare(b.id),
   );
+}
+
+export function groupTimelineItems(items: TimelineItem[]): TimelineGroup[] {
+  const groups = new Map<string, TimelineItem[]>();
+  for (const item of items)
+    groups.set(item.effectiveDate, [...(groups.get(item.effectiveDate) ?? []), item]);
+  return [...groups.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([effectiveDate, grouped]) => ({ effectiveDate, items: grouped }));
+}
+
+export function timelineWindow(groups: TimelineGroup[], offset: number, size: number) {
+  const safeSize = Math.max(1, Math.floor(size));
+  const safeOffset = Math.min(Math.max(0, Math.floor(offset)), Math.max(0, groups.length - 1));
+  return {
+    groups: groups.slice(safeOffset, safeOffset + safeSize),
+    offset: safeOffset,
+    totalGroups: groups.length,
+  };
 }
