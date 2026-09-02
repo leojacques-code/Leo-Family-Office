@@ -126,17 +126,25 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Production et dépôt alignés sur **29 migrations** au 28 août 2026. Les dernières versions
-sont :
+Le DÉPÔT porte **34 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
+34 appliquées, 80 tables publiques). Les dernières versions sont :
 
-- `20260826194551_business_equity_v2_1` ;
-- `20260826194605_business_equity_v2_1_indexes` ;
-- `20260826194644_business_equity_v2_1_blocking_invariants` ;
-- `20260827155134_data_acquisition_foundation` ;
 - `20260827215014_career_tax_v2` ;
 - `20260827215600_career_tax_v2_fk_indexes` ;
 - `20260828131216_fec_corporate_acquisition` ;
-- `20260828131433_fec_corporate_acquisition_fk_indexes`.
+- `20260828131433_fec_corporate_acquisition_fk_indexes` ;
+- `20260829234017_scenarios_v2` ;
+- `20260829234053_goals_v2` ;
+- `20260829234259_scenarios_goals_fk_indexes` ;
+- `20260830154315_decision_lab_v2` ;
+- `20260902093000_portfolio_import_acquisition`.
+
+L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE. Cette section annonçait
+« 29 migrations » alors que le dépôt en portait déjà 33 : la dérive n'est pas corrigée par une
+hypothèse, elle est signalée. Seul `npm run db:verify`, exécuté avec des credentials de
+production hors environnement d'agent, dit l'état réel ; le contenu de référence s'extrait de
+`supabase_migrations.schema_migrations`. La dernière migration ci-dessus n'a PAS été appliquée
+en production.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
@@ -173,7 +181,8 @@ Correctness → données → intégration → calculs → tests → produit → 
 ```text
 faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données + analytics)
                Real Estate (faits + scénarios) · Business Equity (faits + valorisation dérivée)
-               Data Acquisition (staging + provenance + relevé bancaire CSV + FEC)
+               Data Acquisition (staging + provenance + relevé bancaire CSV + FEC
+               + import de portefeuille CSV/XLSX)
                Career + Tax (faits datés + règles fiscales déclarées + calculs dérivés)
 en cours       vérité de schéma · vérité des consommateurs
 suivant        Event Engine → Scenarios V2 → Goals → Decision Lab
@@ -273,6 +282,35 @@ de ce qui devient analysable. ÉCHEC DE NETTOYAGE ≠ ÉCHEC DE VALIDATION, mais
 NETTOYAGE ≠ SUCCÈS SILENCIEUX non plus : la référence d'un objet non supprimé est CONSERVÉE,
 sans quoi une comptabilité entière resterait au stockage sans que rien ne sache où. Détail
 dans `docs/FEC_ACQUISITION.md`.
+
+L'import de PORTEFEUILLE (CSV, XLSX) est la troisième verticale de cette fondation, et elle
+n'ajoute AUCUN ledger : `portfolio_events` et `lfo_record_portfolio_event` existent, elle les
+alimente. POSITION OBSERVÉE ≠ TRANSACTION DU LEDGER : un relevé de positions dit ce qui était
+détenu à une date, pas quand ni à quel prix ; reconstruire un achat depuis une position
+inventerait date, prix et frais, et le coût de revient en paraîtrait calculé tout en étant
+faux. Deux domaines cibles distincts, jamais convertis l'un dans l'autre. INSTRUMENT NON
+RÉSOLU ≠ INSTRUMENT NOUVEAU : un ISIN inconnu ou ambigu BLOQUE ses lignes, et rien n'est créé
+d'office, sans quoi les mêmes titres se répartiraient entre deux entrées du référentiel. La
+décision porte sur le TITRE, pas sur la ligne, et une décision humaine n'est pas écrasée par
+une réanalyse. `lfo_record_portfolio_event` sait CRÉER un instrument décrit par son nom : ce
+chemin est légitime en saisie manuelle et INTERDIT en import, donc seule la forme
+`security: { id }` déjà tranchée lui est transmise. AUCUNE FORMULE XLSX N'EST ÉVALUÉE, et
+VALEUR EN CACHE ≠ VALEUR SAISIE : la valeur mise en cache par le tableur est lue et la cellule
+est NOMMÉE ; une formule sans valeur en cache ne produit rien. Un classeur porteur de macros
+est REFUSÉ, pas lu partiellement. Les plafonds (taille, feuilles, lignes, colonnes, temps
+d'analyse) refusent au lieu de tronquer. `positions` a désormais une unicité par enveloppe et
+instrument, et `position_snapshots` une par date : sans elles, rejouer un fichier scinderait
+une détention et l'idempotence serait impossible ; une observation à la même date CORRIGE la
+précédente, une nouvelle date s'AJOUTE sans supprimer l'historique. AUCUN ADAPTATEUR DE
+COURTIER n'est fourni : sans fixture fiable et non personnelle, l'écrire de mémoire produirait
+un faux support. Détail dans `docs/PORTFOLIO_IMPORT.md`.
+
+LE NOM D'UNE CONTRAINTE N'EST PAS UN NUMÉRO DE VERSION LIBRE. Un `if not exists (… conname =
+'…_v2_ck')` SAUTE l'extension en silence quand une migration antérieure a déjà pris ce nom, et
+le refus se produit alors à la première écriture, très loin de la cause. Avant d'étendre une
+contrainte, lire son état RÉEL en base (`pg_get_constraintdef`) et reprendre sa définition en
+vigueur, puis nommer le successeur. Corollaire du même principe que pour les RPC : chercher la
+DERNIÈRE version, jamais la première, et ne jamais supposer qu'un nom est disponible.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

@@ -13,6 +13,7 @@ import {
 
 import { Callout, EmptyState, SectionHeader } from "@/components/ui";
 import FecSection from "@/components/pages/imports/fec-section";
+import PortfolioSection from "@/components/pages/imports/portfolio-section";
 import { formatDate, NOT_COMPUTABLE } from "@/components/pages/shared";
 import type { SectionProps } from "@/components/pages/shared";
 import type {
@@ -118,7 +119,7 @@ function ImportsPage({ state, refresh }: SectionProps) {
   // Choix explicites de l'utilisateur. `null` = « pas encore choisi » : la valeur affichée
   // est alors DÉRIVÉE des comptes, sans effet de bord ni rendu en cascade.
   /** Domaine d'acquisition affiché. Un seul écran, deux sources : la fondation est commune. */
-  const [domain, setDomain] = useState<"BANK" | "FEC">("BANK");
+  const [domain, setDomain] = useState<"BANK" | "FEC" | "PORTFOLIO">("BANK");
   const [chosenAccountId, setChosenAccountId] = useState<string | null>(null);
   const [chosenCurrency, setChosenCurrency] = useState<string | null>(null);
   const [retainFile, setRetainFile] = useState(true);
@@ -289,6 +290,24 @@ function ImportsPage({ state, refresh }: SectionProps) {
 
   // Les sociétés viennent de l'état du cockpit déjà chargé, comme les comptes : cette page
   // ne lit aucune donnée de domaine par elle-même.
+  /**
+   * Enveloppes susceptibles de porter un portefeuille. Elles viennent de l'état du cockpit
+   * déjà chargé, comme les sociétés : cette page ne lit aucune donnée de domaine par
+   * elle-même.
+   */
+  const portfolioAccounts = useMemo(
+    () =>
+      // AUCUN pré-filtrage par type d'enveloppe, et c'est délibéré : une assurance-vie est
+      // typée OTHER, un compte peut servir d'enveloppe d'espèces, et restreindre la liste
+      // masquerait un cas légitime au lieu de laisser l'utilisateur choisir.
+      (state.accounts ?? []).map((account) => ({
+        id: account.id,
+        name: `${account.name} — ${account.type}`,
+        currency: account.currency,
+      })),
+    [state.accounts],
+  );
+
   const businesses = useMemo(
     () =>
       (state.businesses ?? [])
@@ -314,6 +333,7 @@ function ImportsPage({ state, refresh }: SectionProps) {
           [
             ["BANK", "Relevé bancaire"],
             ["FEC", "Comptabilité (FEC)"],
+            ["PORTFOLIO", "Portefeuille"],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -328,6 +348,10 @@ function ImportsPage({ state, refresh }: SectionProps) {
       </div>
 
       {domain === "FEC" ? <FecSection businesses={businesses} refresh={refresh} /> : null}
+
+      {domain === "PORTFOLIO" ? (
+        <PortfolioSection accounts={portfolioAccounts} refresh={refresh} />
+      ) : null}
 
       {domain === "BANK" ? (
         <>

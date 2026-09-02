@@ -1207,7 +1207,10 @@ try {
      values ($1, 'FILE_CSV', 'CASH_FLOW_TRANSACTION', 'FEC_FR', 'Mauvais domaine', $2, 'fec/1')`,
     [userId, businessId],
     "Une source Cash Flow a pu viser une société",
-    "import_sources_domain_shape_v2_ck",
+    // Nom mis à jour par la migration `portfolio_import_acquisition`, qui a ÉTENDU la
+    // forme par domaine aux deux domaines de portefeuille. Les règles comptables et
+    // bancaires y sont reprises à l'identique : l'invariant testé ici est intact.
+    "import_sources_domain_shape_v3_ck",
   );
   await rejects(
     `insert into public.import_sources
@@ -1215,7 +1218,10 @@ try {
      values ($1, 'FILE_CSV', 'BUSINESS_ACCOUNTING', 'FEC_FR', 'Sans cible', 'fec/1')`,
     [userId],
     "Une source comptable a pu être créée sans société",
-    "import_sources_domain_shape_v2_ck",
+    // Nom mis à jour par la migration `portfolio_import_acquisition`, qui a ÉTENDU la
+    // forme par domaine aux deux domaines de portefeuille. Les règles comptables et
+    // bancaires y sont reprises à l'identique : l'invariant testé ici est intact.
+    "import_sources_domain_shape_v3_ck",
   );
 
   await rejects(

@@ -44,9 +44,42 @@ const canonicalMigrations = [
   "20260829234053",
   "20260829234259",
   "20260830154315",
+  "20260902093000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
+  // L'extension de la table de staging est ADDITIVE : ces colonnes s'ajoutent, aucune
+  // colonne bancaire n'est retirée.
+  import_normalized_records: [
+    "amount",
+    "label",
+    "balance_after",
+    "event_type",
+    "security_id",
+    "quantity",
+    "unit_price",
+    "gross_amount",
+    "fee_amount",
+    "tax_amount",
+    "envelope_cash_amount",
+    "market_value",
+    "cost_basis",
+    "instrument_source_key",
+    "source_isin",
+    "portfolio_event_id",
+    "position_snapshot_id",
+    "field_corrections",
+    "corrected_at",
+  ],
+  import_record_links: ["transaction_id", "portfolio_event_id", "position_snapshot_id"],
+  import_instrument_resolutions: [
+    "source_key",
+    "state",
+    "security_id",
+    "basis",
+    "decided_at",
+    "decided_reason",
+  ],
   profiles: ["user_id", "ledger_coverage_start", "ledger_coverage_source"],
   scenarios: [
     "id",
@@ -858,9 +891,24 @@ const userOwnedTables = [
   "goal_versions",
   "decision_case_versions",
   "decision_runs",
+  "import_instrument_resolutions",
 ] as const;
 
 const requiredIndexes = [
+  // Import de portefeuille. Les trois premiers sont des INVARIANTS, pas des optimisations :
+  // deux détentions du même instrument dans la même enveloppe scinderaient la détention,
+  // deux observations à la même date la cumuleraient, et sans identité unique un rejeu
+  // écrirait des doublons.
+  "positions_id_user_uidx",
+  "positions_envelope_instrument_uidx",
+  "position_snapshots_id_user_uidx",
+  "position_snapshots_observation_uidx",
+  "portfolio_events_id_user_uidx",
+  "import_normalized_records_event_uidx",
+  "import_normalized_records_snapshot_uidx",
+  "import_normalized_records_external_key_uidx",
+  "import_instrument_resolutions_id_user_uidx",
+  "import_instrument_resolutions_key_uidx",
   "scenarios_id_user_uidx",
   "scenario_versions_id_user_uidx",
   "simulation_runs_id_user_uidx",
@@ -1029,6 +1077,33 @@ const requiredTriggerFunctions = [
 ] as const;
 
 const requiredConstraints = [
+  // Noms REMPLACÉS par la migration `portfolio_import_acquisition`, qui a étendu chaque
+  // whitelist de domaine et chaque forme committable pour les deux domaines de portefeuille.
+  // Ils ne sont donc plus exigés — ce sont leurs successeurs, listés plus haut, qui le sont :
+  //   import_sources_domain_v2_ck        → import_sources_domain_v3_ck
+  //   import_sources_domain_shape_v2_ck  → import_sources_domain_shape_v3_ck
+  //   import_record_links_domain_v2_ck   → import_record_links_domain_v3_ck
+  //   import_record_links_target_v2_ck   → import_record_links_target_v3_ck
+  //   import_normalized_records_domain_ck       → ..._domain_v2_ck
+  //   import_normalized_records_ready_shape_ck  → ..._ready_shape_v2_ck
+  //   import_upload_tickets_domain_ck           → ..._domain_v2_ck
+  // Import de portefeuille.
+  "import_sources_domain_v3_ck",
+  "import_sources_domain_shape_v3_ck",
+  "import_record_links_domain_v3_ck",
+  "import_record_links_target_v3_ck",
+  "import_normalized_records_domain_v2_ck",
+  "import_normalized_records_ready_shape_v2_ck",
+  "import_normalized_records_security_shape_ck",
+  "import_normalized_records_event_type_ck",
+  "import_normalized_records_quantity_ck",
+  "import_normalized_records_written_shape_ck",
+  "import_normalized_records_correction_shape_ck",
+  "import_upload_tickets_domain_v2_ck",
+  "import_instrument_resolutions_state_ck",
+  "import_instrument_resolutions_resolved_shape_ck",
+  "import_instrument_resolutions_rejected_shape_ck",
+  "import_instrument_resolutions_pending_shape_ck",
   "scenarios_status_ck",
   "scenarios_archive_shape_ck",
   "simulation_runs_mode_ck",
@@ -1155,10 +1230,8 @@ const requiredConstraints = [
   "import_sources_account_fk",
   "import_sources_business_fk",
   "import_sources_kind_ck",
-  "import_sources_domain_v2_ck",
   "import_sources_status_ck",
   "import_sources_data_kind_ck",
-  "import_sources_domain_shape_v2_ck",
   "import_sources_coverage_order_ck",
   "import_sessions_source_fk",
   "import_sessions_document_fk",
@@ -1180,13 +1253,11 @@ const requiredConstraints = [
   "import_normalized_records_account_fk",
   "import_normalized_records_matched_fk",
   "import_normalized_records_raw_uk",
-  "import_normalized_records_domain_ck",
   "import_normalized_records_status_ck",
   "import_normalized_records_verdict_ck",
   "import_normalized_records_commit_state_ck",
   "import_normalized_records_data_kind_ck",
   "import_normalized_records_issues_ck",
-  "import_normalized_records_ready_shape_ck",
   "import_normalized_records_committable_ck",
   "import_record_links_session_fk",
   "import_record_links_normalized_fk",
@@ -1195,8 +1266,6 @@ const requiredConstraints = [
   "import_record_links_normalized_uk",
   "import_record_links_transaction_uk",
   "import_record_links_business_session_uk",
-  "import_record_links_domain_v2_ck",
-  "import_record_links_target_v2_ck",
   "fec_entry_lines_session_fk",
   "fec_entry_lines_raw_fk",
   "fec_entry_lines_business_fk",
@@ -1209,7 +1278,6 @@ const requiredConstraints = [
   "fec_entry_lines_amount_shape_ck",
   "fec_entry_lines_currency_ck",
   "fec_entry_lines_committable_ck",
-  "import_upload_tickets_domain_ck",
   "import_upload_tickets_path_uk",
   "import_upload_tickets_size_ck",
   "import_upload_tickets_expiry_ck",
@@ -1294,6 +1362,13 @@ const requiredConstraints = [
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
+  lfo_open_portfolio_session: "p_user_id uuid, p_payload jsonb",
+  lfo_append_portfolio_rows: "p_user_id uuid, p_payload jsonb",
+  lfo_stage_import_instruments: "p_user_id uuid, p_payload jsonb",
+  lfo_resolve_import_instrument: "p_user_id uuid, p_payload jsonb",
+  lfo_correct_portfolio_row: "p_user_id uuid, p_payload jsonb",
+  lfo_finalize_portfolio_session: "p_user_id uuid, p_payload jsonb",
+  lfo_commit_portfolio_session: "p_user_id uuid, p_payload jsonb",
   lfo_add_account:
     "p_user_id uuid, p_institution text, p_name text, p_account_type text, p_balance numeric, p_currency text, p_as_of_date date",
   lfo_add_transaction:
@@ -1407,6 +1482,13 @@ const requiredRpcs: Record<string, string> = {
  * l'information utile à l'appelant, davantage que l'identifiant de la ligne créée.
  */
 const declaredReturnTypeRpcs: Record<string, string> = {
+  // Décomptes, pas identifiants : nombre de lignes reçues, d'instruments enregistrés, de
+  // lignes touchées par une décision, de lignes prêtes, de faits écrits.
+  lfo_append_portfolio_rows: "integer",
+  lfo_stage_import_instruments: "integer",
+  lfo_resolve_import_instrument: "integer",
+  lfo_finalize_portfolio_session: "integer",
+  lfo_commit_portfolio_session: "integer",
   lfo_fec_entry_balance: "TABLE(entries integer, unbalanced integer)",
   lfo_save_scenario_version_v2: "integer",
   lfo_validate_goal_definition_v2: "void",
@@ -1427,6 +1509,7 @@ const declaredReturnTypeRpcs: Record<string, string> = {
  * rouvrirait la brèche en silence ; le gate la refuse.
  */
 const readOnlyAuditTables = [
+  "import_instrument_resolutions",
   "import_sources",
   "import_sessions",
   "import_raw_records",
