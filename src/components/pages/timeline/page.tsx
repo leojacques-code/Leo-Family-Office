@@ -1,114 +1,56 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import Link from "next/link";
 import { CalendarCheck } from "lucide-react";
-import { Callout, Currency, EmptyState, SectionHeader } from "@/components/ui";
-import { type SectionProps, formatDate, formatEur } from "@/components/pages/shared";
-import { buildLoanTimeline } from "@/lib/engine/debt";
+import { Callout, EmptyState, SectionHeader } from "@/components/ui";
+import { type SectionProps, formatDate, formatNative } from "@/components/pages/shared";
+import { buildTodayCockpit } from "@/lib/presentation/today-cockpit";
 import {
-  buildOpeningBalanceSheet,
-  runDeterministicModel,
-  scenarioAssumptions,
-} from "@/lib/engine/monthly-financial-model";
+  buildTimelineView,
+  groupTimelineItems,
+  timelineWindow,
+  type TimelineZone,
+} from "@/lib/presentation/timeline-view";
 
-function TimelinePage({ state, mutate, busy }: SectionProps) {
-  // Les jalons de dette viennent de l'échéancier dérivé : un passif modifié déplace
-  // immédiatement ces événements.
-  const debtMilestones = state.liabilities.flatMap((liability) => {
-    // Jalons du contrat : ils décrivent la vie complète du prêt, pas la projection.
-    const { contractual } = buildLoanTimeline(liability, state.asOfDate);
-    const first = contractual.entries[0];
-    const last = contractual.entries.at(-1);
-    if (!first || !last) return [];
-    return [
-      {
-        date: formatDate(first.dueDate),
-        kind: "Contractuel",
-        title: `Première échéance · ${liability.name}`,
-        detail: `${formatEur(first.totalCashOut)} exigibles`,
-        tone: "warning",
-      },
-      {
-        date: formatDate(last.dueDate),
-        kind: "Prévision",
-        title: `Dernière échéance · ${liability.name}`,
-        detail: "Échéancier dérivé, sous réserve du document bancaire",
-        tone: "warning",
-      },
-    ];
+const ZONES: Array<{ id: TimelineZone; title: string; detail: string }> = [
+  { id: "PAST", title: "Passé", detail: "Faits et anciennes attentes, nature d’origine conservée" },
+  { id: "TODAY", title: "Aujourd’hui", detail: "Date zéro et snapshot canonique" },
+  { id: "FUTURE", title: "Futur", detail: "Contrats, projections et hypothèses identifiées" },
+];
+
+export default function TimelinePage({ state, mutate, busy }: SectionProps) {
+  const cockpit = useMemo(() => buildTodayCockpit(state), [state]);
+  const items = useMemo(() => buildTimelineView(state, cockpit), [state, cockpit]);
+  const [domain, setDomain] = useState("ALL");
+  const [nature, setNature] = useState("ALL");
+  const [status, setStatus] = useState("ALL");
+  const [visibleGroups, setVisibleGroups] = useState<Record<TimelineZone, number>>({
+    PAST: 12,
+    TODAY: 12,
+    FUTURE: 12,
   });
-  // Jalons réellement calculables par le modèle mensuel. Aucune date n'est fabriquée :
-  // un seuil jamais franchi dans l'horizon est annoncé comme non atteint.
-  const central =
-    state.scenarios.find((scenario) => scenario.name === "Central") ?? state.scenarios[0];
-  const projected = central
-    ? runDeterministicModel(
-        buildOpeningBalanceSheet(state),
-        state.liabilities,
-        scenarioAssumptions(central),
-        30 * 12,
-      )
-    : null;
-  const breakEven = projected?.states.find(
-    (monthly) => monthly.monthIndex > 0 && monthly.netWorth >= 0,
+  const [groupOffset, setGroupOffset] = useState<Record<TimelineZone, number>>({
+    PAST: 0,
+    TODAY: 0,
+    FUTURE: 0,
+  });
+  const filtered = items.filter(
+    (item) =>
+      (domain === "ALL" || item.domain === domain) &&
+      (nature === "ALL" || item.nature === nature) &&
+      (status === "ALL" || item.status === status),
   );
-  const debtFree = projected?.states.find(
-    (monthly) => monthly.monthIndex > 0 && monthly.loanBalance <= 0.01,
-  );
-  const modelMilestones = [
-    {
-      date: breakEven ? formatDate(breakEven.date) : "Non atteint dans le scénario",
-      kind: "Projection",
-      title: "Patrimoine net financier au-dessus de zéro",
-      detail: breakEven
-        ? `Scénario ${central?.name ?? ""}, périmètre financier uniquement`
-        : `Le patrimoine net reste négatif sur 30 ans sous le scénario ${central?.name ?? ""}`,
-      tone: "model",
-    },
-    ...(state.liabilities.length
-      ? [
-          {
-            date: debtFree ? formatDate(debtFree.date) : "Non atteint dans le scénario",
-            kind: "Projection",
-            title: "Extinction projetée de la dette",
-            detail: debtFree
-              ? "Dernière échéance de l’échéancier forward dérivé"
-              : "L’encours subsiste au-delà de l’horizon projeté",
-            tone: "model",
-          },
-        ]
-      : []),
-  ];
-  const events = [
-    {
-      date: formatDate(state.asOfDate),
-      kind: "Actual",
-      title: "Date zéro",
-      detail: `Patrimoine net identifié ${formatEur(state.metrics.netWorth)}`,
-      tone: "actual",
-    },
-    ...debtMilestones,
-    ...modelMilestones,
-    {
-      date: String(Number(state.asOfDate.slice(0, 4)) + 1),
-      kind: "Hypothèse",
-      title: "Premier CDI principal",
-      detail: "40–45 k€ fixe brut + variable",
-      tone: "model",
-    },
-    {
-      date: `~ ${Number(state.asOfDate.slice(0, 4)) + 3}`,
-      kind: "Scénario",
-      title: "Tentative de passage M&A → PE",
-      detail: "Après environ deux ans, sans certitude",
-      tone: "model",
-    },
-  ];
+  function resetWindows() {
+    setGroupOffset({ PAST: 0, TODAY: 0, FUTURE: 0 });
+    setVisibleGroups({ PAST: 12, TODAY: 12, FUTURE: 12 });
+  }
   return (
     <div className="page-stack">
       <SectionHeader
-        eyebrow="History & future"
-        title="Timeline"
-        description="Clôtures mensuelles observées et événements futurs clairement distingués."
+        eyebrow={`${formatDate(cockpit.context.asOfDate)} → ${formatDate(cockpit.context.endDate)}`}
+        title="Timeline V2"
+        description="Horizon explicite de 80 ans · Event Engine canonique · dates d’événement et d’effet conservées."
         actions={
           <button
             className="button primary"
@@ -116,74 +58,188 @@ function TimelinePage({ state, mutate, busy }: SectionProps) {
             onClick={() => mutate({ action: "create_monthly_close", closeDate: state.asOfDate })}
           >
             <CalendarCheck size={15} />
-            Clôturer {formatDate(state.asOfDate, { month: "long", year: "numeric" })}
+            Clôturer
           </button>
         }
       />
-      <section className="timeline-layout">
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Événements</span>
-              <h2>Trajectoire patrimoniale</h2>
-            </div>
-          </div>
-          <div className="full-timeline">
-            {events.map((event) => (
-              <div key={event.title} className={event.tone}>
-                <div className="timeline-date">{event.date}</div>
-                <i />
-                <div>
-                  <span>{event.kind}</span>
-                  <h3>{event.title}</h3>
-                  <p>{event.detail}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-        <aside className="results-stack">
-          <article className="panel">
+      <section className="panel">
+        <div className="form-grid three" aria-label="Filtres Timeline">
+          <label>
+            Domaine
+            <select
+              value={domain}
+              onChange={(event) => {
+                setDomain(event.target.value);
+                resetWindows();
+              }}
+            >
+              <option value="ALL">Tous</option>
+              {[...new Set(items.map((item) => item.domain))].map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Nature
+            <select
+              value={nature}
+              onChange={(event) => {
+                setNature(event.target.value);
+                resetWindows();
+              }}
+            >
+              <option value="ALL">Toutes</option>
+              {[...new Set(items.map((item) => item.nature))].map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Statut
+            <select
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                resetWindows();
+              }}
+            >
+              <option value="ALL">Tous</option>
+              {[...new Set(items.map((item) => item.status))].map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
+      {ZONES.map((zone) => {
+        const rows = filtered.filter((item) => item.zone === zone.id);
+        const groups = groupTimelineItems(rows);
+        const window = timelineWindow(groups, groupOffset[zone.id], visibleGroups[zone.id]);
+        const shown = window.groups;
+        return (
+          <section className="panel" key={zone.id} aria-labelledby={`zone-${zone.id}`}>
             <div className="panel-header">
               <div>
-                <span className="eyebrow">Monthly close</span>
-                <h2>Clôtures figées</h2>
+                <span className="eyebrow">{zone.detail}</span>
+                <h2 id={`zone-${zone.id}`}>{zone.title}</h2>
               </div>
             </div>
-            {state.monthlyCloses.length ? (
-              <div className="close-list">
-                {state.monthlyCloses.map((close) => (
-                  <div key={close.id}>
-                    <span>
-                      <strong>
-                        {new Date(close.closeDate).toLocaleDateString("fr-FR", {
-                          month: "long",
-                          year: "numeric",
-                        })}
-                      </strong>
-                      <small>Snapshot actual</small>
-                    </span>
-                    <strong>
-                      <Currency value={close.netWorth} />
-                    </strong>
+            {zone.id === "TODAY" && (
+              <Callout
+                title={`${cockpit.context.completeness} · ${cockpit.context.reportingCurrency}`}
+              >
+                Patrimoine net :{" "}
+                {cockpit.netWorth === null
+                  ? "non calculable"
+                  : cockpit.netWorth.toLocaleString("fr-FR")}{" "}
+                · Goal : {cockpit.primaryGoal?.goal.name ?? "aucun"} ·{" "}
+                {cockpit.context.blockers.length} blocker(s).
+              </Callout>
+            )}
+            {rows.length ? (
+              <>
+                <p className="muted-copy">
+                  {shown.reduce((sum, group) => sum + group.items.length, 0)} élément(s) visible(s)
+                  sur {rows.length} · {shown.length} date(s) sur {groups.length}
+                </p>
+                <div className="full-timeline">
+                  {shown.map((group) => (
+                    <div key={group.effectiveDate} className="timeline-date-group">
+                      <div className="timeline-date">{formatDate(group.effectiveDate)}</div>
+                      <i />
+                      <div>
+                        <h3>{group.items.length} événement(s)</h3>
+                        {group.items.map((item) => (
+                          <div
+                            key={item.id}
+                            className={
+                              item.conflict || item.blockers.length
+                                ? "warning"
+                                : item.nature === "PROJECTED" || item.nature.includes("ASSUMPTION")
+                                  ? "model"
+                                  : "actual"
+                            }
+                          >
+                            <div>
+                              <span>
+                                {item.nature} · {item.domain} · {item.status}
+                              </span>
+                              <h3>{item.title}</h3>
+                              <p>
+                                Événement {formatDate(item.eventDate)} · effet{" "}
+                                {formatDate(item.effectiveDate)} ·{" "}
+                                {item.amountKnown && item.amount !== null && item.currency
+                                  ? formatNative(item.amount, item.currency)
+                                  : "montant non calculable"}{" "}
+                                · source {item.provenance}
+                              </p>
+                              {(item.conflict || item.blockers.length > 0) && (
+                                <p className="warning-text">
+                                  {item.conflict ? "Conflit Event Engine. " : ""}
+                                  {item.blockers.join(", ") || "À arbitrer"}
+                                </p>
+                              )}
+                              <Link href={item.href}>Ouvrir le domaine propriétaire</Link>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {window.offset > 0 || window.offset + shown.length < groups.length ? (
+                  <div className="quick-actions">
+                    {window.offset > 0 ? (
+                      <button
+                        className="button secondary"
+                        onClick={() => {
+                          setGroupOffset((current) => ({ ...current, [zone.id]: 0 }));
+                          setVisibleGroups((current) => ({ ...current, [zone.id]: 12 }));
+                        }}
+                      >
+                        Revenir aux événements les plus proches
+                      </button>
+                    ) : null}
+                    {window.offset + shown.length < groups.length ? (
+                      <>
+                        <button
+                          className="button secondary"
+                          onClick={() =>
+                            setVisibleGroups((current) => ({
+                              ...current,
+                              [zone.id]: current[zone.id] + 12,
+                            }))
+                          }
+                        >
+                          Afficher 12 dates de plus
+                        </button>
+                        <button
+                          className="button secondary"
+                          onClick={() => {
+                            const last = timelineWindow(groups, groups.length, 12);
+                            setGroupOffset((current) => ({
+                              ...current,
+                              [zone.id]: last.offset,
+                            }));
+                            setVisibleGroups((current) => ({ ...current, [zone.id]: 12 }));
+                          }}
+                        >
+                          Aller aux événements les plus lointains
+                        </button>
+                      </>
+                    ) : null}
                   </div>
-                ))}
-              </div>
+                ) : null}
+              </>
             ) : (
               <EmptyState
-                title="Aucune clôture"
-                detail="Clôturer août figera soldes, positions, dette et patrimoine net."
+                title="Aucun élément"
+                detail="Aucun fait canonique ne correspond à cette zone et aux filtres actifs."
               />
             )}
-          </article>
-          <Callout title="Écart réel vs prévu">
-            À partir de la deuxième clôture, le cockpit conservera l’écart avec la prévision
-            précédente.
-          </Callout>
-        </aside>
-      </section>
+          </section>
+        );
+      })}
     </div>
   );
 }
-
-export default TimelinePage;

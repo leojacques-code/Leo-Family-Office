@@ -1,594 +1,175 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, CalendarCheck, ChevronRight, Flag } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { nextDebtEvent } from "@/lib/engine/debt";
-import {
-  cashRunwayDays,
-  computeObservedCashFlow,
-  forecastCashFlow,
-  completeMonthsPeriod,
-} from "@/lib/engine/cash-flow";
-import {
-  buildOpeningBalanceSheet,
-  runDeterministicModel,
-  scenarioAssumptions,
-  toAnnualPoints,
-} from "@/lib/engine/monthly-financial-model";
-import { buildCanonicalAllocation, canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
-import { evaluateGoalCurrent } from "@/lib/engine/goal-engine";
-import { GOAL_METRIC_REGISTRY } from "@/lib/engine/goal-metrics";
-import {
-  Currency,
-  DataBadge,
-  MetricCard,
-  Percent,
-  ProgressBar,
-  SectionHeader,
-} from "@/components/ui";
-import {
-  type SectionProps,
-  assetsExplanation,
-  allocationExplanation,
-  allocationSliceLabel,
-  cashFlowExplanation,
-  chartCurrency,
-  formatDate,
-  liquidityExplanation,
-  netWorthExplanation,
-  OptionalCurrency,
-  projectionExplanation,
-} from "@/components/pages/shared";
+import { CalendarCheck } from "lucide-react";
+import { Callout, Currency, MetricCard, ProgressBar, SectionHeader } from "@/components/ui";
+import { type SectionProps, formatDate } from "@/components/pages/shared";
+import { buildTodayCockpit, goalProgress } from "@/lib/presentation/today-cockpit";
 
-function TodayPage({ state, setExplanation, mutate, busy }: SectionProps) {
-  // Vérité unique de l'écran : le bilan canonique déjà calculé par le repository.
-  const sheet = canonicalBalanceSheetOf(state);
-  const central =
-    state.scenarios.find((scenario) => scenario.name === "Central") ?? state.scenarios[0];
-  // Le graphique consomme le Personal Monthly Financial Model : bilan mois par mois,
-  // point de départ égal au patrimoine net observé, dette et cash inclus.
-  const opening = buildOpeningBalanceSheet(state);
-  const assumptions = scenarioAssumptions(central);
-  const annual = toAnnualPoints(
-    runDeterministicModel(opening, state.liabilities, assumptions, 144),
-  );
-  const projection = annual.map((point) => ({
-    year: point.year,
-    value: point.netWorth,
-    assets: point.grossFinancialAssets,
-    debt: point.debt,
-  }));
-  const ALLOCATION_COLORS = ["#356b72", "#89a7a2", "#c0a66a", "#7d8fa8", "#b58a7a"];
-  const SLICE_COLORS: Record<string, string> = {
-    BANK_CASH: "#dce5e2",
-    ENVELOPE_CASH: "#a8c3bd",
-    UNEXPOSED_ENVELOPE: "#b1bcbd",
-  };
-  // La ventilation est LUE sur le bilan canonique : classes d'actifs converties, cash
-  // d'enveloppe et reliquats non exposés. Aucune allocation n'est reconstruite ici à partir
-  // des positions natives, et la somme des tranches boucle sur les actifs financiers.
-  const allocationTruth = buildCanonicalAllocation(sheet);
-  const allocation = allocationTruth.slices.map((slice, index) => ({
-    name: allocationSliceLabel(slice),
-    value: slice.value,
-    unreliable: slice.unreliable,
-    color: SLICE_COLORS[slice.key] ?? ALLOCATION_COLORS[index % ALLOCATION_COLORS.length],
-  }));
-  const allocationTotal = allocationTruth.knownValue;
-  const upcomingDebt = nextDebtEvent(state.liabilities, state.asOfDate);
-  // Surplus réellement constaté au ledger. La moyenne n'existe que si la fenêtre est
-  // couverte : un mois sans historique n'est pas un mois à zéro euro.
-  // Trois derniers mois RÉVOLUS, le mois en cours exclu : une hypothèse mensuelle ne se
-  // compare qu'à des mois calendaires terminés et certifiés couverts.
-  const t3 = completeMonthsPeriod(state.asOfDate, 3);
-  const observedT3M = computeObservedCashFlow(
-    state.transactions,
-    state.expenseCategories,
-    t3.start,
-    t3.end,
-    { ledgerCoverageStart: state.ledgerCoverageStart, asOfDate: state.asOfDate },
-  );
-  // Une trésorerie d'ouverture non convertible n'est pas une trésorerie nulle : sans elle,
-  // la projection de trésorerie n'existe pas plutôt que de partir de zéro.
-  const openingCash = state.metrics.bankCash;
-  const runway =
-    openingCash === null
-      ? null
-      : cashRunwayDays(
-          forecastCashFlow({
-            asOfDate: state.asOfDate,
-            horizonDays: 365,
-            openingCash,
-            rules: state.recurringRules,
-            liabilities: state.liabilities,
-          }),
-        );
-  const primaryGoal = state.goals[0];
-  const primaryGoalEvaluation = primaryGoal?.definition
-    ? evaluateGoalCurrent({
-        goal: primaryGoal.definition,
-        balanceSheet: state.balanceSheet ?? null,
-        reportingCurrency: state.reportingCurrency,
-        asOfDate: state.asOfDate,
-      })
-    : null;
-  const primaryGoalMetric = primaryGoal?.definition
-    ? GOAL_METRIC_REGISTRY[primaryGoal.definition.target.metric]
-    : null;
-
+export default function TodayPage({ state, mutate, busy }: SectionProps) {
+  const view = buildTodayCockpit(state);
+  const goal = view.primaryGoal;
+  const progress = goalProgress(goal?.evaluation?.gap?.relativeGap);
   return (
     <div className="page-stack">
       <SectionHeader
-        eyebrow={formatDate(state.asOfDate, {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        })}
-        title="Bonjour Léo."
-        description="Voici votre situation financière identifiée et ce qui mérite votre attention."
+        eyebrow={`${formatDate(view.context.asOfDate)} · ${view.context.reportingCurrency}`}
+        title="Today"
+        description="Votre situation, le changement observé et la prochaine décision — issus du contexte financier partagé."
         actions={
           <button
             className="button primary"
-            onClick={() => mutate({ action: "create_monthly_close", closeDate: state.asOfDate })}
             disabled={busy}
+            onClick={() => mutate({ action: "create_monthly_close", closeDate: state.asOfDate })}
           >
             <CalendarCheck size={16} />
             Clôturer le mois
           </button>
         }
       />
-      <div className="uncertainty-strip">
-        <DataBadge kind="ACTUAL" />
-        <span>Valeurs observées</span>
-        <DataBadge kind="DERIVED" />
-        <span>Calculs</span>
-        <DataBadge kind="MODEL_ASSUMPTION" />
-        <span>Projections</span>
+      <div className="uncertainty-strip" aria-label="Provenance des données">
+        {(
+          [
+            "ACTUAL",
+            "OBSERVED",
+            "CONTRACTUAL",
+            "PROJECTED",
+            "USER_ASSUMPTION",
+            "MODEL_ASSUMPTION",
+          ] as const
+        ).map((kind) => (
+          <span key={kind} className={`data-badge ${kind.toLowerCase()}`}>
+            {kind.replaceAll("_", " ")}
+          </span>
+        ))}
         <span className="completeness">
-          <strong>{Math.round(state.metrics.dataCompleteness * 100)} %</strong> des catégories de
-          dépenses renseignées
+          <strong>{view.context.completeness}</strong> · fingerprint{" "}
+          {view.context.baseline.eventSetVersion.slice(0, 10)}
         </span>
       </div>
-      <section className="metrics-grid four">
+      <section className="metrics-grid four" aria-label="Situation actuelle">
         <MetricCard
-          label="Patrimoine net identifié"
-          value={<Currency value={state.metrics.netWorth} />}
-          tone={
-            state.metrics.netWorth !== null && state.metrics.netWorth < 0 ? "negative" : "positive"
-          }
-          detail={
-            <>
-              {state.metrics.netWorth !== null && state.metrics.netWorth < 0 ? (
-                <span className="negative-text">Sous zéro</span>
-              ) : (
-                <span className="positive-text">Au-dessus de zéro</span>
-              )}{" "}
-              · périmètre non exhaustif
-            </>
-          }
-          onExplain={() => setExplanation(netWorthExplanation(state))}
+          label="Patrimoine net"
+          value={<Currency value={view.netWorth} />}
+          detail="Bilan canonique · observation"
         />
         <MetricCard
-          label="Actifs financiers identifiés"
-          value={<Currency value={state.metrics.grossAssets} />}
-          detail={`${state.accounts.length} comptes consolidés · hors immobilier et business equity`}
-          onExplain={() => setExplanation(assetsExplanation(state))}
+          label="Liquidité"
+          value={<Currency value={view.liquidity} />}
+          detail="Actifs liquides identifiés · observation"
         />
         <MetricCard
-          label="Cash disponible"
-          value={<Currency value={state.metrics.bankCash} />}
-          tone="warning"
-          detail={
-            <>
-              <span className="warning-text">
-                {state.metrics.emergencyCoverageMonths === null
-                  ? "Non calculable"
-                  : `${state.metrics.emergencyCoverageMonths.toLocaleString("fr-FR", {
-                      maximumFractionDigits: 1,
-                    })} mois`}
-              </span>{" "}
-              de sorties incompressibles connues
-            </>
-          }
-          onExplain={() => setExplanation(liquidityExplanation(state))}
+          label="Cash flow mensuel"
+          value={<Currency value={view.cashFlow} sign />}
+          detail="Flux déclarés · inconnu ≠ zéro"
         />
         <MetricCard
-          label="Cash flow mensuel connu"
-          value={<OptionalCurrency value={state.metrics.freeCashFlow} sign />}
-          tone={
-            state.metrics.freeCashFlow === null
-              ? "warning"
-              : state.metrics.freeCashFlow >= 0
-                ? "positive"
-                : "negative"
-          }
-          detail={
-            state.metrics.monthlyDebtService > 0
-              ? "Service de dette du mois déduit · dépenses incomplètes"
-              : "Aucune échéance de dette exigible ce mois · dépenses incomplètes"
-          }
-          onExplain={() => setExplanation(cashFlowExplanation(state))}
+          label="Dette"
+          value={<Currency value={view.debt} />}
+          detail="Passifs du bilan canonique"
         />
       </section>
       <section className="dashboard-grid">
-        <article className="panel chart-panel span-2">
+        <article className="panel">
           <div className="panel-header">
             <div>
-              <span className="eyebrow">Trajectoire centrale déterministe</span>
-              <h2>Patrimoine net financier projeté</h2>
-            </div>
-            <div className="legend">
-              <span>
-                <i className="legend-line nominal" />
-                Patrimoine net
-              </span>
-              <span>
-                <i className="legend-line real" />
-                Actifs financiers
-              </span>
-              <button
-                className="link-button"
-                onClick={() =>
-                  setExplanation(
-                    projectionExplanation(
-                      state,
-                      central,
-                      opening,
-                      annual[1] ?? annual[0],
-                      annual[0],
-                    ),
-                  )
-                }
-              >
-                Explain calculation
-              </button>
+              <span className="eyebrow">Changement fiable</span>
+              <h2>Depuis la clôture précédente</h2>
             </div>
           </div>
-          <div className="hero-chart">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={projection} margin={{ top: 10, right: 12, bottom: 0, left: 0 }}>
-                <defs>
-                  <linearGradient id="areaNominal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#39747a" stopOpacity={0.28} />
-                    <stop offset="95%" stopColor="#39747a" stopOpacity={0.01} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid vertical={false} stroke="var(--border-soft)" />
-                <XAxis
-                  dataKey="year"
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fill: "var(--text-muted)", fontSize: 11 }}
-                />
-                <YAxis
-                  tickFormatter={chartCurrency}
-                  tickLine={false}
-                  axisLine={false}
-                  width={48}
-                  tick={{ fill: "var(--text-muted)", fontSize: 11 }}
-                />
-                <Tooltip
-                  formatter={(value) => [
-                    new Intl.NumberFormat("fr-FR", {
-                      style: "currency",
-                      currency: "EUR",
-                      maximumFractionDigits: 0,
-                    }).format(Number(value)),
-                    "",
-                  ]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke="#39747a"
-                  strokeWidth={2.4}
-                  fill="url(#areaNominal)"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="assets"
-                  stroke="#9b8555"
-                  strokeDasharray="5 4"
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="chart-foot">
-            <span>
-              Scénario <strong>{central.name}</strong> ·{" "}
-              <strong>
-                <Percent value={central.annualReturn} />
-              </strong>{" "}
-              de rendement ·{" "}
-              <strong>
-                <Currency value={central.monthlySavings} />
-              </strong>
-              /mois de surplus avant service de dette ·{" "}
-              <strong>
-                <Percent value={central.investmentAllocationRate} />
-              </strong>{" "}
-              de ce surplus investi · périmètre financier uniquement
-              {annual.at(-1)?.financingCostMissing
-                ? " · besoin de financement non chiffré sur une partie de la trajectoire"
-                : ""}
-            </span>
-            <Link href="/scenarios">
-              Tester les scénarios <ArrowRight size={14} />
-            </Link>
-          </div>
-        </article>
-        <article className="panel allocation-panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Allocation identifiée</span>
-              <h2>Où sont les actifs</h2>
-            </div>
-            <button
-              className="link-button"
-              onClick={() => setExplanation(allocationExplanation(state, allocationTruth))}
-            >
-              Explain calculation
-            </button>
-          </div>
-          <div className="allocation-content">
-            <div className="donut-wrap">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={allocation}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={55}
-                    outerRadius={76}
-                    paddingAngle={2}
-                    stroke="none"
-                  >
-                    {allocation.map((item) => (
-                      <Cell key={item.name} fill={item.color} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="donut-center">
-                <strong>
-                  <Currency value={allocationTotal} compact />
-                </strong>
-                <span>actifs</span>
-              </div>
-            </div>
-            <div className="allocation-legend">
-              {allocation.map((item) => (
-                <div key={item.name}>
-                  <span>
-                    <i style={{ background: item.color }} />
-                    {item.name}
-                    {item.unreliable ? " ·⚠" : ""}
-                  </span>
-                  <strong>
-                    <Percent value={allocationTotal === 0 ? null : item.value / allocationTotal} />
-                  </strong>
-                </div>
-              ))}
-            </div>
-          </div>
-          {allocationTruth.compositionStatus === "COMPLETE" ? null : (
-            <p className="muted-copy warning-text">
-              Ventilation partielle : {allocationTruth.blockers.join(", ")}. Le total reste la
-              valeur comptable des actifs financiers ; seule la répartition de la part concernée est
-              inconnue, les autres enveloppes gardent leur exposition.
-            </p>
-          )}
-        </article>
-        <article className="panel cashflow-card">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Cash flow connu</span>
-              <h2>Ce mois-ci</h2>
-            </div>
-            <Link href="/cash-flow">
-              Détails <ChevronRight size={14} />
-            </Link>
-          </div>
-          <div className="flow-rows">
-            <div>
-              <span>
-                <i className="flow-dot income" />
-                Revenus actifs
-              </span>
-              <strong>
-                <OptionalCurrency value={state.metrics.monthlyIncome} />
-              </strong>
-            </div>
-            <div>
-              <span>
-                <i className="flow-dot expense" />
-                Dépenses renseignées
-              </span>
-              <strong>
-                −<Currency value={state.metrics.monthlyExpenses} />
-              </strong>
-            </div>
-            <div>
-              <span>
-                <i className="flow-dot debt" />
-                {state.metrics.monthlyDebtService > 0
-                  ? "Service de dette exigible"
-                  : upcomingDebt
-                    ? `Dette à partir du ${formatDate(upcomingDebt.entry.dueDate, { day: "numeric", month: "short", year: "numeric" })}`
-                    : "Aucune dette exigible"}
-              </span>
-              <strong>
-                {state.metrics.monthlyDebtService > 0 ? "−" : ""}
-                <Currency value={state.metrics.monthlyDebtService} />
-              </strong>
-            </div>
-          </div>
-          <div className="flow-total">
-            <span>Disponible ce mois</span>
-            <strong>
-              <OptionalCurrency value={state.metrics.freeCashFlow} sign />
-            </strong>
-          </div>
-          <p className="muted-copy">
-            {observedT3M.monthlyAverageOperatingSurplus === null ? (
-              <>
-                Surplus mensuel constaté : historique insuffisant (
-                {observedT3M.coverage.completeCoveredMonths} mois complets couverts sur{" "}
-                {observedT3M.coverage.requestedMonths}
-                {observedT3M.coverage.ledgerCoverageStart === null
-                  ? ", profondeur d’historique non déclarée"
-                  : `, couverture depuis le ${formatDate(observedT3M.coverage.ledgerCoverageStart)}`}
-                )
-              </>
-            ) : (
-              <>
-                Surplus constaté sur les 3 derniers mois révolus :{" "}
-                <Currency value={observedT3M.monthlyAverageOperatingSurplus} sign />
-                /mois
-              </>
-            )}
-            {openingCash === null
-              ? " · trésorerie de départ non convertible : projection de trésorerie non calculable"
-              : runway !== null
-                ? ` · trésorerie négative projetée dans ${runway} jours`
-                : ""}
-          </p>
-        </article>
-        <article className="panel goals-card">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Objectif prioritaire</span>
-              <h2>{primaryGoal?.name ?? "Aucun objectif"}</h2>
-            </div>
-            <Link href="/goals">
-              Gérer <ChevronRight size={14} />
-            </Link>
-          </div>
-          {primaryGoal ? (
+          {view.closeChange ? (
             <>
-              <div className="goal-number">
-                <Currency value={primaryGoalEvaluation?.observation.value ?? null} />
-                <span>
-                  {primaryGoal?.definition?.target.operator === "AT_MOST" ? " au plus " : " sur "}
-                  <Currency
-                    value={primaryGoal.definition?.target.value ?? primaryGoal.targetAmount}
-                  />
-                </span>
-              </div>
-              {primaryGoalEvaluation?.observation.value !== null &&
-              primaryGoal.definition?.target.operator === "AT_LEAST" &&
-              primaryGoal.definition.target.value > 0 &&
-              primaryGoalEvaluation?.observation.value !== undefined ? (
-                <ProgressBar
-                  value={
-                    Math.max(0, primaryGoalEvaluation.observation.value) /
-                    primaryGoal.definition.target.value
-                  }
-                />
-              ) : null}
-              <p className="muted-copy">
-                {primaryGoalMetric?.label ?? "Métrique historique"} · statut calculé :{" "}
-                {primaryGoalEvaluation?.status ?? "NOT_COMPUTABLE"}
-                {primaryGoalEvaluation?.gap
-                  ? ` · écart ${new Intl.NumberFormat("fr-FR", {
-                      style: "currency",
-                      currency: state.reportingCurrency,
-                      maximumFractionDigits: 0,
-                    }).format(primaryGoalEvaluation.gap.shortfall)}`
-                  : ""}
-              </p>
-            </>
-          ) : null}
-        </article>
-        <article className="panel alerts-panel span-2">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Risques & attention</span>
-              <h2>{state.alerts.length} points ouverts</h2>
-            </div>
-            <span className="alert-count">
-              {state.alerts.filter((alert) => alert.severity === "HIGH").length} critiques
-            </span>
-          </div>
-          <div className="alert-list">
-            {state.alerts.map((alert) => (
-              <div className="alert-row" key={alert.id}>
-                <span className={`severity-icon ${alert.severity.toLowerCase()}`}>
-                  <AlertTriangle size={15} />
-                </span>
-                <div>
-                  <strong>{alert.title}</strong>
-                  <p>{alert.detail}</p>
-                </div>
-                <span className={`severity-label ${alert.severity.toLowerCase()}`}>
-                  {alert.severity === "HIGH" ? "Prioritaire" : "À vérifier"}
-                </span>
-              </div>
-            ))}
-          </div>
-        </article>
-        <article className="panel event-panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Prochain événement majeur</span>
-              <h2>{upcomingDebt ? upcomingDebt.liability.name : "Aucun événement daté"}</h2>
-            </div>
-            <Flag size={18} />
-          </div>
-          {upcomingDebt ? (
-            <>
-              <div className="event-date">
-                <strong>{upcomingDebt.entry.dueDate.slice(8, 10)}</strong>
-                <span>
-                  {formatDate(upcomingDebt.entry.dueDate, { month: "short" }).toUpperCase()}
-                  <br />
-                  {upcomingDebt.entry.dueDate.slice(0, 4)}
-                </span>
+              <div className="metric-value">
+                <Currency value={view.closeChange.amount} sign />
               </div>
               <p>
-                {upcomingDebt.isFirstPayment
-                  ? "Première échéance"
-                  : `Échéance n° ${upcomingDebt.entry.paymentNumber}`}{" "}
-                de{" "}
-                <strong>
-                  <Currency value={upcomingDebt.entry.totalCashOut} />
-                </strong>
-                .
+                {formatDate(view.closeChange.from.closeDate)} →{" "}
+                {formatDate(view.closeChange.to.closeDate)} · deux observations clôturées
               </p>
-              <div className="event-foot">
-                <span>
-                  {upcomingDebt.daysAway === null
-                    ? "Date non calculable"
-                    : `Dans ${upcomingDebt.daysAway} jours à la date d’observation`}
-                </span>
-                <Link href="/debt">Voir l’échéancier</Link>
-              </div>
             </>
           ) : (
-            <p>
-              Aucune échéance de dette n’est exigible dans l’échéancier dérivé. Un événement
-              apparaîtra dès qu’un passif daté sera enregistré.
-            </p>
+            <Callout title="Variation non calculable">
+              Deux clôtures fiables sont nécessaires ; aucune valeur zéro n’est substituée.
+            </Callout>
           )}
         </article>
+        <article className="panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Goal prioritaire</span>
+              <h2>{goal?.goal.name ?? "Aucun Goal actif"}</h2>
+            </div>
+          </div>
+          {goal ? (
+            <>
+              <p>
+                Priorité {goal.goal.definition?.priority ?? goal.goal.priority} · statut{" "}
+                {goal.evaluation?.status ?? "NOT_COMPUTABLE"}
+              </p>
+              {progress === null ? (
+                <p className="warning-text">Progression non calculable</p>
+              ) : (
+                <ProgressBar value={progress} />
+              )}
+              <Link className="button secondary" href="/goals">
+                Ouvrir Goals
+              </Link>
+            </>
+          ) : (
+            <Link className="button secondary" href="/goals">
+              Définir un Goal
+            </Link>
+          )}
+        </article>
+        <article className="panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Prochaine échéance tous domaines</span>
+              <h2>{view.nextEvent?.type.replaceAll("_", " ") ?? "Aucun événement"}</h2>
+            </div>
+          </div>
+          <p>
+            {view.nextEvent
+              ? `${formatDate(view.nextEvent.effectiveDate)} · ${view.nextEvent.domain} · ${view.nextEvent.dataKind}`
+              : "Aucune échéance canonique dans l’horizon explicite de 80 ans."}
+          </p>
+          <Link className="button secondary" href="/timeline">
+            Voir la Timeline
+          </Link>
+        </article>
+        <article className="panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Risque principal</span>
+              <h2>{view.context.blockers[0]?.code ?? "Aucun blocker"}</h2>
+            </div>
+          </div>
+          <p>
+            {view.context.blockers[0]?.message ?? "Le contexte partagé ne signale pas de blocker."}
+          </p>
+        </article>
+      </section>
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <span className="eyebrow">Attention maintenant</span>
+            <h2>Actions déterministes</h2>
+          </div>
+        </div>
+        <div className="quick-actions">
+          {view.actions.map((action) => (
+            <Link key={action.id} className="button secondary" href={action.href}>
+              {action.label}
+            </Link>
+          ))}
+        </div>
+        <p>
+          {view.decisions.length
+            ? `${view.decisions.length} décision(s) ouverte(s) ou récemment évaluée(s).`
+            : "Aucun Decision Case ouvert."}{" "}
+          <Link href="/decision-lab">Ouvrir Decision Lab</Link>
+        </p>
       </section>
     </div>
   );
 }
-
-export default TodayPage;
