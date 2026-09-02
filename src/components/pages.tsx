@@ -1,6 +1,7 @@
 "use client";
 
 import TodayPage from "@/components/pages/today/page";
+import AdvisorPage from "@/components/pages/advisor/page";
 import NetWorthPage from "@/components/pages/net-worth/page";
 import CashFlowPage from "@/components/pages/cash-flow/page";
 import InvestmentsPage from "@/components/pages/investments/page";
@@ -20,6 +21,8 @@ import type { SectionProps } from "@/components/pages/shared";
 
 export function SectionContent(props: SectionProps) {
   switch (props.section) {
+    case "advisor":
+      return <AdvisorPage {...props} />;
     case "net-worth":
       return <NetWorthPage {...props} />;
     case "cash-flow":

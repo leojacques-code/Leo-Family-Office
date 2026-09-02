@@ -6,7 +6,7 @@ import { useState } from "react";
 import {
   AreaChart, BriefcaseBusiness, Building2, CalendarRange, ChevronDown, CircleDollarSign, Download,
   FlaskConical, FolderLock, Landmark, LayoutDashboard, LogOut, Menu, Moon, Network, ReceiptText,
-  RefreshCw, Settings2, ShieldCheck, Sun, Target, TrendingUp, WalletCards, X,
+  RefreshCw, Settings2, ShieldCheck, Sparkles, Sun, Target, TrendingUp, WalletCards, X,
   type LucideIcon,
 } from "lucide-react";
 import type { DashboardState, ProjectionEnvelope } from "@/lib/types";
@@ -18,6 +18,7 @@ import { formatDate } from "@/components/pages/shared";
 
 const ICONS: Record<string, LucideIcon> = {
   "today": LayoutDashboard,
+  "advisor": Sparkles,
   "net-worth": WalletCards,
   "cash-flow": CircleDollarSign,
   "investments": TrendingUp,
