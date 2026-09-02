@@ -17,7 +17,10 @@ import DocumentsPage from "@/components/pages/documents/page";
 import TimelinePage from "@/components/pages/timeline/page";
 import SettingsPage from "@/components/pages/settings/page";
 import { CockpitHomeV9, ProgressiveDomainExperience } from "@/components/cockpit/progressive-domain";
+import { OperationalDomainV9 } from "@/components/cockpit/operational-domain";
 import type { SectionProps } from "@/components/pages/shared";
+
+const OPERATIONAL_SECTIONS = new Set(["imports", "documents", "timeline", "settings"]);
 
 function renderSection(props: SectionProps) {
   switch (props.section) {
@@ -46,6 +49,14 @@ export function SectionContent(props: SectionProps) {
       <CockpitHomeV9 state={props.state}>
         <GuidedHome {...props} />
       </CockpitHomeV9>
+    );
+  }
+
+  if (OPERATIONAL_SECTIONS.has(props.section)) {
+    return (
+      <OperationalDomainV9 section={props.section}>
+        {renderSection(props)}
+      </OperationalDomainV9>
     );
   }
 
