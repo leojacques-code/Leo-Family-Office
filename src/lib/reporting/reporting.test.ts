@@ -6,6 +6,15 @@ import { renderReportPdf } from "./report-pdf";
 
 const close = (id: string, date: string, netWorth: number): MonthlyClose => ({
   id,
+  version: 1,
+  reportingCurrency: "EUR",
+  completenessStatus: "COMPLETE",
+  composition: {
+    immediate_cash: netWorth,
+    market_invested_assets: 0,
+    investment_envelope_cash: 0,
+    illiquid_assets: 0,
+  },
   closeDate: date,
   netWorth,
   grossAssets: netWorth,
@@ -90,7 +99,7 @@ describe("Institutional Reporting V1", () => {
     ];
     const report = buildInstitutionalReport(state, { type: "ANNUAL_REVIEW", year: 2026 });
     expect(report.manifest.period).toEqual({ from: "2026-01-31", to: "2026-12-31" });
-    expect(report.manifest.blockers).toContain("HISTORICAL_COMPOSITION_NOT_PRESERVED");
+    expect(report.sections.find((x) => x.id === "historical-composition")?.amounts).toHaveLength(8);
   });
   it("rend une année vide non calculable", () => {
     const state = eventEngineCrossDomainFixture();

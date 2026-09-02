@@ -25,13 +25,30 @@ est fournie uniquement au renderer PDF et n'entre jamais dans le fingerprint fin
 | Annual Review    | clôtures de l'année        | sections historiques non calculables |
 | IC Memo          | Decision Case/version      | memo de surveillance incomplet       |
 
-Une clôture ne contient pas de composition détaillée : le rapport ne remplace donc jamais cette
-composition par les actifs actuels. Deux clôtures autorisent une variation absolue. La variation
-relative exige un dénominateur non nul. Aucun mois n'est annualisé. Les événements annuels sont
-limités aux faits `OBSERVED` datés dans la période. Devise incompatible, FX absent, fingerprint ou
-méthodologie incompatible doivent bloquer la comparaison dès que ces métadonnées seront conservées
-sur toutes les clôtures ; le contrat legacy `MonthlyClose` ne les stocke pas encore et sa devise
-est celle du workspace au moment de sa création.
+Le repository transporte les colonnes existantes `version`, `reporting_currency`,
+`completeness_status` et `composition`. Pour chaque date, seule la plus haute version est retenue ;
+`created_at`, puis l'identifiant, départagent les égalités. Deux versions du même jour ne forment
+jamais deux périodes. La sélection est partagée avec Today/Timeline, qui alimentent Beyonder.
+
+Une variation exige deux dates distinctes, une même devise historique connue, une complétude
+`COMPLETE`, deux valeurs finies et une convention de composition compatible. Les quatre clés
+persistées par `lfo_create_monthly_close_v2` identifient `CANONICAL_BALANCE_SHEET_V2` ; un JSON legacy
+vide ou une forme inconnue ne prouve pas cette convention et bloque la comparaison. Une version de
+méthodologie explicitement différente la bloque également. Chaque valeur conserve sa propre devise ;
+`UNKNOWN` ne devient jamais la devise actuelle. `NULL` reste inconnu, zéro reste zéro et une base
+nulle interdit le ratio. La composition est celle de chaque clôture, sans reconstruction actuelle.
+
+Le repository lit intégralement les trois tables Decision Lab avec filtre propriétaire, pagination
+et ordre total. Il suit `current_version` sans repli vers une version antérieure. Il sélectionne le
+dernier run par date d'enregistrement puis identifiant, et prend exclusivement le résultat de cette
+ligne. Les deux côtés de chaque association vérifient `user_id`, le cas et sa version. Les snapshots
+sont validés avant exposition ; un snapshot invalide produit un blocker et aucun résultat de secours.
+Une identité legacy reste visible, sans transformer ses anciens `inputs/results` en run V2.
+
+Le mémo exige un run `CURRENT`, la version exacte du cas, la date canonique et le fingerprint
+applicable à l'horizon du cas. Il vérifie également les références, les événements de baseline et
+l'égalité complète du run et de la définition dans le résultat. Sinon les impacts sont
+`NOT_COMPUTABLE`, sans conclusion, avec blockers et provenance historique.
 
 ## Structure
 
@@ -48,15 +65,20 @@ Chaque montant porte date, devise, nature, calculabilité et moteur/source. Les 
 ## Contrat PDF et sécurité
 
 `GET /api/reports/pdf` exige la session, valide une allow-list de types, borne l'année et
-l'identifiant de Decision Case, puis relit seulement le `DashboardState` de l'utilisateur courant.
+l'identifiant de Decision Case et `expectedFingerprint`, puis reconstruit le rapport depuis le
+repository serveur. L'interface transmet le fingerprint exact de l'aperçu. Une différence renvoie
+HTTP 409 et demande de recharger l'aperçu. L'année et le cas sélectionnés entrent dans le fingerprint ;
+les paramètres inactifs sont normalisés. Aucun montant ni contenu financier client n'est accepté.
 Le writer Node produit directement les objets PDF et la pagination : aucun HTML utilisateur,
 JavaScript, formule, URL, navigateur, police distante ou secret client n'est exécuté. Le texte est
 borné, nettoyé des contrôles et échappé pour la syntaxe PDF. La réponse porte `application/pdf`, un
 nom fixe sûr, `private, no-store` et `nosniff`. Le document n'est ni journalisé ni conservé.
 
-Aucune dépendance n'a été ajoutée : le writer minimal évite Chromium et son poids Vercel, tout en
-produisant un PDF texte déterministe. Limite V1 : Helvetica/WinAnsi couvre le français et remplace
-les caractères hors de cette table ; une police Unicode embarquée pourra être ajoutée plus tard.
+Le writer ne nécessite aucune dépendance d'exécution supplémentaire. La conversion Unicode vers
+Windows-1252 est explicite, après normalisation NFC ; `é è à ç œ ’ — • €` sont préservés. Les scalaires
+non représentables sont remplacés par `?` et les octets non ASCII sont échappés en octal dans le PDF,
+jamais tronqués par `Buffer.from(unicode, "latin1")`. PDF.js est une dépendance de développement
+verrouillée pour l'extraction texte indépendante, en plus des tests de structure et d'offsets.
 
 ## Tests, déploiement et rollback
 
@@ -65,7 +87,5 @@ PostgreSQL local. Vérifier `%PDF`, la taille, les en-têtes, `/login`, la prote
 un téléchargement authentifié sur la preview. Déployer comme tout build Next.js, sans migration.
 Rollback : revenir le commit applicatif ; aucune donnée, table, bucket ou artefact n'est à annuler.
 
-Risques résiduels : `MonthlyClose` legacy ne porte pas explicitement devise et version de méthode ;
-les revues le déclarent comme provenance legacy et n'inventent jamais une ventilation historique.
-La reproductibilité longue durée bénéficiera plus tard de clôtures enrichies, mais cette V1 ne crée
-volontairement aucune nouvelle persistance.
+Les clôtures legacy sans métadonnées fiables restent visibles mais ne permettent pas de variation.
+Aucune migration n'est nécessaire : les colonnes et les tables utilisées existent déjà.

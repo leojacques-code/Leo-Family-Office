@@ -1,6 +1,19 @@
 import { buildAdvisorPacket } from "@/lib/advisor/advisor-core";
 import { buildTodayCockpit } from "@/lib/presentation/today-cockpit";
-import type { DashboardState, MonthlyClose } from "@/lib/types";
+import type { DashboardState } from "@/lib/types";
+import { buildGlobalFinancialContext } from "@/lib/engine/global-financial-model";
+import {
+  readDecisionDefinition,
+  readDecisionRun,
+  readDecisionResult,
+  sameDecisionSnapshot,
+} from "@/lib/data/decision-snapshots";
+import {
+  orderedCloses,
+  historicalCurrency,
+  historicalBlockers,
+  COMPOSITION_LABELS,
+} from "@/lib/presentation/historical-closes";
 import { stableFingerprint } from "./report-formatters";
 import { section } from "./report-sections";
 import type {
@@ -20,15 +33,14 @@ const amount = (
   nature: ReportAmount["nature"] = "DERIVED",
 ): ReportAmount => ({
   label,
-  value,
+  value: typeof value === "number" && Number.isFinite(value) ? value : null,
   currency,
   date,
   source,
   nature,
-  calculability: value === null ? "NOT_COMPUTABLE" : "COMPUTABLE",
+  calculability:
+    typeof value === "number" && Number.isFinite(value) ? "COMPUTABLE" : "NOT_COMPUTABLE",
 });
-const orderedCloses = (closes: MonthlyClose[]) =>
-  [...closes].sort((a, b) => a.closeDate.localeCompare(b.closeDate) || a.id.localeCompare(b.id));
 
 function currentSections(state: DashboardState): ReportSection[] {
   const cockpit = buildTodayCockpit(state);
@@ -253,7 +265,9 @@ function reviewSections(
     params.type === "MONTHLY_REVIEW"
       ? closes.slice(-2)
       : closes.length
-        ? [closes[0]!, closes.at(-1)!]
+        ? closes.length === 1
+          ? [closes[0]!]
+          : [closes[0]!, closes.at(-1)!]
         : [];
   const from =
     selected[0]?.closeDate ??
@@ -263,15 +277,11 @@ function reviewSections(
     (params.type === "ANNUAL_REVIEW" ? `${params.year}-12-31` : state.asOfDate);
   const first = selected[0],
     last = selected.at(-1);
-  const comparable = selected.length === 2 && first!.id !== last!.id;
-  const delta = comparable ? last!.netWorth - first!.netWorth : null;
-  const relative = comparable && first!.netWorth !== 0 ? delta! / first!.netWorth : null;
-  const blockers =
-    selected.length === 0
-      ? ["NO_HISTORICAL_CLOSE"]
-      : selected.length === 1
-        ? ["SINGLE_CLOSE_POINT_IN_TIME_ONLY"]
-        : [];
+  const blockers = historicalBlockers(selected);
+  const comparable = blockers.length === 0 && first!.closeDate !== last!.closeDate;
+  const delta = comparable ? last!.netWorth! - first!.netWorth! : null;
+  const relative = comparable && first!.netWorth !== 0 ? delta! / first!.netWorth! : null;
+  if (comparable && first!.netWorth === 0) blockers.push("HISTORICAL_RELATIVE_BASE_ZERO");
   return {
     from,
     to,
@@ -281,12 +291,12 @@ function reviewSections(
         "Évolution mesurable",
         comparable
           ? "Comparaison des clôtures historiques disponibles."
-          : "Historique insuffisant pour une comparaison.",
+          : "Clôtures non comparables ; consulter les blockers et la provenance historique.",
         [
           amount(
             "Patrimoine de départ",
             first?.netWorth ?? null,
-            state.reportingCurrency,
+            historicalCurrency(first),
             from,
             "Monthly Close",
             "OBSERVED",
@@ -294,15 +304,24 @@ function reviewSections(
           amount(
             "Patrimoine d’arrivée",
             last?.netWorth ?? null,
-            state.reportingCurrency,
+            historicalCurrency(last),
             to,
             "Monthly Close",
             "OBSERVED",
           ),
-          amount("Variation absolue", delta, state.reportingCurrency, to, "Reporting difference"),
+          amount(
+            "Variation absolue",
+            delta,
+            comparable ? historicalCurrency(last) : "UNKNOWN",
+            to,
+            "Reporting difference",
+          ),
           amount("Variation relative", relative, "%", to, "Reporting ratio"),
         ],
-        [],
+        selected.map(
+          (x) =>
+            `${x.closeDate} · version ${x.version ?? "inconnue"} · ${x.completenessStatus ?? "complétude inconnue"} · ${historicalCurrency(x)} · ${x.id}`,
+        ),
         blockers,
       ),
       section(
@@ -319,10 +338,26 @@ function reviewSections(
       section(
         "historical-composition",
         "Composition historique",
-        "La composition actuelle n’est jamais présentée comme historique.",
+        "Composition enregistrée à chaque clôture ; les valeurs absentes restent inconnues.",
+        selected.flatMap((close) =>
+          Object.entries(COMPOSITION_LABELS).map(([key, label]) =>
+            amount(
+              `${close.closeDate} · ${label}`,
+              typeof close.composition?.[key] === "number" &&
+                Number.isFinite(close.composition[key])
+                ? (close.composition[key] as number)
+                : null,
+              historicalCurrency(close),
+              close.closeDate,
+              `Monthly Close ${close.id} v${close.version ?? "?"}`,
+              "OBSERVED",
+            ),
+          ),
+        ),
         [],
-        [],
-        ["HISTORICAL_COMPOSITION_NOT_PRESERVED"],
+        selected.some((x) => !x.composition || !Object.keys(x.composition).length)
+          ? ["HISTORICAL_COMPOSITION_NOT_PRESERVED"]
+          : [],
       ),
       section(
         "historical-goals",
@@ -357,10 +392,57 @@ function memoSections(state: DashboardState, caseId: string | null | undefined):
         "Sélectionner ou créer un Decision Case ; aucune action automatique.",
       ),
     ];
-  const definition = selected.definition;
-  const stale = Boolean(
-    selected.latestRun && definition && selected.latestRun.caseVersion !== definition.version,
-  );
+  const definition = readDecisionDefinition(selected.definition);
+  const run = readDecisionRun(selected.latestRun);
+  const result = readDecisionResult(selected.latestResult);
+  const blockers = [...(selected.snapshotBlockers ?? [])];
+  if (!definition) blockers.push("DECISION_VERSION_MISSING_OR_INVALID");
+  if (!run) blockers.push("DECISION_RUN_MISSING_OR_INVALID");
+  if (!result) blockers.push("DECISION_RESULT_MISSING_OR_INVALID");
+  if (run && definition) {
+    const context = buildGlobalFinancialContext(state, definition.horizonMonths);
+    if (
+      run.caseId !== selected.id ||
+      definition.caseId !== selected.id ||
+      run.caseVersion !== definition.version ||
+      definition.version !== selected.currentVersion
+    )
+      blockers.push("DECISION_RUN_VERSION_MISMATCH");
+    if (run.staleStatus !== "CURRENT") blockers.push("DECISION_RUN_STALE_STATUS");
+    if (run.asOfDate !== context.asOfDate || definition.asOfDate !== context.asOfDate)
+      blockers.push("DECISION_RUN_DATE_MISMATCH");
+    if (
+      run.baselineFingerprint !== context.baseline.openingFingerprint ||
+      definition.baseline.openingFingerprint !== context.baseline.openingFingerprint
+    )
+      blockers.push("DECISION_RUN_BASELINE_MISMATCH");
+    if (result && result.provenance.baseline.eventSetVersion !== context.baseline.eventSetVersion)
+      blockers.push("DECISION_RUN_EVENTS_MISMATCH");
+    if (run.horizonMonths !== definition.horizonMonths)
+      blockers.push("DECISION_RUN_HORIZON_MISMATCH");
+    if (
+      definition.options.some(
+        (x) =>
+          context.currentScenarioVersions[x.scenarioReference.scenarioId] !== undefined &&
+          context.currentScenarioVersions[x.scenarioReference.scenarioId] !==
+            x.scenarioReference.scenarioVersion,
+      ) ||
+      definition.selectedGoals.some(
+        (x) =>
+          context.currentGoalVersions[x.goalId] !== undefined &&
+          context.currentGoalVersions[x.goalId] !== x.goalVersion,
+      )
+    )
+      blockers.push("DECISION_RUN_REFERENCE_MISMATCH");
+  }
+  if (
+    result &&
+    (!sameDecisionSnapshot(result.run, run) ||
+      !sameDecisionSnapshot(result.caseVersion, definition) ||
+      result.provenance.baseline.openingFingerprint !== run?.baselineFingerprint)
+  )
+    blockers.push("DECISION_RESULT_RUN_MISMATCH");
+  const publishable = blockers.length === 0;
   return [
     section(
       "decision-question",
@@ -383,8 +465,8 @@ function memoSections(state: DashboardState, caseId: string | null | undefined):
       "Impacts Decision Lab",
       "Résultats du dernier run, sans recommandation ajoutée.",
       [],
-      selected.latestResult ? [selected.latestResult.conclusion] : [],
-      selected.latestResult ? [] : ["DECISION_RESULT_MISSING"],
+      publishable ? [result!.conclusion] : [],
+      blockers,
     ),
     section(
       "risks",
@@ -392,7 +474,7 @@ function memoSections(state: DashboardState, caseId: string | null | undefined):
       "Une projection périmée n’est pas utilisée.",
       [],
       [],
-      stale ? ["DECISION_RUN_STALE"] : [],
+      blockers,
     ),
     section(
       "evidence",
@@ -400,8 +482,12 @@ function memoSections(state: DashboardState, caseId: string | null | undefined):
       "Version et baseline du Decision Case.",
       [],
       [
-        definition ? `Version ${definition.version}` : "Version absente",
-        selected.latestRun?.baselineFingerprint ?? "Fingerprint absent",
+        `Version enregistrée ${selected.currentVersion}`,
+        definition ? `Version validée ${definition.version}` : "Version absente ou legacy",
+        run
+          ? `Run ${run.id} · version ${run.caseVersion} · ${run.asOfDate} · ${run.staleStatus}`
+          : "Run absent ou invalide",
+        run?.baselineFingerprint ?? "Fingerprint absent",
       ],
     ),
     section(
@@ -420,6 +506,12 @@ export function buildInstitutionalReport(
   state: DashboardState,
   parameters: ReportParameters,
 ): InstitutionalReport {
+  parameters = {
+    type: parameters.type,
+    year: parameters.type === "ANNUAL_REVIEW" ? parameters.year : undefined,
+    decisionCaseId:
+      parameters.type === "INVESTMENT_COMMITTEE_MEMO" ? parameters.decisionCaseId || null : null,
+  };
   const context = buildTodayCockpit(state).context;
   let sections: ReportSection[],
     period = { from: state.asOfDate, to: state.asOfDate };
@@ -436,7 +528,18 @@ export function buildInstitutionalReport(
     type: parameters.type,
     observationDate: state.asOfDate,
     period,
-    currency: state.reportingCurrency,
+    currency:
+      parameters.type === "MONTHLY_REVIEW" || parameters.type === "ANNUAL_REVIEW"
+        ? (() => {
+            const currencies = new Set(
+              sections
+                .find((x) => x.id === "historical-summary")
+                ?.amounts.slice(0, 2)
+                .map((x) => x.currency),
+            );
+            return currencies.size === 1 ? [...currencies][0]! : "MULTIPLE";
+          })()
+        : state.reportingCurrency,
     contextFingerprint: `${context.baseline.openingFingerprint}:${context.baseline.eventSetVersion}`,
     openingFingerprint: context.baseline.openingFingerprint,
     eventSetVersion: context.baseline.eventSetVersion,

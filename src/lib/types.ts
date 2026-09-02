@@ -469,10 +469,15 @@ export interface Alert {
 
 export interface MonthlyClose {
   id: string;
+  /** Missing metadata on legacy in-memory states remains explicitly unknown. */
+  version?: number | null;
+  reportingCurrency?: string | null;
+  completenessStatus?: string | null;
+  composition?: Record<string, unknown> | null;
   closeDate: string;
-  grossAssets: number;
-  debt: number;
-  netWorth: number;
+  grossAssets: number | null;
+  debt: number | null;
+  netWorth: number | null;
   forecastNetWorth: number | null;
   variance: number | null;
   createdAt: string;
@@ -886,6 +891,7 @@ export interface DashboardState {
   /** Identités et snapshots Decision Lab V2 ; résultats dérivés, jamais état canonique. */
   decisionCases?: Array<
     import("@/lib/engine/decision-contracts").DecisionCase & {
+      snapshotBlockers?: string[];
       definition?: import("@/lib/engine/decision-contracts").DecisionCaseVersion;
       latestRun?: import("@/lib/engine/decision-contracts").DecisionRun;
       latestResult?: import("@/lib/engine/decision-contracts").DecisionEvaluation;

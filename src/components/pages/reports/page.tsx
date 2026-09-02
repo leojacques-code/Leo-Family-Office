@@ -40,7 +40,10 @@ export default function ReportsPage({ state }: SectionProps) {
     () => buildInstitutionalReport(state, { type, year, decisionCaseId: decisionCaseId || null }),
     [state, type, year, decisionCaseId],
   );
-  const query = new URLSearchParams({ type });
+  const query = new URLSearchParams({
+    type,
+    expectedFingerprint: report.manifest.financialFingerprint,
+  });
   if (type === "ANNUAL_REVIEW") query.set("year", String(year));
   if (type === "INVESTMENT_COMMITTEE_MEMO" && decisionCaseId)
     query.set("decisionCaseId", decisionCaseId);

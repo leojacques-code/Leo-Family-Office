@@ -1,12 +1,29 @@
 import type { InstitutionalReport } from "./report-types";
 import { safeText } from "./report-formatters";
 
-const latin = (value: string) =>
-  Buffer.from(safeText(value).normalize("NFC"), "latin1")
-    .toString("latin1")
-    .replaceAll("\\", "\\\\")
-    .replaceAll("(", "\\(")
-    .replaceAll(")", "\\)");
+// Unicode → Windows-1252, explicitly. Undefined C1/control code points and all
+// unrepresentable Unicode scalars become "?". NFC preserves composed French accents.
+// Octal PDF escapes keep every non-ASCII byte out of the PDF syntax itself.
+const WIN_ANSI = new Map(
+  Array.from("€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ").map((character, index) => [
+    character,
+    [
+      0x80, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8e, 0x91, 0x92,
+      0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9e, 0x9f,
+    ][index]!,
+  ]),
+);
+export function winAnsiLiteral(value: string): string {
+  return Array.from(value.slice(0, 2_000).normalize("NFC"), (character) => {
+    const code = character.codePointAt(0)!;
+    const byte =
+      WIN_ANSI.get(character) ??
+      ((code >= 32 && code <= 126) || (code >= 160 && code <= 255) ? code : 63);
+    if (byte >= 128) return `\\${byte.toString(8).padStart(3, "0")}`;
+    const ascii = String.fromCharCode(byte);
+    return ["\\", "(", ")"].includes(ascii) ? `\\${ascii}` : ascii;
+  }).join("");
+}
 const wrap = (text: string, width = 92) => {
   const words = safeText(text).split(/\s+/);
   const lines: string[] = [];
@@ -63,7 +80,7 @@ export function renderReportPdf(report: InstitutionalReport, generatedAt: string
   for (const [pageIndex, page] of pages.entries()) {
     const commands = [
       `BT /F1 10 Tf 44 800 Td 13 TL`,
-      ...page.map((line) => `(${latin(line)}) Tj T*`),
+      ...page.map((line) => `(${winAnsiLiteral(line)}) Tj T*`),
       `ET`,
       `BT /F1 8 Tf 280 24 Td (Page ${pageIndex + 1} / ${pages.length}) Tj ET`,
     ].join("\n");

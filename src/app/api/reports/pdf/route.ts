@@ -27,12 +27,23 @@ export async function GET(request: Request) {
   const decisionCaseId = query.get("decisionCaseId");
   if (decisionCaseId && !/^[a-zA-Z0-9_-]{1,128}$/.test(decisionCaseId))
     return Response.json({ error: "Decision Case invalide" }, { status: 400 });
+  const expectedFingerprint = query.get("expectedFingerprint");
+  if (!expectedFingerprint || !/^report-[a-f0-9]{8}$/.test(expectedFingerprint))
+    return Response.json({ error: "Fingerprint de l’aperçu absent ou invalide" }, { status: 400 });
   const state = await (await getRepository()).getDashboardState();
   const report = buildInstitutionalReport(state, {
     type: type as ReportType,
     year,
     decisionCaseId,
   });
+  if (report.manifest.financialFingerprint !== expectedFingerprint)
+    return Response.json(
+      {
+        error:
+          "L’état financier ou les paramètres du rapport ont changé depuis l’aperçu. Rechargez l’aperçu avant de télécharger le PDF.",
+      },
+      { status: 409, headers: { "Cache-Control": "private, no-store" } },
+    );
   const pdf = renderReportPdf(report, new Date().toISOString());
   const filename = `leo-${type.toLowerCase().replaceAll("_", "-")}-${report.manifest.observationDate}.pdf`;
   return new Response(Buffer.from(pdf), {

@@ -1,3 +1,4 @@
+import { orderedCloses, historicalBlockers } from "./historical-closes";
 import type { DecisionCaseStatus } from "@/lib/engine/decision-contracts";
 import type { CanonicalEvent } from "@/lib/engine/event-contracts";
 import {
@@ -75,11 +76,10 @@ export function rankGoals(goals: Goal[], context: GlobalFinancialContext): Ranke
 }
 
 function closeChange(closes: MonthlyClose[]) {
-  const ordered = [...closes].sort(
-    (a, b) => a.closeDate.localeCompare(b.closeDate) || a.id.localeCompare(b.id),
-  );
-  if (ordered.length < 2) return null;
+  const ordered = orderedCloses(closes).slice(-2);
+  if (historicalBlockers(ordered).length) return null;
   const [from, to] = ordered.slice(-2);
+  if (from.netWorth === null || to.netWorth === null) return null;
   return { from, to, amount: to.netWorth - from.netWorth };
 }
 
