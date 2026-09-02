@@ -313,7 +313,11 @@ try {
       }),
     ],
     "Une méthode de valorisation hors nomenclature a été acceptée",
-    "real_estate_valuations_method_ck",
+    // Nom mis à jour par la migration `real_estate_public_data` : la whitelist a été
+    // ÉTENDUE additivement (ajout de COMPARABLE_SALES) sous le nom `..._method_v2_ck`. Les
+    // six méthodes préexistantes sont conservées, et l'invariant testé ici est intact : une
+    // méthode hors nomenclature reste refusée par la base.
+    "real_estate_valuations_method_v2_ck",
   );
 
   // ── 3. Faits de capital : un seul prix d'achat, un seul prix de cession ───────────

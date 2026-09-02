@@ -126,17 +126,25 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Production et dépôt alignés sur **29 migrations** au 28 août 2026. Les dernières versions
-sont :
+Le DÉPÔT porte **34 migrations**, rejouables depuis une base vide (`npm run db:local:reset`,
+34 appliquées, 83 tables). Les dernières versions sont :
 
-- `20260826194551_business_equity_v2_1` ;
-- `20260826194605_business_equity_v2_1_indexes` ;
-- `20260826194644_business_equity_v2_1_blocking_invariants` ;
-- `20260827155134_data_acquisition_foundation` ;
 - `20260827215014_career_tax_v2` ;
 - `20260827215600_career_tax_v2_fk_indexes` ;
 - `20260828131216_fec_corporate_acquisition` ;
-- `20260828131433_fec_corporate_acquisition_fk_indexes`.
+- `20260828131433_fec_corporate_acquisition_fk_indexes` ;
+- `20260829234017_scenarios_v2` ;
+- `20260829234053_goals_v2` ;
+- `20260829234259_scenarios_goals_fk_indexes` ;
+- `20260830154315_decision_lab_v2` ;
+- `20260831171500_real_estate_public_data`.
+
+L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE. Cette section annonçait
+« 29 migrations » alors que le dépôt en portait déjà 33 : la dérive n'est pas corrigée par une
+hypothèse, elle est signalée. Seul `npm run db:verify`, exécuté avec des credentials de
+production hors environnement d'agent, dit l'état réel ; le contenu de référence s'extrait de
+`supabase_migrations.schema_migrations`. La dernière migration ci-dessus n'a PAS été appliquée
+en production.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
@@ -173,7 +181,8 @@ Correctness → données → intégration → calculs → tests → produit → 
 ```text
 faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données + analytics)
                Real Estate (faits + scénarios) · Business Equity (faits + valorisation dérivée)
-               Data Acquisition (staging + provenance + relevé bancaire CSV + FEC)
+               Data Acquisition (staging + provenance + relevé bancaire CSV + FEC
+               + données publiques immobilières DVF/DPE)
                Career + Tax (faits datés + règles fiscales déclarées + calculs dérivés)
 en cours       vérité de schéma · vérité des consommateurs
 suivant        Event Engine → Scenarios V2 → Goals → Decision Lab
@@ -273,6 +282,38 @@ de ce qui devient analysable. ÉCHEC DE NETTOYAGE ≠ ÉCHEC DE VALIDATION, mais
 NETTOYAGE ≠ SUCCÈS SILENCIEUX non plus : la référence d'un objet non supprimé est CONSERVÉE,
 sans quoi une comptabilité entière resterait au stockage sans que rien ne sache où. Détail
 dans `docs/FEC_ACQUISITION.md`.
+
+L'acquisition de DONNÉE PUBLIQUE immobilière (DVF, DPE) est la troisième verticale de cette
+fondation, et elle ne valorise RIEN d'elle-même. DVF PUBLIE LES VENTES D'AUTRUI : un jeu de
+comparables n'est pas la valeur d'un bien détenu, et aucune ligne de `real_estate_valuations`
+n'en sort sans décision humaine. UNE ADRESSE NE PROUVE PAS UNE IDENTITÉ : un immeuble porte
+autant de DPE que de lots, la confiance d'un rapprochement d'adresse est donc plafonnée à
+MOYENNE, et accepter exige un motif ÉCRIT — la base le réclame pour toute acceptation de
+confiance faible. RÉSULTAT VIDE ≠ ABSENCE DE MARCHÉ : la couverture est DÉCLARÉE par
+l'adaptateur, jamais présumée, et un instantané vide, en échec ou hors couverture ne fonde
+aucun rapprochement. Une lecture tentée laisse TOUJOURS une trace : l'instantané est écrit
+même en échec, avec son code, et son contenu est immuable. AUCUN PRIX AU M² N'EST PERSISTÉ :
+il est dérivé à la lecture, et une surface absente le rend non calculable — elle ne vaut pas
+zéro. AUCUNE VALIDITÉ DE DPE N'EST CALCULÉE, et ÉTIQUETTE ABSENTE ≠ ÉTIQUETTE G : la
+déduire d'une grille ou d'une règle que ce dépôt ne contient pas produirait une donnée sans
+source. Une mutation MULTI-LOTS n'a pas de prix unitaire, et sous le seuil d'échantillon
+l'estimation est `NOT_COMPUTABLE`, jamais une estimation à confiance basse : un chiffre
+accompagné d'un avertissement finit par être lu sans l'avertissement. Une estimation promue
+est une `MODEL_ASSUMPTION` sous convention NOMMÉE, avec ses intrants et son instantané —
+`COMPARABLE_SALES` ne peut pas emprunter `NOTARY_ESTIMATE`, et la réciproque est interdite.
+La médiane est calculée en TypeScript, jamais en SQL ; la base VÉRIFIE sans recalculer, en
+encadrant la valeur par l'intervalle des prix unitaires réellement persistés — un encadrement
+est un contrôle d'intégrité, pas une valorisation. Détail dans
+`docs/REAL_ESTATE_PUBLIC_DATA.md`.
+
+AVANT DE REMPLACER UNE RPC EXISTANTE, CHERCHER SA DERNIÈRE VERSION DANS L'HISTORIQUE, JAMAIS
+LA PREMIÈRE. Un `create or replace` rédigé depuis une définition périmée supprime en silence
+tout ce que les migrations ultérieures y avaient ajouté, et le gate du domaine concerné ne le
+verra pas : c'est le smoke d'un AUTRE domaine qui le détectera, ou personne. Quand une
+contrainte de forme exige une valeur au moment de l'INSERTION, étendre la RPC existante d'une
+clé de charge optionnelle plutôt que d'ouvrir un second chemin d'écriture : PostgreSQL ne
+connaît pas de contrainte `CHECK` différable, et une seconde porte d'écriture sur une table
+canonique est une seconde vérité.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

@@ -44,9 +44,55 @@ const canonicalMigrations = [
   "20260829234053",
   "20260829234259",
   "20260830154315",
+  "20260831171500",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
+  external_sources: [
+    "domain",
+    "provider",
+    "adapter_version",
+    "dataset_version",
+    "capabilities",
+    "declared_coverage",
+    "snapshot_ttl_minutes",
+    "last_success_at",
+  ],
+  real_estate_data_snapshots: [
+    "query",
+    "query_hash",
+    "payload_hash",
+    "retrieved_at",
+    "stale_after",
+    "record_count",
+    "coverage_state",
+    "status",
+    "error_code",
+  ],
+  real_estate_comparable_sales: ["mutated_on", "price", "built_area_sqm", "lot_count", "raw"],
+  real_estate_energy_certificates: [
+    "issued_on",
+    "valid_until",
+    "method_version",
+    "energy_label",
+    "energy_value",
+    "energy_unit",
+    "raw",
+  ],
+  property_public_data_matches: [
+    "target",
+    "snapshot_id",
+    "certificate_id",
+    "match_basis",
+    "match_score",
+    "match_confidence",
+    "state",
+    "decided_reason",
+    "superseded_by",
+  ],
+  // L'extension de `real_estate_valuations` est ADDITIVE : ces deux colonnes s'ajoutent,
+  // et aucune colonne existante n'est retirée.
+  real_estate_valuations: ["snapshot_id", "derivation"],
   profiles: ["user_id", "ledger_coverage_start", "ledger_coverage_source"],
   scenarios: [
     "id",
@@ -858,9 +904,29 @@ const userOwnedTables = [
   "goal_versions",
   "decision_case_versions",
   "decision_runs",
+  "real_estate_data_snapshots",
+  "real_estate_comparable_sales",
+  "real_estate_energy_certificates",
+  "property_public_data_matches",
 ] as const;
 
 const requiredIndexes = [
+  // Données publiques immobilières : identité composite, position de ligne dans la lecture,
+  // et surtout les index PARTIELS qui portent « un seul ouvert » et « un seul accepté
+  // courant » par cible. Ces deux-là sont l'invariant, pas une optimisation.
+  "external_sources_id_user_uidx",
+  "real_estate_data_snapshots_id_user_uidx",
+  "real_estate_data_snapshots_lookup_idx",
+  "real_estate_comparable_sales_id_user_uidx",
+  "real_estate_comparable_sales_position_uidx",
+  "real_estate_energy_certificates_id_user_uidx",
+  "real_estate_energy_certificates_position_uidx",
+  "property_public_data_matches_id_user_uidx",
+  "property_public_data_matches_open_comparable_uidx",
+  "property_public_data_matches_open_certificate_uidx",
+  "property_public_data_matches_current_comparable_uidx",
+  "property_public_data_matches_current_certificate_uidx",
+  "real_estate_valuations_snapshot_idx",
   "scenarios_id_user_uidx",
   "scenario_versions_id_user_uidx",
   "simulation_runs_id_user_uidx",
@@ -1016,6 +1082,9 @@ const requiredTriggers = [
   "goals_v2_update_guard",
   "decision_case_versions_immutable",
   "decision_runs_immutable",
+  "real_estate_snapshot_frozen",
+  "real_estate_comparable_sale_frozen",
+  "real_estate_energy_certificate_frozen",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1026,9 +1095,40 @@ const requiredTriggerFunctions = [
   "lfo_guard_goal_version_update",
   "lfo_guard_goal_v2_update",
   "lfo_guard_decision_snapshot_immutable",
+  "real_estate_snapshot_frozen",
+  "real_estate_public_row_frozen",
 ] as const;
 
 const requiredConstraints = [
+  // Données publiques immobilières. Chaque nom ci-dessous porte une distinction financière
+  // ou d'honnêteté, pas une validation de saisie.
+  "external_sources_domain_ck",
+  "external_sources_shape_ck",
+  "external_sources_provider_uk",
+  "real_estate_data_snapshots_dataset_ck",
+  "real_estate_data_snapshots_coverage_ck",
+  "real_estate_data_snapshots_status_ck",
+  "real_estate_data_snapshots_stale_ck",
+  "real_estate_data_snapshots_failure_shape_ck",
+  "real_estate_data_snapshots_empty_shape_ck",
+  "real_estate_comparable_sales_built_area_ck",
+  "real_estate_comparable_sales_land_area_ck",
+  "real_estate_comparable_sales_lots_ck",
+  "real_estate_energy_certificates_energy_label_ck",
+  "real_estate_energy_certificates_ghg_label_ck",
+  "real_estate_energy_certificates_energy_unit_ck",
+  "real_estate_energy_certificates_ghg_unit_ck",
+  "real_estate_energy_certificates_validity_ck",
+  "property_public_data_matches_target_ck",
+  "property_public_data_matches_state_ck",
+  "property_public_data_matches_target_shape_ck",
+  "property_public_data_matches_accept_shape_ck",
+  "property_public_data_matches_weak_accept_ck",
+  "property_public_data_matches_superseded_fk",
+  "real_estate_valuations_method_v2_ck",
+  "real_estate_valuations_comparable_shape_ck",
+  "real_estate_valuations_snapshot_method_ck",
+  "real_estate_valuations_snapshot_fk",
   "scenarios_status_ck",
   "scenarios_archive_shape_ck",
   "simulation_runs_mode_ck",
@@ -1084,7 +1184,9 @@ const requiredConstraints = [
   "properties_disposal_after_acquisition_ck",
   "real_estate_valuations_property_fk",
   "real_estate_valuations_value_ck",
-  "real_estate_valuations_method_ck",
+  // `real_estate_valuations_method_ck` a été REMPLACÉE par `real_estate_valuations_method_v2_ck`
+  // (ajout additif de COMPARABLE_SALES aux six méthodes préexistantes, toutes conservées).
+  // Le nom superseded n'est donc plus exigé : c'est la version v2 qui l'est, plus haut.
   "real_estate_valuations_data_kind_ck",
   "real_estate_capital_events_property_fk",
   "real_estate_capital_events_transaction_fk",
@@ -1294,6 +1396,12 @@ const requiredConstraints = [
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
+  lfo_upsert_public_data_source: "p_user_id uuid, p_payload jsonb",
+  lfo_record_real_estate_snapshot: "p_user_id uuid, p_payload jsonb",
+  lfo_append_real_estate_snapshot_rows: "p_user_id uuid, p_payload jsonb",
+  lfo_propose_property_public_data_match: "p_user_id uuid, p_payload jsonb",
+  lfo_decide_property_public_data_match: "p_user_id uuid, p_payload jsonb",
+  lfo_promote_real_estate_market_estimate: "p_user_id uuid, p_payload jsonb",
   lfo_add_account:
     "p_user_id uuid, p_institution text, p_name text, p_account_type text, p_balance numeric, p_currency text, p_as_of_date date",
   lfo_add_transaction:
@@ -1408,6 +1516,11 @@ const requiredRpcs: Record<string, string> = {
  */
 const declaredReturnTypeRpcs: Record<string, string> = {
   lfo_fec_entry_balance: "TABLE(entries integer, unbalanced integer)",
+  // Ces deux-là ne CRÉENT rien : elles rendent un DÉCOMPTE. Le nombre de lignes réellement
+  // persistées pour l'une, le nombre de rapprochements remplacés pour l'autre. Rendre un
+  // uuid les obligerait à inventer un identifiant qui ne désigne aucune ligne nouvelle.
+  lfo_append_real_estate_snapshot_rows: "integer",
+  lfo_decide_property_public_data_match: "integer",
   lfo_save_scenario_version_v2: "integer",
   lfo_validate_goal_definition_v2: "void",
   lfo_save_goal_version_v2: "integer",
@@ -1427,6 +1540,13 @@ const declaredReturnTypeRpcs: Record<string, string> = {
  * rouvrirait la brèche en silence ; le gate la refuse.
  */
 const readOnlyAuditTables = [
+  // Une piste d'audit qu'on peut récrire ne prouve rien : ces quatre tables, et le registre
+  // des adaptateurs, sont en SELECT seul pour `authenticated`.
+  "external_sources",
+  "real_estate_data_snapshots",
+  "real_estate_comparable_sales",
+  "real_estate_energy_certificates",
+  "property_public_data_matches",
   "import_sources",
   "import_sessions",
   "import_raw_records",
