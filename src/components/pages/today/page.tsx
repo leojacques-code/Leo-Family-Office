@@ -4,11 +4,12 @@ import Link from "next/link";
 import { CalendarCheck } from "lucide-react";
 import { Callout, Currency, MetricCard, ProgressBar, SectionHeader } from "@/components/ui";
 import { type SectionProps, formatDate } from "@/components/pages/shared";
-import { buildTodayCockpit } from "@/lib/presentation/today-cockpit";
+import { buildTodayCockpit, goalProgress } from "@/lib/presentation/today-cockpit";
 
 export default function TodayPage({ state, mutate, busy }: SectionProps) {
   const view = buildTodayCockpit(state);
   const goal = view.primaryGoal;
+  const progress = goalProgress(goal?.evaluation?.gap?.relativeGap);
   return (
     <div className="page-stack">
       <SectionHeader
@@ -105,14 +106,11 @@ export default function TodayPage({ state, mutate, busy }: SectionProps) {
                 Priorité {goal.goal.definition?.priority ?? goal.goal.priority} · statut{" "}
                 {goal.evaluation?.status ?? "NOT_COMPUTABLE"}
               </p>
-              <ProgressBar
-                value={
-                  goal.evaluation?.gap?.relativeGap === null ||
-                  goal.evaluation?.gap?.relativeGap === undefined
-                    ? 0
-                    : Math.max(0, 1 - Math.abs(goal.evaluation.gap.relativeGap))
-                }
-              />
+              {progress === null ? (
+                <p className="warning-text">Progression non calculable</p>
+              ) : (
+                <ProgressBar value={progress} />
+              )}
               <Link className="button secondary" href="/goals">
                 Ouvrir Goals
               </Link>

@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { createGoalVersion } from "@/lib/engine/goal-engine";
 import { eventEngineCrossDomainFixture } from "@/lib/engine/__tests__/fixtures/event-engine";
-import type { DashboardState, Goal, MonthlyClose, Scenario } from "@/lib/types";
-import { buildTodayCockpit, rankGoals } from "@/lib/presentation/today-cockpit";
+import type { DashboardState, Goal, MonthlyClose, ProjectionEnvelope, Scenario } from "@/lib/types";
+import { buildTodayCockpit, goalProgress, rankGoals } from "@/lib/presentation/today-cockpit";
 import {
   buildTimelineView,
   eventAmount,
   groupTimelineItems,
   timelineWindow,
 } from "@/lib/presentation/timeline-view";
-import { scenarioCutOffStatus } from "@/lib/presentation/scenario-view";
+import {
+  displayedScenarioProjection,
+  scenarioCutOffStatus,
+  scenarioPresentationAvailability,
+} from "@/lib/presentation/scenario-view";
 import { createScenarioVersion } from "@/lib/engine/scenario-engine";
 
 function state(): DashboardState {
@@ -53,6 +57,11 @@ function close(id: string, date: string, netWorth: number): MonthlyClose {
 }
 
 describe("Today V2 — présentation canonique", () => {
+  it("ne fabrique pas une progression zéro mais conserve un zéro calculable", () => {
+    expect(goalProgress(null)).toBeNull();
+    expect(goalProgress(undefined)).toBeNull();
+    expect(goalProgress(1)).toBe(0);
+  });
   it("gère aucun Goal, aucune décision et aucune clôture sans fabriquer zéro", () => {
     const input = { ...state(), goals: [], decisionCases: [], monthlyCloses: [] };
     const result = buildTodayCockpit(input);
@@ -336,5 +345,23 @@ describe("Scenarios — cut-off canonique", () => {
       canonicalDate: input.asOfDate,
     });
     expect(stale).toEqual(before);
+  });
+  it("interdit simulation et explication et masque toute projection pour une version périmée", () => {
+    const cutOff = { computable: false, scenarioDate: "2025-01-01", canonicalDate: "2026-01-01" };
+    const projection = { scenarioId: "stale", points: [] } as unknown as ProjectionEnvelope;
+    expect(scenarioPresentationAvailability(cutOff, 0)).toEqual({
+      canRunProjection: false,
+      canExplainDeterministic: false,
+    });
+    expect(displayedScenarioProjection(projection, "stale", cutOff)).toBeNull();
+  });
+  it("masque la projection d'un autre scénario et autorise l'explication avec des points", () => {
+    const cutOff = { computable: true, scenarioDate: "2026-01-01", canonicalDate: "2026-01-01" };
+    const projection = { scenarioId: "other", points: [] } as unknown as ProjectionEnvelope;
+    expect(displayedScenarioProjection(projection, "selected", cutOff)).toBeNull();
+    expect(scenarioPresentationAvailability(cutOff, 1)).toEqual({
+      canRunProjection: true,
+      canExplainDeterministic: true,
+    });
   });
 });

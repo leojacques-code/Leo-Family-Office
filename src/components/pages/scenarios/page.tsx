@@ -37,7 +37,11 @@ import {
 } from "@/lib/engine/monthly-financial-model";
 import { evaluateGlobalScenario } from "@/lib/engine/global-financial-model";
 import { createScenarioVersion } from "@/lib/engine/scenario-engine";
-import { scenarioCutOffStatus } from "@/lib/presentation/scenario-view";
+import {
+  displayedScenarioProjection,
+  scenarioPresentationAvailability,
+  scenarioCutOffStatus,
+} from "@/lib/presentation/scenario-view";
 
 function ScenariosPage({
   state,
@@ -227,12 +231,13 @@ function ScenariosPage({
       setCreateForm({ name: "", description: "", horizonYears: "30" });
     }
   }
-  const finalPoint = projection?.points.at(-1);
   // Trajectoire déterministe recalculée côté client : déplacer la part investie ou le
   // surplus modifie immédiatement le bilan projeté, sans relancer le Monte-Carlo.
   const selected =
     state.scenarios.find((scenario) => scenario.id === selectedId) ?? state.scenarios[0];
   const cutOff = scenarioCutOffStatus(selected, state.asOfDate);
+  const displayedProjection = displayedScenarioProjection(projection, selectedId, cutOff);
+  const finalPoint = displayedProjection?.points.at(-1);
   const opening = buildOpeningBalanceSheet(state);
   const legacyMonthly = !selected.definition
     ? runDeterministicModel(opening, state.liabilities, scenarioAssumptions(selected), 30 * 12)
@@ -243,6 +248,7 @@ function ScenariosPage({
       : null;
   const deterministic =
     comparison?.scenario.annual ?? (legacyMonthly ? toAnnualPoints(legacyMonthly) : []);
+  const availability = scenarioPresentationAvailability(cutOff, deterministic.length);
   const horizon = deterministic.at(-1);
   // Le pic se lit sur le déroulé mensuel : les points annuels le sous-échantillonnent.
   const fundingGaps =
@@ -407,22 +413,24 @@ function ScenariosPage({
               {selected.definition ? Math.ceil(selected.definition.horizonMonths / 12) : 30} ans
             </h2>
           </div>
-          <button
-            className="link-button"
-            onClick={() =>
-              setExplanation(
-                projectionExplanation(
-                  state,
-                  selected,
-                  opening,
-                  deterministic[1] ?? deterministic[0],
-                  deterministic[0],
-                ),
-              )
-            }
-          >
-            Explain calculation
-          </button>
+          {availability.canExplainDeterministic ? (
+            <button
+              className="link-button"
+              onClick={() =>
+                setExplanation(
+                  projectionExplanation(
+                    state,
+                    selected,
+                    opening,
+                    deterministic[1] ?? deterministic[0]!,
+                    deterministic[0]!,
+                  ),
+                )
+              }
+            >
+              Explain calculation
+            </button>
+          ) : null}
         </div>
         <div className="medium-chart">
           <ResponsiveContainer width="100%" height="100%">
@@ -527,19 +535,21 @@ function ScenariosPage({
             </label>
             <button
               className="button primary"
-              disabled={busy}
-              onClick={() => runProjection(selectedId, 30, 3000, seed)}
+              disabled={busy || !availability.canRunProjection}
+              onClick={() => {
+                if (availability.canRunProjection) void runProjection(selectedId, 30, 3000, seed);
+              }}
             >
               <Sparkles size={15} />
               Lancer 3 000 simulations
             </button>
           </div>
         </div>
-        {projection ? (
+        {displayedProjection ? (
           <>
             <div className="simulation-chart">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={projection.points}>
+                <AreaChart data={displayedProjection.points}>
                   <defs>
                     <linearGradient id="band90" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0" stopColor="#39747a" stopOpacity={0.2} />
@@ -618,10 +628,14 @@ function ScenariosPage({
                   inputs: [
                     {
                       label: "Simulations",
-                      value: String(projection.simulations),
+                      value: String(displayedProjection.simulations),
                       kind: "MODEL_ASSUMPTION",
                     },
-                    { label: "Seed", value: String(projection.seed), kind: "MODEL_ASSUMPTION" },
+                    {
+                      label: "Seed",
+                      value: String(displayedProjection.seed),
+                      kind: "MODEL_ASSUMPTION",
+                    },
                     {
                       label: "Capital initial simulé",
                       // Un actif brut non calculable ne devient pas zéro dans une explication.
@@ -632,12 +646,13 @@ function ScenariosPage({
                     {
                       label: "Scénario",
                       value:
-                        state.scenarios.find((scenario) => scenario.id === projection.scenarioId)
-                          ?.name ?? projection.scenarioId,
+                        state.scenarios.find(
+                          (scenario) => scenario.id === displayedProjection.scenarioId,
+                        )?.name ?? displayedProjection.scenarioId,
                       kind: "USER_ASSUMPTION",
                     },
                   ],
-                  note: projection.methodology,
+                  note: displayedProjection.methodology,
                 })
               }
             >
@@ -651,7 +666,10 @@ function ScenariosPage({
             action={
               <button
                 className="button primary"
-                onClick={() => runProjection(selectedId, 30, 3000, seed)}
+                disabled={!availability.canRunProjection}
+                onClick={() => {
+                  if (availability.canRunProjection) void runProjection(selectedId, 30, 3000, seed);
+                }}
               >
                 Lancer la projection
               </button>

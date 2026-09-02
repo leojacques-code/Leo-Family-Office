@@ -27,6 +27,13 @@ export interface TodayCockpit {
   actions: Array<{ id: string; label: string; href: string }>;
 }
 
+/** `null` reste non calculable ; une progression réellement égale à zéro reste `0`. */
+export function goalProgress(relativeGap: number | null | undefined): number | null {
+  return relativeGap === null || relativeGap === undefined
+    ? null
+    : Math.max(0, 1 - Math.abs(relativeGap));
+}
+
 /**
  * Ordre pur : Goals actifs, priorité déclarée (la plus petite est la plus forte),
  * calculabilité, absence de blocker, échéance, puis écart relatif décroissant. L'identifiant
