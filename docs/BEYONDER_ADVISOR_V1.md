@@ -23,7 +23,10 @@ déduplication et départage par identifiant rendent le résultat invariant à l
 Le rang 3 ne déduit aucun risque de la seule présence d'une dette et n'introduit aucun seuil. Il
 signale uniquement un cash-flow ou une liquidité explicitement négatifs. Il compare la liquidité
 aux sorties contractuelles des 30 prochains jours seulement si toutes les sorties utiles sont
-connues dans la devise de reporting ; montant ou FX manquant produit `NOT_COMPUTABLE`.
+connues dans la devise de reporting. La couverture somme les `cashOut` bruts des conséquences
+canoniques incluses : un `cashIn` du même événement ne les compense jamais. Montant ou FX manquant
+produit `NOT_COMPUTABLE` ; conséquences exclues, événements terminés/annulés/supersédés et scénarios
+alternatifs restent hors calcul.
 
 Chaque affirmation porte au moins une preuve : identifiant, date, nature, provenance,
 calculabilité, montant/devise seulement connus, et lien propriétaire. `NULL ≠ ZERO` : `null`

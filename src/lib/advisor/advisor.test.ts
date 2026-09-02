@@ -3,9 +3,11 @@ import { eventEngineCrossDomainFixture } from "@/lib/engine/__tests__/fixtures/e
 import { createGoalVersion } from "@/lib/engine/goal-engine";
 import { createScenarioVersion } from "@/lib/engine/scenario-engine";
 import type { DecisionEvaluation } from "@/lib/engine/decision-contracts";
+import type { CanonicalEvent, CanonicalMonthlyConsequence } from "@/lib/engine/event-contracts";
 import { buildTodayCockpit } from "@/lib/presentation/today-cockpit";
 import { buildTimelineView } from "@/lib/presentation/timeline-view";
 import { answerAdvisorIntent, buildAdvisorPacket } from "@/lib/advisor/advisor-core";
+import { readableBlockerTitle } from "@/lib/advisor/advisor-rules";
 import {
   explainAdvisorPacket,
   FixtureAdvisorExplanationProvider,
@@ -30,6 +32,48 @@ function advisorFixture() {
   const cockpit = buildTodayCockpit(input);
   const base = buildTimelineView(input, cockpit)[0]!;
   return { input, cockpit, base };
+}
+
+function coverageFixture() {
+  const { input, cockpit } = advisorFixture();
+  const source = cockpit.context.timeline.events.find((event) => event.consequences.length)!;
+  const consequence = source.consequences[0]!;
+  const event = (
+    id: string,
+    consequences: Array<Partial<CanonicalMonthlyConsequence>>,
+    overrides: Partial<CanonicalEvent> = {},
+  ): CanonicalEvent => ({
+    ...source,
+    id,
+    dataKind: "CONTRACTUAL",
+    status: "PLANNED",
+    scenarioId: null,
+    effectiveDate: input.asOfDate,
+    consequences: consequences.map((item, index) => ({
+      ...consequence,
+      id: `${id}:consequence:${index}`,
+      sourceEventId: id,
+      cashIn: 0,
+      cashOut: 0,
+      currency: input.reportingCurrency,
+      included: true,
+      ...item,
+    })),
+    ...overrides,
+  });
+  const packet = (events: CanonicalEvent[], liquidity: number | null) => {
+    const context = {
+      ...cockpit.context,
+      timeline: { ...cockpit.context.timeline, events },
+    };
+    return buildAdvisorPacket({
+      state: input,
+      context,
+      cockpit: { ...cockpit, context, cashFlow: 0, liquidity },
+      timeline: [],
+    });
+  };
+  return { input, event, packet };
 }
 
 describe("Beyonder Advisor V1 — Core déterministe", () => {
@@ -69,23 +113,8 @@ describe("Beyonder Advisor V1 — Core déterministe", () => {
   });
 
   it("ne transforme pas une échéance contractuelle explicitement nulle en risque", () => {
-    const { input, cockpit, base } = advisorFixture();
-    const packet = buildAdvisorPacket({
-      state: input,
-      cockpit: { ...cockpit, cashFlow: 0, liquidity: 0 },
-      timeline: [
-        {
-          ...base,
-          id: "zero-due",
-          nature: "CONTRACTUAL",
-          status: "PLANNED",
-          effectiveDate: input.asOfDate,
-          amount: 0,
-          amountKnown: true,
-          currency: input.reportingCurrency,
-        },
-      ],
-    });
+    const { event, packet: build } = coverageFixture();
+    const packet = build([event("zero-due", [{ cashIn: 1_000, cashOut: 0 }])], 0);
     expect(packet.insights.some((item) => item.priority === 3)).toBe(false);
   });
 
@@ -102,82 +131,92 @@ describe("Beyonder Advisor V1 — Core déterministe", () => {
   });
 
   it("rend la couverture non calculable pour montant inconnu ou sortie multidevise", () => {
-    const { input, cockpit, base } = advisorFixture();
-    const due = (
-      id: string,
-      amount: number | null,
-      amountKnown: boolean,
-      currency: string | null,
-    ) => ({
-      ...base,
-      id,
-      nature: "CONTRACTUAL" as const,
-      status: "PLANNED",
-      effectiveDate: input.asOfDate,
-      amount,
-      amountKnown,
-      currency,
-    });
-    for (const timeline of [
-      [due("unknown", null, false, "EUR")],
-      [due("mixed", -100, true, "USD"), due("eur", -50, true, "EUR")],
-    ]) {
-      const coverage = buildAdvisorPacket({
-        state: input,
-        cockpit: { ...cockpit, liquidity: 1_000, cashFlow: 0 },
-        timeline,
-      }).insights.find((item) => item.type === "LIQUIDITY_COVERAGE_NOT_COMPUTABLE");
+    const { event, packet: build } = coverageFixture();
+    const cases = [
+      [event("unknown", [{ cashOut: null }])],
+      [event("mixed", [{ cashOut: 100, currency: "USD" }]), event("eur", [{ cashOut: 50 }])],
+    ];
+    for (const events of cases) {
+      const coverage = build(events, 1_000).insights.find(
+        (item) => item.type === "LIQUIDITY_COVERAGE_NOT_COMPUTABLE",
+      );
       expect(coverage?.status).toBe("NOT_COMPUTABLE");
       expect(coverage?.amount).toBeNull();
     }
+    const foreignProof = build(cases[1]!, 1_000)
+      .insights.find((item) => item.type === "LIQUIDITY_COVERAGE_NOT_COMPUTABLE")
+      ?.evidence.find((item) => item.id === "mixed");
+    expect(foreignProof).toMatchObject({ amount: 100, currency: "USD" });
   });
 
   it("rend la couverture non calculable lorsque la liquidité est inconnue", () => {
-    const { input, cockpit, base } = advisorFixture();
-    const packet = buildAdvisorPacket({
-      state: input,
-      cockpit: { ...cockpit, liquidity: null, cashFlow: 0 },
-      timeline: [
-        {
-          ...base,
-          id: "due",
-          nature: "CONTRACTUAL",
-          status: "PLANNED",
-          effectiveDate: input.asOfDate,
-          amount: -100,
-          amountKnown: true,
-          currency: input.reportingCurrency,
-        },
-      ],
-    });
+    const { event, packet: build } = coverageFixture();
+    const packet = build([event("due", [{ cashOut: 100 }])], null);
     expect(packet.insights.find((item) => item.priority === 3)?.calculability).toBe(
       "NOT_COMPUTABLE",
     );
   });
 
   it("détecte une couverture de liquidité insuffisante avec sorties EUR toutes connues", () => {
-    const { input, cockpit, base } = advisorFixture();
-    const packet = buildAdvisorPacket({
-      state: input,
-      cockpit: { ...cockpit, liquidity: 50, cashFlow: 0 },
-      timeline: [
-        {
-          ...base,
-          id: "due",
-          nature: "CONTRACTUAL",
-          status: "PLANNED",
-          effectiveDate: input.asOfDate,
-          amount: -100,
-          amountKnown: true,
-          currency: input.reportingCurrency,
-        },
-      ],
-    });
+    const { event, packet: build } = coverageFixture();
+    const packet = build([event("due", [{ cashOut: 100 }])], 50);
     const coverage = packet.insights.find(
       (item) => item.type === "INSUFFICIENT_LIQUIDITY_COVERAGE",
     );
     expect(coverage?.status).toBe("ACTIONABLE");
-    expect(coverage?.amount).toBe(50);
+    expect(coverage?.amount).toBeNull();
+  });
+
+  it("utilise le cash-out brut sans le compenser par le cash-in du même événement", () => {
+    const { event, packet: build } = coverageFixture();
+    const packet = build([event("gross", [{ cashIn: 1_000, cashOut: 900 }])], 899);
+    const coverage = packet.insights.find(
+      (item) => item.type === "INSUFFICIENT_LIQUIDITY_COVERAGE",
+    )!;
+    expect(coverage.status).toBe("ACTIONABLE");
+    expect(coverage.evidence.find((proof) => proof.id === "gross")?.amount).toBe(900);
+  });
+
+  it("somme plusieurs cash-out inclus et ignore toute conséquence exclue", () => {
+    const { event, packet: build } = coverageFixture();
+    const packet = build(
+      [
+        event("multiple", [
+          { cashOut: 400 },
+          { cashOut: 500 },
+          { cashOut: 10_000, included: false },
+        ]),
+      ],
+      899,
+    );
+    const proof = packet.insights
+      .find((item) => item.type === "INSUFFICIENT_LIQUIDITY_COVERAGE")
+      ?.evidence.find((item) => item.id === "multiple");
+    expect(proof?.amount).toBe(900);
+  });
+
+  it("ignore événements terminés, annulés, supersédés et scénarios alternatifs", () => {
+    const { event, packet: build } = coverageFixture();
+    const events = [
+      event("completed", [{ cashOut: 100 }], { status: "COMPLETED" }),
+      event("cancelled", [{ cashOut: 100 }], { status: "CANCELLED" }),
+      event("superseded", [{ cashOut: 100 }], { status: "SUPERSEDED" }),
+      event("alternative", [{ cashOut: 100 }], { scenarioId: "alternative" }),
+    ];
+    expect(
+      build(events, 0).insights.some((item) => item.dedupeKey === "liquidity-coverage:30d"),
+    ).toBe(false);
+  });
+
+  it("n'alerte pas à couverture exacte et détecte une insuffisance d'un euro", () => {
+    const { event, packet: build } = coverageFixture();
+    const events = [event("due", [{ cashOut: 900 }])];
+    expect(
+      build(events, 900).insights.some((item) => item.type === "INSUFFICIENT_LIQUIDITY_COVERAGE"),
+    ).toBe(false);
+    expect(
+      build(events, 899).insights.some((item) => item.type === "INSUFFICIENT_LIQUIDITY_COVERAGE"),
+    ).toBe(true);
   });
 
   it("restitue bilan partiel, FX absent et devises mixtes sans les additionner", () => {
@@ -202,6 +241,18 @@ describe("Beyonder Advisor V1 — Core déterministe", () => {
     expect(fx.status).toBe("NOT_COMPUTABLE");
     expect(fx.title).toBe("Taux de change manquant");
     expect(fx.title).not.toContain(":");
+  });
+
+  it("traduit les trois derniers titres techniques sans masquer les codes", () => {
+    expect(readableBlockerTitle("MULTIPLE_RANGE_DECLARED")).toBe(
+      "Plusieurs fourchettes ont été déclarées",
+    );
+    expect(readableBlockerTitle("NON_FINANCIAL_ASSET_PROJECTION_TERMS_MISSING")).toBe(
+      "Paramètres de projection des actifs non financiers manquants",
+    );
+    expect(readableBlockerTitle("NON_FINANCIAL_ASSET_VALUE_PARTIAL")).toBe(
+      "Valeur des actifs non financiers incomplète",
+    );
   });
 
   it("classe plusieurs Goals indépendamment de l'ordre et expose le Goal non calculable", () => {

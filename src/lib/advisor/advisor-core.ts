@@ -219,24 +219,55 @@ export function buildAdvisorPacket(input: AdvisorInput): AdvisorPacket {
     );
   }
 
-  const contractualWindow = timeline.filter((item) => {
-    const days = daysBetween(context.asOfDate, item.effectiveDate);
-    return item.nature === "CONTRACTUAL" && item.status !== "COMPLETED" && days >= 0 && days <= 30;
+  const ownerHref = (eventId: string) =>
+    timeline.find((item) => item.id === eventId)?.href ?? "/timeline";
+  const contractualWindow = context.timeline.events.filter((event) => {
+    const days = daysBetween(context.asOfDate, event.effectiveDate);
+    return (
+      event.dataKind === "CONTRACTUAL" &&
+      event.status !== "COMPLETED" &&
+      event.status !== "CANCELLED" &&
+      event.status !== "SUPERSEDED" &&
+      event.scenarioId === null &&
+      days >= 0 &&
+      days <= 30
+    );
   });
-  const unknownContractual = contractualWindow.filter(
-    (item) =>
-      !item.amountKnown ||
-      item.amount === null ||
-      (item.amount < 0 && (item.currency === null || item.currency !== context.reportingCurrency)),
+  const contractualOutflows = contractualWindow.map((event) => {
+    const included = event.consequences.filter((consequence) => consequence.included);
+    const blocking = included.filter(
+      (consequence) =>
+        consequence.cashOut === null ||
+        (consequence.cashOut > 0 &&
+          (!consequence.currency || consequence.currency !== context.reportingCurrency)),
+    );
+    const unknown = blocking.length > 0;
+    const amount = unknown
+      ? null
+      : included.reduce(
+          (sum, consequence) =>
+            consequence.currency === context.reportingCurrency
+              ? sum + (consequence.cashOut ?? 0)
+              : sum,
+          0,
+        );
+    const blockingCurrencies = [...new Set(blocking.map((item) => item.currency).filter(Boolean))];
+    const evidenceAmount = blocking.some((item) => item.cashOut === null)
+      ? null
+      : blocking.reduce((sum, item) => sum + (item.cashOut ?? 0), 0);
+    return {
+      event,
+      amount,
+      unknown,
+      evidenceAmount,
+      evidenceCurrency: blockingCurrencies.length === 1 ? blockingCurrencies[0]! : null,
+    };
+  });
+  const unknownContractual = contractualOutflows.filter((item) => item.unknown);
+  const knownOutflows = contractualOutflows.filter(
+    (item): item is typeof item & { amount: number } => item.amount !== null && item.amount > 0,
   );
-  const knownOutflows = contractualWindow.filter(
-    (item) =>
-      item.amountKnown &&
-      item.amount !== null &&
-      item.amount < 0 &&
-      item.currency === context.reportingCurrency,
-  );
-  if (contractualWindow.length && unknownContractual.length) {
+  if (unknownContractual.length) {
     candidates.push(
       insight({
         id: "advisor:liquidity-coverage:not-computable",
@@ -250,16 +281,16 @@ export function buildAdvisorPacket(input: AdvisorInput): AdvisorPacket {
         summary:
           "Au moins une échéance contractuelle des 30 prochains jours ne possède pas un montant convertible connu.",
         priorityReason: "La couverture ne peut pas être conclue sans toutes les sorties utiles.",
-        evidence: unknownContractual.map((item) =>
+        evidence: unknownContractual.map(({ event, evidenceAmount, evidenceCurrency }) =>
           evidence({
-            id: item.id,
-            date: item.effectiveDate,
-            nature: item.nature,
-            provenance: item.provenance,
+            id: event.id,
+            date: event.effectiveDate,
+            nature: "CONTRACTUAL_CASH_OUT",
+            provenance: event.provenance.source ?? event.provenance.engine,
             calculability: "NOT_COMPUTABLE",
-            amount: item.amountKnown ? item.amount : null,
-            currency: item.currency,
-            href: item.href,
+            amount: evidenceAmount,
+            currency: evidenceCurrency,
+            href: ownerHref(event.id),
           }),
         ),
         calculability: "NOT_COMPUTABLE",
@@ -293,16 +324,16 @@ export function buildAdvisorPacket(input: AdvisorInput): AdvisorPacket {
             currency: context.reportingCurrency,
             href: "/net-worth",
           }),
-          ...knownOutflows.map((item) =>
+          ...knownOutflows.map(({ event, amount }) =>
             evidence({
-              id: item.id,
-              date: item.effectiveDate,
-              nature: item.nature,
-              provenance: item.provenance,
+              id: event.id,
+              date: event.effectiveDate,
+              nature: "CONTRACTUAL_CASH_OUT",
+              provenance: event.provenance.source ?? event.provenance.engine,
               calculability: "KNOWN",
-              amount: item.amount,
-              currency: item.currency,
-              href: item.href,
+              amount,
+              currency: context.reportingCurrency,
+              href: ownerHref(event.id),
             }),
           ),
         ],
@@ -314,7 +345,7 @@ export function buildAdvisorPacket(input: AdvisorInput): AdvisorPacket {
       }),
     );
   } else if (knownOutflows.length && cockpit.liquidity !== null) {
-    const totalOutflows = knownOutflows.reduce((sum, item) => sum - item.amount!, 0);
+    const totalOutflows = knownOutflows.reduce((sum, item) => sum + item.amount, 0);
     if (cockpit.liquidity < totalOutflows) {
       candidates.push(
         insight({
@@ -340,22 +371,22 @@ export function buildAdvisorPacket(input: AdvisorInput): AdvisorPacket {
               currency: context.reportingCurrency,
               href: "/net-worth",
             }),
-            ...knownOutflows.map((item) =>
+            ...knownOutflows.map(({ event, amount }) =>
               evidence({
-                id: item.id,
-                date: item.effectiveDate,
-                nature: item.nature,
-                provenance: item.provenance,
+                id: event.id,
+                date: event.effectiveDate,
+                nature: "CONTRACTUAL_CASH_OUT",
+                provenance: event.provenance.source ?? event.provenance.engine,
                 calculability: "KNOWN",
-                amount: item.amount,
-                currency: item.currency,
-                href: item.href,
+                amount,
+                currency: context.reportingCurrency,
+                href: ownerHref(event.id),
               }),
             ),
           ],
           calculability: "COMPUTABLE",
-          amount: cockpit.liquidity,
-          currency: context.reportingCurrency,
+          amount: null,
+          currency: null,
           baselineFingerprint: fingerprint,
           blockers: [],
         }),

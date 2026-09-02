@@ -33,6 +33,10 @@ export function readableBlockerTitle(code: string): string {
     "position under explained": "Composition d’une position incomplète",
     "real estate valuation missing": "Valorisation immobilière manquante",
     "missing fx": "Taux de change manquant",
+    "multiple range declared": "Plusieurs fourchettes ont été déclarées",
+    "non financial asset projection terms missing":
+      "Paramètres de projection des actifs non financiers manquants",
+    "non financial asset value partial": "Valeur des actifs non financiers incomplète",
   };
   if (known[label]) return known[label];
   return label ? `${label[0]!.toUpperCase()}${label.slice(1)}` : "Donnée financière à compléter";
