@@ -27,6 +27,7 @@ export const NAV_ITEMS: readonly NavigationItem[] = [
   { id: "scenarios", label: "Scenarios", href: "/scenarios", break: true },
   { id: "decision-lab", label: "Decision Lab", href: "/decision-lab" },
   { id: "goals", label: "Goals", href: "/goals" },
+  { id: "reports", label: "Reports", href: "/reports" },
   { id: "imports", label: "Imports", href: "/imports", break: true },
   { id: "documents", label: "Documents", href: "/documents" },
   { id: "timeline", label: "Timeline", href: "/timeline" },
@@ -34,9 +35,9 @@ export const NAV_ITEMS: readonly NavigationItem[] = [
 ];
 
 /** Sections adressables par /[section]. La racine "today" est servie par /. */
-export const ROUTED_SECTION_IDS: readonly string[] = NAV_ITEMS
-  .filter((item) => item.id !== DEFAULT_SECTION)
-  .map((item) => item.id);
+export const ROUTED_SECTION_IDS: readonly string[] = NAV_ITEMS.filter(
+  (item) => item.id !== DEFAULT_SECTION,
+).map((item) => item.id);
 
 export function isValidSection(section: string): boolean {
   return NAV_ITEMS.some((item) => item.id === section);
