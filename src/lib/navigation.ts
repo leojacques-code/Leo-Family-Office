@@ -15,6 +15,7 @@ export const DEFAULT_SECTION = "today";
 
 export const NAV_ITEMS: readonly NavigationItem[] = [
   { id: "today", label: "Today", href: "/" },
+  { id: "advisor", label: "Beyonder", href: "/advisor" },
   { id: "net-worth", label: "Net Worth", href: "/net-worth" },
   { id: "cash-flow", label: "Cash Flow", href: "/cash-flow" },
   { id: "investments", label: "Investments", href: "/investments" },
