@@ -145,8 +145,64 @@ describe("Beyonder Advisor V1 — Core déterministe", () => {
     }
     const foreignProof = build(cases[1]!, 1_000)
       .insights.find((item) => item.type === "LIQUIDITY_COVERAGE_NOT_COMPUTABLE")
-      ?.evidence.find((item) => item.id === "mixed");
+      ?.evidence.find((item) => item.id.includes("event:mixed:consequence:"));
     expect(foreignProof).toMatchObject({ amount: 100, currency: "USD" });
+  });
+
+  it("sépare les preuves natives de cash-outs bloquants multidevises", () => {
+    const { event, packet: build } = coverageFixture();
+    const coverage = build(
+      [
+        event("multi-currency", [
+          { cashOut: 100, currency: "USD" },
+          { cashOut: 200, currency: "GBP" },
+        ]),
+      ],
+      1_000,
+    ).insights.find((item) => item.type === "LIQUIDITY_COVERAGE_NOT_COMPUTABLE")!;
+    expect(coverage.status).toBe("NOT_COMPUTABLE");
+    expect(coverage.evidence).toHaveLength(2);
+    expect(coverage.evidence.map(({ amount, currency }) => ({ amount, currency }))).toEqual([
+      { amount: 100, currency: "USD" },
+      { amount: 200, currency: "GBP" },
+    ]);
+    expect(coverage.evidence.some((proof) => proof.amount === 300)).toBe(false);
+    expect(
+      coverage.evidence.every((proof) => proof.id.includes("event:multi-currency:consequence:")),
+    ).toBe(true);
+  });
+
+  it("sépare un cash-out inconnu de la preuve native USD du même événement", () => {
+    const { event, packet: build } = coverageFixture();
+    const coverage = build(
+      [
+        event("mixed-known-unknown", [
+          { cashOut: null, currency: "EUR" },
+          { cashOut: 100, currency: "USD" },
+        ]),
+      ],
+      1_000,
+    ).insights.find((item) => item.type === "LIQUIDITY_COVERAGE_NOT_COMPUTABLE")!;
+    expect(coverage.evidence).toHaveLength(2);
+    expect(coverage.evidence.map(({ amount, currency }) => ({ amount, currency }))).toEqual([
+      { amount: null, currency: "EUR" },
+      { amount: 100, currency: "USD" },
+    ]);
+  });
+
+  it("conserve une preuve par conséquence même pour plusieurs cash-outs bloquants de même devise", () => {
+    const { event, packet: build } = coverageFixture();
+    const coverage = build(
+      [
+        event("same-currency", [
+          { cashOut: 40, currency: "USD" },
+          { cashOut: 60, currency: "USD" },
+        ]),
+      ],
+      1_000,
+    ).insights.find((item) => item.type === "LIQUIDITY_COVERAGE_NOT_COMPUTABLE")!;
+    expect(coverage.evidence.map((proof) => proof.amount)).toEqual([40, 60]);
+    expect(coverage.evidence.some((proof) => proof.amount === 100)).toBe(false);
   });
 
   it("rend la couverture non calculable lorsque la liquidité est inconnue", () => {

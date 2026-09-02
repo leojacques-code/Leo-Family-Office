@@ -251,17 +251,7 @@ export function buildAdvisorPacket(input: AdvisorInput): AdvisorPacket {
               : sum,
           0,
         );
-    const blockingCurrencies = [...new Set(blocking.map((item) => item.currency).filter(Boolean))];
-    const evidenceAmount = blocking.some((item) => item.cashOut === null)
-      ? null
-      : blocking.reduce((sum, item) => sum + (item.cashOut ?? 0), 0);
-    return {
-      event,
-      amount,
-      unknown,
-      evidenceAmount,
-      evidenceCurrency: blockingCurrencies.length === 1 ? blockingCurrencies[0]! : null,
-    };
+    return { event, amount, unknown, blocking };
   });
   const unknownContractual = contractualOutflows.filter((item) => item.unknown);
   const knownOutflows = contractualOutflows.filter(
@@ -281,17 +271,19 @@ export function buildAdvisorPacket(input: AdvisorInput): AdvisorPacket {
         summary:
           "Au moins une échéance contractuelle des 30 prochains jours ne possède pas un montant convertible connu.",
         priorityReason: "La couverture ne peut pas être conclue sans toutes les sorties utiles.",
-        evidence: unknownContractual.map(({ event, evidenceAmount, evidenceCurrency }) =>
-          evidence({
-            id: event.id,
-            date: event.effectiveDate,
-            nature: "CONTRACTUAL_CASH_OUT",
-            provenance: event.provenance.source ?? event.provenance.engine,
-            calculability: "NOT_COMPUTABLE",
-            amount: evidenceAmount,
-            currency: evidenceCurrency,
-            href: ownerHref(event.id),
-          }),
+        evidence: unknownContractual.flatMap(({ event, blocking }) =>
+          blocking.map((consequence) =>
+            evidence({
+              id: `event:${event.id}:consequence:${consequence.id}`,
+              date: event.effectiveDate,
+              nature: "CONTRACTUAL_CASH_OUT",
+              provenance: event.provenance.source ?? event.provenance.engine,
+              calculability: "NOT_COMPUTABLE",
+              amount: consequence.cashOut,
+              currency: consequence.currency || null,
+              href: ownerHref(event.id),
+            }),
+          ),
         ),
         calculability: "NOT_COMPUTABLE",
         amount: null,
