@@ -1,5 +1,5 @@
-import { PublicV4Page } from "@/components/marketing/public-v4";
+import { PublicV8Page } from "@/components/marketing/public-v8";
 
 export default function PurposePage() {
-  return <PublicV4Page kind="purpose" />;
+  return <PublicV8Page kind="purpose" />;
 }
