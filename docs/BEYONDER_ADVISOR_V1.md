@@ -20,6 +20,11 @@ contractuelle, (3) liquidité/dette/cash-flow calculable, (4) Goal, (5) Decision
 scénario périmé, (7) variation patrimoniale observée, (8) surveillance. Identifiant, clé de
 déduplication et départage par identifiant rendent le résultat invariant à l'ordre des entrées.
 
+Le rang 3 ne déduit aucun risque de la seule présence d'une dette et n'introduit aucun seuil. Il
+signale uniquement un cash-flow ou une liquidité explicitement négatifs. Il compare la liquidité
+aux sorties contractuelles des 30 prochains jours seulement si toutes les sorties utiles sont
+connues dans la devise de reporting ; montant ou FX manquant produit `NOT_COMPUTABLE`.
+
 Chaque affirmation porte au moins une preuve : identifiant, date, nature, provenance,
 calculabilité, montant/devise seulement connus, et lien propriétaire. `NULL ≠ ZERO` : `null`
 reste non calculable tandis que zéro reste une valeur connue. Aucune somme multidevise n'est
@@ -28,12 +33,16 @@ aucune réconciliation silencieuse n'est tentée.
 
 ## Provider, sécurité et confidentialité
 
-`AdvisorExplanationProvider` est provider-neutral. Aucun provider réel, secret, route API ou
-dépendance IA n'est ajouté en V1 : l'interface affiche `BLOCKED_EXTERNAL`, mais les cinq
-questions guidées restent fonctionnelles. La fixture injectable ne fait aucun réseau. Toute
-sortie est bornée et chaque affirmation doit référencer une preuve autorisée. Les libellés
-sources sont des données non fiables, jamais des instructions. Il n'existe aucune écriture,
-conversation persistée ou mutation Supabase, Goal, scénario, Decision Case ou fait canonique.
+`AdvisorExplanationProvider` est provider-neutral. Son état appartient à la couche d'explication,
+jamais au paquet financier ni à son fingerprint. Aucun provider réel, secret, route API ou
+dépendance IA n'est ajouté en V1 : l'interface affiche `BLOCKED_EXTERNAL`, mais les cinq questions
+guidées restent fonctionnelles. La fixture injectable ne fait aucun réseau. Toute sortie est
+bornée par une course avec un timeout, même si le provider ignore l'annulation. Chaque section
+référence un insight et uniquement des preuves de cet insight ; nombres, pourcentages, dates et
+devises non présents dans ces preuves sont refusés. Cette validation ne prétend pas garantir toute
+la sémantique du texte : le Core reste la vérité visuellement prioritaire. Les libellés sources
+sont des données non fiables, jamais des instructions. Il n'existe aucune écriture, conversation
+persistée ou mutation Supabase, Goal, scénario, Decision Case ou fait canonique.
 
 ## Limites, tests et risques résiduels
 

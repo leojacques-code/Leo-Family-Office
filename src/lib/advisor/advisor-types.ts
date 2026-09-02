@@ -5,7 +5,7 @@ import type { TimelineItem } from "@/lib/presentation/timeline-view";
 
 export type AdvisorStatus = "ACTIONABLE" | "INFORMATIONAL" | "BLOCKED" | "NOT_COMPUTABLE";
 export type AdvisorDomain =
-  "GLOBAL" | "TIMELINE" | "NET_WORTH" | "GOALS" | "DECISION_LAB" | "SCENARIOS";
+  "GLOBAL" | "TIMELINE" | "NET_WORTH" | "CASH_FLOW" | "GOALS" | "DECISION_LAB" | "SCENARIOS";
 export type AdvisorIntent = "NOW" | "CHANGED" | "GOALS" | "DECISIONS" | "WHY_NOT_COMPUTABLE";
 
 export interface AdvisorEvidence {
@@ -54,7 +54,6 @@ export interface AdvisorPacket {
   observedAt: string;
   completeness: GlobalFinancialContext["completeness"];
   contextFingerprint: string;
-  providerStatus: "BLOCKED_EXTERNAL";
   insights: AdvisorInsight[];
   counts: { actionable: number; blocked: number; notComputable: number };
 }

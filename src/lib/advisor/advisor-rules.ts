@@ -15,6 +15,7 @@ export const OWNER_CTA: Record<AdvisorDomain, { label: string; href: string }> =
   GLOBAL: { label: "Voir le bilan", href: "/net-worth" },
   TIMELINE: { label: "Ouvrir Timeline", href: "/timeline" },
   NET_WORTH: { label: "Ouvrir Net Worth", href: "/net-worth" },
+  CASH_FLOW: { label: "Ouvrir Cash Flow", href: "/cash-flow" },
   GOALS: { label: "Ouvrir Goals", href: "/goals" },
   DECISION_LAB: { label: "Ouvrir Decision Lab", href: "/decision-lab" },
   SCENARIOS: { label: "Ouvrir Scenarios", href: "/scenarios" },
@@ -22,6 +23,19 @@ export const OWNER_CTA: Record<AdvisorDomain, { label: string; href: string }> =
 
 export function evidence(input: AdvisorEvidence): AdvisorEvidence {
   return input;
+}
+
+/** Les codes restent dans les preuves techniques ; le titre ne montre ni UUID ni syntaxe moteur. */
+export function readableBlockerTitle(code: string): string {
+  const label = code.split(":", 1)[0]!.replaceAll("_", " ").trim().toLowerCase();
+  const known: Record<string, string> = {
+    "capital history partial": "Historique du capital incomplet",
+    "position under explained": "Composition d’une position incomplète",
+    "real estate valuation missing": "Valorisation immobilière manquante",
+    "missing fx": "Taux de change manquant",
+  };
+  if (known[label]) return known[label];
+  return label ? `${label[0]!.toUpperCase()}${label.slice(1)}` : "Donnée financière à compléter";
 }
 
 export function insight(

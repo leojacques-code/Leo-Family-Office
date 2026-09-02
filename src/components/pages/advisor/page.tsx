@@ -34,7 +34,7 @@ export default function AdvisorPage({ state }: SectionProps) {
           <strong>{packet.completeness}</strong> · fingerprint{" "}
           {packet.contextFingerprint.slice(0, 24)}
         </span>
-        <span className="data-badge model_assumption">IA · {packet.providerStatus}</span>
+        <span className="data-badge model_assumption">IA · BLOCKED EXTERNAL</span>
       </div>
       <section className="metrics-grid four" aria-label="Synthèse Beyonder">
         <article className="metric-card">
@@ -70,6 +70,7 @@ export default function AdvisorPage({ state }: SectionProps) {
             <button
               key={question.intent}
               className={`button ${intent === question.intent ? "primary" : "secondary"}`}
+              aria-pressed={intent === question.intent}
               onClick={() => setIntent(question.intent)}
             >
               {question.label}
@@ -87,7 +88,8 @@ export default function AdvisorPage({ state }: SectionProps) {
         </div>
         <div className="page-stack">
           {packet.insights
-            .filter((item) => intent === "NOW" || answer.insightIds.includes(item.id))
+            .filter((item) => answer.insightIds.includes(item.id))
+            .slice(0, intent === "NOW" ? 5 : undefined)
             .map((item) => (
               <article className="panel" key={item.id}>
                 <div className="panel-header">
@@ -106,8 +108,9 @@ export default function AdvisorPage({ state }: SectionProps) {
                   <strong>Pourquoi :</strong> {item.priorityReason}
                 </p>
                 {item.blockers.length ? (
-                  <Callout tone="warning" title="Blockers">
-                    {item.blockers.join(" · ")}
+                  <Callout tone="warning" title="Conclusion limitée">
+                    Certaines données empêchent une conclusion complète. Le détail technique reste
+                    disponible avec les preuves.
                   </Callout>
                 ) : null}
                 <details>
@@ -115,11 +118,18 @@ export default function AdvisorPage({ state }: SectionProps) {
                     <ChevronDown size={15} /> Preuves ({item.evidence.length})
                   </summary>
                   <div className="page-stack">
+                    {item.blockers.length ? (
+                      <div className="callout">
+                        <strong>Codes techniques</strong>
+                        <p>{item.blockers.join(" · ")}</p>
+                      </div>
+                    ) : null}
                     {item.evidence.map((proof) => (
                       <div className="callout" key={proof.id}>
                         <strong>{proof.nature}</strong>
                         <p>
-                          {formatDate(proof.date)} · {proof.provenance} · {proof.calculability}
+                          {proof.id} · {formatDate(proof.date)} · {proof.provenance} ·{" "}
+                          {proof.calculability}
                           {proof.amount !== null && proof.currency
                             ? ` · ${formatNative(proof.amount, proof.currency)}`
                             : ""}
@@ -137,6 +147,20 @@ export default function AdvisorPage({ state }: SectionProps) {
             ))}
         </div>
       </section>
+      {intent === "NOW" && answer.insightIds.length > 5 ? (
+        <details className="panel">
+          <summary>
+            <ChevronDown size={15} /> Toutes les conclusions ({answer.insightIds.length})
+          </summary>
+          <div className="quick-actions">
+            {packet.insights.slice(5).map((item) => (
+              <Link key={item.id} href={item.cta.href} className="button secondary">
+                Priorité {item.priority} · {item.title}
+              </Link>
+            ))}
+          </div>
+        </details>
+      ) : null}
       <Callout title="Explication générative indisponible">
         Le provider réel n’est pas configuré. Le Core déterministe, les questions guidées, les
         preuves et les liens restent pleinement utilisables.
