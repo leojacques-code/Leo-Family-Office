@@ -126,56 +126,36 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **34 migrations**, rejouables depuis une base vide (`npm run db:local:reset`,
-34 appliquées, 83 tables). Les dernières versions sont :
+Le DÉPÔT porte **42 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
+42 appliquées, 105 tables publiques). Les neuf dernières sont les cinq verticales
+d'acquisition ajoutées par ce chantier et leur réconciliation :
 
-Le DÉPÔT porte **35 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
-35 appliquées, 80 tables publiques). Les dernières versions sont :
-
-Le DÉPÔT porte **35 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
-35 appliquées, 90 tables publiques).
-
-L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE. Cette section annonçait
-« 29 migrations alignées au 28 août 2026 » alors que le dépôt en portait déjà 33 : la dérive
-n'est pas corrigée par une hypothèse, elle est signalée. Seul `npm run db:verify`, exécuté
-avec des credentials de production hors environnement d'agent, dit l'état réel ; le contenu de
-référence s'extrait de `supabase_migrations.schema_migrations`. Les deux migrations Open
-Banking n'ont PAS été appliquées en production.
-
-Les dernières versions sont :
-
-- `20260827215014_career_tax_v2` ;
-- `20260827215600_career_tax_v2_fk_indexes` ;
-- `20260828131216_fec_corporate_acquisition` ;
-- `20260828131433_fec_corporate_acquisition_fk_indexes` ;
-- `20260829234017_scenarios_v2` ;
-- `20260829234053_goals_v2` ;
-- `20260829234259_scenarios_goals_fk_indexes` ;
-- `20260830154315_decision_lab_v2` ;
-- `20260831171500_real_estate_public_data`.
-
+- `20260831101500_company_registry_acquisition` ;
+- `20260831154500_document_intelligence_foundation` ;
+- `20260831171500_real_estate_public_data` ;
 - `20260902093000_portfolio_import_acquisition` ;
-- `20260903090000_import_raw_freeze_hardening`.
+- `20260903090000_import_raw_freeze_hardening` ;
+- `20260903120000_open_banking_ais` ;
+- `20260903120500_open_banking_ais_fk_indexes` ;
+- `20260903190000_acquisition_integration_reconciliation` ;
+- `20260903200000_portfolio_findings_no_silent_upsert`.
 
-L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE. Cette section annonçait
-« 29 migrations » alors que le dépôt en portait déjà 33 : la dérive n'est pas corrigée par une
-hypothèse, elle est signalée. Seul `npm run db:verify`, exécuté avec des credentials de
-production hors environnement d'agent, dit l'état réel ; le contenu de référence s'extrait de
-`supabase_migrations.schema_migrations`. La dernière migration ci-dessus n'a PAS été appliquée
-en production.
+L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE, et cette section a dérivé
+trois fois de suite pour l'avoir oublié : elle a successivement annoncé « 29 migrations
+alignées » quand le dépôt en portait 33, puis « 34 », puis « 35 », chaque verticale mettant à
+jour SON chiffre sans voir celui des autres. La dérive ne se corrige pas en écrivant un
+nouveau nombre : elle se corrige en disant d'où vient le nombre.
 
-Cet alignement n'est PLUS vrai au 31 août 2026, et le dire est plus utile que de mettre un
-chiffre à jour. Le dépôt porte **34 migrations**, la production **32** telles que déclarées
-par le propriétaire du schéma — cet écart n'a pas été vérifié depuis un environnement d'agent,
-qui n'a aucun credential de production. Deux migrations sont donc au dépôt sans être
-appliquées :
+CELUI-CI vient du gate local, exécuté sans aucun credential : il prouve que les migrations du
+dépôt reconstruisent un schéma conforme DEPUIS ZÉRO. Il ne dit RIEN de la production. Seul
+`npm run db:verify`, exécuté avec des credentials de production hors environnement d'agent,
+dit l'état réel, et le contenu de référence s'extrait de
+`supabase_migrations.schema_migrations`.
 
-- `20260830154315_decision_lab_v2` ;
-- `20260831101500_company_registry_acquisition`.
-
-Aucune des deux ne dépend de l'autre. L'ordre d'application se décide avec le propriétaire du
-schéma : `npm run db:verify` distant exige la liste EXACTE des versions, et il échouera tant
-que les deux historiques diffèrent, dans les deux sens.
+La production portait **33 migrations** au dernier état communiqué par le propriétaire du
+schéma. AUCUNE des neuf migrations ci-dessus n'y est appliquée. Leur ordre d'application est
+CELUI DE LEURS NOMS et il n'est pas indifférent : la réconciliation et le volet Portfolio
+supposent que les cinq verticales sont déjà là.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
@@ -250,6 +230,19 @@ via une holding entre au patrimoine par la holding et par elle seule.
 Les mutations qui modifient la quote-part (acquisition, cession, rachat, tour de table)
 écrivent l'événement et la détention résultante atomiquement ; elles ne demandent jamais à
 l'utilisateur de maintenir deux vérités indépendantes.
+
+La fondation d'acquisition porte SEPT verticales, et leur ordre est celui de leurs
+migrations : relevé bancaire CSV, FEC, registre d'entreprises, Document Intelligence, donnée
+publique immobilière, portefeuille, Open Banking. Le rang de chacune est écrit ici et nulle
+part ailleurs : quatre paragraphes se sont annoncés « troisième verticale » parce que chaque
+verticale s'était numérotée contre une base où les autres n'existaient pas — exactement la
+dérive du compte de migrations, au même endroit et pour la même raison. Un rang, comme un
+nombre de migrations, se lit à sa source, il ne se déduit pas de ce que l'auteur avait sous
+les yeux.
+
+Ce que les verticales PARTAGENT — objets communs, conflits qu'un smoke de verticale unique ne voit
+pas, consolidations — est dans `docs/ACQUISITION_INTEGRATION.md`. Chaque verticale garde son propre
+document pour ce qui n'appartient qu'à elle.
 
 La couche d'acquisition ALIMENTE les moteurs, elle ne les remplace jamais. Elle ne classe
 aucun flux, ne recalcule aucun solde, ne rapproche aucun transfert interne et ne déclare
@@ -384,7 +377,7 @@ première : `lfo_record_business_financials` a été révisée trois fois, et la
 version d'origine supprimait son upsert et quatre colonnes. Le gate complet l'a détecté ; le
 smoke d'une seule verticale ne l'aurait pas vu.
 
-L'acquisition de DONNÉE PUBLIQUE immobilière (DVF, DPE) est la troisième verticale de cette
+L'acquisition de DONNÉE PUBLIQUE immobilière (DVF, DPE) est la cinquième verticale de cette
 fondation, et elle ne valorise RIEN d'elle-même. DVF PUBLIE LES VENTES D'AUTRUI : un jeu de
 comparables n'est pas la valeur d'un bien détenu, et aucune ligne de `real_estate_valuations`
 n'en sort sans décision humaine. UNE ADRESSE NE PROUVE PAS UNE IDENTITÉ : un immeuble porte
@@ -416,7 +409,7 @@ clé de charge optionnelle plutôt que d'ouvrir un second chemin d'écriture : P
 connaît pas de contrainte `CHECK` différable, et une seconde porte d'écriture sur une table
 canonique est une seconde vérité.
 
-L'import de PORTEFEUILLE (CSV, XLSX) est la troisième verticale de cette fondation, et elle
+L'import de PORTEFEUILLE (CSV, XLSX) est la sixième verticale de cette fondation, et elle
 n'ajoute AUCUN ledger : `portfolio_events` et `lfo_record_portfolio_event` existent, elle les
 alimente. POSITION OBSERVÉE ≠ TRANSACTION DU LEDGER : un relevé de positions dit ce qui était
 détenu à une date, pas quand ni à quel prix ; reconstruire un achat depuis une position
@@ -445,7 +438,7 @@ contrainte, lire son état RÉEL en base (`pg_get_constraintdef`) et reprendre s
 vigueur, puis nommer le successeur. Corollaire du même principe que pour les RPC : chercher la
 DERNIÈRE version, jamais la première, et ne jamais supposer qu'un nom est disponible.
 
-L'OPEN BANKING (AIS) est la troisième verticale de cette fondation, et elle l'étend SANS
+L'OPEN BANKING (AIS) est la septième verticale de cette fondation, et elle l'étend SANS
 ÉLARGIR AUCUNE WHITELIST : une synchronisation bancaire alimente le MÊME domaine cible qu'un
 relevé CSV, `CASH_FLOW_TRANSACTION`, et `import_sources.kind` prévoyait déjà `'API'`. Aucune
 colonne n'est ajoutée à une table du socle. AUCUNE INITIATION DE PAIEMENT n'existe : le

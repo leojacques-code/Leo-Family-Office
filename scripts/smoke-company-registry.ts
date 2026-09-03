@@ -169,9 +169,12 @@ try {
   );
 
   // Un NOM de variable, jamais un secret : le format refuse un jeton collé par erreur.
+  // La valeur d'essai est volontairement SANS forme de jeton réel : une fixture qui ressemble
+  // à un JWT fait échouer tous les scans de secrets à venir sur un faux positif permanent, et
+  // ce que la contrainte refuse est la FORME d'un nom de variable, pas celle d'un jeton.
   await rejects(
     `update public.external_sources set auth_mode = 'BEARER_TOKEN', credential_env_var = $2 where id = $1`,
-    [sourceId, "eyJhbGciOiJIUzI1NiJ9.abc"],
+    [sourceId, "ceci-nest-pas-un-nom-de-variable"],
     "Un jeton a pu être écrit dans le champ réservé au NOM de la variable d'environnement",
     "external_sources_credential_shape_ck",
   );

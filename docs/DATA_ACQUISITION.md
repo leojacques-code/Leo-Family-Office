@@ -186,12 +186,12 @@ que la primitive existe pour éviter.
 
 ## 7. Idempotence : deux garanties, aux deux seuls endroits démontrables
 
-| Garantie                                                                                                 | Portée                                                                                                                           |
-| -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `import_sessions_committed_file_uidx` sur `(user_id, source_id, file_hash)` où le statut est `COMMITTED` | un contenu de fichier ne se valide qu'une fois par source ; le repository refuse en plus **avant** tout dépôt au coffre          |
-| `import_normalized_records_committed_external_uidx` sur `(user_id, external_key)`                        | une identité démontrée ne s'écrit qu'une fois                                                                                    |
-| `lfo_commit_import_session` sur une session déjà validée                                                 | retourne l'identifiant sans rien réécrire                                                                                        |
-| conservation du fichier au **commit** seulement, à un chemin dérivé du SHA-256                           | une analyse abandonnée, réanalysée ou refusée ne dépose rien ; deux validations simultanées du même contenu visent le même objet |
+| Garantie                                                                                                                      | Portée                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `import_sessions_committed_file_uidx` sur `(user_id, source_id, file_hash)` où le statut est `COMMITTED`                      | un contenu de fichier ne se valide qu'une fois par source ; le repository refuse en plus **avant** tout dépôt au coffre                                                  |
+| `import_normalized_records_committed_external_v2_uidx` sur `(user_id, target_domain, external_key)` où l'état est `COMMITTED` | une identité démontrée ne s'écrit qu'une fois PAR DOMAINE CIBLE : le même identifiant de fichier peut légitimement désigner une transaction et une ligne de portefeuille |
+| `lfo_commit_import_session` sur une session déjà validée                                                                      | retourne l'identifiant sans rien réécrire                                                                                                                                |
+| conservation du fichier au **commit** seulement, à un chemin dérivé du SHA-256                                                | une analyse abandonnée, réanalysée ou refusée ne dépose rien ; deux validations simultanées du même contenu visent le même objet                                         |
 
 Il n'existe **délibérément aucune** contrainte d'unicité sur la clé de rapprochement. Ce
 n'est pas un manque : une unicité sur `(compte, date, montant, devise, libellé)` refuserait

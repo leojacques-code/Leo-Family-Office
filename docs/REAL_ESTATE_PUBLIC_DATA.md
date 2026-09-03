@@ -16,13 +16,13 @@ signifier « zone non publiée ».
 
 Toute la conception découle de ces trois phrases.
 
-| Ce qu'on pourrait croire | Ce que la verticale fait |
-| --- | --- |
-| DVF valorise mon bien | DVF produit des faits sur d'autres transactions. Une valeur n'apparaît qu'après une décision humaine, sous une convention nommée |
-| Une adresse identique prouve l'identité du bien | Elle produit une ressemblance forte, plafonnée à une confiance MOYENNE, à trancher par un humain avec un motif écrit |
-| Zéro résultat = aucune vente | Zéro résultat + couverture déclarée = information. Zéro résultat + couverture inconnue = silence |
-| Un DPE ancien est périmé | La fin de validité est **lue**. Absente, elle reste inconnue : elle n'est jamais déduite d'une règle absente du dépôt |
-| Une consommation donne une étiquette | Non : la conversion suppose une grille et une zone climatique. `ÉTIQUETTE ABSENTE ≠ ÉTIQUETTE G` |
+| Ce qu'on pourrait croire                        | Ce que la verticale fait                                                                                                         |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| DVF valorise mon bien                           | DVF produit des faits sur d'autres transactions. Une valeur n'apparaît qu'après une décision humaine, sous une convention nommée |
+| Une adresse identique prouve l'identité du bien | Elle produit une ressemblance forte, plafonnée à une confiance MOYENNE, à trancher par un humain avec un motif écrit             |
+| Zéro résultat = aucune vente                    | Zéro résultat + couverture déclarée = information. Zéro résultat + couverture inconnue = silence                                 |
+| Un DPE ancien est périmé                        | La fin de validité est **lue**. Absente, elle reste inconnue : elle n'est jamais déduite d'une règle absente du dépôt            |
+| Une consommation donne une étiquette            | Non : la conversion suppose une grille et une zone climatique. `ÉTIQUETTE ABSENTE ≠ ÉTIQUETTE G`                                 |
 
 ## 2. Chaîne
 
@@ -41,24 +41,24 @@ Aucune flèche n'est automatique après la troisième. C'est le point.
 
 ## 3. Ce que la base garantit
 
-| Invariant | Porté par |
-| --- | --- |
-| Un adaptateur de domaine a un provider, une version et une fraîcheur déclarée | `external_sources_shape_ck` |
-| Un seul adaptateur par provider et par propriétaire | `external_sources_provider_uk` |
-| Un échec porte son code et zéro ligne ; un vide n'en porte pas | `real_estate_data_snapshots_failure_shape_ck` |
-| `RÉSULTAT VIDE ≠ RÉSULTAT OBTENU` | `real_estate_data_snapshots_empty_shape_ck` |
-| Une fraîcheur nulle ou inversée est refusée | `real_estate_data_snapshots_stale_ck` |
-| Le contenu lu est immuable et l'instantané non supprimable | trigger `real_estate_snapshot_frozen` |
-| Une ligne lue ne se supprime pas isolément, son brut ne se récrit pas | trigger `real_estate_public_row_frozen` |
-| `SURFACE ABSENTE ≠ SURFACE NULLE` | `real_estate_comparable_sales_built_area_ck` |
-| `VALEUR SANS UNITÉ = NON INTERPRÉTABLE` | `..._energy_unit_ck`, `..._ghg_unit_ck` |
-| `ÉTIQUETTE ABSENTE ≠ ÉTIQUETTE G` | `..._energy_label_ck`, `..._ghg_label_ck` |
-| Une validité antérieure à l'établissement est refusée, jamais corrigée | `..._validity_ck` |
-| Un rapprochement accepté porte une base nommée et une date | `property_public_data_matches_accept_shape_ck` |
-| Accepter un rapprochement FAIBLE exige un motif écrit | `property_public_data_matches_weak_accept_ck` |
+| Invariant                                                                       | Porté par                                              |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Un adaptateur de domaine a un provider, une version et une fraîcheur déclarée   | `external_sources_shape_v2_ck`                         |
+| Un seul adaptateur par domaine, provider et propriétaire                        | `external_sources_domain_provider_uk`                  |
+| Un échec porte son code et zéro ligne ; un vide n'en porte pas                  | `real_estate_data_snapshots_failure_shape_ck`          |
+| `RÉSULTAT VIDE ≠ RÉSULTAT OBTENU`                                               | `real_estate_data_snapshots_empty_shape_ck`            |
+| Une fraîcheur nulle ou inversée est refusée                                     | `real_estate_data_snapshots_stale_ck`                  |
+| Le contenu lu est immuable et l'instantané non supprimable                      | trigger `real_estate_snapshot_frozen`                  |
+| Une ligne lue ne se supprime pas isolément, son brut ne se récrit pas           | trigger `real_estate_public_row_frozen`                |
+| `SURFACE ABSENTE ≠ SURFACE NULLE`                                               | `real_estate_comparable_sales_built_area_ck`           |
+| `VALEUR SANS UNITÉ = NON INTERPRÉTABLE`                                         | `..._energy_unit_ck`, `..._ghg_unit_ck`                |
+| `ÉTIQUETTE ABSENTE ≠ ÉTIQUETTE G`                                               | `..._energy_label_ck`, `..._ghg_label_ck`              |
+| Une validité antérieure à l'établissement est refusée, jamais corrigée          | `..._validity_ck`                                      |
+| Un rapprochement accepté porte une base nommée et une date                      | `property_public_data_matches_accept_shape_ck`         |
+| Accepter un rapprochement FAIBLE exige un motif écrit                           | `property_public_data_matches_weak_accept_ck`          |
 | Un seul rapprochement ouvert, et un seul accepté courant, par cible et par bien | index partiels `..._open_*_uidx`, `..._current_*_uidx` |
-| Un chiffre dérivé porte sa convention, sa preuve et son décompte | `real_estate_valuations_comparable_shape_ck` |
-| Un instantané public ne peut pas justifier une expertise notariale | `real_estate_valuations_snapshot_method_ck` |
+| Un chiffre dérivé porte sa convention, sa preuve et son décompte                | `real_estate_valuations_comparable_shape_ck`           |
+| Un instantané public ne peut pas justifier une expertise notariale              | `real_estate_valuations_snapshot_method_ck`            |
 
 `record_count` est **dérivé** des lignes réellement persistées, jamais repris d'un décompte
 fourni par l'appelant. Même doctrine que Σdébits = Σcrédits par écriture du FEC.
@@ -130,7 +130,7 @@ l'environnement** (`CONNECT … 403` par le proxy, vérifié). Conséquences, é
 masquées :
 
 - **aucune lecture réelle de DVF ou de DPE n'a été effectuée.** La forme des paramètres et des
-  réponses est donc *configurable* et non codée en dur : `DVF_API_BASE_URL` et
+  réponses est donc _configurable_ et non codée en dur : `DVF_API_BASE_URL` et
   `DPE_API_BASE_URL` sont vides par défaut, et un adaptateur non configuré rend
   `NOT_SERVED` — une **capacité non servie**, jamais une absence de donnée ;
 - les noms de champ sont tentés dans l'ordre parmi plusieurs graphies documentées, et un
@@ -177,17 +177,17 @@ d'écriture sur `real_estate_valuations`.
 
 ## 10. Fichiers
 
-| Rôle | Chemin |
-| --- | --- |
-| Schéma | `supabase/migrations/20260831171500_real_estate_public_data.sql` |
-| Transport borné | `src/lib/acquisition/transport.ts` |
-| Adresses | `src/lib/acquisition/address.ts` |
-| Contrat d'adaptateur | `src/lib/acquisition/realestate/types.ts` |
-| Lecteurs défensifs | `src/lib/acquisition/realestate/read.ts` |
-| Adaptateurs | `src/lib/acquisition/realestate/{dvf,dpe,fixture-provider}.ts` |
-| Rapprochement | `src/lib/acquisition/realestate/match.ts` |
-| Moteur d'estimation | `src/lib/engine/real-estate-market.ts` |
-| Repository | `src/lib/data/public-data-repository.ts` |
-| Route | `src/app/api/real-estate/public-data/route.ts` |
-| Écran | `src/components/pages/imports/public-data-section.tsx` |
-| Smoke | `scripts/smoke-real-estate-public-data.ts` |
+| Rôle                 | Chemin                                                           |
+| -------------------- | ---------------------------------------------------------------- |
+| Schéma               | `supabase/migrations/20260831171500_real_estate_public_data.sql` |
+| Transport borné      | `src/lib/acquisition/transport.ts`                               |
+| Adresses             | `src/lib/acquisition/address.ts`                                 |
+| Contrat d'adaptateur | `src/lib/acquisition/realestate/types.ts`                        |
+| Lecteurs défensifs   | `src/lib/acquisition/realestate/read.ts`                         |
+| Adaptateurs          | `src/lib/acquisition/realestate/{dvf,dpe,fixture-provider}.ts`   |
+| Rapprochement        | `src/lib/acquisition/realestate/match.ts`                        |
+| Moteur d'estimation  | `src/lib/engine/real-estate-market.ts`                           |
+| Repository           | `src/lib/data/public-data-repository.ts`                         |
+| Route                | `src/app/api/real-estate/public-data/route.ts`                   |
+| Écran                | `src/components/pages/imports/public-data-section.tsx`           |
+| Smoke                | `scripts/smoke-real-estate-public-data.ts`                       |
