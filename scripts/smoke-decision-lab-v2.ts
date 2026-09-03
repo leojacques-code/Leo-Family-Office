@@ -116,6 +116,46 @@ try {
   );
   assert(saved.rows[0]?.id === runId, "Le Decision Run n'a pas été persisté");
 
+  // A caller cannot attach a run or version to another tenant's case, even through
+  // the privileged write RPC. These checks exercise the actual PostgreSQL constraints.
+  for (const [sql, values] of [
+    [
+      "select public.lfo_save_decision_run_v2($1,$2,$3,$4::jsonb,$5::jsonb,$6::timestamptz)",
+      [
+        other,
+        caseId,
+        1,
+        JSON.stringify({ ...run, id: "00000000-0000-4000-8000-000000000202" }),
+        JSON.stringify({ completeness: "READY" }),
+        now,
+      ],
+    ],
+    [
+      "insert into public.decision_case_versions(user_id, case_id, version, payload) values ($1,$2,2,$3::jsonb)",
+      [other, caseId, JSON.stringify({ ...definition, version: 2 })],
+    ],
+  ] as const) {
+    await client.query("savepoint cross_user_association");
+    let rejected = false;
+    try {
+      await client.query(sql, [...values]);
+    } catch {
+      rejected = true;
+      await client.query("rollback to savepoint cross_user_association");
+    }
+    assert(rejected, "Association inter-utilisateur acceptée");
+  }
+  const reloaded = await client.query<{ run_snapshot: unknown; payload: unknown }>(
+    "select r.run_snapshot, v.payload from public.decision_runs r join public.decision_case_versions v on v.case_id = r.case_id and v.version = r.case_version and v.user_id = r.user_id where r.id = $1 and r.user_id = $2",
+    [runId, owner],
+  );
+  assert(reloaded.rows.length === 1, "Le run et sa version ne sont pas rechargeables");
+  assert((reloaded.rows[0].run_snapshot as typeof run).id === runId, "Mauvais run rechargé");
+  assert(
+    (reloaded.rows[0].payload as typeof definition).version === 1,
+    "Mauvaise version rechargée",
+  );
+
   for (const statement of [
     "update public.decision_case_versions set payload = payload where case_id = $1",
     "delete from public.decision_runs where case_id = $1",

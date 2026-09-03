@@ -6,7 +6,7 @@ import { useState } from "react";
 import {
   AreaChart, BriefcaseBusiness, Building2, CalendarRange, ChevronDown, CircleDollarSign, Download,
   FlaskConical, FolderLock, Landmark, LayoutDashboard, LogOut, Menu, Moon, Network, ReceiptText,
-  RefreshCw, Settings2, ShieldCheck, Sparkles, Sun, Target, TrendingUp, WalletCards, X,
+  RefreshCw, Settings2, ShieldCheck, Sparkles, Sun, Target, TrendingUp, WalletCards, X, FileText,
   type LucideIcon,
 } from "lucide-react";
 import type { DashboardState, ProjectionEnvelope } from "@/lib/types";
@@ -30,6 +30,7 @@ const ICONS: Record<string, LucideIcon> = {
   "scenarios": AreaChart,
   "decision-lab": FlaskConical,
   "goals": Target,
+  "reports": FileText,
   "documents": FolderLock,
   "timeline": CalendarRange,
   "settings": Settings2,
