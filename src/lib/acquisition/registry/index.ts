@@ -14,7 +14,10 @@
  */
 
 export * from "./types";
-export * from "./siren";
+// SIREN : module PARTAGÉ. Une liasse fiscale, un registre d'entreprises et un jeu de
+// comptes annuels parlent du même identifiant, et deux lectures divergentes du même numéro
+// seraient une seconde vérité sur l'identité d'une société.
+export * from "@/lib/acquisition/siren";
 export * from "./normalize";
 export * from "./transport";
 export * from "./diff";

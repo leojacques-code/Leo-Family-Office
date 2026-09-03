@@ -19,7 +19,7 @@
  */
 
 import { registryIssue, type CompanyRegistryProfileCandidate, type RegistryIssue } from "./types";
-import { readSiren, readSiret } from "./siren";
+import { readSiren, readSiret } from "@/lib/acquisition/siren";
 
 /** Navigation sûre dans un objet inconnu. */
 export function pick(source: unknown, key: string): unknown {

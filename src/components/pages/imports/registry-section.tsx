@@ -5,7 +5,7 @@ import { Building2, Clock, Link2, Search } from "lucide-react";
 
 import { Callout, EmptyState } from "@/components/ui";
 import { NOT_COMPUTABLE, formatDate } from "@/components/pages/shared";
-import { formatSiren } from "@/lib/acquisition/registry/siren";
+import { formatSiren } from "@/lib/acquisition/siren";
 import type {
   RegistryFieldSkip,
   RegistryIssue,

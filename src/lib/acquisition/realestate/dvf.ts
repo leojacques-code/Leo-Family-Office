@@ -24,7 +24,15 @@
  * forme d'une API qu'on n'a pas pu appeler produirait une certitude sans preuve.
  */
 
-import { fetchJson, TokenBucket, type TransportOptions } from "@/lib/acquisition/transport";
+// Transport UNIQUE de la couche d'acquisition. Cette verticale avait sa propre
+// implémentation ; elles sont fusionnées, et celle-ci gagne au passage la lecture de
+// corps protégée et le quota par connexion avec plafond d'attente.
+import {
+  callJson,
+  DEFAULT_TRANSPORT,
+  RateLimiter,
+  type TransportConfig,
+} from "@/lib/acquisition/transport";
 
 import {
   readArea,
@@ -268,13 +276,19 @@ function queryString(query: PublicDataQuery): Record<string, string> {
 export function createDvfProvider(options: {
   baseUrl: string;
   datasetVersion?: string | null;
-  transport?: TransportOptions;
+  transport?: Partial<TransportConfig>;
 }): PublicDataProvider {
   const descriptor = dvfDescriptor({
     baseUrl: options.baseUrl,
     datasetVersion: options.datasetVersion ?? null,
   });
-  const limiter = new TokenBucket(descriptor.rateLimitPerMinute);
+  const transport: TransportConfig = {
+    ...DEFAULT_TRANSPORT,
+    fetchImpl: fetch,
+    rateLimitPerMinute: descriptor.rateLimitPerMinute,
+    ...(options.transport ?? {}),
+  };
+  const limiter = new RateLimiter(transport.rateLimitPerMinute, transport.clock);
 
   return {
     descriptor,
@@ -311,9 +325,9 @@ export function createDvfProvider(options: {
       }
 
       const url = `${descriptor.baseUrl}?${new URLSearchParams(params).toString()}`;
-      const result = await fetchJson(url, { limiter, ...(options.transport ?? {}) });
+      const result = await callJson({ url }, transport, limiter);
 
-      if (!result.ok) {
+      if (result.errorCode !== null) {
         return {
           descriptor,
           query: params,
@@ -324,21 +338,21 @@ export function createDvfProvider(options: {
           rawText: "",
           sales: [],
           certificates: [],
-          errorCode: result.code,
-          errorMessage: result.message,
+          errorCode: result.errorCode,
+          errorMessage: result.errorMessage,
           issues: [
             publicDataIssue(
               "TRANSPORT_FAILURE",
               "ERROR",
               null,
               null,
-              `Lecture DVF impossible (${result.code}) : ${result.message}. Ce n'est pas une absence de mutations`,
+              `Lecture DVF impossible (${result.errorCode}) : ${result.errorMessage}. Ce n'est pas une absence de mutations`,
             ),
           ],
         } satisfies PublicDataFetch;
       }
 
-      const rows = readRecordArray(result.body, RECORD_KEYS, issues);
+      const rows = readRecordArray(result.payload, RECORD_KEYS, issues);
       if (rows === null) {
         return {
           descriptor,
