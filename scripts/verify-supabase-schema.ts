@@ -44,6 +44,8 @@ const canonicalMigrations = [
   "20260829234053",
   "20260829234259",
   "20260830154315",
+  "20260903120000",
+  "20260903120500",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -858,6 +860,18 @@ const userOwnedTables = [
   "goal_versions",
   "decision_case_versions",
   "decision_runs",
+  // Open Banking (AIS), lecture seule.
+  "bank_providers",
+  "bank_institutions",
+  "bank_consents",
+  "bank_provider_accounts",
+  "bank_sync_cursors",
+  "bank_sync_runs",
+  "bank_sync_raw_pages",
+  "bank_observed_transactions",
+  "bank_balance_observations",
+  "bank_reconciliation_decisions",
+  "bank_sync_events",
 ] as const;
 
 const requiredIndexes = [
@@ -1001,6 +1015,33 @@ const requiredIndexes = [
   "decision_case_versions_case_owner_fk_idx",
   "decision_runs_user_case_created_idx",
   "decision_runs_case_version_idx",
+  // Open Banking — les trois unicités qui portent un invariant, pas une optimisation.
+  "bank_provider_accounts_canonical_uidx",
+  "bank_observed_transactions_identity_uidx",
+  "bank_observed_transactions_committed_uidx",
+  "bank_reconciliation_decisions_transaction_uidx",
+  "bank_sync_runs_running_uidx",
+  // Cibles de clés étrangères composées.
+  "bank_providers_id_user_uidx",
+  "bank_institutions_id_user_uidx",
+  "bank_consents_id_user_uidx",
+  "bank_provider_accounts_id_user_uidx",
+  "bank_sync_cursors_id_user_uidx",
+  "bank_sync_runs_id_user_uidx",
+  "bank_sync_raw_pages_id_user_uidx",
+  "bank_observed_transactions_id_user_uidx",
+  "bank_balance_observations_id_user_uidx",
+  "bank_reconciliation_decisions_id_user_uidx",
+  "bank_sync_events_id_user_uidx",
+  // Index de clés étrangères Open Banking. L'ORDRE des colonnes décide : une unicité
+  // `(user_id, cible)` porte son invariant, pas la clé étrangère `(cible, user_id)`.
+  "bank_institutions_canonical_fk_idx",
+  "bank_provider_accounts_account_fk_idx",
+  "bank_sync_cursors_account_fk_idx",
+  "bank_sync_raw_pages_account_fk_idx",
+  "bank_sync_raw_pages_session_fk_idx",
+  "bank_reconciliation_decisions_observation_fk_idx",
+  "bank_reconciliation_decisions_transaction_fk_idx",
 ] as const;
 const forbiddenIndexes = [
   "net_worth_snapshot_items_owner_snapshot_idx",
@@ -1016,6 +1057,8 @@ const requiredTriggers = [
   "goals_v2_update_guard",
   "decision_case_versions_immutable",
   "decision_runs_immutable",
+  "bank_sync_raw_pages_immutable",
+  "bank_observed_transactions_frozen",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1026,6 +1069,8 @@ const requiredTriggerFunctions = [
   "lfo_guard_goal_version_update",
   "lfo_guard_goal_v2_update",
   "lfo_guard_decision_snapshot_immutable",
+  "bank_sync_raw_page_immutable",
+  "bank_observed_transaction_frozen",
 ] as const;
 
 const requiredConstraints = [
@@ -1291,6 +1336,30 @@ const requiredConstraints = [
   "decision_runs_stale_ck",
   "decision_runs_completeness_ck",
   "decision_runs_snapshot_ck",
+  // Open Banking — chaque contrainte porte une distinction que le code seul ne tiendrait pas.
+  "bank_providers_secret_shape_ck",
+  "bank_providers_secret_reference_ck",
+  "bank_providers_auth_secret_ck",
+  "bank_consents_scopes_ck",
+  "bank_consents_expiry_shape_ck",
+  "bank_consents_active_shape_ck",
+  "bank_consents_revoked_shape_ck",
+  "bank_consents_expired_shape_ck",
+  "bank_consents_secret_shape_ck",
+  "bank_provider_accounts_mapping_shape_ck",
+  "bank_sync_runs_failure_shape_ck",
+  "bank_sync_runs_finished_shape_ck",
+  "bank_sync_runs_complete_shape_ck",
+  "bank_sync_raw_pages_hash_ck",
+  "bank_observed_transactions_original_shape_ck",
+  "bank_observed_transactions_cancelled_ck",
+  "bank_balance_observations_shape_ck",
+  "bank_balance_observations_observation_uk",
+  "bank_reconciliation_decisions_shape_ck",
+  "bank_reconciliation_decisions_observation_uk",
+  "bank_sync_events_event_uk",
+  "bank_sync_events_processed_shape_ck",
+  "bank_sync_events_unverified_ck",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
@@ -1386,6 +1455,20 @@ const requiredRpcs: Record<string, string> = {
     "p_user_id uuid, p_case_id uuid, p_expected_version integer, p_definition jsonb, p_updated_at timestamp with time zone",
   lfo_save_decision_run_v2:
     "p_user_id uuid, p_case_id uuid, p_case_version integer, p_run jsonb, p_result jsonb, p_now timestamp with time zone",
+  // Open Banking (AIS), lecture seule. Aucune primitive d'initiation de paiement n'existe.
+  lfo_register_bank_provider: "p_user_id uuid, p_payload jsonb",
+  lfo_open_bank_consent: "p_user_id uuid, p_payload jsonb",
+  lfo_set_bank_consent_status: "p_user_id uuid, p_payload jsonb",
+  lfo_sync_bank_accounts: "p_user_id uuid, p_payload jsonb",
+  lfo_map_bank_account: "p_user_id uuid, p_payload jsonb",
+  lfo_open_bank_sync_run: "p_user_id uuid, p_payload jsonb",
+  lfo_append_bank_sync_page: "p_user_id uuid, p_payload jsonb",
+  lfo_record_bank_balances: "p_user_id uuid, p_payload jsonb",
+  lfo_finalize_bank_sync_run: "p_user_id uuid, p_payload jsonb",
+  lfo_fail_bank_sync_run: "p_user_id uuid, p_payload jsonb",
+  lfo_decide_bank_reconciliation: "p_user_id uuid, p_payload jsonb",
+  lfo_commit_bank_sync_session: "p_user_id uuid, p_payload jsonb",
+  lfo_record_bank_sync_event: "p_user_id uuid, p_payload jsonb",
 };
 
 /**
@@ -1414,6 +1497,14 @@ const declaredReturnTypeRpcs: Record<string, string> = {
   lfo_set_goal_status_v2: "integer",
   lfo_validate_decision_case_version_v2: "void",
   lfo_save_decision_case_version_v2: "integer",
+  // Décomptes DÉRIVÉS des lignes persistées : comptes vus, lignes écrites, soldes écrits,
+  // lignes touchées par une décision, faits validés.
+  lfo_sync_bank_accounts: "integer",
+  lfo_append_bank_sync_page: "integer",
+  lfo_record_bank_balances: "integer",
+  lfo_finalize_bank_sync_run: "integer",
+  lfo_decide_bank_reconciliation: "integer",
+  lfo_commit_bank_sync_session: "integer",
 };
 
 /**
@@ -1438,6 +1529,20 @@ const readOnlyAuditTables = [
   "goal_versions",
   "decision_case_versions",
   "decision_runs",
+  // Les onze tables Open Banking sont une piste d'audit : une observation modifiable par le
+  // client n'est plus une observation, et un événement de notification effaçable rouvrirait
+  // le rejeu que son unicité existe pour refuser.
+  "bank_providers",
+  "bank_institutions",
+  "bank_consents",
+  "bank_provider_accounts",
+  "bank_sync_cursors",
+  "bank_sync_runs",
+  "bank_sync_raw_pages",
+  "bank_observed_transactions",
+  "bank_balance_observations",
+  "bank_reconciliation_decisions",
+  "bank_sync_events",
 ] as const;
 
 const storagePolicies = [
@@ -1680,6 +1785,63 @@ try {
     if (rpc.authenticated_execute) failures.push(`RPC exécutable par authenticated : ${rpc.name}`);
     if (!rpc.service_role_execute)
       failures.push(`RPC non exécutable par service_role : ${rpc.name}`);
+  }
+
+  // Le garde-fou des pages brutes Open Banking lit l'existence d'une exécution
+  // INDÉPENDAMMENT de la visibilité RLS de l'appelant : SESSION ABSENTE ≠ SESSION INVISIBLE.
+  // C'est la seule fonction SECURITY DEFINER de cette verticale, et elle n'est PAS une RPC
+  // `lfo_*` — le contrat « aucune RPC lfo_* en SECURITY DEFINER » vérifié ci-dessus reste
+  // donc entier. Ses conditions sont contrôlées une par une : une seule relâchée
+  // transformerait un garde-fou en surface d'attaque.
+  const freezeState = await client.query<{
+    security_definer: boolean;
+    result_type: string;
+    arguments: string;
+    volatility: string;
+    settings: string[] | null;
+    anon_execute: boolean;
+    authenticated_execute: boolean;
+    public_execute: boolean;
+    service_role_execute: boolean;
+  }>(
+    `select proc.prosecdef as security_definer,
+            pg_catalog.pg_get_function_result(proc.oid) as result_type,
+            pg_catalog.pg_get_function_arguments(proc.oid) as arguments,
+            proc.provolatile::text as volatility,
+            proc.proconfig as settings,
+            pg_catalog.has_function_privilege('anon', proc.oid, 'execute') as anon_execute,
+            pg_catalog.has_function_privilege('authenticated', proc.oid, 'execute') as authenticated_execute,
+            pg_catalog.has_function_privilege('public', proc.oid, 'execute') as public_execute,
+            pg_catalog.has_function_privilege('service_role', proc.oid, 'execute') as service_role_execute
+       from pg_catalog.pg_proc proc
+       join pg_catalog.pg_namespace ns on ns.oid = proc.pronamespace
+      where ns.nspname = 'public' and proc.proname = 'bank_sync_freeze_state'`,
+  );
+  const freeze = freezeState.rows[0];
+  if (!freeze) failures.push("Fonction absente : public.bank_sync_freeze_state");
+  else {
+    if (!freeze.security_definer)
+      failures.push(
+        "bank_sync_freeze_state n'est pas SECURITY DEFINER : elle redeviendrait aveugle sous RLS",
+      );
+    if (freeze.arguments !== "p_run_id uuid, p_user_id uuid")
+      failures.push(`Signature invalide : bank_sync_freeze_state(${freeze.arguments})`);
+    if (freeze.result_type !== "text")
+      failures.push(`Type de retour invalide : bank_sync_freeze_state -> ${freeze.result_type}`);
+    // `s` = stable. Une fonction de garde-fou ne doit rien écrire.
+    if (freeze.volatility !== "s")
+      failures.push("bank_sync_freeze_state doit rester stable, sans écriture");
+    if (!freeze.settings?.some((setting) => setting === 'search_path=""'))
+      failures.push("search_path non verrouillé : bank_sync_freeze_state");
+    for (const [role, granted] of [
+      ["anon", freeze.anon_execute],
+      ["authenticated", freeze.authenticated_execute],
+      ["public", freeze.public_execute],
+    ] as const)
+      if (granted)
+        failures.push(`bank_sync_freeze_state exécutable par ${role} : surface interdite`);
+    if (!freeze.service_role_execute)
+      failures.push("bank_sync_freeze_state non exécutable par service_role");
   }
 
   const buckets = await client.query<{
