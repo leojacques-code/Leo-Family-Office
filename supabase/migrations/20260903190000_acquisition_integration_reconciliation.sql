@@ -349,3 +349,17 @@ create unique index if not exists import_normalized_records_committed_external_v
 create index if not exists import_normalized_records_external_key_idx
   on public.import_normalized_records(user_id, target_domain, external_key)
   where external_key is not null;
+
+-- ---------------------------------------------------------------------------
+-- 7. Un invariant, un objet : l'index redondant part
+-- ---------------------------------------------------------------------------
+-- `external_sources_domain_provider_uidx`, index unique PARTIEL sur
+-- (utilisateur, domaine, fournisseur), et `external_sources_domain_provider_uk`, contrainte
+-- unique sur les mêmes colonnes, portaient le MÊME invariant. Deux objets pour un invariant
+-- ne le renforcent pas : ils rendent le refus imprévisible, et c'est le smoke d'intégration
+-- qui l'a montré en obtenant le refus du mauvais des deux.
+--
+-- La CONTRAINTE est conservée, l'index part. Ce n'est pas un choix esthétique : `on conflict`
+-- ne peut pas inférer un index partiel sans répéter son prédicat, et la RPC de la donnée
+-- publique s'appuie sur cette inférence. La contrainte, elle, s'infère par ses colonnes.
+drop index if exists public.external_sources_domain_provider_uidx;

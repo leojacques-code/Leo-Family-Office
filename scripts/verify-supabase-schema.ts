@@ -1309,7 +1309,6 @@ const requiredIndexes = [
   // et la même participation serait comptée deux fois.
   "businesses_siren_uidx",
   "external_sources_id_user_uidx",
-  "external_sources_domain_provider_uidx",
   "external_sources_user_idx",
   "company_registry_snapshots_id_user_uidx",
   "company_registry_snapshots_siren_idx",
