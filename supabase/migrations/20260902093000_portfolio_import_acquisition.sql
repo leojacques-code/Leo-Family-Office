@@ -393,6 +393,13 @@ alter table public.import_record_links drop constraint if exists import_record_l
 alter table public.import_record_links drop constraint if exists import_record_links_domain_v2_ck;
 alter table public.import_record_links drop constraint if exists import_record_links_target_ck;
 alter table public.import_record_links drop constraint if exists import_record_links_target_v2_ck;
+-- INTÉGRATION : `_v3_ck` peut déjà exister, posée par la verticale documentaire, qui a
+-- choisi le même numéro de version parce qu'elle a été écrite sur la même base que
+-- celle-ci. Le nom d'une contrainte n'est pas un numéro de version libre : sans ce
+-- `drop … if exists`, la migration ABORTE au replay. La forme finale, union de tous les
+-- domaines cibles, est posée par la migration de réconciliation d'intégration.
+alter table public.import_record_links drop constraint if exists import_record_links_domain_v3_ck;
+alter table public.import_record_links drop constraint if exists import_record_links_target_v3_ck;
 alter table public.import_record_links add constraint import_record_links_domain_v3_ck
   check (
     target_domain in (

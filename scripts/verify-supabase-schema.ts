@@ -51,6 +51,7 @@ const canonicalMigrations = [
   "20260903090000",
   "20260903120000",
   "20260903120500",
+  "20260903190000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -1157,6 +1158,12 @@ const userOwnedTables = [
 ] as const;
 
 const requiredIndexes = [
+  // ── Réconciliation d'intégration ────────────────────────────────────────────────────
+  // Unicité de l'identité démontrée dans le staging : à la VALIDATION, jamais à la LECTURE.
+  // Elle remplace deux index concurrents — celui du socle, sans domaine, et celui de la
+  // verticale portefeuille, qui interdisait de RELIRE une identité déjà validée.
+  "import_normalized_records_committed_external_v2_uidx",
+  "import_normalized_records_external_key_idx",
   "scenarios_id_user_uidx",
   "scenario_versions_id_user_uidx",
   "simulation_runs_id_user_uidx",
@@ -1227,7 +1234,6 @@ const requiredIndexes = [
   "import_raw_records_id_user_uidx",
   "import_raw_records_session_idx",
   "import_normalized_records_match_key_idx",
-  "import_normalized_records_committed_external_uidx",
   "import_normalized_records_id_user_uidx",
   "import_normalized_records_session_idx",
   "import_normalized_records_raw_idx",
@@ -1377,7 +1383,6 @@ const requiredIndexes = [
   "portfolio_events_id_user_uidx",
   "import_normalized_records_event_uidx",
   "import_normalized_records_snapshot_uidx",
-  "import_normalized_records_external_key_uidx",
   "import_instrument_resolutions_id_user_uidx",
   "import_instrument_resolutions_key_uidx",
   // Open Banking — les trois unicités qui portent un invariant, pas une optimisation.
@@ -1448,6 +1453,24 @@ const requiredTriggerFunctions = [
 ] as const;
 
 const requiredConstraints = [
+  // ── Réconciliation d'intégration ────────────────────────────────────────────────────
+  // Formes FINALES des contraintes partagées par plusieurs verticales. Elles remplacent des
+  // noms que deux migrations écrites en parallèle avaient choisis identiques :
+  //   external_sources_domain_ck        → external_sources_domain_v2_ck
+  //   external_sources_shape_ck         ┐
+  //   external_sources_declared_shape_ck┘→ external_sources_shape_v2_ck (par DOMAINE)
+  //   import_record_links_domain_v3_ck  → ..._domain_v4_ck
+  //   import_record_links_target_v3_ck  → ..._target_v4_ck
+  //   import_upload_tickets_domain_v2_ck→ ..._domain_v3_ck
+  // Exiger un prédécesseur ferait échouer le gate sur une contrainte qui n'existe plus ;
+  // ne pas exiger le successeur laisserait un rétrécissement muet passer.
+  "external_sources_domain_v2_ck",
+  "external_sources_shape_v2_ck",
+  "external_sources_capabilities_v2_ck",
+  "external_sources_domain_provider_uk",
+  "import_record_links_domain_v4_ck",
+  "import_record_links_target_v4_ck",
+  "import_upload_tickets_domain_v3_ck",
   "scenarios_status_ck",
   "scenarios_archive_shape_ck",
   "simulation_runs_mode_ck",
@@ -1706,13 +1729,10 @@ const requiredConstraints = [
   // Chaque contrainte listée porte un invariant qu'aucun contrôle applicatif ne peut
   // garantir sous concurrence.
   "businesses_siren_shape_ck",
-  "external_sources_domain_ck",
-  "external_sources_declared_shape_ck",
   "external_sources_auth_mode_ck",
   // Un NOM de variable d'environnement, jamais un secret collé par erreur.
   "external_sources_credential_ck",
   "external_sources_credential_shape_ck",
-  "external_sources_capabilities_ck",
   "external_sources_declared_status_ck",
   "external_sources_quota_ck",
   "company_registry_snapshots_source_fk",
@@ -1820,17 +1840,12 @@ const requiredConstraints = [
   "document_extraction_checks_tolerance_ck",
   "document_extraction_checks_operands_ck",
   "import_upload_tickets_run_fk",
-  "import_upload_tickets_domain_v2_ck",
   "import_upload_tickets_single_target_ck",
   "import_record_links_run_fk",
   "import_record_links_run_uk",
   // Les noms remplacés — `import_record_links_domain_v2_ck`, `..._target_v2_ck` et
   // `import_upload_tickets_domain_ck` — ne figurent PLUS dans cette liste : une contrainte
   // remplacée qu'on continue d'exiger ferait échouer le gate sur une base à jour.
-  "import_record_links_domain_v3_ck",
-  "import_record_links_target_v3_ck",
-  "external_sources_shape_ck",
-  "external_sources_provider_uk",
   "real_estate_data_snapshots_dataset_ck",
   "real_estate_data_snapshots_coverage_ck",
   "real_estate_data_snapshots_status_ck",
@@ -1879,14 +1894,6 @@ const requiredConstraints = [
   "import_instrument_resolutions_resolved_shape_ck",
   "import_instrument_resolutions_rejected_shape_ck",
   "import_instrument_resolutions_pending_shape_ck",
-  "real_estate_valuations_method_ck",
-  "import_sources_domain_v2_ck",
-  "import_sources_domain_shape_v2_ck",
-  "import_normalized_records_domain_ck",
-  "import_normalized_records_ready_shape_ck",
-  "import_record_links_domain_v2_ck",
-  "import_record_links_target_v2_ck",
-  "import_upload_tickets_domain_ck",
   // Open Banking — chaque contrainte porte une distinction que le code seul ne tiendrait pas.
   "bank_providers_secret_shape_ck",
   "bank_providers_secret_reference_ck",

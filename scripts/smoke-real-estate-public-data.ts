@@ -194,32 +194,77 @@ try {
     "provider",
   );
 
+  // `capabilities` est renseignée à l'objet vide : sinon le défaut `[]` de la colonne — hérité
+  // de la verticale du registre d'entreprises — ferait refuser la ligne par le contrôle de
+  // FORME des capacités, et non par celui de la fraîcheur que ce test vise.
   await rejects(
     `insert into public.external_sources
-       (id, user_id, name, source_type, status, domain, provider, adapter_version)
-     values ($1, $2, 'Sans fraicheur', 'PUBLIC_DATA', 'ACTIVE', 'REAL_ESTATE_PUBLIC_DATA', 'X', '1')`,
+       (id, user_id, name, source_type, status, domain, provider, adapter_version, capabilities)
+     values ($1, $2, 'Sans fraicheur', 'PUBLIC_DATA', 'ACTIVE', 'REAL_ESTATE_PUBLIC_DATA', 'X', '1', '{}'::jsonb)`,
     [randomUUID(), userId],
     "Un adaptateur de domaine sans durée de fraîcheur a pu être créé",
-    "external_sources_shape_ck",
+    "external_sources_shape_v2_ck",
   );
 
   await rejects(
     `insert into public.external_sources
-       (id, user_id, name, source_type, status, domain, provider, snapshot_ttl_minutes)
-     values ($1, $2, 'Sans version', 'PUBLIC_DATA', 'ACTIVE', 'REAL_ESTATE_PUBLIC_DATA', 'Y', 60)`,
+       (id, user_id, name, source_type, status, domain, provider, snapshot_ttl_minutes, capabilities)
+     values ($1, $2, 'Sans version', 'PUBLIC_DATA', 'ACTIVE', 'REAL_ESTATE_PUBLIC_DATA', 'Y', 60, '{}'::jsonb)`,
     [randomUUID(), userId],
     "Un adaptateur de domaine sans version a pu être créé",
-    "external_sources_shape_ck",
+    "external_sources_shape_v2_ck",
   );
 
+  // La FORME des capacités déclarées appartient au domaine : un objet de drapeaux pour un
+  // jeu de données public, une liste de noms pour un registre. Deux verticales donnaient à
+  // cette colonne partagée deux conventions incompatibles, et la contrainte de la première
+  // refusait les écritures de la seconde.
+  await rejects(
+    `insert into public.external_sources
+       (id, user_id, name, source_type, status, domain, provider, adapter_version,
+        snapshot_ttl_minutes, capabilities)
+     values ($1, $2, 'Capacités en liste', 'PUBLIC_DATA', 'ACTIVE', 'REAL_ESTATE_PUBLIC_DATA',
+             'V', '1', 60, '["price"]'::jsonb)`,
+    [randomUUID(), userId],
+    "Des capacités en LISTE ont pu être déclarées pour un jeu de données public",
+    "external_sources_capabilities_v2_ck",
+  );
+  await rejects(
+    `insert into public.external_sources
+       (id, user_id, name, source_type, status, domain, provider, adapter_version, auth_mode,
+        capabilities)
+     values ($1, $2, 'Capacités en objet', 'REGISTRY', 'ACTIVE', 'COMPANY_REGISTRY',
+             'U', '1', 'NONE', '{"fields": []}'::jsonb)`,
+    [randomUUID(), userId],
+    "Des capacités en OBJET ont pu être déclarées pour un registre",
+    "external_sources_capabilities_v2_ck",
+  );
+
+  // `COMPANY_REGISTRY` n'est PLUS un domaine sans support : la verticale du registre
+  // d'entreprises apporte ses tables d'instantané, et la whitelist réconciliée l'accepte.
+  // Le contrôle porte donc sur un domaine réellement absent de la whitelist — sans quoi il
+  // affirmerait l'inverse de ce que la base garantit.
   await rejects(
     `insert into public.external_sources
        (id, user_id, name, source_type, status, domain, provider, adapter_version, snapshot_ttl_minutes)
-     values ($1, $2, 'Domaine inconnu', 'PUBLIC_DATA', 'ACTIVE', 'COMPANY_REGISTRY', 'Z', '1', 60)`,
+     values ($1, $2, 'Domaine inconnu', 'PUBLIC_DATA', 'ACTIVE', 'MARKET_DATA', 'Z', '1', 60)`,
     [randomUUID(), userId],
     "Un domaine sans tables de support a pu être déclaré",
-    "external_sources_domain_ck",
+    "external_sources_domain_v2_ck",
   );
+
+  // Et le domaine du registre, lui, est ACCEPTÉ — avec SES exigences, pas celles de la
+  // donnée publique : un registre s'authentifie, il ne se périme pas.
+  const registryProbe = randomUUID();
+  await client.query(
+    `insert into public.external_sources
+       (id, user_id, name, source_type, status, domain, provider, adapter_version, auth_mode,
+        capabilities)
+     values ($1, $2, 'Registre voisin', 'REGISTRY', 'ACTIVE', 'COMPANY_REGISTRY', 'W', '1', 'NONE',
+             '["SIREN_LOOKUP"]'::jsonb)`,
+    [registryProbe, userId],
+  );
+  await client.query("delete from public.external_sources where id = $1", [registryProbe]);
 
   const sourceId = await rpc("lfo_upsert_public_data_source", {
     provider: "SMOKE_DVF",
