@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { API_HEADERS } from "@/lib/http";
 
 import { requireAuthenticated } from "@/lib/auth";
 import { getOpenBankingRepository } from "@/lib/data/open-banking-repository";
@@ -38,11 +39,11 @@ export async function GET(request: Request) {
     if (runId) {
       return NextResponse.json(
         { preview: await repository.preview(runId) },
-        { headers: { "Cache-Control": "no-store" } },
+        { headers: API_HEADERS },
       );
     }
     return NextResponse.json(await repository.overview(), {
-      headers: { "Cache-Control": "no-store" },
+      headers: API_HEADERS,
     });
   } catch (error) {
     return failure(error, "Lecture Open Banking impossible");

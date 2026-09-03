@@ -28,7 +28,9 @@
  *   * désigner une ligne BLOQUÉE, DOUBLON ou IGNORÉE à la validation est REFUSÉ ;
  *   * une position écrit une OBSERVATION DATÉE et AUCUN événement ;
  *   * deux lignes `positions` pour le même couple enveloppe + instrument sont impossibles ;
- *   * une observation à la même date CORRIGE la précédente au lieu de s'y ajouter ;
+ *   * une observation à la même date ne s'écrase pas en SILENCE : rejeu identique sans effet,
+ *     valeurs différentes REFUSÉES sauf décision explicite, et la session qui corrige garde
+ *     sa provenance ;
  *   * un import INCRÉMENTAL à une nouvelle date n'écrase aucune observation antérieure ;
  *   * un second commit de la même session ne réécrit rien (idempotence applicative) ;
  *   * réimporter le même fichier déjà validé est REFUSÉ (idempotence de base) ;
@@ -795,6 +797,123 @@ try {
     `L'incrémental doit AJOUTER une observation sans supprimer l'historique, obtenu ${history.rows[0].dates}`,
   );
 
+  // ── 9 bis. AUCUN écrasement SILENCIEUX d'une observation persistée ──────────────
+  //
+  // Une observation persistée est un FAIT. L'écraser parce qu'un second fichier porte la
+  // même date, sans le dire et sans décision, remplace une quantité et une valeur de marché
+  // déjà lues par un humain — et il n'en reste aucune trace.
+  //
+  // Trois cas, et trois seulement : rien à cette date → écriture ; mêmes valeurs → RIEN,
+  // le rejeu reste idempotent ; valeurs différentes → REFUS, sauf décision explicite.
+  const openPositionSession = async (hash: string) =>
+    rpc("lfo_open_portfolio_session", {
+      source: {
+        kind: "FILE_CSV",
+        domain: "PORTFOLIO_POSITION",
+        provider: "GENERIC_PORTFOLIO_FILE",
+        label: "Positions smoke",
+        target_account_id: accountId,
+        adapter_version: "portfolio-file/1",
+      },
+      session: {
+        file_name: `positions-${hash}.csv`,
+        file_hash: hash.repeat(64).slice(0, 64),
+        file_size_bytes: 512,
+        content_type: "text/csv",
+        parser: "portfolio-file",
+        parser_version: "1",
+        declared_currency: "EUR",
+      },
+    });
+
+  // Rejeu IDENTIQUE : aucune erreur, et aucune écriture. Une valeur identique n'est pas une
+  // correction, et exiger une décision là où rien ne change serait un faux positif.
+  const replaySession = await openPositionSession("d");
+  await rpc("lfo_append_portfolio_rows", {
+    session_id: replaySession,
+    rows: [positionRow({ fact_date: "2026-07-31", market_value: "1810", match_key: "p2" })],
+  });
+  await rpc("lfo_finalize_portfolio_session", { session_id: replaySession });
+  const replayRecords = await client.query<{ id: string }>(
+    "select id from public.import_normalized_records where session_id = $1",
+    [replaySession],
+  );
+  await rpc("lfo_commit_portfolio_session", {
+    session_id: replaySession,
+    record_ids: replayRecords.rows.map((entry) => entry.id),
+  });
+  const afterReplay = await client.query<{ count: string; value: string }>(
+    `select count(*)::text as count, max(market_value)::text as value
+       from public.position_snapshots where user_id = $1 and snapshot_date = '2026-07-31'`,
+    [userId],
+  );
+  assert(
+    afterReplay.rows[0].count === "1" && afterReplay.rows[0].value === "1810.000000",
+    "Un rejeu IDENTIQUE ne doit ni dupliquer ni exiger de décision",
+  );
+
+  // Valeurs DIFFÉRENTES à la même date : refus NOMMÉ, qui dit ce qui change.
+  const correctionSession = await openPositionSession("e");
+  await rpc("lfo_append_portfolio_rows", {
+    session_id: correctionSession,
+    rows: [positionRow({ fact_date: "2026-07-31", market_value: "1999", match_key: "p3" })],
+  });
+  await rpc("lfo_finalize_portfolio_session", { session_id: correctionSession });
+  const correctionRecords = await client.query<{ id: string }>(
+    "select id from public.import_normalized_records where session_id = $1",
+    [correctionSession],
+  );
+  const correctionIds = correctionRecords.rows.map((entry) => entry.id);
+  await rejects(
+    "select public.lfo_commit_portfolio_session($1::uuid, $2::jsonb)",
+    [userId, JSON.stringify({ session_id: correctionSession, record_ids: correctionIds })],
+    "Une observation persistée a pu être écrasée SANS décision",
+    "Une correction est une DÉCISION",
+  );
+  const untouched = await client.query<{ value: string }>(
+    `select market_value::text as value from public.position_snapshots
+      where user_id = $1 and snapshot_date = '2026-07-31'`,
+    [userId],
+  );
+  assert(
+    untouched.rows[0].value === "1810.000000",
+    "Le refus doit laisser l'observation persistée INTACTE",
+  );
+
+  // Décision explicite : la correction est écrite, et sa provenance aussi.
+  await rpc("lfo_commit_portfolio_session", {
+    session_id: correctionSession,
+    record_ids: correctionIds,
+    correct_record_ids: correctionIds,
+  });
+  const correctedObservation = await client.query<{
+    count: string;
+    value: string;
+    links: string;
+  }>(
+    `select
+       (select count(*)::text from public.position_snapshots
+         where user_id = $1 and snapshot_date = '2026-07-31') as count,
+       (select market_value::text from public.position_snapshots
+         where user_id = $1 and snapshot_date = '2026-07-31') as value,
+       (select count(*)::text from public.import_record_links l
+         join public.position_snapshots ps on ps.id = l.position_snapshot_id
+        where l.user_id = $1 and ps.snapshot_date = '2026-07-31') as links`,
+    [userId],
+  );
+  assert(
+    correctedObservation.rows[0].count === "1" &&
+      correctedObservation.rows[0].value === "1999.000000",
+    "La correction DÉCIDÉE doit remplacer l'observation, sans en créer une seconde",
+  );
+  // TROIS lectures ont touché cette observation : celle qui l'a créée, le rejeu identique, et
+  // la correction décidée. Chacune garde sa provenance — c'est ce que l'unicité par
+  // observation seule rendait impossible.
+  assert(
+    correctedObservation.rows[0].links === "3",
+    `La provenance d'une observation corrigée est un HISTORIQUE de sessions : obtenu ${correctedObservation.rows[0].links} lien(s)`,
+  );
+
   // ── 10. Piste d'audit en LECTURE SEULE sous `authenticated` ────────────────────
   await client.query("set local role authenticated");
   for (const table of [
@@ -862,7 +981,7 @@ try {
   }
   if (succeeded) {
     console.log(
-      "Smoke Portfolio Import : session RECEIVING, réception par lots atomique, brut immuable et non supprimable, aucun fait avant validation, compteurs DÉRIVÉS des lignes persistées, ABSENT ≠ ZÉRO sur frais quantité et coût de revient, quantité et montants négatifs refusés, nature hors whitelist refusée, achat sans instrument et apport avec instrument refusés dès le staging, ligne prête sans devise/date/valeur de marché refusée, échec au milieu d'un lot annulant tout le lot, instrument résolu sans cible refusé, rejet sans motif refusé en RPC comme en écriture directe, décision propagée par titre, décision humaine non écrasée par une réanalyse, correction sur la lecture laissant le brut intact avec provenance au champ, correction sans contenu refusée, ligne bloquée refusée à la validation, écriture par la RPC EXISTANTE du ledger, provenance vérifiable, fait non supprimable sans sa provenance, idempotence applicative et de base, POSITION OBSERVÉE ≠ TRANSACTION, une détention par enveloppe et instrument, une observation par date, incrémental sans perte d'historique, piste d'audit en lecture seule sous authenticated, cloisonnement. Aucune donnée persistée.",
+      "Smoke Portfolio Import : session RECEIVING, réception par lots atomique, brut immuable et non supprimable, aucun fait avant validation, compteurs DÉRIVÉS des lignes persistées, ABSENT ≠ ZÉRO sur frais quantité et coût de revient, quantité et montants négatifs refusés, nature hors whitelist refusée, achat sans instrument et apport avec instrument refusés dès le staging, ligne prête sans devise/date/valeur de marché refusée, échec au milieu d'un lot annulant tout le lot, instrument résolu sans cible refusé, rejet sans motif refusé en RPC comme en écriture directe, décision propagée par titre, décision humaine non écrasée par une réanalyse, correction sur la lecture laissant le brut intact avec provenance au champ, correction sans contenu refusée, ligne bloquée refusée à la validation, écriture par la RPC EXISTANTE du ledger, provenance vérifiable, fait non supprimable sans sa provenance, idempotence applicative et de base, POSITION OBSERVÉE ≠ TRANSACTION, une détention par enveloppe et instrument, une observation par date, incrémental sans perte d'historique, AUCUN écrasement silencieux d'une observation persistée — rejeu identique sans effet, valeurs différentes refusées sauf décision, correction décidée traçant sa session, piste d'audit en lecture seule sous authenticated, cloisonnement. Aucune donnée persistée.",
     );
   }
 }

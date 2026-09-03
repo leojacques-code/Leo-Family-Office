@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { API_HEADERS } from "@/lib/http";
 
 import { requireAuthenticated } from "@/lib/auth";
 import { getRegistryRepository } from "@/lib/data/registry-repository";
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
     if (params.get("connections") === "1") {
       return NextResponse.json(
         { connections: await repository.describeConnections() },
-        { headers: { "Cache-Control": "no-store" } },
+        { headers: API_HEADERS },
       );
     }
 
@@ -64,7 +65,7 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: "Société non précisée" }, { status: 400 });
       }
       return NextResponse.json(await repository.getBusinessRegistryState(parsed.data.businessId), {
-        headers: { "Cache-Control": "no-store" },
+        headers: API_HEADERS,
       });
     }
 

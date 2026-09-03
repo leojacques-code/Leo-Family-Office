@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { API_HEADERS } from "@/lib/http";
 
 import { requireAuthenticated } from "@/lib/auth";
 import { getDocumentRepository } from "@/lib/data/document-repository";
@@ -52,7 +53,7 @@ export async function GET(request: Request) {
     const runId = params.get("run");
     if (runId) {
       return NextResponse.json(await repository.getPreview(runId), {
-        headers: { "Cache-Control": "no-store" },
+        headers: API_HEADERS,
       });
     }
 
@@ -60,7 +61,7 @@ export async function GET(request: Request) {
       const business = params.get("business") ?? undefined;
       return NextResponse.json(
         { runs: await repository.listRuns(business) },
-        { headers: { "Cache-Control": "no-store" } },
+        { headers: API_HEADERS },
       );
     }
 

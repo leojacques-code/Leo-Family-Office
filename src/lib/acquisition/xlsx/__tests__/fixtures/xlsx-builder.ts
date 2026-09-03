@@ -150,6 +150,11 @@ export interface WorkbookInput {
   withMacro?: boolean;
   /** Ajoute un lien externe : le lecteur doit le signaler sans le suivre. */
   withExternalLink?: boolean;
+  /**
+   * Relations BRUTES ajoutées telles quelles au `.rels` du classeur. Sert à prouver qu'une
+   * relation externe, d'un autre type ou hors de `worksheets/` n'est pas suivie.
+   */
+  externalRelationships?: readonly string[];
   /** Styles date, par index de `cellXfs`. */
   dateStyleIndexes?: number[];
   /** Feuilles supplémentaires, pour éprouver le plafond. */
@@ -171,13 +176,18 @@ export function buildWorkbook(input: WorkbookInput): Uint8Array {
       (_, index) => `<sheet name="Extra${index}" sheetId="${index + 2}" r:id="rId${index + 2}"/>`,
     ),
   ].join("");
+  // Type de relation RÉEL. Le lecteur n'accepte qu'une relation de feuille interne : une
+  // fixture qui abrège le type ne testerait pas ce que le lecteur voit d'un vrai classeur.
+  const WORKSHEET_TYPE =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
   const relationships = [
-    '<Relationship Id="rId1" Type="ws" Target="worksheets/sheet1.xml"/>',
+    `<Relationship Id="rId1" Type="${WORKSHEET_TYPE}" Target="worksheets/sheet1.xml"/>`,
     ...Array.from(
       { length: extra },
       (_, index) =>
-        `<Relationship Id="rId${index + 2}" Type="ws" Target="worksheets/sheet${index + 2}.xml"/>`,
+        `<Relationship Id="rId${index + 2}" Type="${WORKSHEET_TYPE}" Target="worksheets/sheet${index + 2}.xml"/>`,
     ),
+    ...(input.externalRelationships ?? []),
   ].join("");
 
   // Les styles : chaque `<xf>` porte un `numFmtId`. 14 est un format de date intégré.

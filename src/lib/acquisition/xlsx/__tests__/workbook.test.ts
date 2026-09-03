@@ -217,3 +217,71 @@ describe("décodage des dates de tableur", () => {
     if (result.ok) expect(result.sheets[0].rows[0][0]).toBe("45000");
   });
 });
+
+describe("budget global de décompression", () => {
+  it("REFUSE une archive dont le total décompressé dépasse le budget, plutôt que de la lire à moitié", () => {
+    // Le plafond PAR ENTRÉE ne voyait pas passer ce cas : avec 4 096 entrées à 64 Mio, une
+    // archive de quelques kilo-octets pouvait réclamer 256 Gio. Le budget est global, et il
+    // refuse — une lecture partielle tairait des feuilles.
+    const filler = "x".repeat(2 * 1024 * 1024);
+    const entries = Array.from({ length: 40 }, (_unused, index) => ({
+      name: `xl/worksheets/sheet${index + 1}.xml`,
+      content: filler,
+    }));
+    const result = readWorkbook(buildZip(entries));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("TOTAL_TOO_LARGE");
+      expect(result.message).toContain("Budget global");
+    }
+  });
+
+  it("laisse passer un classeur normal : le budget borne, il n'interdit pas", () => {
+    const result = readWorkbook(
+      buildWorkbook({
+        rows: [[{ ref: "A1", value: "A" }], [{ ref: "A2", value: "1" }]],
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("relations du classeur", () => {
+  it("ne suit PAS une relation externe", () => {
+    const bytes = buildWorkbook({
+      rows: [[{ ref: "A1", value: "A" }], [{ ref: "A2", value: "1" }]],
+      externalRelationships: [
+        '<Relationship Id="rIdX" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="https://exemple.test/feuille.xml" TargetMode="External"/>',
+      ],
+    });
+    const result = readWorkbook(bytes);
+    expect(result.ok).toBe(true);
+    // La feuille légitime est lue, et la relation externe n'a produit aucune feuille de plus.
+    if (result.ok) expect(result.sheets).toHaveLength(1);
+  });
+
+  it("ne suit PAS une relation qui sort de `xl/worksheets/`", () => {
+    const bytes = buildWorkbook({
+      rows: [[{ ref: "A1", value: "A" }], [{ ref: "A2", value: "1" }]],
+      externalRelationships: [
+        '<Relationship Id="rIdY" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="../../../etc/passwd"/>',
+        '<Relationship Id="rIdZ" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/externalLinks/externalLink1.xml"/>',
+      ],
+    });
+    const result = readWorkbook(bytes);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.sheets).toHaveLength(1);
+  });
+
+  it("ne suit PAS une relation d'un AUTRE type, même vers `worksheets/`", () => {
+    const bytes = buildWorkbook({
+      rows: [[{ ref: "A1", value: "A" }], [{ ref: "A2", value: "1" }]],
+      externalRelationships: [
+        '<Relationship Id="rIdW" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="worksheets/sheet9.xml"/>',
+      ],
+    });
+    const result = readWorkbook(bytes);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.sheets).toHaveLength(1);
+  });
+});

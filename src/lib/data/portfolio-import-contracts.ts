@@ -183,5 +183,14 @@ export type PortfolioImportCommand =
       values: Record<string, string | null>;
       reason: string;
     }
-  | { action: "commit"; sessionId: string; recordIds: string[] }
+  | {
+      action: "commit";
+      sessionId: string;
+      recordIds: string[];
+      /**
+       * Corrections DÉCLARÉES d'observations déjà persistées. Vide par défaut : un second
+       * fichier portant la même date ne suffit pas à autoriser le remplacement d'un fait.
+       */
+      correctRecordIds: string[];
+    }
   | { action: "discard"; sessionId: string };

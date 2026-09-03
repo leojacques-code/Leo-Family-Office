@@ -590,12 +590,45 @@ function PortfolioSection({ accounts, refresh }: Props) {
                             (row.status === "READY" || row.status === "WARNING"),
                         )
                         .map((row) => row.recordId),
+                      // Aucune correction DÉCLARÉE par ce bouton. Si une observation déjà
+                      // persistée porte d'autres valeurs à la même date, la validation
+                      // REFUSE et nomme ce qui change : le second bouton, ci-dessous, est le
+                      // seul chemin qui remplace un fait, et il est explicite.
+                      correctRecordIds: [],
                     },
                     "Faits écrits",
                   )
                 }
               >
                 {busy ? "Écriture…" : `Écrire ${committable} fait(s)`}
+              </button>
+              <button
+                type="button"
+                className="button secondary"
+                disabled={busy || committable === 0 || preview.session.status !== "ANALYZED"}
+                title="Remplace les observations déjà persistées portant la même date, en le déclarant"
+                onClick={() => {
+                  const retained = preview.rows
+                    .filter(
+                      (row) =>
+                        selected.has(row.recordId) &&
+                        (row.status === "READY" || row.status === "WARNING"),
+                    )
+                    .map((row) => row.recordId);
+                  void command(
+                    {
+                      action: "commit",
+                      sessionId: preview.session.sessionId,
+                      recordIds: retained,
+                      // DÉCISION explicite de correction. Ce qui est déjà persisté et
+                      // identique n'est pas touché : un rejeu reste un rejeu.
+                      correctRecordIds: retained,
+                    },
+                    "Faits écrits, observations existantes corrigées",
+                  );
+                }}
+              >
+                {busy ? "Écriture…" : "Écrire en CORRIGEANT les observations existantes"}
               </button>
               <button
                 type="button"

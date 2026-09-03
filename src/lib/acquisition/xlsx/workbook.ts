@@ -219,12 +219,45 @@ interface SheetRef {
   path: string;
 }
 
+/** Type de relation OOXML désignant une feuille de calcul interne. */
+const WORKSHEET_RELATION_TYPE =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+
+/**
+ * Une relation n'est retenue que si elle désigne une FEUILLE INTERNE du classeur.
+ *
+ * Trois refus, et chacun ferme un chemin distinct :
+ *
+ *   * `TargetMode="External"` — une relation externe pointe hors de l'archive. La suivre
+ *     ferait du lecteur un client HTTP ou un lecteur de fichiers, ce qu'il n'est pas ;
+ *   * un `Type` autre que `worksheet` — un lien externe, un classeur imbriqué ou une
+ *     macro ne se lisent pas comme une feuille, même si leur XML y ressemble ;
+ *   * une cible qui SORT de `xl/worksheets/`, y compris par un segment `..` ou un chemin
+ *     absolu. Aucune lecture de disque n'a lieu — le lecteur ne consulte que les entrées de
+ *     l'archive — mais une cible hors périmètre ferait lire une AUTRE partie du classeur
+ *     comme si c'était une feuille, et ses valeurs entreraient dans un portefeuille.
+ */
+function resolveWorksheetTarget(relation: string): string | null {
+  if (/TargetMode="External"/i.test(relation)) return null;
+  const type = /Type="([^"]+)"/.exec(relation)?.[1];
+  if (type !== WORKSHEET_RELATION_TYPE) return null;
+  const raw = /Target="([^"]+)"/.exec(relation)?.[1];
+  if (raw === undefined) return null;
+  // Une cible absolue ou distante n'est pas un chemin d'archive.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("//")) return null;
+  const normalized = raw.replace(/^\/?xl\//, "").replace(/^\//, "");
+  if (normalized.split("/").includes("..")) return null;
+  if (!normalized.startsWith("worksheets/")) return null;
+  return normalized;
+}
+
 function resolveSheets(workbookXml: string, relsXml: string): SheetRef[] {
   const relationships = new Map<string, string>();
   for (const match of relsXml.matchAll(/<Relationship\b[^>]*\/?>/g)) {
     const id = /Id="([^"]+)"/.exec(match[0])?.[1];
-    const target = /Target="([^"]+)"/.exec(match[0])?.[1];
-    if (id && target) relationships.set(id, target.replace(/^\/?xl\//, "").replace(/^\//, ""));
+    if (id === undefined) continue;
+    const target = resolveWorksheetTarget(match[0]);
+    if (target !== null) relationships.set(id, target);
   }
   const sheets: SheetRef[] = [];
   for (const match of workbookXml.matchAll(/<sheet\b[^>]*\/?>/g)) {
@@ -232,7 +265,9 @@ function resolveSheets(workbookXml: string, relsXml: string): SheetRef[] {
     const relationId = /r:id="([^"]+)"/.exec(match[0])?.[1];
     if (name === undefined) continue;
     const target = relationId ? relationships.get(relationId) : undefined;
-    sheets.push({ name: decodeXmlText(name), path: `xl/${target ?? ""}` });
+    // Une feuille dont la relation n'a pas été retenue reste DÉCLARÉE, avec un chemin vide :
+    // le lecteur la signalera introuvable plutôt que de la faire disparaître du classeur.
+    sheets.push({ name: decodeXmlText(name), path: target === undefined ? "" : `xl/${target}` });
   }
   return sheets;
 }

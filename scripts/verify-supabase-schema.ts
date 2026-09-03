@@ -52,6 +52,7 @@ const canonicalMigrations = [
   "20260903120000",
   "20260903120500",
   "20260903190000",
+  "20260903200000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -1382,7 +1383,8 @@ const requiredIndexes = [
   "position_snapshots_observation_uidx",
   "portfolio_events_id_user_uidx",
   "import_normalized_records_event_uidx",
-  "import_normalized_records_snapshot_uidx",
+  "import_normalized_records_snapshot_session_uidx",
+  "import_normalized_records_snapshot_idx",
   "import_instrument_resolutions_id_user_uidx",
   "import_instrument_resolutions_key_uidx",
   // Open Banking — les trois unicités qui portent un invariant, pas une optimisation.
@@ -1471,6 +1473,10 @@ const requiredConstraints = [
   "import_record_links_domain_v4_ck",
   "import_record_links_target_v4_ck",
   "import_upload_tickets_domain_v3_ck",
+  // Provenance d'une observation de position, par SESSION : une observation corrigée a un
+  // historique de lectures, et l'unicité par observation seule faisait perdre sa provenance
+  // à la session qui corrige.
+  "import_record_links_snapshot_session_uk",
   "scenarios_status_ck",
   "scenarios_archive_shape_ck",
   "simulation_runs_mode_ck",
@@ -2414,6 +2420,99 @@ try {
     if (rpc.authenticated_execute) failures.push(`RPC exécutable par authenticated : ${rpc.name}`);
     if (!rpc.service_role_execute)
       failures.push(`RPC non exécutable par service_role : ${rpc.name}`);
+  }
+
+  // ── Garde-fous SECURITY DEFINER ──────────────────────────────────────────────────────
+  //
+  // Deux garde-fous lisent l'existence d'un objet INDÉPENDAMMENT de la visibilité RLS de
+  // l'appelant : SESSION ABSENTE ≠ SESSION INVISIBLE. Un garde qui décide à partir d'une
+  // lecture filtrée par la RLS conclut « déjà supprimé » sur une simple absence de droit, et
+  // AUTORISE.
+  //
+  // Ce sont les SEULES fonctions `security definer` du schéma applicatif, et aucune n'est
+  // nommée `lfo_*` : le contrat « aucune RPC lfo_* en SECURITY DEFINER », vérifié
+  // ci-dessus, reste donc entier.
+  //
+  // Le contrôle est PARAMÉTRÉ, pas copié. Les deux verticales l'avaient écrit deux fois à un
+  // nom près, et deux copies dérivent : celle qu'on oublie de durcir devient la porte.
+  const SECURITY_DEFINER_GUARDS = [
+    { name: "import_session_freeze_state", args: "p_session_id uuid, p_user_id uuid" },
+    { name: "bank_sync_freeze_state", args: "p_run_id uuid, p_user_id uuid" },
+  ] as const;
+
+  const guards = await client.query<{
+    name: string;
+    security_definer: boolean;
+    result_type: string;
+    arguments: string;
+    volatility: string;
+    settings: string[] | null;
+    anon_execute: boolean;
+    authenticated_execute: boolean;
+    public_execute: boolean;
+    service_role_execute: boolean;
+  }>(
+    `select proc.proname as name,
+            proc.prosecdef as security_definer,
+            pg_catalog.pg_get_function_result(proc.oid) as result_type,
+            pg_catalog.pg_get_function_arguments(proc.oid) as arguments,
+            proc.provolatile::text as volatility,
+            proc.proconfig as settings,
+            pg_catalog.has_function_privilege('anon', proc.oid, 'execute') as anon_execute,
+            pg_catalog.has_function_privilege('authenticated', proc.oid, 'execute') as authenticated_execute,
+            pg_catalog.has_function_privilege('public', proc.oid, 'execute') as public_execute,
+            pg_catalog.has_function_privilege('service_role', proc.oid, 'execute') as service_role_execute
+       from pg_catalog.pg_proc proc
+       join pg_catalog.pg_namespace ns on ns.oid = proc.pronamespace
+      where ns.nspname = 'public' and proc.proname = any ($1::text[])`,
+    [SECURITY_DEFINER_GUARDS.map((guard) => guard.name)],
+  );
+
+  // Aucune AUTRE fonction du schéma applicatif ne doit être `security definer`. Une
+  // troisième apparue sans être déclarée ici passerait sinon tous les contrôles.
+  const unexpectedDefiners = await client.query<{ name: string }>(
+    `select proc.proname as name
+       from pg_catalog.pg_proc proc
+       join pg_catalog.pg_namespace ns on ns.oid = proc.pronamespace
+      where ns.nspname = 'public' and proc.prosecdef
+        and proc.proname <> all ($1::text[])`,
+    [SECURITY_DEFINER_GUARDS.map((guard) => guard.name)],
+  );
+  if (unexpectedDefiners.rows.length > 0) {
+    failures.push(
+      `Fonction(s) SECURITY DEFINER non déclarée(s) : ${unexpectedDefiners.rows
+        .map((row) => row.name)
+        .join(", ")}`,
+    );
+  }
+
+  for (const expected of SECURITY_DEFINER_GUARDS) {
+    const guard = guards.rows.find((row) => row.name === expected.name);
+    if (!guard) {
+      failures.push(`Garde-fou absent : public.${expected.name}`);
+      continue;
+    }
+    if (!guard.security_definer)
+      failures.push(
+        `${expected.name} n'est pas SECURITY DEFINER : elle redeviendrait aveugle sous RLS`,
+      );
+    if (guard.arguments !== expected.args)
+      failures.push(`Signature invalide : ${expected.name}(${guard.arguments})`);
+    if (guard.result_type !== "text")
+      failures.push(`Type de retour invalide : ${expected.name} -> ${guard.result_type}`);
+    // `s` = stable. Une fonction de garde-fou ne doit rien écrire.
+    if (guard.volatility !== "s")
+      failures.push(`${expected.name} doit rester stable, sans écriture`);
+    if (!guard.settings?.some((setting) => setting === 'search_path=""'))
+      failures.push(`search_path non verrouillé : ${expected.name}`);
+    for (const [role, granted] of [
+      ["anon", guard.anon_execute],
+      ["authenticated", guard.authenticated_execute],
+      ["public", guard.public_execute],
+    ] as const)
+      if (granted) failures.push(`${expected.name} exécutable par ${role} : surface interdite`);
+    if (!guard.service_role_execute)
+      failures.push(`${expected.name} non exécutable par service_role`);
   }
 
   const buckets = await client.query<{

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { API_HEADERS } from "@/lib/http";
 
 import { requireAuthenticated } from "@/lib/auth";
 import { getPublicDataRepository } from "@/lib/data/public-data-repository";
@@ -47,14 +48,14 @@ export async function GET(request: Request) {
     if (params.get("sources") === "1") {
       return NextResponse.json(
         { sources: await repository.listSources() },
-        { headers: { "Cache-Control": "no-store" } },
+        { headers: API_HEADERS },
       );
     }
 
     const propertyId = params.get("property");
     if (propertyId) {
       return NextResponse.json(await repository.getPropertyView(propertyId), {
-        headers: { "Cache-Control": "no-store" },
+        headers: API_HEADERS,
       });
     }
 

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { API_HEADERS } from "@/lib/http";
 
 import { requireAuthenticated } from "@/lib/auth";
 import { getPortfolioImportRepository } from "@/lib/data/portfolio-import-repository";
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
     const sessionId = params.get("session");
     if (sessionId) {
       return NextResponse.json(await repository.getPreview(sessionId), {
-        headers: { "Cache-Control": "no-store" },
+        headers: API_HEADERS,
       });
     }
 
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
       const accountId = params.get("account") ?? undefined;
       return NextResponse.json(
         { sessions: await repository.listSessions(accountId) },
-        { headers: { "Cache-Control": "no-store" } },
+        { headers: API_HEADERS },
       );
     }
 

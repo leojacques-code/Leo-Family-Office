@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { API_HEADERS } from "@/lib/http";
 
 import { requireAuthenticated } from "@/lib/auth";
 import { getFecRepository } from "@/lib/data/fec-repository";
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
     }
     return NextResponse.json(
       { lines: await getFecRepository().getSessionLines(sessionId) },
-      { headers: { "Cache-Control": "no-store" } },
+      { headers: API_HEADERS },
     );
   } catch (error) {
     return failure(error, "Lecture des écritures impossible");

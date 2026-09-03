@@ -144,6 +144,14 @@ export const portfolioCommitSchema = z.object({
    * cochée ; une ligne bloquée, doublon ou ignorée est refusée par la base.
    */
   recordIds: z.array(z.uuid()).max(MAX_PORTFOLIO_ROWS),
+  /**
+   * Lignes pour lesquelles l'utilisateur DÉCLARE corriger une observation déjà persistée.
+   *
+   * Vide par défaut, et c'est le point : une observation persistée est un fait, et un second
+   * fichier portant la même date ne suffit pas à autoriser son remplacement. Sans cette
+   * déclaration, la validation REFUSE et nomme ce qui change.
+   */
+  correctRecordIds: z.array(z.uuid()).max(MAX_PORTFOLIO_ROWS).default([]),
 });
 
 export const portfolioDiscardSchema = z.object({

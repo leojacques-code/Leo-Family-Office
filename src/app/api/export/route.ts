@@ -17,11 +17,35 @@ export async function GET(request: Request) {
   if (format === "csv") {
     const rows = [
       ["type", "institution", "nom", "valeur_eur", "date", "provenance"],
-      ...state.accounts.map((account) => ["actif", account.institution, account.name, account.balance, account.balanceDate, account.provenance.kind]),
-      ...state.liabilities.map((liability) => ["passif", liability.lender, liability.name, -liability.currentBalance, state.asOfDate, liability.provenance.kind]),
+      ...state.accounts.map((account) => [
+        "actif",
+        account.institution,
+        account.name,
+        account.balance,
+        account.balanceDate,
+        account.provenance.kind,
+      ]),
+      ...state.liabilities.map((liability) => [
+        "passif",
+        liability.lender,
+        liability.name,
+        -liability.currentBalance,
+        state.asOfDate,
+        liability.provenance.kind,
+      ]),
     ];
     const csv = rows.map((row) => row.map(csvEscape).join(",")).join("\r\n");
-    return new Response(`\uFEFF${csv}`, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="leo-family-office-${state.asOfDate}.csv"` } });
+    return new Response(`\uFEFF${csv}`, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="leo-family-office-${state.asOfDate}.csv"`,
+      },
+    });
   }
-  return new Response(JSON.stringify(state, null, 2), { headers: { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="leo-family-office-${state.asOfDate}.json"` } });
+  return new Response(JSON.stringify(state, null, 2), {
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Disposition": `attachment; filename="leo-family-office-${state.asOfDate}.json"`,
+    },
+  });
 }

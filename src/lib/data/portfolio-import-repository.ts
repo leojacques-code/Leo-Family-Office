@@ -689,7 +689,13 @@ function createPortfolioImportRepository(): PortfolioImportRepository {
     const written = unwrap(
       await db.rpc("lfo_commit_portfolio_session", {
         p_user_id: user,
-        p_payload: { session_id: input.sessionId, record_ids: input.recordIds },
+        p_payload: {
+          session_id: input.sessionId,
+          record_ids: input.recordIds,
+          // Corrections DÉCLARÉES d'observations déjà persistées. Vide par défaut : la RPC
+          // refuse alors le remplacement et nomme ce qui change.
+          correct_record_ids: input.correctRecordIds,
+        },
       }),
       "validation de la session d'import",
     ) as number;

@@ -30,6 +30,20 @@ const DEFLATED = 8;
  */
 export const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
 
+/**
+ * Budget GLOBAL d'octets décompressés, toutes entrées confondues.
+ *
+ * Le plafond par entrée ne suffisait pas : avec 4 096 entrées à 64 Mio, une archive de
+ * quelques kilo-octets pouvait réclamer 256 Gio de mémoire. C'est le schéma classique d'une
+ * archive piégée, et le plafond par entrée ne le voit jamais passer.
+ *
+ * Le budget est STRICT et il REFUSE : une lecture partielle d'un classeur produirait des
+ * feuilles manquantes sans le dire, et un import muet d'une partie du portefeuille est pire
+ * qu'un refus. Chaque entrée décompressée est bornée par ce qui RESTE du budget, jamais par
+ * le plafond nominal.
+ */
+export const MAX_TOTAL_INFLATED_BYTES = 64 * 1024 * 1024;
+
 /** Plafond du nombre d'entrées. Une archive à cent mille entrées n'est pas un classeur. */
 export const MAX_ENTRIES = 4096;
 
@@ -37,6 +51,7 @@ export type ZipFailureCode =
   | "NOT_A_ZIP"
   | "TRUNCATED"
   | "TOO_MANY_ENTRIES"
+  | "TOTAL_TOO_LARGE"
   | "ENTRY_TOO_LARGE"
   | "UNSUPPORTED_COMPRESSION"
   | "INFLATE_FAILED";
@@ -111,6 +126,9 @@ export function openZip(bytes: Uint8Array): ZipArchive | ZipFailure {
   let cursor = u32(view, eocd + 16);
   const entries = new Map<string, ZipEntry>();
   const skipped: Array<{ name: string; reason: ZipFailureCode }> = [];
+  // Budget consommé, entrées STOCKÉES comprises : une entrée non compressée occupe la même
+  // mémoire qu'une entrée décompressée, et l'exclure du décompte laisserait le trou ouvert.
+  let inflatedBytes = 0;
 
   for (let index = 0; index < entryCount; index += 1) {
     if (cursor + 46 > bytes.byteLength || u32(view, cursor) !== CENTRAL_SIGNATURE) {
@@ -156,14 +174,34 @@ export function openZip(bytes: Uint8Array): ZipArchive | ZipFailure {
       return { ok: false, code: "TRUNCATED", message: `Données tronquées pour ${name}` };
     }
 
+    const remaining = MAX_TOTAL_INFLATED_BYTES - inflatedBytes;
+    if (remaining <= 0 || uncompressedSize > remaining) {
+      // REFUS, pas un saut : au-delà du budget, le classeur ne peut plus être lu en entier,
+      // et une lecture partielle tairait des feuilles.
+      return {
+        ok: false,
+        code: "TOTAL_TOO_LARGE",
+        message:
+          `Budget global de décompression dépassé à l'entrée « ${name} » : ` +
+          `${inflatedBytes} octets déjà extraits, plafond ${MAX_TOTAL_INFLATED_BYTES}. ` +
+          "Le classeur est refusé, jamais lu partiellement",
+      };
+    }
+
     const raw = bytes.subarray(dataStart, dataEnd);
     if (compression === STORED) {
       entries.set(name, { name, bytes: raw, compression });
+      inflatedBytes += raw.byteLength;
       continue;
     }
     try {
-      const inflated = inflateRawSync(raw, { maxOutputLength: MAX_ENTRY_BYTES });
+      // La borne est le RESTE du budget, jamais le plafond nominal : c'est ce qui empêche
+      // une seule entrée de le consommer entièrement au détriment des suivantes.
+      const inflated = inflateRawSync(raw, {
+        maxOutputLength: Math.min(MAX_ENTRY_BYTES, remaining),
+      });
       entries.set(name, { name, bytes: new Uint8Array(inflated), compression });
+      inflatedBytes += inflated.byteLength;
     } catch {
       // Une entrée illisible n'est pas une entrée vide : elle est signalée et absente.
       skipped.push({ name, reason: "INFLATE_FAILED" });
