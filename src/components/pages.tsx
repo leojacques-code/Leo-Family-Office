@@ -17,6 +17,7 @@ import ImportsPage from "@/components/pages/imports/page";
 import DocumentsPage from "@/components/pages/documents/page";
 import TimelinePage from "@/components/pages/timeline/page";
 import SettingsPage from "@/components/pages/settings/page";
+import ReportsPage from "@/components/pages/reports/page";
 import type { SectionProps } from "@/components/pages/shared";
 
 export function SectionContent(props: SectionProps) {
@@ -53,6 +54,8 @@ export function SectionContent(props: SectionProps) {
       return <TimelinePage {...props} />;
     case "settings":
       return <SettingsPage {...props} />;
+    case "reports":
+      return <ReportsPage {...props} />;
     default:
       return <TodayPage {...props} />;
   }

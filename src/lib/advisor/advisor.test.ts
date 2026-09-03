@@ -18,6 +18,15 @@ import type { DashboardState, MonthlyClose } from "@/lib/types";
 const state = (): DashboardState => eventEngineCrossDomainFixture();
 const close = (id: string, closeDate: string, netWorth: number): MonthlyClose => ({
   id,
+  version: 1,
+  reportingCurrency: "EUR",
+  completenessStatus: "COMPLETE",
+  composition: {
+    immediate_cash: netWorth,
+    market_invested_assets: 0,
+    investment_envelope_cash: 0,
+    illiquid_assets: 0,
+  },
   closeDate,
   netWorth,
   grossAssets: netWorth,

@@ -3418,3 +3418,25 @@ dd {
   flex-direction: column;
   gap: 4px;
 }
+.report-type-card {
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.report-type-card.selected {
+  outline: 2px solid var(--accent, #2f6f62);
+}
+@media print {
+  .sidebar,
+  .topbar,
+  .quick-actions {
+    display: none !important;
+  }
+  .app-main {
+    margin: 0 !important;
+  }
+  details {
+    break-inside: avoid;
+  }
+}

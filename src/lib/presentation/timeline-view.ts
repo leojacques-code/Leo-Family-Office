@@ -1,3 +1,4 @@
+import { orderedCloses, historicalCurrency, historicalBlockers } from "./historical-closes";
 import type { CanonicalDataKind, CanonicalEvent, EventDomain } from "@/lib/engine/event-contracts";
 import type { GlobalFinancialContext } from "@/lib/engine/global-financial-model";
 import type { DashboardState } from "@/lib/types";
@@ -94,7 +95,7 @@ export function buildTimelineView(state: DashboardState, cockpit: TodayCockpit):
         provenance: event.provenance.source ?? event.provenance.engine,
       };
     });
-  const closes: TimelineItem[] = state.monthlyCloses.map((close) => ({
+  const closes: TimelineItem[] = orderedCloses(state.monthlyCloses).map((close) => ({
     id: `close:${close.id}`,
     zone: zoneOf(close.closeDate, context.asOfDate),
     eventDate: close.closeDate,
@@ -104,9 +105,9 @@ export function buildTimelineView(state: DashboardState, cockpit: TodayCockpit):
     status: "COMPLETED",
     title: "Clôture patrimoniale",
     amount: close.netWorth,
-    amountKnown: true,
-    currency: state.reportingCurrency,
-    blockers: [],
+    amountKnown: close.netWorth !== null,
+    currency: historicalCurrency(close),
+    blockers: historicalBlockers([close]).filter((x) => x !== "SINGLE_CLOSE_POINT_IN_TIME_ONLY"),
     conflict: false,
     href: "/net-worth",
     provenance: "Monthly close",

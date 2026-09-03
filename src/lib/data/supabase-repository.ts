@@ -1,4 +1,5 @@
 import "server-only";
+import { mapDecisionCases } from "@/lib/data/decision-snapshots";
 
 import type { PostgrestError } from "@supabase/supabase-js";
 import { DOCUMENTS_BUCKET, ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
@@ -384,6 +385,9 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       scenarioVersionRows,
       goalRows,
       goalVersionRows,
+      decisionCaseRows,
+      decisionVersionRows,
+      decisionRunRows,
       recurringRuleRows,
       cashFlowCloseRows,
       alertRows,
@@ -443,10 +447,13 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("scenario_versions"),
       mine("goals"),
       optionalMine("goal_versions"),
+      fetchAllPages("decision_cases", "id"),
+      fetchAllPages("decision_case_versions", "version"),
+      fetchAllPages("decision_runs", "created_at"),
       mine("recurring_cash_flow_rules"),
       mine("cash_flow_monthly_closes"),
       db.from("alerts").select("*").eq("user_id", user).eq("status", "OPEN"),
-      mine("monthly_closes"),
+      fetchAllPages("monthly_closes", "close_date"),
       mine("documents"),
       mine("economic_assumptions"),
       db.from("profiles").select("*").eq("user_id", user),
@@ -1040,12 +1047,27 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       .map((row) => ({
         id: str(row.id),
         closeDate: str(row.close_date),
-        grossAssets: finiteNumber(
+        version: nullableFiniteNumber(row.version, "monthly_closes.version"),
+        reportingCurrency:
+          typeof row.reporting_currency === "string" &&
+          /^[A-Z]{3}$/.test(row.reporting_currency.trim())
+            ? row.reporting_currency.trim()
+            : null,
+        completenessStatus:
+          typeof row.completeness_status === "string" ? row.completeness_status : null,
+        composition:
+          row.composition && typeof row.composition === "object" && !Array.isArray(row.composition)
+            ? (row.composition as Record<string, unknown>)
+            : null,
+        grossAssets: nullableFiniteNumber(
           row.gross_assets,
           `monthly_closes[id=${str(row.id)}].gross_assets`,
         ),
-        debt: finiteNumber(row.debt, `monthly_closes[id=${str(row.id)}].debt`),
-        netWorth: finiteNumber(row.net_worth, `monthly_closes[id=${str(row.id)}].net_worth`),
+        debt: nullableFiniteNumber(row.debt, `monthly_closes[id=${str(row.id)}].debt`),
+        netWorth: nullableFiniteNumber(
+          row.net_worth,
+          `monthly_closes[id=${str(row.id)}].net_worth`,
+        ),
         forecastNetWorth: nullableFiniteNumber(
           row.forecast_net_worth,
           `monthly_closes[id=${str(row.id)}].forecast_net_worth`,
@@ -1053,7 +1075,13 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         variance: nullableFiniteNumber(row.variance, `monthly_closes[id=${str(row.id)}].variance`),
         createdAt: str(row.created_at),
       }))
-      .sort((a, b) => b.closeDate.localeCompare(a.closeDate));
+      .sort(
+        (a, b) =>
+          b.closeDate.localeCompare(a.closeDate) ||
+          (b.version ?? 0) - (a.version ?? 0) ||
+          b.createdAt.localeCompare(a.createdAt) ||
+          b.id.localeCompare(a.id),
+      );
 
     const documents: DocumentRecord[] = documentRows
       .map((row) => ({
@@ -1809,6 +1837,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       goals,
       alerts,
       monthlyCloses,
+      decisionCases: mapDecisionCases(user, decisionCaseRows, decisionVersionRows, decisionRunRows),
       netWorthSnapshots,
       currencyRates,
       documents,
