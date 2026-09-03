@@ -13,6 +13,7 @@ import {
 
 import { Callout, EmptyState, SectionHeader } from "@/components/ui";
 import FecSection from "@/components/pages/imports/fec-section";
+import LiasseSection from "@/components/pages/imports/liasse-section";
 import RegistrySection from "@/components/pages/imports/registry-section";
 import { formatDate, NOT_COMPUTABLE } from "@/components/pages/shared";
 import type { SectionProps } from "@/components/pages/shared";
@@ -115,11 +116,28 @@ function RowAmount({ row }: { row: ImportPreviewRow }) {
 
 type StatusFilter = "ALL" | ImportRowStatus;
 
+/**
+ * ONGLETS D'ACQUISITION, DÉCLARÉS UNE FOIS
+ *
+ * Le type de l'état en DÉRIVE : ajouter une verticale est une seule ligne, et il devient
+ * impossible qu'un onglet existe dans le rendu sans exister dans le type, ou l'inverse.
+ * C'est exactement ce qui dérivait quand chaque verticale maintenait sa propre union de
+ * littéraux à côté de sa propre entrée de rendu.
+ */
+const IMPORT_DOMAIN_TABS = [
+  ["BANK", "Relevé bancaire"],
+  ["FEC", "Comptabilité (FEC)"],
+  ["LIASSE", "Liasse fiscale (PDF)"],
+  ["REGISTRY", "Registre d'entreprises"],
+] as const;
+
+type ImportDomainTab = (typeof IMPORT_DOMAIN_TABS)[number][0];
+
 function ImportsPage({ state, refresh }: SectionProps) {
   // Choix explicites de l'utilisateur. `null` = « pas encore choisi » : la valeur affichée
   // est alors DÉRIVÉE des comptes, sans effet de bord ni rendu en cascade.
   /** Domaine d'acquisition affiché. Un seul écran, deux sources : la fondation est commune. */
-  const [domain, setDomain] = useState<"BANK" | "FEC" | "REGISTRY">("BANK");
+  const [domain, setDomain] = useState<ImportDomainTab>("BANK");
   const [chosenAccountId, setChosenAccountId] = useState<string | null>(null);
   const [chosenCurrency, setChosenCurrency] = useState<string | null>(null);
   const [retainFile, setRetainFile] = useState(true);
@@ -311,13 +329,7 @@ function ImportsPage({ state, refresh }: SectionProps) {
       />
 
       <div className="import-filters">
-        {(
-          [
-            ["BANK", "Relevé bancaire"],
-            ["FEC", "Comptabilité (FEC)"],
-            ["REGISTRY", "Registre d'entreprises"],
-          ] as const
-        ).map(([value, label]) => (
+        {IMPORT_DOMAIN_TABS.map(([value, label]) => (
           <button
             key={value}
             type="button"
@@ -330,6 +342,8 @@ function ImportsPage({ state, refresh }: SectionProps) {
       </div>
 
       {domain === "FEC" ? <FecSection businesses={businesses} refresh={refresh} /> : null}
+
+      {domain === "LIASSE" ? <LiasseSection businesses={businesses} refresh={refresh} /> : null}
 
       {domain === "REGISTRY" ? <RegistrySection businesses={businesses} refresh={refresh} /> : null}
 

@@ -311,6 +311,37 @@ une IDENTITÉ, pas une finance : capital social, effectifs et catégorie d'entre
 des observations et n'entrent pas dans `businesses`. Détail dans
 `docs/COMPANY_REGISTRY_ACQUISITION.md`.
 
+DOCUMENT INTELLIGENCE est la quatrième verticale, et la liasse fiscale en est la première
+application. Elle RÉUTILISE le chemin « navigateur → stockage privé » du FEC, son billet à chemin
+calculé en base, et `import_record_links` comme UNIQUE pont de provenance — une troisième forme
+s'y ajoute, dont l'unité est un RUN et non une ligne. `lfo_record_business_financials` reste le
+chemin d'écriture unique de `business_financials` : cette verticale ne le modifie pas.
+
+DOCUMENT ≠ LECTURE ≠ FAIT CANONIQUE, et VALIDER ≠ RATTACHER : quatre actes, quatre décisions.
+CASE VIDE ≠ CASE À ZÉRO : une case de liasse laissée blanche ne déclare rien, et la compter zéro
+fausserait tout total construit dessus. CONTRÔLE NON CALCULABLE ≠ CONTRÔLE PASSÉ : un contrôle
+dont un opérande est absent, ou ambigu parce que deux cases portent le même code, rend
+`NOT_COMPUTABLE` — le compter réussi laisserait valider une liasse dont l'équilibre n'a jamais
+été vérifié. L'arithmétique des contrôles est faite EN BASE sur les cases persistées, comme la
+partie double du FEC : une charge forgée ne peut pas déclarer un bilan équilibré. VALEUR BRUTE ≠
+VALEUR NORMALISÉE ≠ VALEUR CORRIGÉE : corriger n'efface jamais ce que le document imprimait, et
+une correction ré-évalue les contrôles dans la MÊME transaction. OCR_REQUIRED ≠ ÉCHEC ≠ VALEUR
+SUPPOSÉE : un scan est un fait technique nommé, et aucune valeur n'en est déduite. LIASSE ≠
+COMPTE DE RÉSULTAT NORMALISÉ : seuls le chiffre d'affaires et le résultat de l'exercice sont
+écrits ; EBITDA, EBIT, capex, BFR et marge sont REFUSÉS par la RPC, parce que leur définition est
+une convention qui appartient au ledger de Quality of Earnings.
+
+AUCUN code de case n'est écrit en dur : le code est LU dans le document, à côté de sa valeur. Le
+registre de spécifications ne porte que des ancres de détection et des ancres de libellé, et une
+ancre qui ne s'apparie pas rend le contrôle non calculable, jamais réussi. La colonne d'une case
+n'est déterminée que si les EN-TÊTES sont trouvés : il n'y a pas de colonne par défaut. Détail
+dans `docs/DOCUMENT_INTELLIGENCE.md`.
+
+Avant de remplacer une RPC existante, chercher sa DERNIÈRE version dans l'historique, jamais la
+première : `lfo_record_business_financials` a été révisée trois fois, et la réécrire depuis sa
+version d'origine supprimait son upsert et quatre colonnes. Le gate complet l'a détecté ; le
+smoke d'une seule verticale ne l'aurait pas vu.
+
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger
 portefeuille porte les faits, jamais les lots ni le coût de revient, qui en sont dérivés.
