@@ -14,6 +14,7 @@ import {
 import { Callout, EmptyState, SectionHeader } from "@/components/ui";
 import FecSection from "@/components/pages/imports/fec-section";
 import LiasseSection from "@/components/pages/imports/liasse-section";
+import OpenBankingSection from "@/components/pages/imports/open-banking-section";
 import PortfolioSection from "@/components/pages/imports/portfolio-section";
 import PublicDataSection from "@/components/pages/imports/public-data-section";
 import RegistrySection from "@/components/pages/imports/registry-section";
@@ -129,6 +130,7 @@ type StatusFilter = "ALL" | ImportRowStatus;
  */
 const IMPORT_DOMAIN_TABS = [
   ["BANK", "Relevé bancaire"],
+  ["OPEN_BANKING", "Connexion bancaire"],
   ["FEC", "Comptabilité (FEC)"],
   ["LIASSE", "Liasse fiscale (PDF)"],
   ["PORTFOLIO", "Portefeuille"],
@@ -427,6 +429,8 @@ function ImportsPage({ state, refresh }: SectionProps) {
           refresh={refresh}
         />
       ) : null}
+
+      {domain === "OPEN_BANKING" ? <OpenBankingSection refresh={refresh} /> : null}
 
       {domain === "BANK" ? (
         <>

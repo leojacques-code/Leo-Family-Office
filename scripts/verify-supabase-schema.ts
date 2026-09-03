@@ -49,6 +49,8 @@ const canonicalMigrations = [
   "20260831171500",
   "20260902093000",
   "20260903090000",
+  "20260903120000",
+  "20260903120500",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -1140,6 +1142,18 @@ const userOwnedTables = [
   "real_estate_energy_certificates",
   "property_public_data_matches",
   "import_instrument_resolutions",
+  // Open Banking (AIS), lecture seule.
+  "bank_providers",
+  "bank_institutions",
+  "bank_consents",
+  "bank_provider_accounts",
+  "bank_sync_cursors",
+  "bank_sync_runs",
+  "bank_sync_raw_pages",
+  "bank_observed_transactions",
+  "bank_balance_observations",
+  "bank_reconciliation_decisions",
+  "bank_sync_events",
 ] as const;
 
 const requiredIndexes = [
@@ -1366,6 +1380,33 @@ const requiredIndexes = [
   "import_normalized_records_external_key_uidx",
   "import_instrument_resolutions_id_user_uidx",
   "import_instrument_resolutions_key_uidx",
+  // Open Banking — les trois unicités qui portent un invariant, pas une optimisation.
+  "bank_provider_accounts_canonical_uidx",
+  "bank_observed_transactions_identity_uidx",
+  "bank_observed_transactions_committed_uidx",
+  "bank_reconciliation_decisions_transaction_uidx",
+  "bank_sync_runs_running_uidx",
+  // Cibles de clés étrangères composées.
+  "bank_providers_id_user_uidx",
+  "bank_institutions_id_user_uidx",
+  "bank_consents_id_user_uidx",
+  "bank_provider_accounts_id_user_uidx",
+  "bank_sync_cursors_id_user_uidx",
+  "bank_sync_runs_id_user_uidx",
+  "bank_sync_raw_pages_id_user_uidx",
+  "bank_observed_transactions_id_user_uidx",
+  "bank_balance_observations_id_user_uidx",
+  "bank_reconciliation_decisions_id_user_uidx",
+  "bank_sync_events_id_user_uidx",
+  // Index de clés étrangères Open Banking. L'ORDRE des colonnes décide : une unicité
+  // `(user_id, cible)` porte son invariant, pas la clé étrangère `(cible, user_id)`.
+  "bank_institutions_canonical_fk_idx",
+  "bank_provider_accounts_account_fk_idx",
+  "bank_sync_cursors_account_fk_idx",
+  "bank_sync_raw_pages_account_fk_idx",
+  "bank_sync_raw_pages_session_fk_idx",
+  "bank_reconciliation_decisions_observation_fk_idx",
+  "bank_reconciliation_decisions_transaction_fk_idx",
 ] as const;
 const forbiddenIndexes = [
   "net_worth_snapshot_items_owner_snapshot_idx",
@@ -1386,6 +1427,8 @@ const requiredTriggers = [
   "real_estate_snapshot_frozen",
   "real_estate_comparable_sale_frozen",
   "real_estate_energy_certificate_frozen",
+  "bank_sync_raw_pages_immutable",
+  "bank_observed_transactions_frozen",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1400,6 +1443,8 @@ const requiredTriggerFunctions = [
   "document_extraction_field_frozen",
   "real_estate_snapshot_frozen",
   "real_estate_public_row_frozen",
+  "bank_sync_raw_page_immutable",
+  "bank_observed_transaction_frozen",
 ] as const;
 
 const requiredConstraints = [
@@ -1835,6 +1880,37 @@ const requiredConstraints = [
   "import_instrument_resolutions_rejected_shape_ck",
   "import_instrument_resolutions_pending_shape_ck",
   "real_estate_valuations_method_ck",
+  "import_sources_domain_v2_ck",
+  "import_sources_domain_shape_v2_ck",
+  "import_normalized_records_domain_ck",
+  "import_normalized_records_ready_shape_ck",
+  "import_record_links_domain_v2_ck",
+  "import_record_links_target_v2_ck",
+  "import_upload_tickets_domain_ck",
+  // Open Banking — chaque contrainte porte une distinction que le code seul ne tiendrait pas.
+  "bank_providers_secret_shape_ck",
+  "bank_providers_secret_reference_ck",
+  "bank_providers_auth_secret_ck",
+  "bank_consents_scopes_ck",
+  "bank_consents_expiry_shape_ck",
+  "bank_consents_active_shape_ck",
+  "bank_consents_revoked_shape_ck",
+  "bank_consents_expired_shape_ck",
+  "bank_consents_secret_shape_ck",
+  "bank_provider_accounts_mapping_shape_ck",
+  "bank_sync_runs_failure_shape_ck",
+  "bank_sync_runs_finished_shape_ck",
+  "bank_sync_runs_complete_shape_ck",
+  "bank_sync_raw_pages_hash_ck",
+  "bank_observed_transactions_original_shape_ck",
+  "bank_observed_transactions_cancelled_ck",
+  "bank_balance_observations_shape_ck",
+  "bank_balance_observations_observation_uk",
+  "bank_reconciliation_decisions_shape_ck",
+  "bank_reconciliation_decisions_observation_uk",
+  "bank_sync_events_event_uk",
+  "bank_sync_events_processed_shape_ck",
+  "bank_sync_events_unverified_ck",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
@@ -1957,6 +2033,20 @@ const requiredRpcs: Record<string, string> = {
   lfo_correct_portfolio_row: "p_user_id uuid, p_payload jsonb",
   lfo_finalize_portfolio_session: "p_user_id uuid, p_payload jsonb",
   lfo_commit_portfolio_session: "p_user_id uuid, p_payload jsonb",
+  // Open Banking (AIS), lecture seule. Aucune primitive d'initiation de paiement n'existe.
+  lfo_register_bank_provider: "p_user_id uuid, p_payload jsonb",
+  lfo_open_bank_consent: "p_user_id uuid, p_payload jsonb",
+  lfo_set_bank_consent_status: "p_user_id uuid, p_payload jsonb",
+  lfo_sync_bank_accounts: "p_user_id uuid, p_payload jsonb",
+  lfo_map_bank_account: "p_user_id uuid, p_payload jsonb",
+  lfo_open_bank_sync_run: "p_user_id uuid, p_payload jsonb",
+  lfo_append_bank_sync_page: "p_user_id uuid, p_payload jsonb",
+  lfo_record_bank_balances: "p_user_id uuid, p_payload jsonb",
+  lfo_finalize_bank_sync_run: "p_user_id uuid, p_payload jsonb",
+  lfo_fail_bank_sync_run: "p_user_id uuid, p_payload jsonb",
+  lfo_decide_bank_reconciliation: "p_user_id uuid, p_payload jsonb",
+  lfo_commit_bank_sync_session: "p_user_id uuid, p_payload jsonb",
+  lfo_record_bank_sync_event: "p_user_id uuid, p_payload jsonb",
 };
 
 /**
@@ -2007,6 +2097,14 @@ const declaredReturnTypeRpcs: Record<string, string> = {
   lfo_resolve_import_instrument: "integer",
   lfo_finalize_portfolio_session: "integer",
   lfo_commit_portfolio_session: "integer",
+  // Décomptes DÉRIVÉS des lignes persistées : comptes vus, lignes écrites, soldes écrits,
+  // lignes touchées par une décision, faits validés.
+  lfo_sync_bank_accounts: "integer",
+  lfo_append_bank_sync_page: "integer",
+  lfo_record_bank_balances: "integer",
+  lfo_finalize_bank_sync_run: "integer",
+  lfo_decide_bank_reconciliation: "integer",
+  lfo_commit_bank_sync_session: "integer",
 };
 
 /**
@@ -2053,6 +2151,20 @@ const readOnlyAuditTables = [
   "real_estate_energy_certificates",
   "property_public_data_matches",
   "import_instrument_resolutions",
+  // Les onze tables Open Banking sont une piste d'audit : une observation modifiable par le
+  // client n'est plus une observation, et un événement de notification effaçable rouvrirait
+  // le rejeu que son unicité existe pour refuser.
+  "bank_providers",
+  "bank_institutions",
+  "bank_consents",
+  "bank_provider_accounts",
+  "bank_sync_cursors",
+  "bank_sync_runs",
+  "bank_sync_raw_pages",
+  "bank_observed_transactions",
+  "bank_balance_observations",
+  "bank_reconciliation_decisions",
+  "bank_sync_events",
 ] as const;
 
 const storagePolicies = [
@@ -2334,6 +2446,10 @@ try {
       failures.push(
         `Limite du bucket family-office-import-staging (${stagingBucket.file_size_limit}) inférieure au plafond d'analyse (${MAX_FEC_FILE_BYTES})`,
       );
+    // UNION de ce que les quatre verticales de FICHIER déposent réellement au staging :
+    // texte à plat (relevé bancaire, FEC), PDF (liasse fiscale), classeur (portefeuille).
+    // Un type manquant ferait échouer le dépôt APRÈS que le serveur a émis son billet, et
+    // le contournement de la limite de corps de requête ne servirait alors à rien.
     for (const mime of [
       "text/plain",
       "text/csv",

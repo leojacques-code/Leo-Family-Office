@@ -132,6 +132,18 @@ Le DÉPÔT porte **34 migrations**, rejouables depuis une base vide (`npm run db
 Le DÉPÔT porte **35 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
 35 appliquées, 80 tables publiques). Les dernières versions sont :
 
+Le DÉPÔT porte **35 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
+35 appliquées, 90 tables publiques).
+
+L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE. Cette section annonçait
+« 29 migrations alignées au 28 août 2026 » alors que le dépôt en portait déjà 33 : la dérive
+n'est pas corrigée par une hypothèse, elle est signalée. Seul `npm run db:verify`, exécuté
+avec des credentials de production hors environnement d'agent, dit l'état réel ; le contenu de
+référence s'extrait de `supabase_migrations.schema_migrations`. Les deux migrations Open
+Banking n'ont PAS été appliquées en production.
+
+Les dernières versions sont :
+
 - `20260827215014_career_tax_v2` ;
 - `20260827215600_career_tax_v2_fk_indexes` ;
 - `20260828131216_fec_corporate_acquisition` ;
@@ -204,6 +216,8 @@ faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (donné
                + données publiques immobilières DVF/DPE)
 
                + import de portefeuille CSV/XLSX)
+
+               + Open Banking AIS lecture seule)
                Career + Tax (faits datés + règles fiscales déclarées + calculs dérivés)
 en cours       vérité de schéma · vérité des consommateurs
 suivant        Event Engine → Scenarios V2 → Goals → Decision Lab
@@ -430,6 +444,36 @@ le refus se produit alors à la première écriture, très loin de la cause. Ava
 contrainte, lire son état RÉEL en base (`pg_get_constraintdef`) et reprendre sa définition en
 vigueur, puis nommer le successeur. Corollaire du même principe que pour les RPC : chercher la
 DERNIÈRE version, jamais la première, et ne jamais supposer qu'un nom est disponible.
+
+L'OPEN BANKING (AIS) est la troisième verticale de cette fondation, et elle l'étend SANS
+ÉLARGIR AUCUNE WHITELIST : une synchronisation bancaire alimente le MÊME domaine cible qu'un
+relevé CSV, `CASH_FLOW_TRANSACTION`, et `import_sources.kind` prévoyait déjà `'API'`. Aucune
+colonne n'est ajoutée à une table du socle. AUCUNE INITIATION DE PAIEMENT n'existe : le
+contrat d'adaptateur n'expose que trois lectures, et deux contrôles le vérifient
+structurellement — un test sur les actions de la route, une assertion SQL sur les fonctions et
+colonnes `bank_*`. OBSERVATION ≠ FAIT CANONIQUE : une opération lue naît observée, et rien
+n'entre au Cash Flow sans DÉCISION humaine, qui est DURABLE et jamais redemandée à la
+synchronisation suivante. PENDING ≠ BOOKED : un remplacement n'est appliqué que DÉCLARÉ par le
+fournisseur et seulement s'il déclare ses identifiants stables, sinon il est signalé ; quand
+l'opération remplacée a déjà été écrite, c'est une CORRECTION, pas une nouvelle dépense. Les
+trois dates — opération, valeur, comptabilisation — sont conservées SÉPARÉMENT, et seule celle
+d'opération date le fait : une date absente BLOQUE au lieu de se replier sur une autre. SOLDE
+ABSENT ≠ SOLDE À ZÉRO, et un solde disponible n'est pas un solde comptable. COMPTE FOURNISSEUR
+≠ COMPTE CANONIQUE : rien n'est créé d'office, et un compte canonique est alimenté par AU PLUS
+UN compte fournisseur — sans cette unicité les mêmes opérations seraient écrites deux fois.
+CAPACITÉ NON DÉCLARÉE ≠ CAPACITÉ ABSENTE : un adaptateur qui ne déclare pas ses identifiants
+stables n'en a pas, et la déduplication automatique est alors INTERDITE. EXPIRATION NON
+DÉCLARÉE ≠ SANS EXPIRATION, RÉVOQUÉ ≠ EXPIRÉ, et la révocation est TERMINALE. PAGE VIDE ≠ FIN
+DE PAGINATION et CURSEUR IDENTIQUE ≠ FIN : seul un curseur nul déclare la fin, une boucle est
+nommée et interrompue, un plafond REFUSE au lieu de tronquer. Le curseur n'avance qu'APRÈS
+écriture réelle, et un échec le CONSERVE avec ses pages. Le BRUT d'une API est la PAGE, pas la
+ligne. RÉFÉRENCE DE SECRET ≠ SECRET : aucune table ne porte de colonne capable d'accueillir un
+jeton, et c'est l'absence de colonne qui garantit, pas une contrainte. Le rejeu d'une
+notification est refusé par la BASE, et un événement non signé ne déclenche rien. AUCUN
+ADAPTATEUR D'AGRÉGATEUR RÉEL n'est fourni : sans contrat ni identifiants, l'écrire de mémoire
+produirait un faux support ; le fournisseur sandbox couvre la chaîne sans réseau, à partir
+d'un catalogue de scénarios CÔTÉ SERVEUR — le navigateur choisit un nom, jamais un contenu.
+Détail dans `docs/OPEN_BANKING.md`.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger
