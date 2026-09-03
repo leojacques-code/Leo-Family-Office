@@ -315,11 +315,17 @@ try {
     "immuable",
   );
 
-  // La SUPPRESSION est refusée dès qu'un fait a été écrit — c'est le cas qui protège
-  // réellement quelque chose, et il est vérifié plus bas, après validation. Avant validation,
-  // le socle d'acquisition l'autorise volontairement : une session qui n'a rien produit doit
-  // pouvoir être remplacée par une réanalyse. Voir le constat consigné dans la PR sur la
-  // portée exacte de ce garde-fou sous `service_role`.
+  // La SUPPRESSION est refusée sur une session VIVANTE, avant comme après validation. Le
+  // socle l'autorisait sur toute session encore en réception ou analysée, parce que c'était
+  // l'état dans lequel l'abandon travaillait ; le retrait est maintenant DÉCLARÉ — seul
+  // l'abandon de la session libère son brut. Le cas « après validation » est vérifié plus
+  // bas ; l'état de gel complet l'est dans le smoke du socle.
+  await rejects(
+    "delete from public.import_raw_records where id = $1",
+    [rawId.rows[0].id],
+    "Le brut d'une session en réception a pu être supprimé",
+    "ne se supprime qu'en abandonnant la session",
+  );
 
   // ── 4. Formes de ligne refusées PAR LA BASE ────────────────────────────────────
   const badRow = (overrides: Record<string, unknown>) =>
@@ -573,6 +579,7 @@ try {
     "delete from public.import_raw_records where session_id = $1",
     [sessionId],
     "Le brut d'une session validée a pu être supprimé",
+    "fait canonique",
   );
   await rejects(
     "delete from public.import_record_links where session_id = $1",

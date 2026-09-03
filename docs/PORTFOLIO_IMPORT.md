@@ -22,31 +22,31 @@ coût de revient qui en découlerait serait faux **tout en paraissant calculé**
 natures sont donc deux domaines cibles distincts, écrits dans deux tables distinctes, et
 jamais convertis l'un dans l'autre :
 
-| Domaine | Écrit dans | Ce que ça dit |
-| --- | --- | --- |
-| `PORTFOLIO_LEDGER` | `portfolio_events`, via `lfo_record_portfolio_event` | un mouvement daté : achat, vente, dividende, intérêt, frais, taxe, apport, retrait, transfert, ancrage d'ouverture |
-| `PORTFOLIO_POSITION` | `positions` + `position_snapshots` | une observation datée : quantité, valeur de marché, coût de revient éventuel |
+| Domaine              | Écrit dans                                           | Ce que ça dit                                                                                                      |
+| -------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `PORTFOLIO_LEDGER`   | `portfolio_events`, via `lfo_record_portfolio_event` | un mouvement daté : achat, vente, dividende, intérêt, frais, taxe, apport, retrait, transfert, ancrage d'ouverture |
+| `PORTFOLIO_POSITION` | `positions` + `position_snapshots`                   | une observation datée : quantité, valeur de marché, coût de revient éventuel                                       |
 
 Un import de positions ne produit **aucun** événement. Un import d'opérations ne produit
 **aucune** observation. Le smoke le vérifie explicitement.
 
 ## 2. Audit préalable
 
-| Existant | Décision | Motif |
-| --- | --- | --- |
-| `csv.ts` (`detectDelimiter`, `parseDelimited`, `formatSignature`) | **REUSE inchangé** | Découpage neutre au domaine |
-| `normalization.ts` (décodage, conventions de montant et de date, devises, empreinte de libellé) | **REUSE inchangé** | La convention décimale d'un export de courtier est le même problème que celle d'un relevé bancaire |
-| `mapping.ts` `normalizeHeader` | **REUSE** | Le repli d'en-tête est commun ; l'inférence bancaire reste bancaire |
-| `types.ts` (`ImportIssue`, `ImportRowStatus`, `ImportDedupeVerdict`, `SourceConventions`, `RawRow`) | **REUSE** | Même vocabulaire d'anomalie et de verdict |
-| `dedupe.ts` | **REUSE du contrat, clé propre au domaine** | L'identité d'un événement de portefeuille porte l'instrument, la nature et la quantité : ce ne sont pas les composantes d'une opération bancaire |
-| `import_sources`, `import_sessions`, `import_raw_records`, `import_column_mappings` | **REUSE**, tables inchangées | Un import de portefeuille est un import de fichier lu ligne par ligne |
-| `import_upload_tickets` + zone de staging | **REUSE** | Un classeur dépasse la taille de corps qu'une fonction serverless accepte |
-| `import_normalized_records` | **EXTEND** | Colonnes de portefeuille ajoutées, forme committable arbitrée par domaine |
-| `import_record_links` | **EXTEND** | Deux colonnes cibles de plus, exactement ce que son propre commentaire prévoyait |
-| `lfo_record_portfolio_event` | **REUSE strict** | Unique porte d'écriture du ledger |
-| `positions` / `position_snapshots` | **REUSE**, avec les unicités qui manquaient | Voir §4 |
-| `portfolio.ts` (moteur) | **KEEP non modifié** | L'acquisition alimente, elle ne calcule pas |
-| Beyonder, Today, Timeline, Goals, Scenarios, Decision Lab | **NON TOUCHÉS** | Hors périmètre |
+| Existant                                                                                            | Décision                                    | Motif                                                                                                                                            |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `csv.ts` (`detectDelimiter`, `parseDelimited`, `formatSignature`)                                   | **REUSE inchangé**                          | Découpage neutre au domaine                                                                                                                      |
+| `normalization.ts` (décodage, conventions de montant et de date, devises, empreinte de libellé)     | **REUSE inchangé**                          | La convention décimale d'un export de courtier est le même problème que celle d'un relevé bancaire                                               |
+| `mapping.ts` `normalizeHeader`                                                                      | **REUSE**                                   | Le repli d'en-tête est commun ; l'inférence bancaire reste bancaire                                                                              |
+| `types.ts` (`ImportIssue`, `ImportRowStatus`, `ImportDedupeVerdict`, `SourceConventions`, `RawRow`) | **REUSE**                                   | Même vocabulaire d'anomalie et de verdict                                                                                                        |
+| `dedupe.ts`                                                                                         | **REUSE du contrat, clé propre au domaine** | L'identité d'un événement de portefeuille porte l'instrument, la nature et la quantité : ce ne sont pas les composantes d'une opération bancaire |
+| `import_sources`, `import_sessions`, `import_raw_records`, `import_column_mappings`                 | **REUSE**, tables inchangées                | Un import de portefeuille est un import de fichier lu ligne par ligne                                                                            |
+| `import_upload_tickets` + zone de staging                                                           | **REUSE**                                   | Un classeur dépasse la taille de corps qu'une fonction serverless accepte                                                                        |
+| `import_normalized_records`                                                                         | **EXTEND**                                  | Colonnes de portefeuille ajoutées, forme committable arbitrée par domaine                                                                        |
+| `import_record_links`                                                                               | **EXTEND**                                  | Deux colonnes cibles de plus, exactement ce que son propre commentaire prévoyait                                                                 |
+| `lfo_record_portfolio_event`                                                                        | **REUSE strict**                            | Unique porte d'écriture du ledger                                                                                                                |
+| `positions` / `position_snapshots`                                                                  | **REUSE**, avec les unicités qui manquaient | Voir §4                                                                                                                                          |
+| `portfolio.ts` (moteur)                                                                             | **KEEP non modifié**                        | L'acquisition alimente, elle ne calcule pas                                                                                                      |
+| Beyonder, Today, Timeline, Goals, Scenarios, Decision Lab                                           | **NON TOUCHÉS**                             | Hors périmètre                                                                                                                                   |
 
 ### Pourquoi étendre la table de staging plutôt qu'en créer une seconde
 
@@ -68,18 +68,18 @@ Ce choix n'est pas de la fierté mal placée : les bibliothèques de tableur gé
 évaluent les formules, suivent les liens externes et acceptent les classeurs à macros. Ce
 dépôt a besoin de l'inverse.
 
-| Situation | Comportement |
-| --- | --- |
-| Cellule de formule **avec** valeur en cache | La valeur est lue, et la cellule est **nommée** dans `formulaCells`. `VALEUR EN CACHE ≠ VALEUR SAISIE` : elle peut être périmée si le classeur a été modifié sans recalcul |
-| Cellule de formule **sans** valeur en cache | Rien n'est produit, et c'est une **erreur**. L'évaluer reviendrait à écrire un moteur de tableur, donc à inventer un chiffre |
-| Classeur porteur de macros (`vbaProject.bin`) | **REFUSÉ**, pas lu partiellement. Une lecture partielle laisserait croire que le contenu a été validé |
-| Classeur chiffré | **REFUSÉ** |
-| Lien externe vers un autre classeur | **SIGNALÉ**, jamais suivi |
-| Cellule en erreur (`#REF!`, `#DIV/0!`) | Aucune valeur n'en est tirée |
-| Index de chaîne partagée hors bornes | Cellule vide **et** anomalie, jamais une chaîne devinée |
-| Colonne manquante au milieu d'une ligne | Comblée par une chaîne **vide** — jamais par un zéro |
-| Cellule datée | Numéro de série décodé selon l'époque **déclarée par le classeur** (1900 ou 1904), bug du 29 février 1900 compris, et le décodage est signalé |
-| Entité XML externe | Non résolue : le parseur ne connaît que les cinq entités prédéfinies et les références numériques |
+| Situation                                     | Comportement                                                                                                                                                               |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cellule de formule **avec** valeur en cache   | La valeur est lue, et la cellule est **nommée** dans `formulaCells`. `VALEUR EN CACHE ≠ VALEUR SAISIE` : elle peut être périmée si le classeur a été modifié sans recalcul |
+| Cellule de formule **sans** valeur en cache   | Rien n'est produit, et c'est une **erreur**. L'évaluer reviendrait à écrire un moteur de tableur, donc à inventer un chiffre                                               |
+| Classeur porteur de macros (`vbaProject.bin`) | **REFUSÉ**, pas lu partiellement. Une lecture partielle laisserait croire que le contenu a été validé                                                                      |
+| Classeur chiffré                              | **REFUSÉ**                                                                                                                                                                 |
+| Lien externe vers un autre classeur           | **SIGNALÉ**, jamais suivi                                                                                                                                                  |
+| Cellule en erreur (`#REF!`, `#DIV/0!`)        | Aucune valeur n'en est tirée                                                                                                                                               |
+| Index de chaîne partagée hors bornes          | Cellule vide **et** anomalie, jamais une chaîne devinée                                                                                                                    |
+| Colonne manquante au milieu d'une ligne       | Comblée par une chaîne **vide** — jamais par un zéro                                                                                                                       |
+| Cellule datée                                 | Numéro de série décodé selon l'époque **déclarée par le classeur** (1900 ou 1904), bug du 29 février 1900 compris, et le décodage est signalé                              |
+| Entité XML externe                            | Non résolue : le parseur ne connaît que les cinq entités prédéfinies et les références numériques                                                                          |
 
 Plafonds explicites, tous refusant plutôt que tronquant : 16 Mio, 64 feuilles, 50 000 lignes,
 256 colonnes, 20 s d'analyse, 64 Mio par entrée décompressée.
@@ -124,15 +124,15 @@ La décision porte sur la **clé de source** (`ISIN:…`, `TICKER:…`, `NAME:�
 toutes les lignes qui citent le même titre se résolvent ensemble. Elle est persistée dans
 `import_instrument_resolutions`, avec sa base nommée et ses candidats.
 
-| Cas | État | Effet |
-| --- | --- | --- |
-| ISIN valide, un seul instrument | `RESOLVED` | Rattachement, sans réserve |
-| ISIN valide, plusieurs instruments | `AMBIGUOUS` | **Aucun** retenu, les deux montrés |
-| ISIN valide, inconnu | `UNRESOLVED` | Lignes bloquées jusqu'à décision |
-| Chaîne présente mais pas un ISIN | signalé | Repli sur les identifiants plus faibles, dit en clair |
-| Ticker seul, un instrument | `RESOLVED` **avec réserve** | Un même ticker désigne des sociétés différentes selon la place |
-| Libellé seul, un instrument | `RESOLVED` **avec réserve** | Un libellé n'est pas un identifiant |
-| Décision humaine | l'emporte | Une réanalyse ne l'écrase pas |
+| Cas                                | État                        | Effet                                                          |
+| ---------------------------------- | --------------------------- | -------------------------------------------------------------- |
+| ISIN valide, un seul instrument    | `RESOLVED`                  | Rattachement, sans réserve                                     |
+| ISIN valide, plusieurs instruments | `AMBIGUOUS`                 | **Aucun** retenu, les deux montrés                             |
+| ISIN valide, inconnu               | `UNRESOLVED`                | Lignes bloquées jusqu'à décision                               |
+| Chaîne présente mais pas un ISIN   | signalé                     | Repli sur les identifiants plus faibles, dit en clair          |
+| Ticker seul, un instrument         | `RESOLVED` **avec réserve** | Un même ticker désigne des sociétés différentes selon la place |
+| Libellé seul, un instrument        | `RESOLVED` **avec réserve** | Un libellé n'est pas un identifiant                            |
+| Décision humaine                   | l'emporte                   | Une réanalyse ne l'écrase pas                                  |
 
 Le point le plus important de cette verticale se trouve dans
 `lfo_commit_portfolio_session` : l'instrument est transmis à la RPC du ledger sous sa **seule
@@ -167,14 +167,14 @@ C'est le seul endroit du domaine où c'est vrai.
 
 ## 7. `NULL ≠ ZERO`, ligne par ligne
 
-| Terme | Absent signifie |
-| --- | --- |
-| `fee_amount`, `tax_amount` | frais **inconnus**. Le coût de revient qui en dépend reste non calculable plutôt que flatteur |
-| `cost_basis` | coût de revient non fourni. La plus-value latente reste non calculable |
-| `envelope_cash_amount` | effet sur le cash **inconnu**, jamais nul |
-| `quantity` sur un dividende | pas de quantité, ce qui est normal |
-| `market_value` sur une position | **BLOQUANT** : `position_snapshots.market_value` est NOT NULL, et une position sans valeur observée n'est pas une observation de valeur |
-| devise | ligne **refusée**, sauf repli sur la devise déclarée de l'enveloppe — et ce repli est signalé à chaque ligne, parce que `FX ABSENT ≠ FX ÉGAL À 1` |
+| Terme                           | Absent signifie                                                                                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fee_amount`, `tax_amount`      | frais **inconnus**. Le coût de revient qui en dépend reste non calculable plutôt que flatteur                                                     |
+| `cost_basis`                    | coût de revient non fourni. La plus-value latente reste non calculable                                                                            |
+| `envelope_cash_amount`          | effet sur le cash **inconnu**, jamais nul                                                                                                         |
+| `quantity` sur un dividende     | pas de quantité, ce qui est normal                                                                                                                |
+| `market_value` sur une position | **BLOQUANT** : `position_snapshots.market_value` est NOT NULL, et une position sans valeur observée n'est pas une observation de valeur           |
+| devise                          | ligne **refusée**, sauf repli sur la devise déclarée de l'enveloppe — et ce repli est signalé à chaque ligne, parce que `FX ABSENT ≠ FX ÉGAL À 1` |
 
 Un **zéro explicite** est une information et se distingue d'une cellule vide. Le test le
 vérifie sur la même colonne, ligne à ligne.
@@ -215,62 +215,144 @@ source a écrit.
 
 Chaque fait accepté conserve :
 
-| Élément | Où |
-| --- | --- |
-| import et fichier sources | `import_sessions.file_name`, `file_hash`, `staging_storage_path` |
-| numéro de ligne | `import_raw_records.row_number` |
-| champ source et valeur brute | `import_raw_records.cells`, `raw_line` |
-| valeur normalisée | colonnes de `import_normalized_records` |
-| correction éventuelle | `field_corrections` (valeur d'origine **et** valeur retenue, par champ), `corrected_at`, `correction_reason` |
-| adaptateur et version | `import_sessions.parser`, `parser_version`, `import_sources.adapter_version` |
-| date d'import | `import_sessions.observation_date`, distincte de la date d'arrêté du reporting |
-| lien vers le fait canonique | `import_normalized_records.portfolio_event_id` / `position_snapshot_id`, et `import_record_links` |
+| Élément                      | Où                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| import et fichier sources    | `import_sessions.file_name`, `file_hash`, `staging_storage_path`                                             |
+| numéro de ligne              | `import_raw_records.row_number`                                                                              |
+| champ source et valeur brute | `import_raw_records.cells`, `raw_line`                                                                       |
+| valeur normalisée            | colonnes de `import_normalized_records`                                                                      |
+| correction éventuelle        | `field_corrections` (valeur d'origine **et** valeur retenue, par champ), `corrected_at`, `correction_reason` |
+| adaptateur et version        | `import_sessions.parser`, `parser_version`, `import_sources.adapter_version`                                 |
+| date d'import                | `import_sessions.observation_date`, distincte de la date d'arrêté du reporting                               |
+| lien vers le fait canonique  | `import_normalized_records.portfolio_event_id` / `position_snapshot_id`, et `import_record_links`            |
 
 Un fait importé n'est **pas supprimable** en laissant sa provenance orpheline : la FK est
 `restrict`.
 
-## 11. Constat sur la portée du gel du brut
+## 11. Gel du brut : correction du garde-fou
 
 Le trigger `import_raw_record_immutable` du socle d'acquisition refuse toute **modification**
-sans condition. Pour la **suppression**, il lit le statut de la session :
+sans condition. Pour la **suppression**, il lisait le statut de la session :
 
 ```sql
 select status into v_status from public.import_sessions
  where id = old.session_id and user_id = old.user_id;
-if v_status is null then return old; end if;
+if v_status is null then return old; end if;   -- « cascade légitime »
 ```
 
-Sous `service_role`, `import_sessions` est protégée par RLS avec une policy visant
-`authenticated` : la lecture rend **zéro ligne**, `v_status` est `null`, et le trigger conclut
-« session déjà supprimée, cascade légitime » — donc autorise. La suppression du brut d'une
-session qui n'a **encore produit aucun fait** passe donc.
+### Ce que le constat initial disait de faux
 
-Ce n'est pas exploitable pour effacer un fait : dès qu'une ligne est committée, la cascade
-vers `import_normalized_records` et `import_record_links` est bloquée par leurs propres gels,
-et c'est ce refus qui protège réellement. Le smoke de cette verticale le vérifie dans les deux
-états.
+La première rédaction de cette section affirmait que, sous `service_role`, la RLS rendait
+`import_sessions` invisible et que la suppression du brut d'une session committée passait donc.
+**C'est inexact.** Vérification sur base locale reconstruite depuis zéro :
+`service_role` porte l'attribut `bypassrls`, ici comme sur Supabase. Le garde lisait donc le
+bon statut, et le refus se produisait bien :
 
-Le constat est **préexistant** et concerne le socle commun, pas cette verticale. Il n'est pas
-corrigé ici : le corriger demanderait de distinguer « session absente » de « session
-invisible », ce qu'une fonction `security invoker` ne peut pas faire, et toucher au socle
-sortait du périmètre. Correction proposée, à arbitrer : passer le statut de session en
-paramètre du contrôle plutôt qu'en lecture, ou accorder à `service_role` un `select` explicite
-sur `import_sessions`.
+| statut de la session | suppression du brut, avant correction |
+| -------------------- | ------------------------------------- |
+| `RECEIVING`          | autorisée                             |
+| `ANALYZED`           | autorisée                             |
+| `COMMITTED`          | **refusée**                           |
+| `DISCARDED`          | **refusée**                           |
+| `FAILED`             | **refusée**                           |
+
+Le smoke du socle vérifiait déjà le refus sur `COMMITTED`, et il passait pour la bonne raison.
+
+### Le défaut réel
+
+Le garde était correct **par accident d'un attribut de rôle**, pas par construction. Sous un
+appelant qui ne contourne pas la RLS, `import_sessions` rend zéro ligne, `v_status` vaut `null`,
+et le garde conclut « session déjà supprimée » : il **autorise**. Sonde reproduite en
+transaction annulée, avec un rôle voyant le brut mais pas les sessions :
+
+```text
+sous_role       | sessions_visibles | brut_visible
+lfo_probe_norls |                 0 |            1
+DELETE 1                                    -- brut d'une session COMMITTED, aucun refus
+```
+
+Aucun chemin applicatif ne l'atteignait : `authenticated` n'a que le `select` sur
+`import_raw_records`, donc la permission tombe avant le trigger. Mais forcer la RLS sur la
+table, retirer `bypassrls`, ou ouvrir un jour un chemin de suppression à un rôle applicatif
+aurait inversé le garde en silence, dans le sens le plus coûteux : celui qui autorise.
+
+**SESSION ABSENTE ≠ SESSION INVISIBLE.** Cette distinction ne peut pas être posée par une
+lecture `security invoker` : elle exige une lecture qui ne dépend pas de ce que l'appelant a le
+droit de voir.
+
+### La correction
+
+`supabase/migrations/20260903090000_import_raw_freeze_hardening.sql`, additive.
+
+`public.import_session_freeze_state(p_session_id uuid, p_user_id uuid) returns text` rend
+`ABSENT`, `FACTS_WRITTEN`, ou le statut de la session. `SECURITY DEFINER` y est **nécessaire**,
+pas commode : la question posée est « cette session existe-t-elle ? », et une réponse filtrée
+par la RLS de l'appelant répond à une autre question. Surface minimale, chaque condition
+vérifiée par le gate :
+
+- `stable`, aucune écriture ;
+- `search_path` verrouillé à vide, tous les objets qualifiés par leur schéma ;
+- elle rend un état de gel, aucune donnée d'affaire ;
+- **pas** nommée `lfo_*` : ce n'est pas une RPC d'écriture, et le contrat « aucune RPC `lfo_*`
+  en `SECURITY DEFINER` » reste entier ;
+- aucun `execute` pour `public`, `anon` ni `authenticated` ; `service_role` seul l'obtient. Un
+  futur rôle applicatif recevant un `delete` sur le brut sans ce privilège échoue sur
+  `permission denied for function` : le défaut est **fermé**.
+
+Deux invariants s'ajoutent du même mouvement.
+
+**Un fait écrit gèle tout le brut de sa session.** L'autorisation ne s'appuie plus sur le statut
+affiché mais d'abord sur la **preuve** qu'un fait canonique existe : un lien de provenance, une
+ligne normalisée committée, une écriture comptable committée. Remettre `status` en arrière ne
+rouvre donc rien.
+
+**Supprimer le brut d'une session vivante n'est pas un abandon.** Le socle autorisait la
+suppression sur toute session `RECEIVING` ou `ANALYZED`, parce que c'était l'état dans lequel
+`lfo_discard_import_session` travaillait — la RPC libérait les lignes _puis_ marquait la session,
+en notant que l'inverse aurait fait refuser sa propre suppression. L'ordre s'inverse : la RPC
+marque `DISCARDED` d'abord, et le garde n'autorise plus que cet état. Une suppression de brut
+laisse désormais une trace dans la piste d'audit, ou elle est refusée. Les gels des lignes de
+staging et des écritures comptables portent sur leur propre `commit_state`, jamais sur le statut
+de la session : l'inversion ne les touche pas, et une session abandonnable n'a par définition
+aucune ligne committée.
+
+| statut de la session                 | suppression du brut, après correction |
+| ------------------------------------ | ------------------------------------- |
+| session réellement absente (cascade) | autorisée                             |
+| un fait canonique existe             | **refusée**                           |
+| `RECEIVING`                          | **refusée**                           |
+| `ANALYZED`                           | **refusée**                           |
+| `COMMITTED`                          | **refusée**                           |
+| `FAILED`                             | **refusée**                           |
+| `DISCARDED`                          | autorisée (abandon déclaré)           |
+
+La modification reste refusée sans condition, avant comme après validation.
+
+### Ce qui le vérifie
+
+`scripts/smoke-import-acquisition.ts` § 11 bis : les cinq statuts, sous `service_role` ; le
+retrait réservé à l'abandon déclaré ; un statut remis en arrière qui ne rouvre rien ; la cascade
+légitime d'une session sans fait, ouverte ; la cascade d'une session à faits, barrée ; sous
+`authenticated`, la lecture d'invariant, le `delete` et l'`update` tous refusés par les
+privilèges. `scripts/verify-supabase-schema.ts` vérifie `SECURITY DEFINER`, la signature, le
+type de retour, la volatilité, le `search_path` verrouillé et l'absence d'`execute` pour
+`public`, `anon` et `authenticated`.
 
 ## 12. Fichiers
 
-| Rôle | Chemin |
-| --- | --- |
-| Schéma | `supabase/migrations/20260902093000_portfolio_import_acquisition.sql` |
-| Lecteur ZIP | `src/lib/acquisition/xlsx/zip.ts` |
-| Lecteur de classeur | `src/lib/acquisition/xlsx/workbook.ts` |
-| Contrats du domaine | `src/lib/acquisition/portfolio/types.ts` |
-| Mapping des colonnes | `src/lib/acquisition/portfolio/mapping.ts` |
-| Résolution d'instrument | `src/lib/acquisition/portfolio/instruments.ts` |
-| Déduplication | `src/lib/acquisition/portfolio/dedupe.ts` |
-| Analyse unifiée CSV/XLSX | `src/lib/acquisition/portfolio/analyze.ts` |
-| Repository | `src/lib/data/portfolio-import-repository.ts` |
-| Validation | `src/lib/validation/portfolio-imports.ts` |
-| Route | `src/app/api/imports/portfolio/route.ts` |
-| Écran | `src/components/pages/imports/portfolio-section.tsx` |
-| Smoke | `scripts/smoke-portfolio-import.ts` |
+| Rôle                        | Chemin                                                                |
+| --------------------------- | --------------------------------------------------------------------- |
+| Schéma                      | `supabase/migrations/20260902093000_portfolio_import_acquisition.sql` |
+| Lecteur ZIP                 | `src/lib/acquisition/xlsx/zip.ts`                                     |
+| Lecteur de classeur         | `src/lib/acquisition/xlsx/workbook.ts`                                |
+| Contrats du domaine         | `src/lib/acquisition/portfolio/types.ts`                              |
+| Mapping des colonnes        | `src/lib/acquisition/portfolio/mapping.ts`                            |
+| Résolution d'instrument     | `src/lib/acquisition/portfolio/instruments.ts`                        |
+| Déduplication               | `src/lib/acquisition/portfolio/dedupe.ts`                             |
+| Analyse unifiée CSV/XLSX    | `src/lib/acquisition/portfolio/analyze.ts`                            |
+| Repository                  | `src/lib/data/portfolio-import-repository.ts`                         |
+| Validation                  | `src/lib/validation/portfolio-imports.ts`                             |
+| Route                       | `src/app/api/imports/portfolio/route.ts`                              |
+| Écran                       | `src/components/pages/imports/portfolio-section.tsx`                  |
+| Smoke                       | `scripts/smoke-portfolio-import.ts`                                   |
+| Durcissement du gel du brut | `supabase/migrations/20260903090000_import_raw_freeze_hardening.sql`  |

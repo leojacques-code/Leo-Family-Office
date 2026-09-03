@@ -126,8 +126,8 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **34 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
-34 appliquées, 80 tables publiques). Les dernières versions sont :
+Le DÉPÔT porte **35 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
+35 appliquées, 80 tables publiques). Les dernières versions sont :
 
 - `20260827215014_career_tax_v2` ;
 - `20260827215600_career_tax_v2_fk_indexes` ;
@@ -137,14 +137,15 @@ Le DÉPÔT porte **34 migrations**, rejouables depuis une base vide (`npm run db
 - `20260829234053_goals_v2` ;
 - `20260829234259_scenarios_goals_fk_indexes` ;
 - `20260830154315_decision_lab_v2` ;
-- `20260902093000_portfolio_import_acquisition`.
+- `20260902093000_portfolio_import_acquisition` ;
+- `20260903090000_import_raw_freeze_hardening`.
 
 L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE. Cette section annonçait
 « 29 migrations » alors que le dépôt en portait déjà 33 : la dérive n'est pas corrigée par une
 hypothèse, elle est signalée. Seul `npm run db:verify`, exécuté avec des credentials de
 production hors environnement d'agent, dit l'état réel ; le contenu de référence s'extrait de
-`supabase_migrations.schema_migrations`. La dernière migration ci-dessus n'a PAS été appliquée
-en production.
+`supabase_migrations.schema_migrations`. Les DEUX dernières migrations ci-dessus n'ont PAS été
+appliquées en production.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
@@ -225,7 +226,18 @@ lignes concernées sinon : choisir entre 1,234 et 1 234 sur 800 lignes n'est pas
 décision de présentation. Un enregistrement brut est immuable et sa piste
 d'audit est en LECTURE SEULE pour le client : corriger une lecture modifie le fait
 canonique, jamais ce que la source a écrit, et une transaction importée n'est pas
-supprimable en laissant sa provenance orpheline.
+supprimable en laissant sa provenance orpheline. SESSION ABSENTE ≠ SESSION INVISIBLE : un
+garde-fou qui décide à partir d'une lecture filtrée par la RLS de l'appelant conclut
+« déjà supprimé » sur une simple absence de droit, et autorise. La question « cet objet
+existe-t-il ? » se lit donc indépendamment de la visibilité de l'appelant, et le seul
+`SECURITY DEFINER` du schéma applicatif existe pour cela : `search_path` vide, objets
+qualifiés, aucune écriture, aucun `execute` pour `public`, `anon` ni `authenticated`, et un
+nom hors du contrat `lfo_*`, qui reste sans aucune RPC `SECURITY DEFINER`. UN FAIT ÉCRIT
+GÈLE TOUT LE BRUT DE SA SESSION : l'autorisation s'appuie sur la PREUVE qu'un fait existe,
+jamais sur le statut affiché, sans quoi un statut remis en arrière rouvrirait la suppression
+de sa propre provenance. Et SUPPRIMER LE BRUT D'UNE SESSION VIVANTE N'EST PAS UN ABANDON :
+l'abandon se DÉCLARE avant de libérer les lignes, de sorte qu'un retrait de brut laisse une
+trace dans la piste d'audit ou se fait refuser.
 
 L'IDENTITÉ SE DÉMONTRE, elle ne se présume pas. Une égalité de tuple — compte, date,
 montant, devise, libellé — ne prouve rien entre deux fichiers distincts : un relevé partiel

@@ -605,9 +605,15 @@ try {
     "delete from public.fec_entry_lines where session_id = $1 and status = 'BLOCKED'",
     [sessionId],
   );
-  await client.query(
+  // Le BRUT de la ligne illisible, lui, RESTE. C'est ce que le fichier contenait, et le
+  // garde-fou du brut refuse maintenant de le retirer d'une session vivante : seul l'abandon
+  // DÉCLARÉ de la session libère un brut. Retirer la LECTURE suffit à débloquer la
+  // validation, et c'est le bon niveau — corriger une lecture ne réécrit pas la source.
+  await rejects(
     "delete from public.import_raw_records where session_id = $1 and row_number = 900",
     [sessionId],
+    "Le brut d'une session vivante a pu être supprimé",
+    "ne se supprime qu'en abandonnant la session",
   );
 
   // Le décompte de la SESSION n'est plus ce qui décide : seules les lignes persistées le

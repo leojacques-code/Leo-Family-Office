@@ -45,6 +45,7 @@ const canonicalMigrations = [
   "20260829234259",
   "20260830154315",
   "20260902093000",
+  "20260903090000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -1763,6 +1764,65 @@ try {
     if (rpc.authenticated_execute) failures.push(`RPC exécutable par authenticated : ${rpc.name}`);
     if (!rpc.service_role_execute)
       failures.push(`RPC non exécutable par service_role : ${rpc.name}`);
+  }
+
+  // Le garde-fou du brut d'import lit l'existence d'une session INDÉPENDAMMENT de la
+  // visibilité RLS de l'appelant. C'est la seule fonction SECURITY DEFINER du schéma
+  // applicatif, et elle n'est PAS une RPC `lfo_*` : le contrat « aucune RPC lfo_* en
+  // SECURITY DEFINER » vérifié ci-dessus reste donc entier. Ses conditions d'existence
+  // sont vérifiées une par une, parce qu'une seule d'entre elles relâchée transformerait
+  // un garde-fou en surface d'attaque.
+  const freezeState = await client.query<{
+    security_definer: boolean;
+    result_type: string;
+    arguments: string;
+    volatility: string;
+    settings: string[] | null;
+    anon_execute: boolean;
+    authenticated_execute: boolean;
+    public_execute: boolean;
+    service_role_execute: boolean;
+  }>(
+    `select proc.prosecdef as security_definer,
+            pg_catalog.pg_get_function_result(proc.oid) as result_type,
+            pg_catalog.pg_get_function_arguments(proc.oid) as arguments,
+            proc.provolatile::text as volatility,
+            proc.proconfig as settings,
+            pg_catalog.has_function_privilege('anon', proc.oid, 'execute') as anon_execute,
+            pg_catalog.has_function_privilege('authenticated', proc.oid, 'execute') as authenticated_execute,
+            pg_catalog.has_function_privilege('public', proc.oid, 'execute') as public_execute,
+            pg_catalog.has_function_privilege('service_role', proc.oid, 'execute') as service_role_execute
+       from pg_catalog.pg_proc proc
+       join pg_catalog.pg_namespace ns on ns.oid = proc.pronamespace
+      where ns.nspname = 'public' and proc.proname = 'import_session_freeze_state'`,
+  );
+  const freeze = freezeState.rows[0];
+  if (!freeze) failures.push("Fonction absente : public.import_session_freeze_state");
+  else {
+    if (!freeze.security_definer)
+      failures.push(
+        "import_session_freeze_state n'est pas SECURITY DEFINER : elle redeviendrait aveugle sous RLS",
+      );
+    if (freeze.arguments !== "p_session_id uuid, p_user_id uuid")
+      failures.push(`Signature invalide : import_session_freeze_state(${freeze.arguments})`);
+    if (freeze.result_type !== "text")
+      failures.push(
+        `Type de retour invalide : import_session_freeze_state -> ${freeze.result_type}`,
+      );
+    // `s` = stable. Une fonction de garde-fou ne doit rien écrire.
+    if (freeze.volatility !== "s")
+      failures.push("import_session_freeze_state doit rester stable, sans écriture");
+    if (!freeze.settings?.some((setting) => setting === 'search_path=""'))
+      failures.push("search_path non verrouillé : import_session_freeze_state");
+    for (const [role, granted] of [
+      ["anon", freeze.anon_execute],
+      ["authenticated", freeze.authenticated_execute],
+      ["public", freeze.public_execute],
+    ] as const)
+      if (granted)
+        failures.push(`import_session_freeze_state exécutable par ${role} : surface interdite`);
+    if (!freeze.service_role_execute)
+      failures.push("import_session_freeze_state non exécutable par service_role");
   }
 
   const buckets = await client.query<{
