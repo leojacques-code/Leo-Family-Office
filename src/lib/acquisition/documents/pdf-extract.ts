@@ -77,9 +77,12 @@ export async function extractPdfTextLayer(bytes: Uint8Array): Promise<PdfExtract
   try {
     document = await pdfjs.getDocument({
       data: bytes,
-      // Aucune évaluation de code embarqué, aucun script du document : un PDF déposé par un
-      // tiers ne doit pas pouvoir exécuter quoi que ce soit dans le processus serveur.
-      isEvalSupported: false,
+      // `isEvalSupported: false` figurait ici. L'option n'existe plus en pdfjs-dist 6 : elle a
+      // été retirée avec la CAPACITÉ qu'elle désarmait, et les builds `legacy` de la version
+      // installée ne contiennent ni `eval(` ni `new Function(`. La garantie voulue — un PDF
+      // déposé par un tiers n'exécute rien dans le processus serveur — est donc le seul
+      // comportement possible, et non un défaut qu'on aurait cessé de corriger. Si une version
+      // future réintroduisait l'évaluation, ce commentaire est l'endroit où le vérifier.
       // Aucune police système : la lecture du texte n'en a pas besoin, et les charger ferait
       // dépendre le résultat de l'environnement d'exécution.
       useSystemFonts: false,

@@ -22,6 +22,28 @@ Règle appliquée partout dans la réconciliation : **élargir, jamais remplacer
 lire la définition RÉELLEMENT ACTIVE par `pg_get_constraintdef`, jamais la définition que le
 fichier prétend poser.
 
+### Un septième conflit, hors du schéma : `package.json`
+
+La même dérive existe un étage plus haut, et elle a échappé au gate. `pdfjs-dist` s'est retrouvé
+déclaré DEUX FOIS : en `dependencies` à la version qu'une verticale avait lue, en
+`devDependencies` à celle que `main` portait déjà. Un seul arbre est installé, donc **une seule
+des deux versions gagne** — et ce n'était pas celle contre laquelle le code compilait.
+
+Le gate local ne l'a pas vu, pour une raison qui vaut d'être écrite : `npm run build` construisait
+sur un `node_modules` DÉJÀ EN PLACE, portant encore l'ancienne version. **Un gate qui construit sur
+un arbre existant ne prouve pas ce qu'une installation propre produira.** La préview a échoué au
+premier `npm ci`, sur un champ retiré par la version majeure suivante.
+
+Résolution : une seule déclaration, en `dependencies` puisque le code l'importe à l'exécution, à la
+version de `main` — la plus récente et celle contre laquelle ses propres tests tournaient déjà. Le
+code appelant est adapté, et l'option de sécurité qu'il posait a été VÉRIFIÉE plutôt que supprimée :
+`isEvalSupported: false` n'existe plus parce que la CAPACITÉ n'existe plus, les builds installés ne
+contenant ni `eval(` ni `new Function(`. Une option retirée n'est pas une garantie perdue, mais
+c'est à démontrer, pas à supposer.
+
+Un contrôle en porte la leçon : `src/lib/__tests__/dependency-declarations.test.ts` refuse un paquet
+déclaré des deux côtés, et une plage de version ajoutée hors des exceptions nommées.
+
 ## 2. Les six conflits, et leur résolution
 
 Migration : `20260903190000_acquisition_integration_reconciliation`.
