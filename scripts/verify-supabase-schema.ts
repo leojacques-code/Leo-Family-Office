@@ -46,6 +46,7 @@ const canonicalMigrations = [
   "20260830154315",
   "20260831101500",
   "20260831154500",
+  "20260831171500",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -259,6 +260,8 @@ const requiredColumns: Record<string, string[]> = {
     "valuation_method",
     "data_kind",
     "confidence",
+    "snapshot_id",
+    "derivation",
   ],
   real_estate_capital_events: [
     "id",
@@ -799,6 +802,8 @@ const requiredColumns: Record<string, string[]> = {
     "last_checked_at",
     "last_success_at",
     "last_error",
+    "dataset_version",
+    "declared_coverage",
   ],
   company_registry_snapshots: [
     "id",
@@ -978,6 +983,38 @@ const requiredColumns: Record<string, string[]> = {
     "operands",
     "message",
   ],
+  real_estate_data_snapshots: [
+    "query",
+    "query_hash",
+    "payload_hash",
+    "retrieved_at",
+    "stale_after",
+    "record_count",
+    "coverage_state",
+    "status",
+    "error_code",
+  ],
+  real_estate_comparable_sales: ["mutated_on", "price", "built_area_sqm", "lot_count", "raw"],
+  real_estate_energy_certificates: [
+    "issued_on",
+    "valid_until",
+    "method_version",
+    "energy_label",
+    "energy_value",
+    "energy_unit",
+    "raw",
+  ],
+  property_public_data_matches: [
+    "target",
+    "snapshot_id",
+    "certificate_id",
+    "match_basis",
+    "match_score",
+    "match_confidence",
+    "state",
+    "decided_reason",
+    "superseded_by",
+  ],
 };
 
 const userOwnedTables = [
@@ -1070,6 +1107,10 @@ const userOwnedTables = [
   "document_extraction_runs",
   "document_extraction_fields",
   "document_extraction_checks",
+  "real_estate_data_snapshots",
+  "real_estate_comparable_sales",
+  "real_estate_energy_certificates",
+  "property_public_data_matches",
 ] as const;
 
 const requiredIndexes = [
@@ -1270,6 +1311,18 @@ const requiredIndexes = [
   "document_extraction_checks_user_idx",
   "import_upload_tickets_run_idx",
   "import_record_links_run_idx",
+  "real_estate_data_snapshots_id_user_uidx",
+  "real_estate_data_snapshots_lookup_idx",
+  "real_estate_comparable_sales_id_user_uidx",
+  "real_estate_comparable_sales_position_uidx",
+  "real_estate_energy_certificates_id_user_uidx",
+  "real_estate_energy_certificates_position_uidx",
+  "property_public_data_matches_id_user_uidx",
+  "property_public_data_matches_open_comparable_uidx",
+  "property_public_data_matches_open_certificate_uidx",
+  "property_public_data_matches_current_comparable_uidx",
+  "property_public_data_matches_current_certificate_uidx",
+  "real_estate_valuations_snapshot_idx",
 ] as const;
 const forbiddenIndexes = [
   "net_worth_snapshot_items_owner_snapshot_idx",
@@ -1287,6 +1340,9 @@ const requiredTriggers = [
   "decision_runs_immutable",
   "company_registry_snapshots_immutable",
   "document_extraction_fields_frozen",
+  "real_estate_snapshot_frozen",
+  "real_estate_comparable_sale_frozen",
+  "real_estate_energy_certificate_frozen",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1299,6 +1355,8 @@ const requiredTriggerFunctions = [
   "lfo_guard_decision_snapshot_immutable",
   "company_registry_snapshot_immutable",
   "document_extraction_field_frozen",
+  "real_estate_snapshot_frozen",
+  "real_estate_public_row_frozen",
 ] as const;
 
 const requiredConstraints = [
@@ -1357,7 +1415,6 @@ const requiredConstraints = [
   "properties_disposal_after_acquisition_ck",
   "real_estate_valuations_property_fk",
   "real_estate_valuations_value_ck",
-  "real_estate_valuations_method_ck",
   "real_estate_valuations_data_kind_ck",
   "real_estate_capital_events_property_fk",
   "real_estate_capital_events_transaction_fk",
@@ -1688,6 +1745,35 @@ const requiredConstraints = [
   // remplacée qu'on continue d'exiger ferait échouer le gate sur une base à jour.
   "import_record_links_domain_v3_ck",
   "import_record_links_target_v3_ck",
+  "external_sources_shape_ck",
+  "external_sources_provider_uk",
+  "real_estate_data_snapshots_dataset_ck",
+  "real_estate_data_snapshots_coverage_ck",
+  "real_estate_data_snapshots_status_ck",
+  "real_estate_data_snapshots_stale_ck",
+  "real_estate_data_snapshots_failure_shape_ck",
+  "real_estate_data_snapshots_empty_shape_ck",
+  "real_estate_comparable_sales_built_area_ck",
+  "real_estate_comparable_sales_land_area_ck",
+  "real_estate_comparable_sales_lots_ck",
+  "real_estate_energy_certificates_energy_label_ck",
+  "real_estate_energy_certificates_ghg_label_ck",
+  "real_estate_energy_certificates_energy_unit_ck",
+  "real_estate_energy_certificates_ghg_unit_ck",
+  "real_estate_energy_certificates_validity_ck",
+  "property_public_data_matches_target_ck",
+  "property_public_data_matches_state_ck",
+  "property_public_data_matches_target_shape_ck",
+  "property_public_data_matches_accept_shape_ck",
+  "property_public_data_matches_weak_accept_ck",
+  "property_public_data_matches_superseded_fk",
+  "real_estate_valuations_method_v2_ck",
+  "real_estate_valuations_comparable_shape_ck",
+  "real_estate_valuations_snapshot_method_ck",
+  "real_estate_valuations_snapshot_fk",
+  "import_record_links_domain_v2_ck",
+  "import_record_links_target_v2_ck",
+  "import_upload_tickets_domain_ck",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
@@ -1797,6 +1883,12 @@ const requiredRpcs: Record<string, string> = {
   lfo_link_document_extraction_financials: "p_user_id uuid, p_payload jsonb",
   lfo_reject_document_extraction: "p_user_id uuid, p_run_id uuid, p_reason text",
   lfo_record_document_staging_cleanup: "p_user_id uuid, p_run_id uuid, p_removed boolean",
+  lfo_upsert_public_data_source: "p_user_id uuid, p_payload jsonb",
+  lfo_record_real_estate_snapshot: "p_user_id uuid, p_payload jsonb",
+  lfo_append_real_estate_snapshot_rows: "p_user_id uuid, p_payload jsonb",
+  lfo_propose_property_public_data_match: "p_user_id uuid, p_payload jsonb",
+  lfo_decide_property_public_data_match: "p_user_id uuid, p_payload jsonb",
+  lfo_promote_real_estate_market_estimate: "p_user_id uuid, p_payload jsonb",
 };
 
 /**
@@ -1835,6 +1927,11 @@ const declaredReturnTypeRpcs: Record<string, string> = {
   // plusieurs centaines de lignes touchées.
   lfo_append_document_extraction_fields: "integer",
   lfo_evaluate_document_extraction_checks: "integer",
+  // Ces deux-là ne CRÉENT rien : elles rendent un DÉCOMPTE. Le nombre de lignes réellement
+  // persistées pour l'une, le nombre de rapprochements remplacés pour l'autre. Rendre un
+  // uuid les obligerait à inventer un identifiant qui ne désigne aucune ligne nouvelle.
+  lfo_append_real_estate_snapshot_rows: "integer",
+  lfo_decide_property_public_data_match: "integer",
 };
 
 /**
@@ -1876,6 +1973,10 @@ const readOnlyAuditTables = [
   "document_extraction_runs",
   "document_extraction_fields",
   "document_extraction_checks",
+  "real_estate_data_snapshots",
+  "real_estate_comparable_sales",
+  "real_estate_energy_certificates",
+  "property_public_data_matches",
 ] as const;
 
 const storagePolicies = [
