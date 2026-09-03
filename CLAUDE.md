@@ -129,6 +129,9 @@ ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 Le DÉPÔT porte **34 migrations**, rejouables depuis une base vide (`npm run db:local:reset`,
 34 appliquées, 83 tables). Les dernières versions sont :
 
+Le DÉPÔT porte **35 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
+35 appliquées, 80 tables publiques). Les dernières versions sont :
+
 - `20260827215014_career_tax_v2` ;
 - `20260827215600_career_tax_v2_fk_indexes` ;
 - `20260828131216_fec_corporate_acquisition` ;
@@ -138,6 +141,9 @@ Le DÉPÔT porte **34 migrations**, rejouables depuis une base vide (`npm run db
 - `20260829234259_scenarios_goals_fk_indexes` ;
 - `20260830154315_decision_lab_v2` ;
 - `20260831171500_real_estate_public_data`.
+
+- `20260902093000_portfolio_import_acquisition` ;
+- `20260903090000_import_raw_freeze_hardening`.
 
 L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE. Cette section annonçait
 « 29 migrations » alors que le dépôt en portait déjà 33 : la dérive n'est pas corrigée par une
@@ -196,6 +202,8 @@ faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (donné
                Real Estate (faits + scénarios) · Business Equity (faits + valorisation dérivée)
                Data Acquisition (staging + provenance + relevé bancaire CSV + FEC
                + données publiques immobilières DVF/DPE)
+
+               + import de portefeuille CSV/XLSX)
                Career + Tax (faits datés + règles fiscales déclarées + calculs dérivés)
 en cours       vérité de schéma · vérité des consommateurs
 suivant        Event Engine → Scenarios V2 → Goals → Decision Lab
@@ -238,7 +246,18 @@ lignes concernées sinon : choisir entre 1,234 et 1 234 sur 800 lignes n'est pas
 décision de présentation. Un enregistrement brut est immuable et sa piste
 d'audit est en LECTURE SEULE pour le client : corriger une lecture modifie le fait
 canonique, jamais ce que la source a écrit, et une transaction importée n'est pas
-supprimable en laissant sa provenance orpheline.
+supprimable en laissant sa provenance orpheline. SESSION ABSENTE ≠ SESSION INVISIBLE : un
+garde-fou qui décide à partir d'une lecture filtrée par la RLS de l'appelant conclut
+« déjà supprimé » sur une simple absence de droit, et autorise. La question « cet objet
+existe-t-il ? » se lit donc indépendamment de la visibilité de l'appelant, et le seul
+`SECURITY DEFINER` du schéma applicatif existe pour cela : `search_path` vide, objets
+qualifiés, aucune écriture, aucun `execute` pour `public`, `anon` ni `authenticated`, et un
+nom hors du contrat `lfo_*`, qui reste sans aucune RPC `SECURITY DEFINER`. UN FAIT ÉCRIT
+GÈLE TOUT LE BRUT DE SA SESSION : l'autorisation s'appuie sur la PREUVE qu'un fait existe,
+jamais sur le statut affiché, sans quoi un statut remis en arrière rouvrirait la suppression
+de sa propre provenance. Et SUPPRIMER LE BRUT D'UNE SESSION VIVANTE N'EST PAS UN ABANDON :
+l'abandon se DÉCLARE avant de libérer les lignes, de sorte qu'un retrait de brut laisse une
+trace dans la piste d'audit ou se fait refuser.
 
 L'IDENTITÉ SE DÉMONTRE, elle ne se présume pas. Une égalité de tuple — compte, date,
 montant, devise, libellé — ne prouve rien entre deux fichiers distincts : un relevé partiel
@@ -382,6 +401,35 @@ contrainte de forme exige une valeur au moment de l'INSERTION, étendre la RPC e
 clé de charge optionnelle plutôt que d'ouvrir un second chemin d'écriture : PostgreSQL ne
 connaît pas de contrainte `CHECK` différable, et une seconde porte d'écriture sur une table
 canonique est une seconde vérité.
+
+L'import de PORTEFEUILLE (CSV, XLSX) est la troisième verticale de cette fondation, et elle
+n'ajoute AUCUN ledger : `portfolio_events` et `lfo_record_portfolio_event` existent, elle les
+alimente. POSITION OBSERVÉE ≠ TRANSACTION DU LEDGER : un relevé de positions dit ce qui était
+détenu à une date, pas quand ni à quel prix ; reconstruire un achat depuis une position
+inventerait date, prix et frais, et le coût de revient en paraîtrait calculé tout en étant
+faux. Deux domaines cibles distincts, jamais convertis l'un dans l'autre. INSTRUMENT NON
+RÉSOLU ≠ INSTRUMENT NOUVEAU : un ISIN inconnu ou ambigu BLOQUE ses lignes, et rien n'est créé
+d'office, sans quoi les mêmes titres se répartiraient entre deux entrées du référentiel. La
+décision porte sur le TITRE, pas sur la ligne, et une décision humaine n'est pas écrasée par
+une réanalyse. `lfo_record_portfolio_event` sait CRÉER un instrument décrit par son nom : ce
+chemin est légitime en saisie manuelle et INTERDIT en import, donc seule la forme
+`security: { id }` déjà tranchée lui est transmise. AUCUNE FORMULE XLSX N'EST ÉVALUÉE, et
+VALEUR EN CACHE ≠ VALEUR SAISIE : la valeur mise en cache par le tableur est lue et la cellule
+est NOMMÉE ; une formule sans valeur en cache ne produit rien. Un classeur porteur de macros
+est REFUSÉ, pas lu partiellement. Les plafonds (taille, feuilles, lignes, colonnes, temps
+d'analyse) refusent au lieu de tronquer. `positions` a désormais une unicité par enveloppe et
+instrument, et `position_snapshots` une par date : sans elles, rejouer un fichier scinderait
+une détention et l'idempotence serait impossible ; une observation à la même date CORRIGE la
+précédente, une nouvelle date s'AJOUTE sans supprimer l'historique. AUCUN ADAPTATEUR DE
+COURTIER n'est fourni : sans fixture fiable et non personnelle, l'écrire de mémoire produirait
+un faux support. Détail dans `docs/PORTFOLIO_IMPORT.md`.
+
+LE NOM D'UNE CONTRAINTE N'EST PAS UN NUMÉRO DE VERSION LIBRE. Un `if not exists (… conname =
+'…_v2_ck')` SAUTE l'extension en silence quand une migration antérieure a déjà pris ce nom, et
+le refus se produit alors à la première écriture, très loin de la cause. Avant d'étendre une
+contrainte, lire son état RÉEL en base (`pg_get_constraintdef`) et reprendre sa définition en
+vigueur, puis nommer le successeur. Corollaire du même principe que pour les RPC : chercher la
+DERNIÈRE version, jamais la première, et ne jamais supposer qu'un nom est disponible.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

@@ -47,6 +47,8 @@ const canonicalMigrations = [
   "20260831101500",
   "20260831154500",
   "20260831171500",
+  "20260902093000",
+  "20260903090000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -598,6 +600,22 @@ const requiredColumns: Record<string, string[]> = {
     "committed_at",
     "data_kind",
     "confidence",
+    "event_type",
+    "security_id",
+    "quantity",
+    "unit_price",
+    "gross_amount",
+    "fee_amount",
+    "tax_amount",
+    "envelope_cash_amount",
+    "market_value",
+    "cost_basis",
+    "instrument_source_key",
+    "source_isin",
+    "portfolio_event_id",
+    "position_snapshot_id",
+    "field_corrections",
+    "corrected_at",
   ],
   import_record_links: [
     "id",
@@ -608,6 +626,8 @@ const requiredColumns: Record<string, string[]> = {
     "transaction_id",
     "business_financials_id",
     "extraction_run_id",
+    "portfolio_event_id",
+    "position_snapshot_id",
   ],
   import_column_mappings: [
     "id",
@@ -1015,6 +1035,14 @@ const requiredColumns: Record<string, string[]> = {
     "decided_reason",
     "superseded_by",
   ],
+  import_instrument_resolutions: [
+    "source_key",
+    "state",
+    "security_id",
+    "basis",
+    "decided_at",
+    "decided_reason",
+  ],
 };
 
 const userOwnedTables = [
@@ -1111,6 +1139,7 @@ const userOwnedTables = [
   "real_estate_comparable_sales",
   "real_estate_energy_certificates",
   "property_public_data_matches",
+  "import_instrument_resolutions",
 ] as const;
 
 const requiredIndexes = [
@@ -1323,6 +1352,20 @@ const requiredIndexes = [
   "property_public_data_matches_current_comparable_uidx",
   "property_public_data_matches_current_certificate_uidx",
   "real_estate_valuations_snapshot_idx",
+  // Import de portefeuille. Les trois premiers sont des INVARIANTS, pas des optimisations :
+  // deux détentions du même instrument dans la même enveloppe scinderaient la détention,
+  // deux observations à la même date la cumuleraient, et sans identité unique un rejeu
+  // écrirait des doublons.
+  "positions_id_user_uidx",
+  "positions_envelope_instrument_uidx",
+  "position_snapshots_id_user_uidx",
+  "position_snapshots_observation_uidx",
+  "portfolio_events_id_user_uidx",
+  "import_normalized_records_event_uidx",
+  "import_normalized_records_snapshot_uidx",
+  "import_normalized_records_external_key_uidx",
+  "import_instrument_resolutions_id_user_uidx",
+  "import_instrument_resolutions_key_uidx",
 ] as const;
 const forbiddenIndexes = [
   "net_worth_snapshot_items_owner_snapshot_idx",
@@ -1485,10 +1528,8 @@ const requiredConstraints = [
   "import_sources_account_fk",
   "import_sources_business_fk",
   "import_sources_kind_ck",
-  "import_sources_domain_v2_ck",
   "import_sources_status_ck",
   "import_sources_data_kind_ck",
-  "import_sources_domain_shape_v2_ck",
   "import_sources_coverage_order_ck",
   "import_sessions_source_fk",
   "import_sessions_document_fk",
@@ -1510,13 +1551,11 @@ const requiredConstraints = [
   "import_normalized_records_account_fk",
   "import_normalized_records_matched_fk",
   "import_normalized_records_raw_uk",
-  "import_normalized_records_domain_ck",
   "import_normalized_records_status_ck",
   "import_normalized_records_verdict_ck",
   "import_normalized_records_commit_state_ck",
   "import_normalized_records_data_kind_ck",
   "import_normalized_records_issues_ck",
-  "import_normalized_records_ready_shape_ck",
   "import_normalized_records_committable_ck",
   "import_record_links_session_fk",
   "import_record_links_normalized_fk",
@@ -1771,9 +1810,31 @@ const requiredConstraints = [
   "real_estate_valuations_comparable_shape_ck",
   "real_estate_valuations_snapshot_method_ck",
   "real_estate_valuations_snapshot_fk",
-  "import_record_links_domain_v2_ck",
-  "import_record_links_target_v2_ck",
-  "import_upload_tickets_domain_ck",
+  // Noms REMPLACÉS par la migration `portfolio_import_acquisition`, qui a étendu chaque
+  // whitelist de domaine et chaque forme committable pour les deux domaines de portefeuille.
+  // Ils ne sont donc plus exigés — ce sont leurs successeurs, listés plus haut, qui le sont :
+  //   import_sources_domain_v2_ck        → import_sources_domain_v3_ck
+  //   import_sources_domain_shape_v2_ck  → import_sources_domain_shape_v3_ck
+  //   import_record_links_domain_v2_ck   → import_record_links_domain_v3_ck
+  //   import_record_links_target_v2_ck   → import_record_links_target_v3_ck
+  //   import_normalized_records_domain_ck       → ..._domain_v2_ck
+  //   import_normalized_records_ready_shape_ck  → ..._ready_shape_v2_ck
+  //   import_upload_tickets_domain_ck           → ..._domain_v2_ck
+  // Import de portefeuille.
+  "import_sources_domain_v3_ck",
+  "import_sources_domain_shape_v3_ck",
+  "import_normalized_records_domain_v2_ck",
+  "import_normalized_records_ready_shape_v2_ck",
+  "import_normalized_records_security_shape_ck",
+  "import_normalized_records_event_type_ck",
+  "import_normalized_records_quantity_ck",
+  "import_normalized_records_written_shape_ck",
+  "import_normalized_records_correction_shape_ck",
+  "import_instrument_resolutions_state_ck",
+  "import_instrument_resolutions_resolved_shape_ck",
+  "import_instrument_resolutions_rejected_shape_ck",
+  "import_instrument_resolutions_pending_shape_ck",
+  "real_estate_valuations_method_ck",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
@@ -1889,6 +1950,13 @@ const requiredRpcs: Record<string, string> = {
   lfo_propose_property_public_data_match: "p_user_id uuid, p_payload jsonb",
   lfo_decide_property_public_data_match: "p_user_id uuid, p_payload jsonb",
   lfo_promote_real_estate_market_estimate: "p_user_id uuid, p_payload jsonb",
+  lfo_open_portfolio_session: "p_user_id uuid, p_payload jsonb",
+  lfo_append_portfolio_rows: "p_user_id uuid, p_payload jsonb",
+  lfo_stage_import_instruments: "p_user_id uuid, p_payload jsonb",
+  lfo_resolve_import_instrument: "p_user_id uuid, p_payload jsonb",
+  lfo_correct_portfolio_row: "p_user_id uuid, p_payload jsonb",
+  lfo_finalize_portfolio_session: "p_user_id uuid, p_payload jsonb",
+  lfo_commit_portfolio_session: "p_user_id uuid, p_payload jsonb",
 };
 
 /**
@@ -1932,6 +2000,13 @@ const declaredReturnTypeRpcs: Record<string, string> = {
   // uuid les obligerait à inventer un identifiant qui ne désigne aucune ligne nouvelle.
   lfo_append_real_estate_snapshot_rows: "integer",
   lfo_decide_property_public_data_match: "integer",
+  // Décomptes, pas identifiants : nombre de lignes reçues, d'instruments enregistrés, de
+  // lignes touchées par une décision, de lignes prêtes, de faits écrits.
+  lfo_append_portfolio_rows: "integer",
+  lfo_stage_import_instruments: "integer",
+  lfo_resolve_import_instrument: "integer",
+  lfo_finalize_portfolio_session: "integer",
+  lfo_commit_portfolio_session: "integer",
 };
 
 /**
@@ -1977,6 +2052,7 @@ const readOnlyAuditTables = [
   "real_estate_comparable_sales",
   "real_estate_energy_certificates",
   "property_public_data_matches",
+  "import_instrument_resolutions",
 ] as const;
 
 const storagePolicies = [
@@ -2258,10 +2334,14 @@ try {
       failures.push(
         `Limite du bucket family-office-import-staging (${stagingBucket.file_size_limit}) inférieure au plafond d'analyse (${MAX_FEC_FILE_BYTES})`,
       );
-    // `application/pdf` s'y ajoute pour la lecture documentaire. Sans lui, le dépôt direct
-    // échouerait au stockage APRÈS que le serveur a émis un billet, et le contournement de
-    // la limite de corps de requête ne servirait à rien.
-    for (const mime of ["text/plain", "text/csv", "text/tab-separated-values", "application/pdf"]) {
+    for (const mime of [
+      "text/plain",
+      "text/csv",
+      "text/tab-separated-values",
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+    ]) {
       if (!(stagingBucket.allowed_mime_types ?? []).includes(mime))
         failures.push(`Type MIME absent du bucket family-office-import-staging : ${mime}`);
     }

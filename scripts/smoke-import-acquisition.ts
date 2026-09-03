@@ -645,6 +645,164 @@ try {
   assert(discarded.rows[0].status === "DISCARDED", "La session n'a pas été marquée abandonnée");
   assert(discarded.rows[0].raw === "0", "Le staging d'une session abandonnée n'a pas été libéré");
 
+  // ── 11 bis. Gel du brut : « SESSION ABSENTE » ≠ « SESSION INVISIBLE » ─────────────
+  //
+  // Le garde-fou du brut décidait à partir d'une lecture `security invoker` de
+  // `import_sessions`. Sous un rôle qui CONTOURNE la RLS — `service_role` porte
+  // `bypassrls`, ici comme sur Supabase — il lisait le bon statut. Sous un rôle qui ne la
+  // contourne pas, il lisait ZÉRO ligne, en concluait « session déjà supprimée, cascade
+  // légitime » et AUTORISAIT la suppression du brut d'une session committée. Le garde était
+  // donc correct par accident d'un attribut de rôle, et non par construction.
+  //
+  // L'existence de la session est maintenant lue indépendamment de la visibilité de
+  // l'appelant, et l'autorisation ne repose plus sur le seul statut affiché. Ces contrôles
+  // la vérifient état par état, sous les deux rôles, et dans les deux sens de la cascade.
+  const guardSourceId = (
+    await client.query<{ id: string }>(
+      "select source_id as id from public.import_sessions where id = $1",
+      [full],
+    )
+  ).rows[0].id;
+
+  const guardSessions = new Map<string, string>();
+  for (const status of ["RECEIVING", "ANALYZED", "COMMITTED", "DISCARDED", "FAILED"] as const) {
+    const guardSession = randomUUID();
+    guardSessions.set(status, guardSession);
+    await client.query(
+      `insert into public.import_sessions
+         (id, user_id, source_id, status, committed_at, parser, parser_version, file_name)
+       values ($1, $2, $3, $4,
+               case when $4 = 'COMMITTED' then now() else null end,
+               'bank-csv', '1', 'gel.csv')`,
+      [guardSession, userId, guardSourceId, status],
+    );
+    await client.query(
+      `insert into public.import_raw_records (user_id, session_id, row_number, raw_line, cells)
+       values ($1, $2, 1, 'gel', '[]'::jsonb)`,
+      [userId, guardSession],
+    );
+  }
+
+  // Une session VIVANTE garde son brut, qu'elle ait produit un fait ou non : supprimer le
+  // brut sans abandonner la session laissait un décompte sans source.
+  for (const status of ["RECEIVING", "ANALYZED", "COMMITTED", "FAILED"] as const) {
+    await rejects(
+      "delete from public.import_raw_records where session_id = $1",
+      [guardSessions.get(status)],
+      `Le brut d'une session ${status} a pu être supprimé`,
+      "ne se supprime qu'en abandonnant la session",
+    );
+  }
+
+  // L'abandon DÉCLARÉ, et lui seul, libère le brut d'une session vivante. C'est l'ordre que
+  // `lfo_discard_import_session` applique désormais : marquer, puis libérer.
+  await client.query("delete from public.import_raw_records where session_id = $1", [
+    guardSessions.get("DISCARDED"),
+  ]);
+  const guardDiscarded = await client.query<{ count: string }>(
+    "select count(*)::text from public.import_raw_records where session_id = $1",
+    [guardSessions.get("DISCARDED")],
+  );
+  assert(
+    guardDiscarded.rows[0].count === "0",
+    "Le brut d'une session abandonnée doit rester libérable : sinon l'abandon officiel casse",
+  );
+
+  // UN FAIT ÉCRIT GÈLE TOUT LE BRUT DE SA SESSION. Remettre le statut en arrière ne rouvre
+  // rien : l'autorisation s'appuie sur la PREUVE qu'un fait existe — un lien de provenance,
+  // une ligne committée — pas sur ce que la colonne `status` affiche.
+  await client.query(
+    "update public.import_sessions set status = 'DISCARDED', discarded_at = now() where id = $1 and user_id = $2",
+    [full, userId],
+  );
+  await rejects(
+    "delete from public.import_raw_records where session_id = $1",
+    [full],
+    "Un statut remis en arrière a rouvert la suppression du brut d'une session qui a produit des faits",
+    "fait canonique",
+  );
+  await client.query(
+    "update public.import_sessions set status = 'COMMITTED', discarded_at = null where id = $1 and user_id = $2",
+    [full, userId],
+  );
+
+  // La CASCADE réellement légitime reste ouverte : la session disparaît, son brut suit.
+  const cascadeSession = randomUUID();
+  await client.query(
+    `insert into public.import_sessions
+       (id, user_id, source_id, status, parser, parser_version, file_name)
+     values ($1, $2, $3, 'ANALYZED', 'bank-csv', '1', 'cascade.csv')`,
+    [cascadeSession, userId, guardSourceId],
+  );
+  await client.query(
+    `insert into public.import_raw_records (user_id, session_id, row_number, raw_line, cells)
+     values ($1, $2, 1, 'cascade', '[]'::jsonb)`,
+    [userId, cascadeSession],
+  );
+  await client.query("delete from public.import_sessions where id = $1 and user_id = $2", [
+    cascadeSession,
+    userId,
+  ]);
+  const cascaded = await client.query<{ count: string }>(
+    "select count(*)::text from public.import_raw_records where session_id = $1",
+    [cascadeSession],
+  );
+  assert(
+    cascaded.rows[0].count === "0",
+    "La cascade d'une session sans fait écrit doit rester ouverte",
+  );
+
+  // Et elle reste BARRÉE dès qu'un fait a été écrit : la cascade se heurte d'abord au gel de
+  // la ligne normalisée committée, puis à celui du lien de provenance. Une session qui a
+  // produit des faits ne peut donc pas disparaître, et son brut ne peut pas partir avec elle.
+  await rejects(
+    "delete from public.import_sessions where id = $1 and user_id = $2",
+    [full, userId],
+    "Une session ayant produit des faits a pu être supprimée avec sa provenance",
+    "gelée",
+  );
+
+  // Sous `authenticated`, rien de tout cela n'est atteignable, et la lecture d'invariant du
+  // garde-fou non plus. Un futur rôle applicatif qui recevrait un DELETE sur le brut sans
+  // cet `execute` échouerait donc AVANT de pouvoir supprimer : le défaut est FERMÉ.
+  await client.query("reset role");
+  await client.query("set local role authenticated");
+  await rejects(
+    "select public.import_session_freeze_state($1::uuid, $2::uuid)",
+    [full, userId],
+    "authenticated a pu exécuter la lecture d'invariant du garde-fou du brut",
+    "permission denied",
+  );
+  await rejects(
+    "delete from public.import_raw_records where session_id = $1",
+    [full],
+    "authenticated a pu supprimer du brut",
+    "permission denied",
+  );
+  await rejects(
+    "update public.import_raw_records set raw_line = 'trafique' where session_id = $1",
+    [full],
+    "authenticated a pu modifier du brut",
+    "permission denied",
+  );
+  await client.query("reset role");
+  await client.query("set local role service_role");
+
+  // Sous `service_role` — le rôle du serveur — la MODIFICATION reste refusée sans condition,
+  // avant comme après validation, et la suppression du brut d'une session committée aussi.
+  await rejects(
+    "update public.import_raw_records set raw_line = 'trafique' where session_id = $1",
+    [full],
+    "Le brut d'une session committée a pu être modifié sous service_role",
+    "immuable",
+  );
+  await rejects(
+    "update public.import_raw_records set raw_line = 'trafique' where session_id = $1",
+    [guardSessions.get("ANALYZED")],
+    "Le brut d'une session analysée a pu être modifié sous service_role",
+    "immuable",
+  );
+
   // ── 12. Cloisonnement : la session d'un voisin est inatteignable ───────────────────
   await rejects(
     `insert into public.import_raw_records (user_id, session_id, row_number, raw_line, cells)
@@ -733,7 +891,13 @@ try {
     `insert into public.documents (id, user_id, name, category, storage_path, size_bytes, status)
      values ($1, $2, 'releve.csv', 'bank', $3, 512, 'INBOX'),
             ($4, $2, 'releve.csv', 'bank', $5, 512, 'INBOX')`,
-    [documentA, userId, `${userId}/imports/${FILE_HASH_B}.csv`, documentB, `${userId}/imports/autre.csv`],
+    [
+      documentA,
+      userId,
+      `${userId}/imports/${FILE_HASH_B}.csv`,
+      documentB,
+      `${userId}/imports/autre.csv`,
+    ],
   );
   await client.query("set local role service_role");
 
@@ -843,7 +1007,7 @@ try {
   }
   if (succeeded) {
     console.log(
-      "Smoke Data Acquisition Foundation : staging atomique, brut immuable et non supprimable, piste d'audit en lecture seule sous authenticated, provenance gelée de façon exhaustive, lien immuable en UPDATE et DELETE sous service_role, transaction importée non supprimable sans sa provenance, jumeau détachable seul, commit sélectif, idempotence applicative et de base, cloisonnement, atomicité du lien, rattachement de document convergent. Aucune donnée persistée.",
+      "Smoke Data Acquisition Foundation : staging atomique, brut immuable, gel du brut décidé sur « session ABSENTE » et non sur « session invisible » — refus état par état sous service_role, retrait réservé à l'abandon DÉCLARÉ, statut remis en arrière ne rouvrant rien, cascade légitime ouverte et cascade d'une session à faits barrée, lecture d'invariant du garde-fou inexécutable par authenticated, piste d'audit en lecture seule sous authenticated, provenance gelée de façon exhaustive, lien immuable en UPDATE et DELETE sous service_role, transaction importée non supprimable sans sa provenance, jumeau détachable seul, commit sélectif, idempotence applicative et de base, cloisonnement, atomicité du lien, rattachement de document convergent. Aucune donnée persistée.",
     );
   }
 }

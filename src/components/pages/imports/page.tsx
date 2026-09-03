@@ -14,6 +14,7 @@ import {
 import { Callout, EmptyState, SectionHeader } from "@/components/ui";
 import FecSection from "@/components/pages/imports/fec-section";
 import LiasseSection from "@/components/pages/imports/liasse-section";
+import PortfolioSection from "@/components/pages/imports/portfolio-section";
 import PublicDataSection from "@/components/pages/imports/public-data-section";
 import RegistrySection from "@/components/pages/imports/registry-section";
 import { formatDate, NOT_COMPUTABLE } from "@/components/pages/shared";
@@ -130,6 +131,7 @@ const IMPORT_DOMAIN_TABS = [
   ["BANK", "Relevé bancaire"],
   ["FEC", "Comptabilité (FEC)"],
   ["LIASSE", "Liasse fiscale (PDF)"],
+  ["PORTFOLIO", "Portefeuille"],
   ["REGISTRY", "Registre d'entreprises"],
   ["PUBLIC_DATA", "Données publiques (DVF, DPE)"],
 ] as const;
@@ -352,6 +354,24 @@ function ImportsPage({ state, refresh }: SectionProps) {
     }
   }, []);
 
+  /**
+   * Enveloppes susceptibles de porter un portefeuille. Elles viennent de l'état du cockpit
+   * déjà chargé, comme les sociétés : cette page ne lit aucune donnée de domaine par
+   * elle-même.
+   */
+  const portfolioAccounts = useMemo(
+    () =>
+      // AUCUN pré-filtrage par type d'enveloppe, et c'est délibéré : une assurance-vie est
+      // typée OTHER, un compte peut servir d'enveloppe d'espèces, et restreindre la liste
+      // masquerait un cas légitime au lieu de laisser l'utilisateur choisir.
+      (state.accounts ?? []).map((account) => ({
+        id: account.id,
+        name: `${account.name} — ${account.type}`,
+        currency: account.currency,
+      })),
+    [state.accounts],
+  );
+
   const businesses = useMemo(
     () =>
       (state.businesses ?? [])
@@ -395,6 +415,10 @@ function ImportsPage({ state, refresh }: SectionProps) {
       {domain === "LIASSE" ? <LiasseSection businesses={businesses} refresh={refresh} /> : null}
 
       {domain === "REGISTRY" ? <RegistrySection businesses={businesses} refresh={refresh} /> : null}
+
+      {domain === "PORTFOLIO" ? (
+        <PortfolioSection accounts={portfolioAccounts} refresh={refresh} />
+      ) : null}
 
       {domain === "PUBLIC_DATA" ? (
         <PublicDataSection

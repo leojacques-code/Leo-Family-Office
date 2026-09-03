@@ -605,9 +605,15 @@ try {
     "delete from public.fec_entry_lines where session_id = $1 and status = 'BLOCKED'",
     [sessionId],
   );
-  await client.query(
+  // Le BRUT de la ligne illisible, lui, RESTE. C'est ce que le fichier contenait, et le
+  // garde-fou du brut refuse maintenant de le retirer d'une session vivante : seul l'abandon
+  // DÉCLARÉ de la session libère un brut. Retirer la LECTURE suffit à débloquer la
+  // validation, et c'est le bon niveau — corriger une lecture ne réécrit pas la source.
+  await rejects(
     "delete from public.import_raw_records where session_id = $1 and row_number = 900",
     [sessionId],
+    "Le brut d'une session vivante a pu être supprimé",
+    "ne se supprime qu'en abandonnant la session",
   );
 
   // Le décompte de la SESSION n'est plus ce qui décide : seules les lignes persistées le
@@ -1207,7 +1213,10 @@ try {
      values ($1, 'FILE_CSV', 'CASH_FLOW_TRANSACTION', 'FEC_FR', 'Mauvais domaine', $2, 'fec/1')`,
     [userId, businessId],
     "Une source Cash Flow a pu viser une société",
-    "import_sources_domain_shape_v2_ck",
+    // Nom mis à jour par la migration `portfolio_import_acquisition`, qui a ÉTENDU la
+    // forme par domaine aux deux domaines de portefeuille. Les règles comptables et
+    // bancaires y sont reprises à l'identique : l'invariant testé ici est intact.
+    "import_sources_domain_shape_v3_ck",
   );
   await rejects(
     `insert into public.import_sources
@@ -1215,7 +1224,10 @@ try {
      values ($1, 'FILE_CSV', 'BUSINESS_ACCOUNTING', 'FEC_FR', 'Sans cible', 'fec/1')`,
     [userId],
     "Une source comptable a pu être créée sans société",
-    "import_sources_domain_shape_v2_ck",
+    // Nom mis à jour par la migration `portfolio_import_acquisition`, qui a ÉTENDU la
+    // forme par domaine aux deux domaines de portefeuille. Les règles comptables et
+    // bancaires y sont reprises à l'identique : l'invariant testé ici est intact.
+    "import_sources_domain_shape_v3_ck",
   );
 
   await rejects(
