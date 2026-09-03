@@ -13,6 +13,7 @@ import {
 
 import { Callout, EmptyState, SectionHeader } from "@/components/ui";
 import FecSection from "@/components/pages/imports/fec-section";
+import RegistrySection from "@/components/pages/imports/registry-section";
 import { formatDate, NOT_COMPUTABLE } from "@/components/pages/shared";
 import type { SectionProps } from "@/components/pages/shared";
 import type {
@@ -118,7 +119,7 @@ function ImportsPage({ state, refresh }: SectionProps) {
   // Choix explicites de l'utilisateur. `null` = « pas encore choisi » : la valeur affichée
   // est alors DÉRIVÉE des comptes, sans effet de bord ni rendu en cascade.
   /** Domaine d'acquisition affiché. Un seul écran, deux sources : la fondation est commune. */
-  const [domain, setDomain] = useState<"BANK" | "FEC">("BANK");
+  const [domain, setDomain] = useState<"BANK" | "FEC" | "REGISTRY">("BANK");
   const [chosenAccountId, setChosenAccountId] = useState<string | null>(null);
   const [chosenCurrency, setChosenCurrency] = useState<string | null>(null);
   const [retainFile, setRetainFile] = useState(true);
@@ -314,6 +315,7 @@ function ImportsPage({ state, refresh }: SectionProps) {
           [
             ["BANK", "Relevé bancaire"],
             ["FEC", "Comptabilité (FEC)"],
+            ["REGISTRY", "Registre d'entreprises"],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -328,6 +330,8 @@ function ImportsPage({ state, refresh }: SectionProps) {
       </div>
 
       {domain === "FEC" ? <FecSection businesses={businesses} refresh={refresh} /> : null}
+
+      {domain === "REGISTRY" ? <RegistrySection businesses={businesses} refresh={refresh} /> : null}
 
       {domain === "BANK" ? (
         <>

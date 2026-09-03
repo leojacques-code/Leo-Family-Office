@@ -44,6 +44,7 @@ const canonicalMigrations = [
   "20260829234053",
   "20260829234259",
   "20260830154315",
+  "20260831101500",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -295,6 +296,8 @@ const requiredColumns: Record<string, string[]> = {
   ],
   businesses: [
     "id",
+    "siren",
+    "naf_code",
     "business_type",
     "functional_currency",
     "archived",
@@ -776,6 +779,125 @@ const requiredColumns: Record<string, string[]> = {
     "source",
     "notes",
   ],
+  // ── Acquisition du registre d'entreprises ───────────────────────────────────────────
+  // Les colonnes listées sont celles dont la DISPARITION changerait un invariant : identité,
+  // provenance, fraîcheur, état de décision. Une colonne d'agrément n'y figure pas.
+  external_sources: [
+    "id",
+    "user_id",
+    "domain",
+    "provider",
+    "adapter_version",
+    "capabilities",
+    "auth_mode",
+    "credential_env_var",
+    "rate_limit_per_minute",
+    "snapshot_ttl_minutes",
+    "last_checked_at",
+    "last_success_at",
+    "last_error",
+  ],
+  company_registry_snapshots: [
+    "id",
+    "user_id",
+    "external_source_id",
+    "provider",
+    "endpoint",
+    "query",
+    "siren",
+    "siret",
+    "http_status",
+    "payload",
+    "payload_hash",
+    "schema_version",
+    "observed_at",
+    "effective_at",
+    "provider_updated_at",
+    "stale_after",
+    "error_code",
+    "error_message",
+    "data_kind",
+    "confidence",
+  ],
+  company_registry_profiles: [
+    "id",
+    "user_id",
+    "snapshot_id",
+    "provider",
+    "siren",
+    "legal_name",
+    "legal_form_code",
+    "legal_form_label",
+    "naf_code",
+    "naf_label",
+    "share_capital",
+    "share_capital_currency",
+    "created_on",
+    "ceased_on",
+    "registry_status",
+    "head_office_siret",
+    "establishment_count",
+    "issues",
+    "data_kind",
+  ],
+  company_registry_officers: [
+    "id",
+    "user_id",
+    "snapshot_id",
+    "position_index",
+    "officer_kind",
+    "last_name",
+    "first_names",
+    "birth_year",
+    "role_label",
+    "company_siren",
+    "company_name",
+  ],
+  company_registry_establishments: [
+    "id",
+    "user_id",
+    "snapshot_id",
+    "siret",
+    "is_head_office",
+    "establishment_status",
+    "naf_code",
+  ],
+  company_registry_documents: [
+    "id",
+    "user_id",
+    "snapshot_id",
+    "document_kind",
+    "fiscal_year_end",
+    "filing_date",
+    "confidentiality",
+    "download_available",
+    "document_id",
+    "retrieved_at",
+  ],
+  business_registry_links: [
+    "id",
+    "user_id",
+    "business_id",
+    "provider",
+    "siren",
+    "siret",
+    "linked_snapshot_id",
+    "match_basis",
+    "linked_at",
+  ],
+  business_enrichment_decisions: [
+    "id",
+    "user_id",
+    "business_id",
+    "snapshot_id",
+    "field_path",
+    "candidate_value",
+    "canonical_value_before",
+    "state",
+    "decided_at",
+    "decided_reason",
+    "superseded_by",
+  ],
 };
 
 const userOwnedTables = [
@@ -858,6 +980,14 @@ const userOwnedTables = [
   "goal_versions",
   "decision_case_versions",
   "decision_runs",
+  "external_sources",
+  "company_registry_snapshots",
+  "company_registry_profiles",
+  "company_registry_officers",
+  "company_registry_establishments",
+  "company_registry_documents",
+  "business_registry_links",
+  "business_enrichment_decisions",
 ] as const;
 
 const requiredIndexes = [
@@ -1001,6 +1131,43 @@ const requiredIndexes = [
   "decision_case_versions_case_owner_fk_idx",
   "decision_runs_user_case_created_idx",
   "decision_runs_case_version_idx",
+  // Acquisition du registre d'entreprises. `businesses_siren_uidx` est l'invariant le plus
+  // important de la liste : sans lui, deux sociétés du patrimoine porteraient le même SIREN
+  // et la même participation serait comptée deux fois.
+  "businesses_siren_uidx",
+  "external_sources_id_user_uidx",
+  "external_sources_domain_provider_uidx",
+  "external_sources_user_idx",
+  "company_registry_snapshots_id_user_uidx",
+  "company_registry_snapshots_siren_idx",
+  "company_registry_snapshots_source_idx",
+  "company_registry_snapshots_user_idx",
+  "company_registry_snapshots_failures_idx",
+  "company_registry_profiles_id_user_uidx",
+  "company_registry_profiles_siren_idx",
+  "company_registry_profiles_snapshot_idx",
+  "company_registry_profiles_user_idx",
+  "company_registry_officers_id_user_uidx",
+  "company_registry_officers_snapshot_idx",
+  "company_registry_officers_user_idx",
+  "company_registry_establishments_id_user_uidx",
+  "company_registry_establishments_snapshot_idx",
+  "company_registry_establishments_user_idx",
+  "company_registry_documents_id_user_uidx",
+  "company_registry_documents_snapshot_idx",
+  "company_registry_documents_document_idx",
+  "company_registry_documents_user_idx",
+  "business_registry_links_id_user_uidx",
+  "business_registry_links_business_idx",
+  "business_registry_links_snapshot_idx",
+  "business_registry_links_user_idx",
+  "business_enrichment_decisions_id_user_uidx",
+  // Une seule proposition OUVERTE par champ et par société.
+  "business_enrichment_decisions_open_uidx",
+  "business_enrichment_decisions_business_idx",
+  "business_enrichment_decisions_snapshot_idx",
+  "business_enrichment_decisions_superseded_idx",
+  "business_enrichment_decisions_user_idx",
 ] as const;
 const forbiddenIndexes = [
   "net_worth_snapshot_items_owner_snapshot_idx",
@@ -1016,6 +1183,7 @@ const requiredTriggers = [
   "goals_v2_update_guard",
   "decision_case_versions_immutable",
   "decision_runs_immutable",
+  "company_registry_snapshots_immutable",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1026,6 +1194,7 @@ const requiredTriggerFunctions = [
   "lfo_guard_goal_version_update",
   "lfo_guard_goal_v2_update",
   "lfo_guard_decision_snapshot_immutable",
+  "company_registry_snapshot_immutable",
 ] as const;
 
 const requiredConstraints = [
@@ -1291,9 +1460,92 @@ const requiredConstraints = [
   "decision_runs_stale_ck",
   "decision_runs_completeness_ck",
   "decision_runs_snapshot_ck",
+  // ── Acquisition du registre d'entreprises ───────────────────────────────────────────
+  // Chaque contrainte listée porte un invariant qu'aucun contrôle applicatif ne peut
+  // garantir sous concurrence.
+  "businesses_siren_shape_ck",
+  "external_sources_domain_ck",
+  "external_sources_declared_shape_ck",
+  "external_sources_auth_mode_ck",
+  // Un NOM de variable d'environnement, jamais un secret collé par erreur.
+  "external_sources_credential_ck",
+  "external_sources_credential_shape_ck",
+  "external_sources_capabilities_ck",
+  "external_sources_declared_status_ck",
+  "external_sources_quota_ck",
+  "company_registry_snapshots_source_fk",
+  "company_registry_snapshots_endpoint_ck",
+  // Un instantané DIT quelque chose : une réponse, ou un échec nommé.
+  "company_registry_snapshots_outcome_ck",
+  "company_registry_snapshots_payload_hash_ck",
+  "company_registry_snapshots_siren_ck",
+  "company_registry_snapshots_siret_ck",
+  "company_registry_snapshots_identity_ck",
+  "company_registry_snapshots_query_ck",
+  "company_registry_snapshots_bytes_ck",
+  "company_registry_snapshots_data_kind_ck",
+  "company_registry_snapshots_confidence_ck",
+  "company_registry_profiles_snapshot_fk",
+  "company_registry_profiles_snapshot_uk",
+  "company_registry_profiles_siren_ck",
+  "company_registry_profiles_head_office_ck",
+  "company_registry_profiles_head_office_identity_ck",
+  "company_registry_profiles_status_ck",
+  "company_registry_profiles_life_order_ck",
+  // Un montant sans devise n'est pas un montant. FX ABSENT ≠ FX ÉGAL À 1.
+  "company_registry_profiles_capital_ck",
+  "company_registry_profiles_capital_sign_ck",
+  "company_registry_profiles_establishments_ck",
+  "company_registry_profiles_issues_ck",
+  "company_registry_profiles_data_kind_ck",
+  "company_registry_profiles_confidence_ck",
+  "company_registry_officers_snapshot_fk",
+  "company_registry_officers_position_uk",
+  "company_registry_officers_position_ck",
+  "company_registry_officers_kind_ck",
+  "company_registry_officers_identity_ck",
+  "company_registry_officers_company_siren_ck",
+  "company_registry_officers_birth_year_ck",
+  "company_registry_establishments_snapshot_fk",
+  "company_registry_establishments_siret_uk",
+  "company_registry_establishments_siret_ck",
+  "company_registry_establishments_status_ck",
+  "company_registry_establishments_life_order_ck",
+  "company_registry_documents_snapshot_fk",
+  "company_registry_documents_document_fk",
+  "company_registry_documents_kind_ck",
+  "company_registry_documents_confidentiality_ck",
+  "company_registry_documents_retrieved_ck",
+  "business_registry_links_business_fk",
+  "business_registry_links_snapshot_fk",
+  "business_registry_links_business_uk",
+  // UN SIREN, UNE SOCIÉTÉ : le pendant de `businesses_siren_uidx`.
+  "business_registry_links_siren_uk",
+  "business_registry_links_siren_ck",
+  "business_registry_links_siret_ck",
+  "business_registry_links_identity_ck",
+  "business_registry_links_basis_ck",
+  // Un rattachement « confirmé par le fournisseur » exige son instantané.
+  "business_registry_links_basis_shape_ck",
+  "business_enrichment_decisions_business_fk",
+  // PAS de cascade : la provenance d'un fait décidé ne se supprime pas.
+  "business_enrichment_decisions_snapshot_fk",
+  "business_enrichment_decisions_superseded_fk",
+  "business_enrichment_decisions_state_ck",
+  "business_enrichment_decisions_decided_ck",
+  // ACCEPTER UN VIDE N'EST PAS UN ENRICHISSEMENT.
+  "business_enrichment_decisions_accept_shape_ck",
+  "business_enrichment_decisions_field_path_ck",
+  "business_enrichment_decisions_superseded_self_ck",
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
+  lfo_upsert_external_source: "p_user_id uuid, p_payload jsonb",
+  lfo_record_registry_snapshot: "p_user_id uuid, p_payload jsonb",
+  lfo_link_business_registry: "p_user_id uuid, p_payload jsonb",
+  lfo_unlink_business_registry: "p_user_id uuid, p_business_id uuid, p_provider text",
+  lfo_propose_business_enrichment: "p_user_id uuid, p_payload jsonb",
+  lfo_decide_business_enrichment: "p_user_id uuid, p_payload jsonb",
   lfo_add_account:
     "p_user_id uuid, p_institution text, p_name text, p_account_type text, p_balance numeric, p_currency text, p_as_of_date date",
   lfo_add_transaction:
@@ -1414,6 +1666,11 @@ const declaredReturnTypeRpcs: Record<string, string> = {
   lfo_set_goal_status_v2: "integer",
   lfo_validate_decision_case_version_v2: "void",
   lfo_save_decision_case_version_v2: "integer",
+  // Ces deux RPC rendent un DÉCOMPTE : « combien de propositions écrites » et « combien de
+  // décisions appliquées » sont l'information utile à l'appelant, davantage qu'un identifiant
+  // parmi plusieurs lignes touchées.
+  lfo_propose_business_enrichment: "integer",
+  lfo_decide_business_enrichment: "integer",
 };
 
 /**
@@ -1438,6 +1695,18 @@ const readOnlyAuditTables = [
   "goal_versions",
   "decision_case_versions",
   "decision_runs",
+  // Le registre d'entreprises rejoint la même règle. `external_sources` était restée
+  // inscriptible depuis la migration initiale, sans aucun usage applicatif : un client
+  // capable de réécrire `capabilities` pourrait faire croire qu'un fournisseur publie un
+  // capital social qu'il ne publie pas.
+  "external_sources",
+  "company_registry_snapshots",
+  "company_registry_profiles",
+  "company_registry_officers",
+  "company_registry_establishments",
+  "company_registry_documents",
+  "business_registry_links",
+  "business_enrichment_decisions",
 ] as const;
 
 const storagePolicies = [
