@@ -198,12 +198,15 @@ export interface PortfolioCorrectionDecision {
   recordId: string;
   /** Motif. Non vide : une correction remplace un fait déjà lu par un humain. */
   reason: string;
-  /**
-   * Identité DÉCLARÉE du décideur. Facultative — la base retombe alors sur le rôle
-   * PostgreSQL constaté plutôt que sur une personne inventée : « on ne sait pas qui » est
-   * une information, un nom fabriqué n'en est pas une.
+  /*
+   * AUCUN CHAMP D'ACTEUR, et c'est délibéré.
+   *
+   * L'acteur d'une décision est l'identité que le SERVEUR établit — l'UUID Supabase Auth du
+   * propriétaire, derrière une session authentifiée — et il est écrit dans la piste d'audit
+   * sous `actor_user_id`. Le laisser déclarer par le navigateur produisait une piste dont le
+   * champ « qui » ne répondait pas à « qui a décidé » mais à « qui l'appelant a bien voulu
+   * nommer ». Le schéma de validation et la base refusent désormais ces clés.
    */
-  decidedBy?: string;
   /**
    * État de l'observation tel que la prévisualisation l'a MONTRÉ, verbatim.
    *
@@ -218,7 +221,24 @@ export interface PortfolioCorrectionDecision {
   expected: PortfolioObservedValues;
 }
 
-/** Valeurs comparées d'une observation, telles que la base les rend. */
+/**
+ * Valeurs comparées d'une observation, telles que la base les rend.
+ *
+ * Les CINQ champs sont obligatoires, et les montants sont `string | null` sans `undefined` :
+ * CLÉ ABSENTE ≠ JSON NULL ≠ CHAÎNE VIDE ≠ ZÉRO.
+ *
+ *   omettre un champ  → charge invalide. Un oubli n'est pas une déclaration d'absence, et
+ *                       l'interpréter comme telle laisse l'état attendu s'accorder avec une
+ *                       observation dont l'appelant ne sait rien : le conflit de concurrence
+ *                       ne se déclenche pas, et un fait est remplacé en silence ;
+ *   `null`            → absence DÉCLARÉE, qui se compare ;
+ *   `""`              → charge invalide. Ni un nombre, ni une absence ;
+ *   `"0"`             → zéro, une valeur. NULL ≠ ZERO.
+ *
+ * Les montants restent des CHAÎNES : un `numeric(30,10)` ne traverse pas un flottant double
+ * sans risque de perte, et une perte de précision fabriquerait un conflit — ou en
+ * masquerait un. `"10.50"` et `"10.5"` sont le même nombre : la base compare en `numeric`.
+ */
 export interface PortfolioObservedValues {
   snapshotId: string;
   quantity: string | null;

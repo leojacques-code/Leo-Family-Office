@@ -159,24 +159,21 @@ describe("forme de la décision", () => {
     ).toBe(true);
   });
 
-  it("accepte une identité déclarée, et s'en passe : « on ne sait pas qui » est une information", () => {
-    const withIdentity = commit([
-      { recordId: RECORD, reason: "m", decidedBy: "willy", expected: expected() },
-    ]);
-    expect(withIdentity.success).toBe(true);
-    if (withIdentity.success && withIdentity.data.action === "commit") {
-      expect(withIdentity.data.corrections[0].decidedBy).toBe("willy");
-    }
-    const withoutIdentity = commit([{ recordId: RECORD, reason: "m", expected: expected() }]);
-    expect(withoutIdentity.success).toBe(true);
-    if (withoutIdentity.success && withoutIdentity.data.action === "commit") {
-      expect(withoutIdentity.data.corrections[0].decidedBy).toBeUndefined();
+  it("REFUSE toute clé d'acteur : une identité déclarée par le client n'est pas une identité", () => {
+    // La piste d'audit doit répondre à « qui a décidé », pas à « qui l'appelant a bien voulu
+    // nommer ». L'acteur est l'identité que le serveur établit, et le client n'a aucun moyen
+    // de la fournir : ces clés sont refusées ici ET par la base.
+    for (const key of ["decidedBy", "decided_by", "actorUserId", "actor_user_id", "executedBy"]) {
+      const parsed = commit([
+        { recordId: RECORD, reason: "m", [key]: "willy", expected: expected() },
+      ]);
+      expect(parsed.success, `clé d'acteur ${key} acceptée`).toBe(false);
     }
   });
 
-  it("REFUSE une identité déclarée BLANCHE : la déclarer vide n'est pas ne pas la déclarer", () => {
+  it("REFUSE une clé inconnue dans la décision, plutôt que de l'ignorer", () => {
     expect(
-      commit([{ recordId: RECORD, reason: "m", decidedBy: "   ", expected: expected() }]).success,
+      commit([{ recordId: RECORD, reason: "m", note: "au passage", expected: expected() }]).success,
     ).toBe(false);
   });
 

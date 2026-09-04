@@ -13,6 +13,9 @@ import {
   callJson,
   classifyFetchFailure,
   classifyHttpStatus,
+  DEFAULT_MAX_RESPONSE_BYTES,
+  invalidResponseLimit,
+  MAX_TRANSPORT_RESPONSE_BYTES,
   RateLimiter,
   type TransportClock,
   type TransportConfig,
@@ -1005,5 +1008,267 @@ describe("statut HTTP préservé", () => {
     expect(result.httpStatus).toBe(429);
     expect(result.errorCode).toBe("RATE_LIMITED");
     expect(result.providerUpdatedAt).toBe("2026-08-30T12:00:00.000Z");
+  });
+});
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * PLAFOND INCONTOURNABLE, CONTRÔLE MIME AVANT LECTURE, ATTENTE ANNULABLE
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Trois findings de la revue suivante. Le premier est le plus grave : le plafond était
+ * « déclaré » mais un adaptateur pouvait déclarer `Infinity`, donc il n'existait pas.
+ */
+describe("plafond incontournable", () => {
+  it("le défaut est ÉGAL au maximum, pas au-dessus", () => {
+    expect(DEFAULT_MAX_RESPONSE_BYTES).toBe(MAX_TRANSPORT_RESPONSE_BYTES);
+    expect(MAX_TRANSPORT_RESPONSE_BYTES).toBe(4 * 1024 * 1024);
+  });
+
+  it("REFUSE chaque forme de plafond inutilisable, et le dit sans accuser la source", () => {
+    // Chaque cas a son diagnostic : « non entier » sur un `Infinity` masquerait la vraie
+    // faute, qui est qu'un plafond infini n'est pas un plafond.
+    expect(invalidResponseLimit(Number.POSITIVE_INFINITY)).toContain("infini");
+    expect(invalidResponseLimit(Number.NEGATIVE_INFINITY)).toContain("infini");
+    expect(invalidResponseLimit(Number.NaN)).toContain("non numérique");
+    expect(invalidResponseLimit(1_024.5)).toContain("non entier");
+    expect(invalidResponseLimit(0)).toContain("nul ou négatif");
+    expect(invalidResponseLimit(-1)).toContain("nul ou négatif");
+    expect(invalidResponseLimit(MAX_TRANSPORT_RESPONSE_BYTES + 1)).toContain("au-delà du maximum");
+    expect(invalidResponseLimit("4194304")).toContain("non numérique");
+    expect(invalidResponseLimit(undefined)).toContain("non numérique");
+    expect(invalidResponseLimit(null)).toContain("non numérique");
+  });
+
+  it("ACCEPTE le maximum exact et toute limite plus petite", () => {
+    expect(invalidResponseLimit(MAX_TRANSPORT_RESPONSE_BYTES)).toBeNull();
+    expect(invalidResponseLimit(1)).toBeNull();
+    expect(invalidResponseLimit(64)).toBeNull();
+    expect(invalidResponseLimit(1_024)).toBeNull();
+  });
+
+  it("n'émet AUCUN fetch sur une configuration inutilisable", async () => {
+    // C'est le cœur du finding : une limite qu'un adaptateur peut relever ne protège de
+    // rien, et l'appel ne doit pas partir du tout.
+    for (const maxResponseBytes of [
+      Number.POSITIVE_INFINITY,
+      Number.NaN,
+      0,
+      -1,
+      1_024.5,
+      MAX_TRANSPORT_RESPONSE_BYTES + 1,
+    ]) {
+      let calls = 0;
+      const result = await callJson(
+        { url: "https://source.test/x" },
+        config({
+          maxResponseBytes,
+          fetchImpl: async () => {
+            calls += 1;
+            return jsonResponse({ ok: true });
+          },
+        }),
+        new RateLimiter(null),
+      );
+      expect(calls, `un fetch est parti avec un plafond de ${maxResponseBytes}`).toBe(0);
+      expect(result.errorCode).toBe("CONFIG_INVALID");
+      expect(result.attempts).toBe(0);
+      expect(result.httpStatus).toBeNull();
+      expect(result.payload).toBeNull();
+      // Diagnostic NEUTRALISÉ : ni URL, ni corps, ni exception.
+      expect(result.errorMessage).toContain("aucune requête n'est émise");
+      expect(result.errorMessage).not.toContain("https://");
+    }
+  });
+
+  it("NE RÉESSAIE PAS une configuration inutilisable : elle ne changera pas", async () => {
+    let calls = 0;
+    const result = await callJson(
+      { url: "https://source.test/x" },
+      config({
+        maxAttempts: 3,
+        maxResponseBytes: Number.POSITIVE_INFINITY,
+        fetchImpl: async () => {
+          calls += 1;
+          return jsonResponse({ ok: true });
+        },
+      }),
+      new RateLimiter(null),
+    );
+    expect(calls).toBe(0);
+    expect(result.attempts).toBe(0);
+    expect(result.errorCode).toBe("CONFIG_INVALID");
+  });
+
+  it("laisse passer un appel normal sous une limite valide plus petite que le maximum", async () => {
+    const result = await callJson(
+      { url: "https://source.test/x" },
+      config({ maxResponseBytes: 2_048, fetchImpl: async () => jsonResponse({ ok: true }) }),
+      new RateLimiter(null),
+    );
+    expect(result.errorCode).toBeNull();
+    expect(result.payload).toEqual({ ok: true });
+  });
+
+  it("ne consomme AUCUN jeton de quota sur une configuration inutilisable", async () => {
+    // Le refus a lieu avant la boucle, donc avant `limiter.record()` : un appel qui ne part
+    // pas ne doit pas amputer le quota de celui qui partira ensuite.
+    const clock = fakeClock();
+    const limiter = new RateLimiter(1, clock);
+    await callJson(
+      { url: "https://source.test/x" },
+      config({ clock, maxResponseBytes: 0, fetchImpl: async () => jsonResponse({ ok: true }) }),
+      limiter,
+    );
+    expect(limiter.waitFor()).toBe(0);
+  });
+});
+
+describe("type de contenu refusé AVANT lecture", () => {
+  it("ne lit AUCUN octet d'un HTML rendu en HTTP 200, et annule le flux", async () => {
+    // L'ordre est le finding : le contrôle avait lieu après la lecture bornée, donc une page
+    // de portail captif était téléchargée jusqu'à 4 Mio avant d'être refusée.
+    let cancelled = false;
+    let emitted = 0;
+    const html = () =>
+      new Response(
+        new ReadableStream(
+          {
+            pull(controller) {
+              emitted += 1;
+              controller.enqueue(new TextEncoder().encode("<html>".repeat(64)));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+        { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    const result = await callJson(
+      { url: "https://source.test/x" },
+      config({ fetchImpl: async () => html(), maxAttempts: 1 }),
+      new RateLimiter(null),
+    );
+    expect(result.errorCode).toBe("INVALID_RESPONSE");
+    // AUCUN octet lu, et le flux fermé : c'est ce que « avant lecture » veut dire.
+    expect(emitted).toBe(0);
+    expect(cancelled).toBe(true);
+    expect(result.payloadBytes).toBeNull();
+    // Le statut est CONSERVÉ, et aucun contenu fournisseur n'est restitué.
+    expect(result.httpStatus).toBe(200);
+    expect(result.rawText).toBe("");
+    expect(result.errorMessage).toContain("le corps n'est PAS lu");
+    expect(result.errorMessage).toContain("text/html");
+    expect(result.errorMessage).not.toContain("<html>");
+  });
+
+  it("refuse de même un 2xx sans type déclaré, sans rien lire", async () => {
+    let emitted = 0;
+    const untyped = () =>
+      new Response(
+        new ReadableStream(
+          {
+            pull(controller) {
+              emitted += 1;
+              controller.enqueue(new TextEncoder().encode("{}"));
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+        // 200 et non 204 : HTTP 204 INTERDIT un corps, et le constructeur `Response` lève —
+        // l'échec serait alors classé NETWORK, ce qui ne testerait plus le type de contenu.
+        { status: 200 },
+      );
+    const result = await callJson(
+      { url: "https://source.test/x" },
+      config({ fetchImpl: async () => untyped(), maxAttempts: 1 }),
+      new RateLimiter(null),
+    );
+    expect(result.errorCode).toBe("INVALID_RESPONSE");
+    expect(result.httpStatus).toBe(200);
+    expect(emitted).toBe(0);
+    expect(result.errorMessage).toContain("aucun");
+  });
+
+  it("LIT encore le corps d'un statut d'ERREUR non JSON : il sert le diagnostic", async () => {
+    const result = await callJson(
+      { url: "https://source.test/x" },
+      config({
+        fetchImpl: async () =>
+          new Response("<html>indisponible</html>", {
+            status: 503,
+            headers: { "content-type": "text/html" },
+          }),
+        maxAttempts: 1,
+      }),
+      new RateLimiter(null),
+    );
+    expect(result.httpStatus).toBe(503);
+    expect(result.errorCode).toBe("PROVIDER_ERROR");
+    // Le corps est MESURÉ, jamais cité.
+    expect(result.payloadBytes).toBeGreaterThan(0);
+    expect(result.errorMessage).not.toContain("indisponible");
+  });
+});
+
+describe("attente de quota annulable", () => {
+  it("une annulation PENDANT l'attente n'émet aucun fetch, ne consomme aucun jeton, ne réessaie pas", async () => {
+    // Le contrôle d'entrée de boucle a lieu AVANT l'attente : sans second contrôle après,
+    // on émettait une requête pour une réponse que plus personne n'attendait.
+    const clock = fakeClock(1_000);
+    const limiter = new RateLimiter(1, clock);
+    limiter.record();
+    const controller = new AbortController();
+    let calls = 0;
+
+    const result = await callJson(
+      { url: "https://source.test/x", signal: controller.signal },
+      config({
+        clock,
+        maxAttempts: 3,
+        maxRateLimitWaitMs: 120_000,
+        // L'appelant renonce PENDANT l'attente de quota.
+        sleep: async (ms: number) => {
+          clock.advance(ms);
+          controller.abort();
+        },
+        fetchImpl: async () => {
+          calls += 1;
+          return jsonResponse({ ok: true });
+        },
+      }),
+      limiter,
+    );
+
+    expect(calls).toBe(0);
+    expect(result.errorCode).toBe("CANCELLED");
+    // AUCUNE tentative comptée : le refus a lieu avant `record()` et avant `fetchImpl`, donc
+    // rien n'a été tenté. Compter une tentative laisserait croire qu'un appel est parti.
+    expect(result.attempts).toBe(0);
+    expect(result.errorMessage).toContain("abandonné par le demandeur");
+  });
+
+  it("après une attente NON annulée, l'appel part normalement", async () => {
+    const clock = fakeClock(1_000);
+    const limiter = new RateLimiter(1, clock);
+    limiter.record();
+    let calls = 0;
+    const result = await callJson(
+      { url: "https://source.test/x", signal: new AbortController().signal },
+      config({
+        clock,
+        maxAttempts: 1,
+        maxRateLimitWaitMs: 120_000,
+        sleep: async (ms: number) => clock.advance(ms),
+        fetchImpl: async () => {
+          calls += 1;
+          return jsonResponse({ ok: true });
+        },
+      }),
+      limiter,
+    );
+    expect(calls).toBe(1);
+    expect(result.errorCode).toBeNull();
   });
 });

@@ -147,13 +147,66 @@ export const portfolioCorrectSchema = z.object({
  * Le format n'est PAS contraint à une forme canonique : `10.50` et `10.5` sont le même
  * nombre, et c'est la base qui les compare en `numeric`, jamais en texte.
  */
-const portfolioObservedValuesSchema = z.object({
-  snapshotId: z.uuid(),
-  quantity: z.string().trim().max(60).nullable(),
-  costBasis: z.string().trim().max(60).nullable(),
-  marketValue: z.string().trim().max(60).nullable(),
-  currency: z.string().trim().length(3),
-});
+/**
+ * REPRÉSENTATION DÉCIMALE EXACTE, telle que PostgreSQL l'ÉMET : chiffres, point décimal
+ * optionnel, signe optionnel.
+ *
+ * Le même motif est appliqué en base. `NaN`, `Infinity` et la notation exponentielle sont
+ * refusés — `numeric` les accepterait, mais aucun n'est une quantité ni un montant. Une
+ * chaîne vide ou blanche est refusée aussi : ce n'est ni un nombre, ni une absence.
+ */
+const EXACT_DECIMAL = /^-?[0-9]+(\.[0-9]+)?$/;
+
+/**
+ * Un montant attendu : chaîne décimale exacte, ou `null` EXPLICITE.
+ *
+ * `.nullable()` et NON `.nullish()` / `.optional()`, et c'est tout le finding : les trois
+ * situations ci-dessous étaient aplaties sur un même `NULL` SQL par un `coalesce`/`nullif`,
+ * alors qu'elles ne disent pas la même chose.
+ *
+ *   clé ABSENTE     → invalide. Le client n'a rien dit de ce champ, et l'interpréter comme
+ *                     « valeur absente » ferait passer un OUBLI pour une déclaration. Un
+ *                     état attendu bâti sur un oubli se trouve « d'accord » avec une
+ *                     observation dont l'appelant ne sait rien : le conflit de concurrence
+ *                     ne se déclenche pas, et un fait est remplacé sans que rien ne
+ *                     l'annonce ;
+ *   JSON `null`     → valide. C'est une absence DÉCLARÉE, et elle se compare ;
+ *   `""` ou `"  "`  → invalide. Illisible, donc ni un nombre ni une absence ;
+ *   `"0"`           → VALIDE, et vaut zéro. NULL ≠ ZERO ;
+ *   `"10.50"`       → valide, et égal à `"10.5"` : la base compare en `numeric`, jamais en
+ *                     texte, donc une différence de forme ne fabrique pas de conflit.
+ *
+ * Le type reste une CHAÎNE et jamais un nombre : un `numeric(30,10)` ne traverse pas un
+ * flottant double sans risque de perte, et une perte de précision fabriquerait un conflit —
+ * ou, plus grave, en masquerait un.
+ */
+const expectedAmountSchema = z
+  .string()
+  .max(60)
+  .regex(EXACT_DECIMAL, {
+    message:
+      "Montant attendu : chaîne décimale exacte (ex. « 1810.000000 », « 0 », « -5.25 ») ou `null` explicite. Une chaîne vide n'est ni un nombre ni une absence",
+  })
+  .nullable();
+
+/**
+ * Les CINQ clés sont exigées. Aucune n'est optionnelle, et aucune autre n'est acceptée : sans
+ * `strict()`, `marketvalue` au lieu de `marketValue` serait lu comme une clé absente, et le
+ * message désignerait un oubli là où il y a une faute de frappe.
+ */
+const portfolioObservedValuesSchema = z
+  .object({
+    snapshotId: z.uuid(),
+    quantity: expectedAmountSchema,
+    costBasis: expectedAmountSchema,
+    marketValue: expectedAmountSchema,
+    // La devise n'est JAMAIS absente : `position_snapshots.currency` est `char(3) not null`.
+    // FX ABSENT ≠ FX ÉGAL À 1, et comparer une devise contre rien n'a pas de sens.
+    currency: z.string().regex(/^[A-Za-z]{3}$/, {
+      message: "Devise attendue : code de TROIS lettres",
+    }),
+  })
+  .strict();
 
 /**
  * DÉCISION de remplacer une observation de position déjà persistée.
@@ -161,16 +214,19 @@ const portfolioObservedValuesSchema = z.object({
  * `reason` est obligatoire et non vide APRÈS `trim` : « » et «    » sont le même vide, et un
  * motif blanc laisserait la piste d'audit sans réponse à « pourquoi cette valeur ».
  */
-const portfolioCorrectionDecisionSchema = z.object({
-  recordId: z.uuid(),
-  reason: z.string().trim().min(1).max(2000),
-  /**
-   * Identité DÉCLARÉE. Facultative : la base retombe alors sur le rôle PostgreSQL constaté
-   * plutôt que sur une personne inventée.
-   */
-  decidedBy: z.string().trim().min(1).max(200).optional(),
-  expected: portfolioObservedValuesSchema,
-});
+const portfolioCorrectionDecisionSchema = z
+  .object({
+    recordId: z.uuid(),
+    reason: z.string().trim().min(1).max(2000),
+    expected: portfolioObservedValuesSchema,
+  })
+  // `strict()` REFUSE toute clé d'acteur. `decidedBy` était une identité déclarée librement
+  // par le navigateur, présentée dans la piste d'audit à côté d'un rôle constaté : une piste
+  // dont le champ « qui » est déclaratif ne répond pas à « qui a décidé », elle répond à
+  // « qui l'appelant a bien voulu nommer ». L'acteur est désormais l'identité que le SERVEUR
+  // établit, et le client n'a aucun moyen de la fournir. La base refuse ces clés aussi :
+  // ignorer laisserait un appelant croire qu'il a nommé quelqu'un.
+  .strict();
 
 export const portfolioCommitSchema = z.object({
   action: z.literal("commit"),

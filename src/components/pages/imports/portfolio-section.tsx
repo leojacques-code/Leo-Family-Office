@@ -614,6 +614,10 @@ function PortfolioSection({ accounts, refresh }: Props) {
                   dans une piste que personne ne peut réécrire — avec les valeurs d&apos;avant. Le
                   motif porte sur la décision et s&apos;applique à chacune des lignes corrigées.
                 </p>
+                <p>
+                  L&apos;auteur est enregistré automatiquement : c&apos;est le compte authentifié de
+                  cette session. Rien à saisir, et rien à choisir.
+                </p>
                 <label className="field">
                   <span>Motif de la correction</span>
                   <textarea

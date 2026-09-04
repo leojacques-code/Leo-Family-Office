@@ -236,7 +236,80 @@ cette branche sont, eux, conformes.
 **Paquets optionnels ou surnuméraires.** Sur installation propre (`npm ci`), `npm ls --all` ne
 signale ni `extraneous`, ni `invalid`, ni `missing`. Le lockfile n'est pas modifié.
 
-## 7. Leçons portées dans `CLAUDE.md`
+## 7. Second tour de revue : quatre blockers, trois améliorations
+
+La revue suivante a reproduit les gates puis rendu quatre blockers. Ils sont corrigés sur cette
+même branche, par la migration additive `20260905090000` et par le durcissement du transport.
+
+### 7.1 Représentation exacte de l'état attendu
+
+`nullif(btrim(coalesce(expected ->> 'quantity', '')), '')::numeric` rendait le même `NULL` SQL pour
+une clé **absente**, un JSON `null` et une chaîne **vide**. Un client qui omettait `market_value`
+obtenait donc l'interprétation d'un client qui déclarait la valeur absente : son état attendu se
+trouvait « d'accord » avec une observation dont il ne savait rien, le conflit de concurrence ne se
+déclenchait pas, et un fait était remplacé sur la foi d'un oubli. Les cinq clés sont maintenant
+exigées, chaque forme a un traitement, et le contrôle est appliqué au schéma TypeScript, à la
+route/repository et à la RPC **avant toute écriture**. Détail dans `docs/PORTFOLIO_IMPORT.md`.
+
+### 7.2 Auteur vérifié de la décision
+
+`decided_by` était une chaîne **libre** fournie par le navigateur. Une piste d'audit dont le champ
+« qui » est déclaratif ne répond pas à « qui a décidé » : elle répond à « qui l'appelant a bien
+voulu nommer ». La colonne est supprimée ; `actor_user_id` la remplace, `NOT NULL`, référencé sur
+`auth.users`, contraint à `= user_id` pour cette version, et posé par la RPC depuis `p_user_id` —
+l'identité que le serveur établit. Toute clé d'acteur présente dans la charge est **refusée**, pas
+ignorée. `executed_by` reste une colonne distincte : ACTEUR HUMAIN ≠ RÔLE TECHNIQUE.
+
+Aucune délégation n'est construite : ce produit n'a pas d'utilisateurs multiples, et un mécanisme
+de délégation sans utilisateur serait un mécanisme sans emploi. La contrainte d'égalité est le
+point où une future délégation devra être décidée, bruyamment.
+
+### 7.3 Limite HTTP incontournable
+
+Le plafond de taille de réponse était « déclaré » par connexion, donc un adaptateur pouvait
+déclarer `Infinity` : le plafond devenait ce que l'appelant voulait bien s'accorder, et une limite
+qu'un appelant peut relever ne protège de rien. `MAX_TRANSPORT_RESPONSE_BYTES` (4 Mio) est
+désormais un **maximum absolu** ; une connexion peut seulement resserrer. `Infinity`, `NaN`, un non
+entier, zéro, un négatif ou une valeur au-delà du maximum font refuser l'appel **avant tout
+réseau**, avec le code neutralisé `CONFIG_INVALID` — un code qui n'accuse ni la source ni le
+réseau, puisque aucune requête n'a été émise. Aucun jeton de quota n'est consommé.
+
+### 7.4 Inventaire exact des tables
+
+Le gate annonçait « 105 tables » en publiant la longueur d'une **liste déclarative** comme si
+c'était une mesure, alors que la base en reconstruisait 106. `bank_sync_events` manquait à
+`userOwnedTables`, et sa RLS comme sa policy propriétaire n'étaient donc vérifiées par personne —
+elles existaient, mais rien ne le prouvait. La table est ajoutée, et un **contrôle d'inventaire
+exact** compare désormais l'inventaire déclaré aux tables de base réellement présentes, en
+échouant dans les deux sens. Le résumé annonce le nombre attendu **et** le nombre constaté.
+
+### 7.5 Les trois améliorations fermées
+
+**Suppression d'un utilisateur.** `ON DELETE CASCADE` cohabitait avec un trigger refusant tout
+`DELETE` : la cascade demandait ce que le trigger refusait. Les deux clés vers `auth.users` passent
+en `ON DELETE RESTRICT`. La suppression destructive d'un utilisateur portant une piste financière
+est interdite ; une procédure de désactivation ou d'anonymisation reste à concevoir et n'est pas
+construite ici.
+
+**MIME.** Le contrôle de `Content-Type` avait lieu **après** la lecture bornée : une page HTML
+rendue en HTTP 200 était intégralement téléchargée — jusqu'à 4 Mio — pour être ensuite refusée. Il
+passe avant, le corps est explicitement annulé, le statut est conservé, et aucun contenu
+fournisseur n'est restitué. Sur un statut d'erreur, le corps reste lu : il sert le diagnostic.
+
+**Attente de quota.** Le signal de l'appelant n'était contrôlé qu'à l'entrée de boucle, donc avant
+l'attente. Il est revérifié **après** l'attente et avant `limiter.record()` comme avant
+`fetchImpl` : une annulation pendant l'attente n'émet aucune requête, ne consomme aucun jeton, et
+ne déclenche aucun réessai.
+
+### 7.6 Migration
+
+Aucune commande de création de migration n'existe dans ce dépôt : la convention est un fichier
+horodaté dans `supabase/migrations/`, et c'est `db:local:reset` puis `db:verify` qui l'éprouvent.
+`20260905090000_portfolio_correction_actor_and_expected.sql` suit cette convention. Aucune des 43
+migrations présentes au head audité n'est modifiée. **Nouveau total : 44 migrations**, 106 tables
+publiques.
+
+## 8. Leçons portées dans `CLAUDE.md`
 
 Trois règles y sont entrées parce qu'un défaut réel les a coûtées, pas parce qu'elles sonnent bien :
 

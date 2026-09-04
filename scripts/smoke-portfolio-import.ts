@@ -914,7 +914,6 @@ try {
     corrections: correctionIds.map((id) => ({
       record_id: id,
       reason: "Le relevé de juillet était provisoire",
-      decided_by: "smoke:portfolio-import",
       expected: expectedState,
       ...overrides,
     })),
@@ -962,6 +961,173 @@ try {
     "Un état attendu PÉRIMÉ a été accepté : la décision d'un autre aurait été écrasée",
     "l'état attendu n'est plus l'état courant",
   );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // REPRÉSENTATION EXACTE DE `expected` : CLÉ ABSENTE ≠ NULL ≠ VIDE ≠ ZÉRO
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Un `coalesce`/`nullif` faisait des trois premiers un même `NULL` SQL. Un client qui
+  // OMET `market_value` obtenait donc l'interprétation d'un client qui DÉCLARE la valeur
+  // absente : son état attendu se trouvait d'accord avec une observation dont il ne savait
+  // rien, le conflit ne se déclenchait pas, et un fait était remplacé sur la foi d'un oubli.
+  const auditBefore = async () => {
+    const row = await client.query<{ count: string }>(
+      "select count(*)::text as count from public.position_snapshot_corrections where user_id = $1",
+      [userId],
+    );
+    return row.rows[0].count;
+  };
+  const observationNow = async () => {
+    const row = await client.query<{ value: string }>(
+      `select market_value::text as value from public.position_snapshots
+        where user_id = $1 and snapshot_date = '2026-07-31'`,
+      [userId],
+    );
+    return row.rows[0].value;
+  };
+  const auditCountBefore = await auditBefore();
+  const observationBefore = await observationNow();
+
+  /** Une charge invalide ne doit RIEN écrire : ni audit, ni mutation. */
+  const rejectsExpected = async (
+    label: string,
+    mutate: (state: Record<string, unknown>) => Record<string, unknown>,
+    expectedMessage: string,
+  ) => {
+    await rejects(
+      "select public.lfo_commit_portfolio_session($1::uuid, $2::jsonb)",
+      [userId, JSON.stringify(decision({ expected: mutate({ ...expectedState }) }))],
+      `Représentation invalide acceptée : ${label}`,
+      expectedMessage,
+    );
+    assert(
+      (await auditBefore()) === auditCountBefore,
+      `ROLLBACK INTÉGRAL : la charge invalide « ${label} » a laissé une trace d'audit`,
+    );
+    assert(
+      (await observationNow()) === observationBefore,
+      `ROLLBACK INTÉGRAL : la charge invalide « ${label} » a modifié l'observation`,
+    );
+  };
+
+  // CLÉ ABSENTE : le client n'a rien dit de ce champ. Ce n'est pas une absence déclarée.
+  for (const key of ["quantity", "cost_basis", "market_value"]) {
+    await rejectsExpected(
+      `clé ${key} absente`,
+      (state) => {
+        delete state[key];
+        return state;
+      },
+      "ABSENTE de `expected`",
+    );
+  }
+
+  // CHAÎNE VIDE OU BLANCHE : ni un nombre, ni une absence.
+  for (const blank of ["", "   ", "\t"]) {
+    await rejectsExpected(
+      `market_value = ${JSON.stringify(blank)}`,
+      (state) => ({ ...state, market_value: blank }),
+      "représentation décimale exacte",
+    );
+  }
+
+  // FORME JSON NON TEXTUELLE : un nombre JSON perdrait de la précision sur un numeric(30,10).
+  for (const [label, value] of [
+    ["nombre JSON", 1810],
+    ["booléen", true],
+    ["objet", { valeur: 1810 }],
+    ["tableau", [1810]],
+  ] as const) {
+    await rejectsExpected(
+      `market_value en ${label}`,
+      (state) => ({ ...state, market_value: value }),
+      "doit être une CHAÎNE décimale ou `null`",
+    );
+  }
+
+  // FORMES NUMÉRIQUES QUE `numeric` ACCEPTERAIT, mais qui ne sont ni une quantité ni un
+  // montant. Les laisser passer ferait entrer `NaN` dans une comparaison de patrimoine.
+  for (const value of ["NaN", "Infinity", "-Infinity", "1e5", ".5", "5.", "1 810", "1,5", "abc"]) {
+    await rejectsExpected(
+      `market_value = ${JSON.stringify(value)}`,
+      (state) => ({ ...state, market_value: value }),
+      "représentation décimale exacte",
+    );
+  }
+
+  // CLÉ INCONNUE : sans ce refus, `marketvalue` serait lu comme « clé absente », et le
+  // message désignerait un oubli là où il y a une faute de frappe.
+  await rejectsExpected(
+    "clé inconnue `marketvalue`",
+    (state) => ({ ...state, marketvalue: "1810" }),
+    "Clé inconnue dans `expected`",
+  );
+
+  // DEVISE : jamais absente, jamais nulle, jamais autre chose qu'un code de trois lettres.
+  for (const [label, value] of [
+    ["null", null],
+    ["vide", ""],
+    ["deux lettres", "EU"],
+    ["quatre lettres", "EURO"],
+    ["numérique", "978"],
+  ] as const) {
+    await rejectsExpected(
+      `devise ${label}`,
+      (state) => ({ ...state, currency: value }),
+      "`expected.currency` absente ou mal formée",
+    );
+  }
+
+  // `snapshot_id` : une chaîne vide ou un `null` ne DÉSIGNENT rien.
+  for (const [label, value] of [
+    ["null", null],
+    ["vide", ""],
+    ["non UUID", "observation-3"],
+  ] as const) {
+    await rejectsExpected(
+      `snapshot_id ${label}`,
+      (state) => ({ ...state, snapshot_id: value }),
+      "`expected.snapshot_id` absent ou mal formé",
+    );
+  }
+
+  // JSON `null` EXPLICITE : c'est une absence DÉCLARÉE, et elle est VALIDE. Ici elle ne
+  // correspond pas à l'état courant — la quantité est renseignée — donc elle produit un
+  // CONFLIT, ce qui est exactement la bonne conduite : un état attendu faux est détecté.
+  await rejects(
+    "select public.lfo_commit_portfolio_session($1::uuid, $2::jsonb)",
+    [userId, JSON.stringify(decision({ expected: { ...expectedState, quantity: null } }))],
+    "Un `null` explicite FAUX a été accepté comme état attendu",
+    "l'état attendu n'est plus l'état courant",
+  );
+  // Et le message DISTINGUE une absence déclarée d'une valeur : « absente (déclarée) ».
+  assert(
+    (await auditBefore()) === auditCountBefore && (await observationNow()) === observationBefore,
+    "ROLLBACK INTÉGRAL : le conflit sur un `null` explicite a laissé une écriture",
+  );
+
+  // ZÉRO EST UNE VALEUR, pas une absence. `"0"` est bien lu comme zéro, donc il ne
+  // correspond pas à une quantité de 10, et le conflit est nommé.
+  await rejects(
+    "select public.lfo_commit_portfolio_session($1::uuid, $2::jsonb)",
+    [userId, JSON.stringify(decision({ expected: { ...expectedState, quantity: "0" } }))],
+    "Un zéro a été confondu avec l'état courant",
+    "quantité attendue 0",
+  );
+
+  // L'ACTEUR NE SE DÉCLARE PAS. Une clé d'acteur dans la charge est REFUSÉE, pas ignorée :
+  // ignorer laisserait l'appelant croire qu'il a nommé quelqu'un.
+  for (const key of ["actor_user_id", "decided_by", "executed_by"]) {
+    await rejects(
+      "select public.lfo_commit_portfolio_session($1::uuid, $2::jsonb)",
+      [userId, JSON.stringify(decision({ [key]: foreignUser }))],
+      `Une clé d'acteur (${key}) a été acceptée dans la charge`,
+      "acteur ne se déclare PAS",
+    );
+    assert(
+      (await auditBefore()) === auditCountBefore,
+      `ROLLBACK INTÉGRAL : la clé d'acteur ${key} a laissé une trace`,
+    );
+  }
 
   // `1810.000000` et `1810.0` sont le MÊME nombre : la comparaison est numérique, jamais
   // textuelle. Un conflit fabriqué sur une différence de forme rendrait le contrat
@@ -1014,7 +1180,7 @@ try {
     session_id: string;
     normalized_record_id: string;
     position_snapshot_id: string;
-    decided_by: string;
+    actor_user_id: string;
     executed_by: string;
     reason: string;
     before_market: string | null;
@@ -1026,7 +1192,7 @@ try {
             user_id::text as user_id, session_id::text as session_id,
             normalized_record_id::text as normalized_record_id,
             position_snapshot_id::text as position_snapshot_id,
-            decided_by, executed_by, reason,
+            actor_user_id::text as actor_user_id, executed_by, reason,
             before_values ->> 'market_value' as before_market,
             after_values ->> 'market_value' as after_market,
             changed_fields as changed, decided_at::text as decided_at
@@ -1046,14 +1212,21 @@ try {
     trace.position_snapshot_id === snapshotId,
     "La trace doit porter l'observation RÉELLEMENT modifiée",
   );
+  // ACTEUR VÉRIFIÉ : l'identité établie par le SERVEUR, jamais reçue du navigateur. Elle
+  // n'a été transmise NULLE PART dans la charge — la RPC la pose depuis `p_user_id`.
   assert(
-    trace.decided_by === "smoke:portfolio-import",
-    `L'identité DÉCLARÉE doit être conservée telle quelle : obtenu ${trace.decided_by}`,
+    trace.actor_user_id === userId,
+    `L'acteur doit être l'identité établie côté serveur : obtenu ${trace.actor_user_id}`,
   );
-  // IDENTITÉ DÉCLARÉE ≠ IDENTITÉ CONSTATÉE : `executed_by` est posé par la base.
+  // ACTEUR HUMAIN ≠ RÔLE TECHNIQUE. `executed_by` est posé par la base et reste distinct :
+  // les confondre ferait passer un rôle PostgreSQL pour une personne.
   assert(
     trace.executed_by === "service_role",
     `Le rôle CONSTATÉ doit être celui qui a exécuté : obtenu ${trace.executed_by}`,
+  );
+  assert(
+    trace.actor_user_id !== trace.executed_by,
+    "L'acteur et le rôle d'exécution doivent rester deux faits DISTINCTS",
   );
   assert(
     trace.reason === "Le relevé de juillet était provisoire",
@@ -1105,23 +1278,85 @@ try {
 
   // CONTRAINTES DE BASE, éprouvées en écriture DIRECTE : un motif vide et une correction ne
   // nommant aucun champ modifié sont refusés par la base, pas seulement par la RPC.
-  for (const [label, columns, values, expected] of [
-    ["motif vide", "reason", ["   "], "position_snapshot_corrections_reason_ck"],
-    ["auteur vide", "decided_by", [" "], "position_snapshot_corrections_decided_by_ck"],
-  ] as const) {
+  for (const reason of ["   ", "\t", ""]) {
     await rejects(
       `insert into public.position_snapshot_corrections
          (user_id, session_id, normalized_record_id, position_snapshot_id,
-          decided_by, reason, before_values, after_values, changed_fields)
-       values ($1, $2, $3, $4,
-               ${columns === "decided_by" ? "$5" : "'qui'"},
-               ${columns === "reason" ? "$5" : "'pourquoi'"},
-               '{}'::jsonb, '{}'::jsonb, array['market_value'])`,
-      [userId, correctionSession, correctionIds[0], snapshotId, values[0]],
-      `Une correction avec ${label} a été acceptée`,
-      expected,
+          actor_user_id, reason, before_values, after_values, changed_fields)
+       values ($1, $2, $3, $4, $1, $5, '{}'::jsonb, '{}'::jsonb, array['market_value'])`,
+      [userId, correctionSession, correctionIds[0], snapshotId, reason],
+      `Une correction avec un motif blanc (${JSON.stringify(reason)}) a été acceptée`,
+      "position_snapshot_corrections_reason_ck",
     );
   }
+
+  // ACTEUR DIFFÉRENT DU PROPRIÉTAIRE : refusé par la base, pas par l'application. Ce produit
+  // n'a aucune délégation, donc aucune décision ne peut honnêtement nommer quelqu'un
+  // d'autre — et c'est ici qu'une future délégation devra être DÉCIDÉE.
+  await rejects(
+    `insert into public.position_snapshot_corrections
+       (user_id, session_id, normalized_record_id, position_snapshot_id,
+        actor_user_id, reason, before_values, after_values, changed_fields)
+     values ($1, $2, $3, $4, $5, 'tentative', '{}'::jsonb, '{}'::jsonb, array['market_value'])`,
+    [userId, correctionSession, correctionIds[0], snapshotId, foreignUser],
+    "Un acteur DIFFÉRENT du propriétaire a été accepté",
+    "position_snapshot_corrections_actor_is_owner_ck",
+  );
+
+  // ACTEUR ABSENT : la colonne est NOT NULL. Une décision sans auteur n'en est pas une.
+  await rejects(
+    `insert into public.position_snapshot_corrections
+       (user_id, session_id, normalized_record_id, position_snapshot_id,
+        reason, before_values, after_values, changed_fields)
+     values ($1, $2, $3, $4, 'sans acteur', '{}'::jsonb, '{}'::jsonb, array['market_value'])`,
+    [userId, correctionSession, correctionIds[0], snapshotId],
+    "Une correction SANS acteur a été acceptée",
+    "actor_user_id",
+  );
+
+  // SUPPRESSION DU PROPRIÉTAIRE : refusée par la CLÉ ÉTRANGÈRE, et l'audit reste.
+  //
+  // La cascade et le trigger d'immuabilité se contredisaient : la cascade DEMANDAIT une
+  // suppression que le trigger REFUSAIT, et le résultat n'était ni l'une ni l'autre — une
+  // erreur de trigger levée au milieu d'une cascade, à un endroit qui n'explique rien.
+  // `RESTRICT` tranche, et le refus vient de la contrainte, avec un message qui la nomme.
+  //
+  // Le rôle est RENDU le temps de l'essai : `service_role` n'a aucun droit sur le schéma
+  // `auth`, donc sous ce rôle le refus viendrait d'un « permission denied » et ne prouverait
+  // rien de la clé étrangère.
+  //
+  // CE QUE CE CAS PROUVE, ET CE QU'IL NE PROUVE PAS. La suppression est refusée, et l'audit
+  // survit : c'est la propriété qui compte. En revanche il ne prouve pas QUELLE contrainte
+  // parle : la suppression d'un utilisateur touche tout le graphe, et le premier garde-fou
+  // rencontré l'emporte — ici le gel de provenance d'une ligne normalisée déjà écrite. Aucun
+  // décor ne permet d'isoler la clé étrangère de l'audit, puisque toute correction suppose
+  // une session, une ligne et une observation qui dépendent elles aussi du propriétaire.
+  //
+  // La forme `RESTRICT` des deux clés vers `auth.users` est donc vérifiée STRUCTURELLEMENT,
+  // par `pg_get_constraintdef` dans l'inspection des contraintes, et non par ce refus.
+  await client.query("reset role");
+  let ownerDeletionRefused: string | null = null;
+  await client.query("savepoint owner_delete");
+  try {
+    await client.query("delete from auth.users where id = $1", [userId]);
+    await client.query("rollback to savepoint owner_delete");
+  } catch (error) {
+    ownerDeletionRefused = error instanceof Error ? error.message : String(error);
+    await client.query("rollback to savepoint owner_delete");
+  }
+  await client.query("set local role service_role");
+  assert(
+    ownerDeletionRefused !== null,
+    "Un utilisateur portant une piste financière a pu être supprimé : l'historique aurait disparu avec lui",
+  );
+  const auditSurvived = await client.query<{ count: string }>(
+    "select count(*)::text as count from public.position_snapshot_corrections where user_id = $1",
+    [userId],
+  );
+  assert(
+    auditSurvived.rows[0].count === "1",
+    "Le refus de suppression ne doit RIEN effacer de la piste d'audit",
+  );
   for (const [label, changed] of [
     ["aucun champ", "array[]::text[]"],
     ["un champ NULL", "array[null]::text[]"],
@@ -1129,8 +1364,8 @@ try {
     await rejects(
       `insert into public.position_snapshot_corrections
          (user_id, session_id, normalized_record_id, position_snapshot_id,
-          decided_by, reason, before_values, after_values, changed_fields)
-       values ($1, $2, $3, $4, 'qui', 'pourquoi', '{}'::jsonb, '{}'::jsonb, ${changed})`,
+          actor_user_id, reason, before_values, after_values, changed_fields)
+       values ($1, $2, $3, $4, $1, 'pourquoi', '{}'::jsonb, '{}'::jsonb, ${changed})`,
       [userId, correctionSession, correctionIds[0], snapshotId],
       `Une correction ne nommant ${label} modifié a été acceptée`,
       "position_snapshot_corrections_changed_ck",
@@ -1189,8 +1424,8 @@ try {
   await rejects(
     `insert into public.position_snapshot_corrections
        (user_id, session_id, normalized_record_id, position_snapshot_id,
-        decided_by, reason, before_values, after_values, changed_fields)
-     values ($1, $2, $3, $4, 'voisin', 'tentative', '{}'::jsonb, '{}'::jsonb,
+        actor_user_id, reason, before_values, after_values, changed_fields)
+     values ($1, $2, $3, $4, $1, 'tentative', '{}'::jsonb, '{}'::jsonb,
              array['market_value'])`,
     [foreignUser, correctionSession, correctionIds[0], snapshotId],
     "Un autre propriétaire a pu tracer une correction sur la session et l'observation d'autrui",
@@ -1215,8 +1450,8 @@ try {
   await rejects(
     `insert into public.position_snapshot_corrections
        (user_id, session_id, normalized_record_id, position_snapshot_id,
-        decided_by, reason, before_values, after_values, changed_fields)
-     values ($1, $2, $3, $4, 'moi', 'tentative', '{}'::jsonb, '{}'::jsonb,
+        actor_user_id, reason, before_values, after_values, changed_fields)
+     values ($1, $2, $3, $4, $1, 'tentative', '{}'::jsonb, '{}'::jsonb,
              array['market_value'])`,
     [userId, correctionSession, correctionIds[0], foreignSnapshotId],
     "Une décision a pu désigner l'observation d'un autre propriétaire",
@@ -1248,7 +1483,7 @@ try {
   }
   if (succeeded) {
     console.log(
-      "Smoke Portfolio Import : session RECEIVING, réception par lots atomique, brut immuable et non supprimable, aucun fait avant validation, compteurs DÉRIVÉS des lignes persistées, ABSENT ≠ ZÉRO sur frais quantité et coût de revient, quantité et montants négatifs refusés, nature hors whitelist refusée, achat sans instrument et apport avec instrument refusés dès le staging, ligne prête sans devise/date/valeur de marché refusée, échec au milieu d'un lot annulant tout le lot, instrument résolu sans cible refusé, rejet sans motif refusé en RPC comme en écriture directe, décision propagée par titre, décision humaine non écrasée par une réanalyse, correction sur la lecture laissant le brut intact avec provenance au champ, correction sans contenu refusée, ligne bloquée refusée à la validation, écriture par la RPC EXISTANTE du ledger, provenance vérifiable, fait non supprimable sans sa provenance, idempotence applicative et de base, POSITION OBSERVÉE ≠ TRANSACTION, une détention par enveloppe et instrument, une observation par date, incrémental sans perte d'historique, AUCUN écrasement silencieux d'une observation persistée — rejeu identique sans effet, valeurs différentes refusées sauf DÉCISION STRUCTURÉE, tableau nu d'identifiants refusé, motif blanc refusé (espace, tabulation, retour à la ligne), état attendu obligatoire, conflit d'état attendu nommé, forme numérique abrégée acceptée, piste d'audit portant auteur déclaré et rôle constaté, motif, avant, après et champs dérivés, immuable en UPDATE comme en DELETE, observation corrigée non supprimable, contraintes de motif d'auteur et de champs éprouvées en écriture directe, correction décidée traçant sa session, piste d'audit en lecture seule sous authenticated, cloisonnement des corrections dans les deux sens. Aucune donnée persistée.",
+      "Smoke Portfolio Import : session RECEIVING, réception par lots atomique, brut immuable et non supprimable, aucun fait avant validation, compteurs DÉRIVÉS des lignes persistées, ABSENT ≠ ZÉRO sur frais quantité et coût de revient, quantité et montants négatifs refusés, nature hors whitelist refusée, achat sans instrument et apport avec instrument refusés dès le staging, ligne prête sans devise/date/valeur de marché refusée, échec au milieu d'un lot annulant tout le lot, instrument résolu sans cible refusé, rejet sans motif refusé en RPC comme en écriture directe, décision propagée par titre, décision humaine non écrasée par une réanalyse, correction sur la lecture laissant le brut intact avec provenance au champ, correction sans contenu refusée, ligne bloquée refusée à la validation, écriture par la RPC EXISTANTE du ledger, provenance vérifiable, fait non supprimable sans sa provenance, idempotence applicative et de base, POSITION OBSERVÉE ≠ TRANSACTION, une détention par enveloppe et instrument, une observation par date, incrémental sans perte d'historique, AUCUN écrasement silencieux d'une observation persistée — rejeu identique sans effet, valeurs différentes refusées sauf DÉCISION STRUCTURÉE, tableau nu d'identifiants refusé, motif blanc refusé (espace, tabulation, retour à la ligne), état attendu obligatoire, conflit d'état attendu nommé, forme numérique abrégée acceptée, CLÉ ABSENTE ≠ JSON NULL ≠ CHAÎNE VIDE ≠ ZÉRO éprouvé clé par clé avec rollback intégral, NaN Infinity notation exponentielle et nombre JSON refusés, clé inconnue refusée, devise et snapshot_id exigés, acteur VÉRIFIÉ posé par le serveur et non déclarable, clé d'acteur dans la charge refusée, acteur hors propriétaire et acteur absent refusés par la base, acteur distinct du rôle d'exécution, suppression du propriétaire refusée sans effacer l'audit, motif, avant, après et champs dérivés, immuable en UPDATE comme en DELETE, observation corrigée non supprimable, contraintes éprouvées en écriture directe, correction décidée traçant sa session, piste d'audit en lecture seule sous authenticated, cloisonnement des corrections dans les deux sens. Aucune donnée persistée.",
     );
   }
 }

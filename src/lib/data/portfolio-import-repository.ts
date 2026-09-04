@@ -705,10 +705,15 @@ function createPortfolioImportRepository(): PortfolioImportRepository {
           //
           // Les montants attendus repartent VERBATIM tels que la prévisualisation les a lus
           // en texte : les reformater ici fabriquerait un conflit, ou en masquerait un.
+          //
+          // AUCUNE clé d'acteur n'est transmise. La RPC pose `actor_user_id` depuis
+          // `p_user_id`, c'est-à-dire depuis `ownerId()` — l'UUID Supabase Auth lu de
+          // l'environnement SERVEUR, derrière une session authentifiée. L'identité ne
+          // traverse donc jamais le navigateur, et la base REFUSE toute clé d'acteur
+          // présente dans la charge.
           corrections: input.corrections.map((decision) => ({
             record_id: decision.recordId,
             reason: decision.reason,
-            decided_by: decision.decidedBy ?? null,
             expected: {
               snapshot_id: decision.expected.snapshotId,
               quantity: decision.expected.quantity,

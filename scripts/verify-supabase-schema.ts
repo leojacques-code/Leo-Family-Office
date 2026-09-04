@@ -54,6 +54,7 @@ const canonicalMigrations = [
   "20260903190000",
   "20260903200000",
   "20260904093000",
+  "20260905090000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -631,7 +632,10 @@ const requiredColumns: Record<string, string[]> = {
     "session_id",
     "normalized_record_id",
     "position_snapshot_id",
-    "decided_by",
+    // ACTEUR VÉRIFIÉ, jamais reçu du navigateur. `decided_by` a été SUPPRIMÉE : une identité
+    // déclarée librement par le client n'est pas une identité, et la garder à côté d'un rôle
+    // constaté produisait deux vérités sur la même question.
+    "actor_user_id",
     "executed_by",
     "reason",
     "before_values",
@@ -1174,6 +1178,12 @@ const userOwnedTables = [
   "bank_observed_transactions",
   "bank_balance_observations",
   "bank_reconciliation_decisions",
+  // Onzième table Open Banking, ABSENTE de cet inventaire jusqu'ici. L'oubli était
+  // silencieux et il a menti dans les deux sens : le gate annonçait « 105 tables » alors
+  // que la base en reconstruisait 106, et la RLS comme la policy propriétaire de cette
+  // table n'étaient VÉRIFIÉES par personne — elles existaient, mais rien ne le prouvait.
+  // Le contrôle d'inventaire exact ajouté plus bas empêche la même dérive de recommencer.
+  "bank_sync_events",
 ] as const;
 
 const requiredIndexes = [
@@ -1486,7 +1496,6 @@ const requiredConstraints = [
   // vide, un avant ou un après qui ne serait pas un objet, et une correction ne nommant
   // AUCUN champ modifié — un rejeu déguisé en décision.
   "position_snapshot_corrections_reason_ck",
-  "position_snapshot_corrections_decided_by_ck",
   "position_snapshot_corrections_before_ck",
   "position_snapshot_corrections_after_ck",
   "position_snapshot_corrections_changed_ck",
@@ -1495,6 +1504,15 @@ const requiredConstraints = [
   "position_snapshot_corrections_session_fk",
   "position_snapshot_corrections_record_fk",
   "position_snapshot_corrections_snapshot_fk",
+  // V1 : l'acteur EST le propriétaire. Ce produit n'a pas de délégation, donc aucune
+  // décision ne peut honnêtement nommer quelqu'un d'autre. C'est ici qu'une future
+  // délégation devra être décidée, plutôt que de se glisser sans le dire.
+  "position_snapshot_corrections_actor_is_owner_ck",
+  // Les deux clés vers `auth.users` sont en RESTRICT, et c'est une CONTRADICTION TRANCHÉE :
+  // une cascade demandait une suppression que le trigger d'immuabilité refusait. La
+  // suppression destructive d'un utilisateur portant une piste financière est interdite.
+  "position_snapshot_corrections_actor_fk",
+  "position_snapshot_corrections_owner_fk",
   // ── Réconciliation d'intégration ────────────────────────────────────────────────────
   // Formes FINALES des contraintes partagées par plusieurs verticales. Elles remplacent des
   // noms que deux migrations écrites en parallèle avaient choisis identiques :
@@ -2259,6 +2277,13 @@ function addExactInventory(
  */
 const MAX_FEC_FILE_BYTES = 24 * 1024 * 1024;
 
+/**
+ * Nombre de tables publiques RÉELLEMENT constatées. Il est rendu dans le résumé à côté du
+ * nombre attendu : annoncer la longueur d'une liste déclarative comme si c'était une mesure
+ * est exactement ce qui a laissé « 105 tables » cohabiter avec 106 tables reconstruites.
+ */
+let observedTableCount = 0;
+
 const connectionString = required("SUPABASE_DB_URL");
 const connectionUrl = new URL(connectionString);
 const localHost = ["localhost", "127.0.0.1", "::1"].includes(connectionUrl.hostname);
@@ -2282,6 +2307,27 @@ try {
     tableColumns.add(row.column_name);
     columnsByTable.set(row.table_name, tableColumns);
   }
+  // INVENTAIRE EXACT, et non seulement « rien ne manque ».
+  //
+  // `addMissing` ne regarde qu'un sens : il signale ce que le code attend et que la base
+  // n'a pas. Une table réellement présente mais absente de cet inventaire passait donc
+  // inaperçue — c'est exactement ce qui est arrivé à `bank_sync_events`, dont la RLS et la
+  // policy n'étaient contrôlées par personne pendant que le gate se déclarait vert.
+  //
+  // Les VUES sont exclues : l'inventaire porte sur les tables de base, seules porteuses de
+  // RLS et de policies. Le compte est donc directement comparable à celui que
+  // `db:local:reset` annonce.
+  const baseTables = await client.query<{ table_name: string }>(
+    `select table_name from information_schema.tables
+      where table_schema = 'public' and table_type = 'BASE TABLE'`,
+  );
+  observedTableCount = baseTables.rows.length;
+  addExactInventory(
+    failures,
+    "Table(s) publique(s)",
+    userOwnedTables,
+    baseTables.rows.map((row) => row.table_name),
+  );
   addMissing(failures, "Table(s)", userOwnedTables, columnsByTable.keys());
   for (const [table, expected] of Object.entries(requiredColumns))
     addMissing(
@@ -2512,6 +2558,72 @@ try {
     [SECURITY_DEFINER_GUARDS.map((guard) => guard.name)],
   );
 
+  // ── Lectures PURES hors contrat `lfo_*` ───────────────────────────────────────────────
+  // `expected_numeric` et `expected_label` ne sont pas des RPC : elles ne portent pas le
+  // préfixe, donc la requête `lfo\_%` ci-dessus ne les voit pas. Leur absence ferait
+  // pourtant échouer `lfo_commit_portfolio_session` à l'exécution, très loin de la cause,
+  // et une régression de leur volatilité ou de leur `search_path` passerait inaperçue.
+  const PURE_READERS = [
+    { name: "expected_numeric", result: "numeric" },
+    { name: "expected_label", result: "text" },
+  ] as const;
+
+  const pureReaders = await client.query<{
+    name: string;
+    security_definer: boolean;
+    result_type: string;
+    arguments: string;
+    volatility: string;
+    settings: string[] | null;
+    anon_execute: boolean;
+    authenticated_execute: boolean;
+    public_execute: boolean;
+    service_role_execute: boolean;
+  }>(
+    `select proc.proname as name,
+            proc.prosecdef as security_definer,
+            pg_catalog.pg_get_function_result(proc.oid) as result_type,
+            pg_catalog.pg_get_function_identity_arguments(proc.oid) as arguments,
+            proc.provolatile::text as volatility,
+            proc.proconfig as settings,
+            pg_catalog.has_function_privilege('anon', proc.oid, 'execute') as anon_execute,
+            pg_catalog.has_function_privilege('authenticated', proc.oid, 'execute') as authenticated_execute,
+            pg_catalog.has_function_privilege('public', proc.oid, 'execute') as public_execute,
+            pg_catalog.has_function_privilege('service_role', proc.oid, 'execute') as service_role_execute
+       from pg_catalog.pg_proc proc
+       join pg_catalog.pg_namespace ns on ns.oid = proc.pronamespace
+      where ns.nspname = 'public' and proc.proname = any ($1::text[])`,
+    [PURE_READERS.map((reader) => reader.name)],
+  );
+
+  for (const expected of PURE_READERS) {
+    const reader = pureReaders.rows.find((row) => row.name === expected.name);
+    if (!reader) {
+      failures.push(`Lecture pure absente : public.${expected.name}`);
+      continue;
+    }
+    if (reader.arguments !== "p_expected jsonb, p_key text")
+      failures.push(`Signature invalide : ${expected.name}(${reader.arguments})`);
+    if (reader.result_type !== expected.result)
+      failures.push(`Type de retour invalide : ${expected.name} -> ${reader.result_type}`);
+    // `i` = immutable. Une lecture de charge ne dépend ni de la base ni de l'heure.
+    if (reader.volatility !== "i")
+      failures.push(`${expected.name} n'est pas IMMUTABLE : volatilité ${reader.volatility}`);
+    if (reader.security_definer)
+      failures.push(`${expected.name} ne doit PAS être SECURITY DEFINER`);
+    if (!reader.settings?.some((setting) => setting === 'search_path=""'))
+      failures.push(`search_path non verrouillé : ${expected.name}`);
+    for (const [role, granted] of [
+      ["anon", reader.anon_execute],
+      ["authenticated", reader.authenticated_execute],
+      ["public", reader.public_execute],
+    ] as const) {
+      if (granted) failures.push(`${expected.name} exécutable par ${role}`);
+    }
+    if (!reader.service_role_execute)
+      failures.push(`${expected.name} non exécutable par service_role`);
+  }
+
   // Aucune AUTRE fonction du schéma applicatif ne doit être `security definer`. Une
   // troisième apparue sans être déclarée ici passerait sinon tous les contrôles.
   const unexpectedDefiners = await client.query<{ name: string }>(
@@ -2666,5 +2778,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Schéma Supabase vérifié en lecture seule : ${userOwnedTables.length} tables, ${requiredConstraints.length} contraintes, ${Object.keys(requiredRpcs).length} RPC, ${requiredTriggers.length} trigger(s) d'invariant, ${readOnlyAuditTables.length} tables d'audit en lecture seule, RLS/policies, Storage, index de snapshot et ${canonicalMigrations.length} migrations conformes.`,
+  `Schéma Supabase vérifié en lecture seule : ${userOwnedTables.length} tables attendues et ${observedTableCount} constatées, ${requiredConstraints.length} contraintes, ${Object.keys(requiredRpcs).length} RPC, ${requiredTriggers.length} trigger(s) d'invariant, ${readOnlyAuditTables.length} tables d'audit en lecture seule, RLS/policies, Storage, index de snapshot et ${canonicalMigrations.length} migrations conformes.`,
 );

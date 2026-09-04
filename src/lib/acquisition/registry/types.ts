@@ -93,6 +93,10 @@ export type RegistryCapability = (typeof REGISTRY_CAPABILITIES)[number];
  * `RESPONSE_TOO_LARGE` dit que NOTRE plafond a tranché, et non que le registre a mal
  * répondu : c'est le seul cas où relever le plafond est la bonne réponse, et le confondre
  * avec `INVALID_RESPONSE` ferait chercher une malformation inexistante.
+ *
+ * `CONFIG_INVALID` n'accuse NI le registre NI le réseau : la configuration de l'appel est
+ * inutilisable, donc AUCUNE requête n'a été émise. L'instantané d'échec doit le dire, sans
+ * quoi on chercherait un défaut chez un fournisseur qui n'a jamais été contacté.
  */
 export const REGISTRY_ERROR_CODES = [
   "NETWORK",
@@ -106,6 +110,7 @@ export const REGISTRY_ERROR_CODES = [
   "RESPONSE_TOO_LARGE",
   "PROVIDER_ERROR",
   "EGRESS_BLOCKED",
+  "CONFIG_INVALID",
 ] as const;
 export type RegistryErrorCode = (typeof REGISTRY_ERROR_CODES)[number];
 

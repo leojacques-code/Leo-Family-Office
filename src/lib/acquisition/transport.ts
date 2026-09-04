@@ -64,6 +64,11 @@
  * abandonnée par le navigateur, arrêt du processus. Le classer en `TIMEOUT` accuserait la
  * source d'une lenteur qu'elle n'a peut-être pas eue, et `TIMEOUT` est réessayable là où un
  * abandon de l'appelant ne doit RIEN relancer.
+ *
+ * `CONFIG_INVALID` est distinct de tout le reste, et c'est le seul code qui n'accuse NI la
+ * source NI le réseau : la configuration de l'appel est inutilisable, donc AUCUNE requête
+ * n'est émise. Le confondre avec `INVALID_RESPONSE` ferait chercher un défaut chez un
+ * fournisseur qui n'a jamais été contacté.
  */
 export const TRANSPORT_FAILURE_CODES = [
   "NETWORK",
@@ -77,6 +82,7 @@ export const TRANSPORT_FAILURE_CODES = [
   "RESPONSE_TOO_LARGE",
   "PROVIDER_ERROR",
   "EGRESS_BLOCKED",
+  "CONFIG_INVALID",
 ] as const;
 export type TransportFailureCode = (typeof TRANSPORT_FAILURE_CODES)[number];
 
@@ -127,24 +133,69 @@ export interface TransportConfig {
    * elle-même est interrompue au premier octet qui le dépasse — la longueur annoncée peut
    * être absente ou mensongère.
    *
-   * Un fournisseur plus bavard se configure PAR CONNEXION en surchargeant ce champ, à la
-   * hausse comme à la baisse. Aucun second transport n'est nécessaire pour cela.
+   * Une connexion peut seulement RESSERRER ce plafond, jamais le relever : le maximum
+   * absolu est `MAX_TRANSPORT_RESPONSE_BYTES`, et une valeur au-delà — comme `Infinity`,
+   * `NaN`, un non-entier, zéro ou un négatif — fait refuser l'appel AVANT tout réseau avec
+   * `CONFIG_INVALID`. Une limite qu'un adaptateur peut relever ne protège de rien.
    */
   maxResponseBytes: number;
 }
 
 /**
- * Plafond par défaut : 4 Mio.
+ * MAXIMUM ABSOLU de taille de corps : 4 Mio. Ce n'est pas un défaut, c'est un PLAFOND.
+ *
+ * La distinction est le finding : une configuration par fournisseur pouvait choisir
+ * `Infinity`, et le « plafond déclaré » n'en était plus un — le plafond devenait ce que
+ * l'appelant voulait bien s'accorder. Une limite qu'un appelant peut relever ne protège de
+ * rien. Une connexion peut donc seulement choisir une limite PLUS PETITE ; toute valeur
+ * au-delà, non entière, nulle, négative, `NaN` ou infinie fait refuser l'appel AVANT tout
+ * réseau, avec `CONFIG_INVALID`.
  *
  * Ce chiffre est un ARBITRAGE, et il est écrit ici pour qu'il soit discutable. Les corps
  * réellement attendus par les adaptateurs de cette couche — une fiche d'entité de registre,
  * une page de mutations DVF, un lot de certificats DPE — se comptent en dizaines ou centaines
  * de kilo-octets. 4 Mio laisse donc une marge d'un ordre de grandeur pour une page
  * inhabituellement large, tout en restant très en dessous de la mémoire d'une fonction
- * serverless. Il ne prétend pas être la bonne valeur pour un futur fournisseur qui
- * paginerait mal : c'est précisément à quoi sert la surcharge par connexion.
+ * serverless. Le relever est une décision qui se prend ICI, pas dans un adaptateur.
  */
-export const DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+export const MAX_TRANSPORT_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Défaut, égal au maximum : un adaptateur qui ne déclare rien hérite du plafond le plus
+ * large ACCEPTABLE, et non d'une absence de plafond.
+ */
+export const DEFAULT_MAX_RESPONSE_BYTES = MAX_TRANSPORT_RESPONSE_BYTES;
+
+/**
+ * Valide le plafond d'UNE connexion. Rend `null` quand il est utilisable, sinon la raison
+ * NEUTRALISÉE du refus.
+ *
+ * Exporté pour être testable seul : c'est un contrôle de configuration, et le prouver ne
+ * doit pas exiger de simuler une réponse HTTP.
+ */
+export function invalidResponseLimit(maxResponseBytes: unknown): string | null {
+  if (typeof maxResponseBytes !== "number" || Number.isNaN(maxResponseBytes)) {
+    return "Plafond de taille de réponse non numérique : aucune requête n'est émise";
+  }
+  // `Number.isFinite` d'abord : `Infinity` n'est pas un entier, mais le dire par « non
+  // entier » masquerait la vraie faute — un plafond infini n'est pas un plafond.
+  if (!Number.isFinite(maxResponseBytes)) {
+    return "Plafond de taille de réponse infini : un plafond infini n'est pas un plafond, aucune requête n'est émise";
+  }
+  if (!Number.isInteger(maxResponseBytes)) {
+    return "Plafond de taille de réponse non entier : un compte d'octets est un entier, aucune requête n'est émise";
+  }
+  if (maxResponseBytes <= 0) {
+    return "Plafond de taille de réponse nul ou négatif : aucune réponse ne pourrait être lue, aucune requête n'est émise";
+  }
+  if (maxResponseBytes > MAX_TRANSPORT_RESPONSE_BYTES) {
+    return (
+      `Plafond de taille de réponse au-delà du maximum de ${MAX_TRANSPORT_RESPONSE_BYTES} octets : ` +
+      "une connexion peut seulement choisir une limite PLUS PETITE, aucune requête n'est émise"
+    );
+  }
+  return null;
+}
 
 export const DEFAULT_TRANSPORT: Omit<TransportConfig, "fetchImpl" | "rateLimitPerMinute"> = {
   clock: systemTransportClock,
@@ -480,7 +531,14 @@ export async function callJson(
   config: TransportConfig,
   limiter: RateLimiter,
 ): Promise<TransportResult> {
-  const maxBytes = Math.max(1, config.maxResponseBytes);
+  // REFUS AVANT TOUT RÉSEAU. `Math.max(1, …)` coerçait en silence une configuration
+  // absurde en configuration plausible : `0` devenait 1, `Infinity` restait infini. Une
+  // configuration inutilisable est un ÉCHEC, pas une valeur à corriger d'office.
+  const configFailure = invalidResponseLimit(config.maxResponseBytes);
+  if (configFailure !== null) {
+    return failed("CONFIG_INVALID", configFailure, 0);
+  }
+  const maxBytes = config.maxResponseBytes;
   let attempts = 0;
   let last: TransportResult = failed("NETWORK", "Aucune tentative effectuée", 0);
 
@@ -502,6 +560,15 @@ export async function callJson(
         );
       }
       await config.sleep(wait);
+      // SIGNAL REVÉRIFIÉ APRÈS L'ATTENTE. Le contrôle d'entrée de boucle a eu lieu AVANT
+      // l'attente : sur un quota atteint, l'appelant a eu tout le temps de renoncer
+      // pendant qu'on patientait. Sans ce second contrôle, on consommerait un jeton local
+      // et on émettrait une requête pour une réponse que plus personne n'attend — puis on
+      // la réessaierait. L'ordre est donc : attendre, RE-CONTRÔLER, puis seulement
+      // `record()` et `fetchImpl`.
+      if (request.signal?.aborted) {
+        return failed("CANCELLED", FAILURE_DIAGNOSTICS.CANCELLED, attempts);
+      }
     }
 
     attempts += 1;
@@ -539,14 +606,31 @@ export async function callJson(
         );
       }
 
+      // TYPE DE CONTENU, AVANT TOUTE LECTURE, sur le chemin de SUCCÈS uniquement.
+      //
+      // L'ordre est le finding : ce contrôle avait lieu APRÈS la lecture bornée, donc une
+      // page HTML de portail captif rendue en HTTP 200 était intégralement téléchargée —
+      // jusqu'à 4 Mio — pour être ensuite refusée. Décider sur l'en-tête ne coûte rien, et
+      // le corps est explicitement ANNULÉ : la connexion se ferme, le fournisseur cesse
+      // d'émettre, et aucun contenu n'est ni lu ni restitué.
+      //
+      // Sur un statut d'ERREUR, le type n'est PAS exigé : un corps HTML ou texte y est la
+      // norme et il sert au diagnostic. Le statut, lui, est conservé dans les deux cas.
+      const contentType = response.headers?.get?.("content-type") ?? null;
+      if (!statusError && !isJsonContentType(contentType)) {
+        await response.body?.cancel().catch(() => undefined);
+        return failed(
+          "INVALID_RESPONSE",
+          `Type de contenu non JSON reçu en HTTP ${response.status} (annoncé : ${declaredContentType(contentType)}) : le corps n'est PAS lu, et aucune valeur n'en est tirée`,
+          attempts,
+          { httpStatus: response.status, providerUpdatedAt },
+        );
+      }
+
       // LECTURE DE CORPS PROTÉGÉE ET BORNÉE. Un corps interrompu ne doit pas faire PERDRE le
       // statut que la source a réellement rendu : sans ce garde, un 503 dont le corps se
       // coupe serait classé « erreur réseau », et le diagnostic désignerait la mauvaise
       // cause. Le plafond s'applique quoi qu'ait annoncé le fournisseur.
-      //
-      // Le type de contenu n'est PAS exigé ici : sur un statut d'erreur, un corps HTML ou
-      // texte est la norme, et il sert au diagnostic. Il n'est exigé que du chemin de
-      // succès, seul endroit où un corps devient une donnée.
       const read = await readBodyBounded(response, maxBytes);
 
       if (statusError) {
@@ -585,19 +669,6 @@ export async function callJson(
           `Corps illisible reçu en HTTP ${response.status} : le statut est conservé, aucune valeur n'en est tirée`,
           attempts,
           { httpStatus: response.status, providerUpdatedAt },
-        );
-      }
-
-      // TYPE DE CONTENU, sur le chemin de succès UNIQUEMENT. Un HTML en HTTP 200 — portail
-      // captif, page de maintenance, redirection avalée — n'est pas une donnée, et le parser
-      // « au cas où » est exactement ce qui fait entrer n'importe quoi dans le patrimoine.
-      const contentType = response.headers?.get?.("content-type") ?? null;
-      if (!isJsonContentType(contentType)) {
-        return failed(
-          "INVALID_RESPONSE",
-          `Type de contenu non JSON reçu en HTTP ${response.status} (annoncé : ${declaredContentType(contentType)}) : le corps n'est pas parsé, et aucune valeur n'en est tirée`,
-          attempts,
-          { httpStatus: response.status, payloadBytes: read.bytes, providerUpdatedAt },
         );
       }
 

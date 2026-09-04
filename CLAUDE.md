@@ -92,10 +92,31 @@ Corollaires appliqués dans le code existant, à préserver :
 - une observation persistée ne se remplace que sur DÉCISION, et une décision n'est pas un
   consentement : un identifiant de ligne ne dit ni pourquoi, ni par qui, ni sur la foi de quel
   état courant. DÉCISION ≠ CONSENTEMENT, ÉTAT ATTENDU ≠ ÉTAT COURANT, ANCIENNE VALEUR ≠ VALEUR
-  REMPLACÉE, IDENTITÉ DÉCLARÉE ≠ IDENTITÉ CONSTATÉE : le motif, l'avant, l'après et les champs
-  modifiés vont dans une piste immuable, le verrou est pris AVANT la comparaison, et une
-  seconde décision sur un état périmé échoue avec un conflit révisable au lieu d'écraser la
-  première ;
+  REMPLACÉE : le motif, l'avant, l'après et les champs modifiés vont dans une piste immuable,
+  le verrou est pris AVANT la comparaison, et une seconde décision sur un état périmé échoue
+  avec un conflit révisable au lieu d'écraser la première ;
+- un état attendu se lit clé par clé, et CLÉ ABSENTE ≠ JSON NULL ≠ CHAÎNE VIDE ≠ ZÉRO : un
+  `coalesce`/`nullif` qui aplatit les trois premiers sur un `NULL` fait passer un OUBLI pour
+  une absence déclarée, l'état attendu s'accorde alors avec une observation dont l'appelant ne
+  sait rien, et le conflit de concurrence ne se déclenche pas. Les montants voyagent en TEXTE
+  et se comparent en `numeric` : un flottant double perdrait la précision d'un
+  `numeric(30,10)`, et `NaN` comme la notation exponentielle sont refusés bien que `numeric`
+  les accepterait ;
+- IDENTITÉ DÉCLARÉE ≠ IDENTITÉ VÉRIFIÉE ≠ RÔLE D'EXÉCUTION : l'acteur d'une décision est
+  l'identité établie CÔTÉ SERVEUR, jamais une chaîne reçue du navigateur — une piste dont le
+  champ « qui » est déclaratif répond à « qui l'appelant a bien voulu nommer », pas à « qui a
+  décidé ». Toute clé d'acteur présente dans une charge est REFUSÉE et non ignorée, et le rôle
+  PostgreSQL constaté reste une colonne distincte. Sans délégation dans le produit, une
+  contrainte impose acteur = propriétaire : c'est là qu'une future délégation devra être
+  décidée, bruyamment ;
+- une limite qu'un appelant peut relever ne protège de rien : un plafond de taille de réponse
+  est un MAXIMUM global, une connexion ne peut que le resserrer, et `Infinity`, `NaN`, un non
+  entier, zéro ou un négatif font refuser l'appel AVANT tout réseau ;
+- un `ON DELETE CASCADE` et un trigger qui refuse tout `DELETE` ne peuvent pas être vrais
+  ensemble : la cascade demande ce que le trigger refuse, et le résultat est une erreur levée
+  au milieu d'une cascade, loin de la cause. Une piste financière se protège par `RESTRICT`,
+  et le départ d'un utilisateur se traite par désactivation ou anonymisation, jamais par
+  effacement de l'historique ;
 - un fournisseur distant n'est pas coopératif : `Content-Length` est une DÉCLARATION et non une
   mesure, un corps se lit de façon incrémentale sous un plafond déclaré, seul du JSON est parsé,
   et un diagnostic d'échec ne reprend JAMAIS `error.message` — un `fetch` y cite l'URL demandée,
@@ -137,10 +158,10 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **43 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
-43 appliquées, 106 tables publiques). Les dix dernières sont les cinq verticales
-d'acquisition ajoutées par ce chantier, leur réconciliation et la correction des findings de
-revue :
+Le DÉPÔT porte **44 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
+44 appliquées, 106 tables publiques). Les onze dernières sont les cinq verticales
+d'acquisition ajoutées par ce chantier, leur réconciliation et les deux tours de correction
+des findings de revue :
 
 - `20260831101500_company_registry_acquisition` ;
 - `20260831154500_document_intelligence_foundation` ;
@@ -151,7 +172,8 @@ revue :
 - `20260903120500_open_banking_ais_fk_indexes` ;
 - `20260903190000_acquisition_integration_reconciliation` ;
 - `20260903200000_portfolio_findings_no_silent_upsert` ;
-- `20260904093000_portfolio_correction_audit`.
+- `20260904093000_portfolio_correction_audit` ;
+- `20260905090000_portfolio_correction_actor_and_expected`.
 
 L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE, et cette section a dérivé
 trois fois de suite pour l'avoir oublié : elle a successivement annoncé « 29 migrations
@@ -166,10 +188,12 @@ dit l'état réel, et le contenu de référence s'extrait de
 `supabase_migrations.schema_migrations`.
 
 La production portait **33 migrations** au dernier état communiqué par le propriétaire du
-schéma. AUCUNE des dix migrations ci-dessus n'y est appliquée. Leur ordre d'application est
-CELUI DE LEURS NOMS et il n'est pas indifférent : la réconciliation et les deux volets
-Portfolio supposent que les cinq verticales sont déjà là, et
-`20260904093000_portfolio_correction_audit` reprend la RPC que `20260903200000` a redéfinie.
+schéma. AUCUNE des onze migrations ci-dessus n'y est appliquée. Leur ordre d'application est
+CELUI DE LEURS NOMS et il n'est pas indifférent : la réconciliation et les trois volets
+Portfolio supposent que les cinq verticales sont déjà là, et chacun reprend la RPC que le
+précédent a redéfinie — `20260903200000`, puis `20260904093000`, puis `20260905090000`.
+Chercher la DERNIÈRE version d'une RPC avant de la remplacer n'est pas une précaution
+théorique : c'est la seule façon de ne pas supprimer ce que le volet précédent avait ajouté.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,

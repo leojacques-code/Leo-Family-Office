@@ -356,14 +356,20 @@ refusé, et à juste titre : un identifiant ne dit ni **pourquoi**, ni **par qui
 de quel état courant**, et la mutation effaçait définitivement la valeur remplacée. L'écran allait
 au bout de la logique — un bouton déclarait en bloc toutes les lignes retenues, sans motif.
 
-Une décision porte donc quatre choses :
+Une décision porte donc trois choses :
 
-| Champ       | Rôle                                                                               |
-| ----------- | ---------------------------------------------------------------------------------- |
-| `recordId`  | la ligne de staging portant les valeurs de remplacement                            |
-| `reason`    | le motif, **non blanc**. Espace, tabulation et retour à la ligne sont le même vide |
-| `decidedBy` | l'identité **déclarée**, facultative                                               |
-| `expected`  | l'état de l'observation **tel que la prévisualisation l'a montré**                 |
+| Champ      | Rôle                                                                               |
+| ---------- | ---------------------------------------------------------------------------------- |
+| `recordId` | la ligne de staging portant les valeurs de remplacement                            |
+| `reason`   | le motif, **non blanc**. Espace, tabulation et retour à la ligne sont le même vide |
+| `expected` | l'état de l'observation **tel que la prévisualisation l'a montré**                 |
+
+Il n'y a **aucun champ d'acteur**, et c'est le point. Une première version laissait le client
+fournir `decidedBy`, une chaîne libre. La piste d'audit présentait donc, à côté d'un rôle
+PostgreSQL constaté, une « identité » que n'importe quel appelant pouvait écrire à sa convenance :
+elle ne répondait pas à « qui a décidé » mais à « qui l'appelant a bien voulu nommer ». Le champ a
+disparu du contrat, du schéma de validation et de la table ; toute clé d'acteur présente dans la
+charge est **refusée**, pas ignorée.
 
 `expected` est le verrou de concurrence. La base verrouille l'observation (`for update`) **avant**
 de comparer, puis confronte l'état attendu à l'état réellement persisté. Deux sessions décidant de
@@ -371,11 +377,34 @@ la même observation ne s'écrasent donc plus : la seconde échoue avec un **con
 nomme le champ, l'attendu et le trouvé. Sans état attendu, la seconde décision remplaçait la
 première en silence.
 
-Les montants de `expected` sont des **chaînes**, lues avec un `::text` explicite et renvoyées
-verbatim. Les faire passer par un nombre JavaScript perdrait de la précision sur un
-`numeric(30,10)` : l'écart fabriquerait un conflit, ou en masquerait un. La comparaison, elle, est
-**numérique** côté base — `1810.000000` et `1810` sont le même nombre, et les déclarer différents
-présenterait un rejeu comme une correction.
+### La représentation de `expected` est exacte, pas approximative
+
+Les **cinq** clés sont exigées, et chaque forme a **un** traitement. Une première version lisait
+chaque montant par `nullif(btrim(coalesce(expected ->> 'quantity', '')), '')::numeric`, ce qui
+rendait le même `NULL` SQL dans trois situations sans rapport. La conséquence n'était pas
+cosmétique : un client qui **omettait** `market_value` obtenait l'interprétation d'un client qui
+**déclarait** la valeur absente, son état attendu se trouvait « d'accord » avec une observation
+dont il ne savait rien, le conflit de concurrence ne se déclenchait pas, et un fait était remplacé
+sur la foi d'un oubli.
+
+| Forme reçue                 | Lecture                                                                   |
+| --------------------------- | ------------------------------------------------------------------------- |
+| clé **absente**             | charge **invalide** — un oubli n'est pas une déclaration                  |
+| JSON `null`                 | `NULL` SQL — une absence **déclarée**, qui se compare                     |
+| `""` ou `"   "`             | charge **invalide** — ni un nombre, ni une absence                        |
+| `"0"`                       | **zéro**, une valeur numérique. NULL ≠ ZERO                               |
+| `"10.50"` / `"10.5"`        | le **même** nombre : la base compare en `numeric`                         |
+| nombre JSON, booléen, objet | charge **invalide** — un flottant perdrait la précision                   |
+| `NaN`, `Infinity`, `1e5`    | charge **invalide** — `numeric` les accepterait, ce produit non           |
+| clé inconnue                | charge **invalide** — `marketvalue` est une faute de frappe, pas un oubli |
+
+Les montants restent des **chaînes**, lues avec un `::text` explicite et renvoyées verbatim : un
+`numeric(30,10)` ne traverse pas un flottant double sans risque de perte, et une perte de
+précision fabriquerait un conflit — ou, plus grave, en masquerait un. Le motif accepté est celui
+que PostgreSQL **émet**, appliqué à l'identique dans le schéma TypeScript et dans la RPC. Le
+contrôle a lieu **avant toute écriture** : une charge mal formée est une faute connue d'avance, et
+faire échouer la transaction après avoir écrit la moitié des faits annulerait un travail correct
+pour rien.
 
 ### La piste d'audit
 
@@ -387,15 +416,44 @@ présenterait un rejeu comme une correction.
 | `session_id`                     | la session d'import qui a décidé                                 |
 | `normalized_record_id`           | la ligne normalisée portant les valeurs de remplacement          |
 | `position_snapshot_id`           | l'observation réellement modifiée                                |
-| `decided_by`                     | l'identité **déclarée** par l'appelant                           |
+| `actor_user_id`                  | l'acteur **vérifié** : UUID Supabase Auth établi côté serveur    |
 | `executed_by`                    | le rôle PostgreSQL **constaté**, posé par la base, infalsifiable |
 | `reason`                         | le motif, mot pour mot                                           |
 | `before_values` / `after_values` | l'avant et l'après, champ par champ, `null` compris              |
 | `changed_fields`                 | les champs réellement modifiés, **dérivés** de la comparaison    |
 | `decided_at`                     | la date de décision                                              |
 
-IDENTITÉ DÉCLARÉE ≠ IDENTITÉ CONSTATÉE : les confondre laisserait croire à une identité vérifiée
-là où il n'y a qu'une déclaration.
+IDENTITÉ VÉRIFIÉE ≠ RÔLE D'EXÉCUTION : `actor_user_id` est une personne, `executed_by` un rôle
+technique. Les confondre ferait passer `service_role` pour un décideur.
+
+**Ce que ce produit peut honnêtement affirmer, et rien de plus.** L'accès est gardé par un code
+d'accès unique, et l'UUID Supabase Auth du propriétaire est lu de l'environnement **serveur**
+(`OWNER_USER_ID`). Il n'existe aucune session par utilisateur, aucun jeton porteur d'identité,
+donc aucune délégation. Le seul acteur qu'une décision puisse nommer avec certitude est **le
+propriétaire**, et la base l'impose : `actor_user_id` est `NOT NULL`, référence `auth.users`, et
+une contrainte exige `actor_user_id = user_id`. La RPC le pose depuis `p_user_id` — l'identité
+établie côté serveur — de sorte qu'il ne peut structurellement pas venir du navigateur.
+
+Construire une délégation maintenant serait construire un mécanisme sans utilisateur. La
+contrainte d'égalité est le point où une future délégation devra être **décidée**, et elle
+échouera bruyamment plutôt que de laisser passer un acteur non vérifié.
+
+### Suppression d'un utilisateur : une contradiction tranchée
+
+La table déclarait `user_id ... references auth.users(id) on delete cascade` **et** un trigger
+refusant tout `DELETE`. Les deux ne peuvent pas être vraies : la cascade demande une suppression
+que le trigger refuse, et le résultat n'était ni « l'utilisateur est supprimé avec son audit », ni
+« la suppression est refusée » — c'était une erreur de trigger levée au milieu d'une cascade, à un
+endroit qui n'explique rien.
+
+Les deux clés vers `auth.users` — propriétaire et acteur — sont désormais en **`ON DELETE
+RESTRICT`**. La suppression destructive d'un utilisateur portant une piste financière est
+**interdite**, et le refus vient de la clé étrangère.
+
+Ce n'est **pas** une procédure de départ d'utilisateur, et elle n'est pas construite ici. Effacer
+l'historique patrimonial pour honorer un départ détruirait précisément ce que ce produit existe
+pour conserver. Une future procédure devra **désactiver ou anonymiser** l'utilisateur sans effacer
+ses faits : c'est une décision de conception, pas une correction de revue.
 
 La table est **immuable** — un trigger refuse `update` et `delete` sans condition — et en **lecture
 seule** pour `authenticated`, comme le reste de la piste d'acquisition. Ses trois clés étrangères
@@ -418,22 +476,23 @@ d'échec de la mutation par la donnée n'est donc pas constructible — et c'est
 
 ## 13. Fichiers
 
-| Rôle                        | Chemin                                                                |
-| --------------------------- | --------------------------------------------------------------------- |
-| Schéma                      | `supabase/migrations/20260902093000_portfolio_import_acquisition.sql` |
-| Lecteur ZIP                 | `src/lib/acquisition/xlsx/zip.ts`                                     |
-| Lecteur de classeur         | `src/lib/acquisition/xlsx/workbook.ts`                                |
-| Contrats du domaine         | `src/lib/acquisition/portfolio/types.ts`                              |
-| Mapping des colonnes        | `src/lib/acquisition/portfolio/mapping.ts`                            |
-| Résolution d'instrument     | `src/lib/acquisition/portfolio/instruments.ts`                        |
-| Déduplication               | `src/lib/acquisition/portfolio/dedupe.ts`                             |
-| Analyse unifiée CSV/XLSX    | `src/lib/acquisition/portfolio/analyze.ts`                            |
-| Repository                  | `src/lib/data/portfolio-import-repository.ts`                         |
-| Validation                  | `src/lib/validation/portfolio-imports.ts`                             |
-| Route                       | `src/app/api/imports/portfolio/route.ts`                              |
-| Écran                       | `src/components/pages/imports/portfolio-section.tsx`                  |
-| Smoke                       | `scripts/smoke-portfolio-import.ts`                                   |
-| Durcissement du gel du brut | `supabase/migrations/20260903090000_import_raw_freeze_hardening.sql`  |
-| Audit des corrections       | `supabase/migrations/20260904093000_portfolio_correction_audit.sql`   |
-| Comparaison de montants     | `src/lib/data/observed-amounts.ts`                                    |
-| Smoke de concurrence        | `scripts/smoke-portfolio-correction-concurrency.ts`                   |
+| Rôle                        | Chemin                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------- |
+| Schéma                      | `supabase/migrations/20260902093000_portfolio_import_acquisition.sql`            |
+| Lecteur ZIP                 | `src/lib/acquisition/xlsx/zip.ts`                                                |
+| Lecteur de classeur         | `src/lib/acquisition/xlsx/workbook.ts`                                           |
+| Contrats du domaine         | `src/lib/acquisition/portfolio/types.ts`                                         |
+| Mapping des colonnes        | `src/lib/acquisition/portfolio/mapping.ts`                                       |
+| Résolution d'instrument     | `src/lib/acquisition/portfolio/instruments.ts`                                   |
+| Déduplication               | `src/lib/acquisition/portfolio/dedupe.ts`                                        |
+| Analyse unifiée CSV/XLSX    | `src/lib/acquisition/portfolio/analyze.ts`                                       |
+| Repository                  | `src/lib/data/portfolio-import-repository.ts`                                    |
+| Validation                  | `src/lib/validation/portfolio-imports.ts`                                        |
+| Route                       | `src/app/api/imports/portfolio/route.ts`                                         |
+| Écran                       | `src/components/pages/imports/portfolio-section.tsx`                             |
+| Smoke                       | `scripts/smoke-portfolio-import.ts`                                              |
+| Durcissement du gel du brut | `supabase/migrations/20260903090000_import_raw_freeze_hardening.sql`             |
+| Audit des corrections       | `supabase/migrations/20260904093000_portfolio_correction_audit.sql`              |
+| Acteur et état attendu      | `supabase/migrations/20260905090000_portfolio_correction_actor_and_expected.sql` |
+| Comparaison de montants     | `src/lib/data/observed-amounts.ts`                                               |
+| Smoke de concurrence        | `scripts/smoke-portfolio-correction-concurrency.ts`                              |

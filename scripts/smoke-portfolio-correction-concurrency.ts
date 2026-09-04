@@ -89,6 +89,8 @@ async function cleanup(): Promise<void> {
   // `service_role` la désactivation échouerait en silence — le décor resterait derrière.
   await setup.query("reset role").catch(() => undefined);
   await setup.query("set session session_replication_role = replica");
+  // La piste est immuable ET son propriétaire est en `RESTRICT` : le décor se démonte donc
+  // par le haut, dans l'ordre des dépendances, jamais par une cascade.
   await run(
     `delete from public.position_snapshot_corrections
       where position_snapshot_id in (
@@ -264,7 +266,6 @@ try {
         {
           record_id: session.recordId,
           reason: `Correction concurrente ${label}`,
-          decided_by: `smoke:concurrence-${label}`,
           expected,
         },
       ],
@@ -332,9 +333,15 @@ try {
     `L'observation devait porter la décision de la PREMIÈRE (1500), et une seule : obtenu ${persisted.rows[0].count} ligne(s) à ${persisted.rows[0].value}`,
   );
 
-  const audit = await setup.query<{ count: string; decided_by: string; before: string }>(
-    `select count(*) over ()::text as count, decided_by,
-            before_values ->> 'market_value' as before
+  const audit = await setup.query<{
+    count: string;
+    actor_user_id: string;
+    executed_by: string;
+    reason: string;
+    before: string;
+  }>(
+    `select count(*) over ()::text as count, actor_user_id::text as actor_user_id,
+            executed_by, reason, before_values ->> 'market_value' as before
        from public.position_snapshot_corrections
       where position_snapshot_id = $1`,
     [expected.snapshot_id],
@@ -344,8 +351,19 @@ try {
     `La piste d'audit doit porter EXACTEMENT une correction, celle qui a eu lieu : obtenu ${audit.rows.length}`,
   );
   assert(
-    audit.rows[0].decided_by === "smoke:concurrence-A",
-    `La trace doit être celle de la première décision : obtenu ${audit.rows[0].decided_by}`,
+    audit.rows[0].reason === "Correction concurrente A",
+    `La trace doit être celle de la PREMIÈRE décision : obtenu ${audit.rows[0].reason}`,
+  );
+  // ACTEUR VÉRIFIÉ, et posé par le serveur : aucune des deux charges ne l'a transmis.
+  assert(
+    audit.rows[0].actor_user_id === userId,
+    `L'acteur doit être l'identité établie côté serveur : obtenu ${audit.rows[0].actor_user_id}`,
+  );
+  // ACTEUR HUMAIN ≠ RÔLE TECHNIQUE.
+  assert(
+    audit.rows[0].executed_by === "service_role" &&
+      audit.rows[0].executed_by !== audit.rows[0].actor_user_id,
+    "L'acteur et le rôle d'exécution doivent rester deux faits DISTINCTS",
   );
   assert(
     Number(audit.rows[0].before) === 1000,
@@ -410,7 +428,6 @@ try {
       {
         record_id: rollbackSession.recordId,
         reason: "Correction annulée avec sa transaction",
-        decided_by: "smoke:concurrence-rollback",
         expected: { snapshot_id: expected.snapshot_id, ...stateNow.rows[0] },
       },
     ],
@@ -439,7 +456,7 @@ try {
   );
 
   console.log(
-    "Smoke Portfolio correction concurrente vert : seconde décision sérialisée par le verrou de l'observation, refusée sur conflit d'état attendu nommant l'attendu et le trouvé, décision de la première conservée, piste d'audit portant exactement une correction avec sa valeur d'avant, décision et audit et mutation et provenance annulés ENSEMBLE. Aucune donnée persistée.",
+    "Smoke Portfolio correction concurrente vert : seconde décision sérialisée par le verrou de l'observation, refusée sur conflit d'état attendu nommant l'attendu et le trouvé, décision de la première conservée, piste d'audit portant exactement une correction avec son acteur VÉRIFIÉ, son rôle d'exécution distinct et sa valeur d'avant, décision et audit et mutation et provenance annulés ENSEMBLE. Aucune donnée persistée.",
   );
 } finally {
   await first.query("rollback").catch(() => undefined);
