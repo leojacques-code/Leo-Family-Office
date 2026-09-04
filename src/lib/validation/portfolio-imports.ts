@@ -136,6 +136,42 @@ export const portfolioCorrectSchema = z.object({
   reason: z.string().trim().min(1).max(2000),
 });
 
+/**
+ * Valeurs comparées d'une observation, telles que la base les a rendues.
+ *
+ * Les montants sont des CHAÎNES, et volontairement : PostgreSQL les rend en texte via un
+ * `::text` explicite dans la lecture, et les faire passer par un nombre JavaScript perdrait
+ * de la précision sur un `numeric(30,10)`. Un écart de précision fabriquerait un conflit de
+ * concurrence imaginaire — ou, plus grave, en masquerait un vrai.
+ *
+ * Le format n'est PAS contraint à une forme canonique : `10.50` et `10.5` sont le même
+ * nombre, et c'est la base qui les compare en `numeric`, jamais en texte.
+ */
+const portfolioObservedValuesSchema = z.object({
+  snapshotId: z.uuid(),
+  quantity: z.string().trim().max(60).nullable(),
+  costBasis: z.string().trim().max(60).nullable(),
+  marketValue: z.string().trim().max(60).nullable(),
+  currency: z.string().trim().length(3),
+});
+
+/**
+ * DÉCISION de remplacer une observation de position déjà persistée.
+ *
+ * `reason` est obligatoire et non vide APRÈS `trim` : « » et «    » sont le même vide, et un
+ * motif blanc laisserait la piste d'audit sans réponse à « pourquoi cette valeur ».
+ */
+const portfolioCorrectionDecisionSchema = z.object({
+  recordId: z.uuid(),
+  reason: z.string().trim().min(1).max(2000),
+  /**
+   * Identité DÉCLARÉE. Facultative : la base retombe alors sur le rôle PostgreSQL constaté
+   * plutôt que sur une personne inventée.
+   */
+  decidedBy: z.string().trim().min(1).max(200).optional(),
+  expected: portfolioObservedValuesSchema,
+});
+
 export const portfolioCommitSchema = z.object({
   action: z.literal("commit"),
   sessionId: z.uuid(),
@@ -145,13 +181,25 @@ export const portfolioCommitSchema = z.object({
    */
   recordIds: z.array(z.uuid()).max(MAX_PORTFOLIO_ROWS),
   /**
-   * Lignes pour lesquelles l'utilisateur DÉCLARE corriger une observation déjà persistée.
+   * DÉCISIONS de correction d'observations déjà persistées.
    *
    * Vide par défaut, et c'est le point : une observation persistée est un fait, et un second
-   * fichier portant la même date ne suffit pas à autoriser son remplacement. Sans cette
-   * déclaration, la validation REFUSE et nomme ce qui change.
+   * fichier portant la même date ne suffit pas à autoriser son remplacement. Sans décision,
+   * la validation REFUSE et nomme ce qui change.
+   *
+   * Le contrat précédent n'exigeait qu'un tableau d'identifiants. Il est refusé ici et par
+   * la base : un identifiant seul ne dit ni pourquoi, ni par qui, ni sur la foi de quel état
+   * courant, et il ne conservait rien de la valeur remplacée.
    */
-  correctRecordIds: z.array(z.uuid()).max(MAX_PORTFOLIO_ROWS).default([]),
+  corrections: z
+    .array(portfolioCorrectionDecisionSchema)
+    .max(MAX_PORTFOLIO_ROWS)
+    .default([])
+    // Deux décisions pour la même ligne rendraient le motif conservé INDÉTERMINÉ. La base
+    // le refuse aussi : ce contrôle-ci rend seulement le message lisible côté client.
+    .refine((decisions) => new Set(decisions.map((d) => d.recordId)).size === decisions.length, {
+      message: "Deux décisions pour la même ligne : le motif conservé serait indéterminé",
+    }),
 });
 
 export const portfolioDiscardSchema = z.object({

@@ -22,12 +22,15 @@ import type { ImportIssue } from "@/lib/acquisition/types";
 import type {
   InstrumentResolutionView,
   PortfolioCommitResult,
+  PortfolioExistingObservation,
   PortfolioImportCommand,
+  PortfolioObservedValues,
   PortfolioPreview,
   PortfolioPreviewRow,
   PortfolioSessionSummary,
   PortfolioUploadTicket,
 } from "@/lib/data/portfolio-import-contracts";
+import { changedObservedFields } from "@/lib/data/observed-amounts";
 import { LEDGER_PAGE_SIZE, pagesFor, readAllPages } from "@/lib/data/pagination";
 import { nullableFiniteNumber } from "@/lib/data/row-validation";
 import { IMPORT_STAGING_BUCKET, ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
@@ -692,9 +695,28 @@ function createPortfolioImportRepository(): PortfolioImportRepository {
         p_payload: {
           session_id: input.sessionId,
           record_ids: input.recordIds,
-          // Corrections DÉCLARÉES d'observations déjà persistées. Vide par défaut : la RPC
+          // DÉCISIONS de correction d'observations déjà persistées. Vide par défaut : la RPC
           // refuse alors le remplacement et nomme ce qui change.
-          correct_record_ids: input.correctRecordIds,
+          //
+          // Chaque décision porte son motif, son auteur déclaré et l'état qu'elle CROIT
+          // corriger. La base compare cet état attendu à l'état réellement persisté, sous
+          // verrou : deux sessions décidant de la même observation ne s'écrasent plus, la
+          // seconde échoue avec un conflit révisable.
+          //
+          // Les montants attendus repartent VERBATIM tels que la prévisualisation les a lus
+          // en texte : les reformater ici fabriquerait un conflit, ou en masquerait un.
+          corrections: input.corrections.map((decision) => ({
+            record_id: decision.recordId,
+            reason: decision.reason,
+            decided_by: decision.decidedBy ?? null,
+            expected: {
+              snapshot_id: decision.expected.snapshotId,
+              quantity: decision.expected.quantity,
+              cost_basis: decision.expected.costBasis,
+              market_value: decision.expected.marketValue,
+              currency: decision.expected.currency,
+            },
+          })),
         },
       }),
       "validation de la session d'import",
@@ -738,6 +760,133 @@ function createPortfolioImportRepository(): PortfolioImportRepository {
       analyzedAt: nullableStr(row.analyzed_at),
       committedAt: nullableStr(row.committed_at),
       issues: Array.isArray(row.issues) ? (row.issues as ImportIssue[]) : [],
+    };
+  }
+
+  /**
+   * Clé d'une observation : une détention (enveloppe + instrument) à une DATE.
+   *
+   * L'enveloppe est celle de la session, donc constante : la clé n'a besoin que de
+   * l'instrument et de la date.
+   */
+  function observationKey(securityId: string, snapshotDate: string): string {
+    return `${securityId}\u0000${snapshotDate}`;
+  }
+
+  /**
+   * Lit, pour les lignes de POSITION d'une session, l'observation déjà persistée à la même
+   * date pour la même détention.
+   *
+   * Deux lectures, jamais une par ligne : les détentions de l'enveloppe, puis les
+   * observations de ces détentions aux dates concernées.
+   *
+   * LES MONTANTS SONT LUS EN TEXTE (`::text`). C'est la clé du contrat de concurrence : ce
+   * texte est renvoyé verbatim par la décision comme état attendu, et un aller-retour par un
+   * nombre JavaScript perdrait de la précision sur un `numeric(30,10)`.
+   */
+  async function readExistingObservations(
+    accountId: string,
+    rows: readonly Row[],
+  ): Promise<Map<string, { snapshotId: string; snapshotDate: string; observed: Row }>> {
+    const result = new Map<string, { snapshotId: string; snapshotDate: string; observed: Row }>();
+
+    const securityIds = [
+      ...new Set(
+        rows.map((row) => nullableStr(row.security_id)).filter((id): id is string => id !== null),
+      ),
+    ];
+    const dates = [
+      ...new Set(
+        rows
+          .map((row) => nullableStr(row.transaction_date))
+          .filter((date): date is string => date !== null),
+      ),
+    ];
+    if (securityIds.length === 0 || dates.length === 0) return result;
+
+    const positions = unwrap(
+      await db
+        .from("positions")
+        .select("id, security_id")
+        .eq("user_id", user)
+        .eq("account_id", accountId)
+        .in("security_id", securityIds),
+      "lecture des détentions de l'enveloppe",
+    ) as Row[];
+    if (positions.length === 0) return result;
+
+    const securityByPosition = new Map<string, string>();
+    for (const position of positions) {
+      securityByPosition.set(str(position.id), str(position.security_id));
+    }
+
+    const snapshots = unwrap(
+      await db
+        .from("position_snapshots")
+        .select(
+          // `::text` DÉLIBÉRÉ : c'est ce texte que la décision renvoie comme état attendu.
+          "id, position_id, snapshot_date, quantity::text, cost_basis::text, market_value::text, currency",
+        )
+        .eq("user_id", user)
+        .in("position_id", [...securityByPosition.keys()])
+        .in("snapshot_date", dates),
+      "lecture des observations déjà persistées",
+    ) as Row[];
+
+    for (const snapshot of snapshots) {
+      const securityId = securityByPosition.get(str(snapshot.position_id));
+      if (securityId === undefined) continue;
+      const snapshotDate = str(snapshot.snapshot_date);
+      result.set(observationKey(securityId, snapshotDate), {
+        snapshotId: str(snapshot.id),
+        snapshotDate,
+        observed: snapshot,
+      });
+    }
+    return result;
+  }
+
+  /**
+   * Projette l'observation déjà persistée d'une ligne, et dit ce qui CHANGERAIT.
+   *
+   * `state` est INDICATIF : cette lecture n'est pas sous verrou. C'est sans danger et c'est
+   * le contrat — la décision transmet `observed` comme état attendu, la base le compare sous
+   * verrou, et une divergence produit un conflit révisable, jamais un écrasement. Une
+   * prévisualisation périmée fait échouer, elle ne fait pas perdre un fait.
+   */
+  function existingObservationFor(
+    row: Row,
+    existing: Map<string, { snapshotId: string; snapshotDate: string; observed: Row }>,
+  ): PortfolioExistingObservation | null {
+    const securityId = nullableStr(row.security_id);
+    const factDate = nullableStr(row.transaction_date);
+    if (securityId === null || factDate === null) return null;
+    const found = existing.get(observationKey(securityId, factDate));
+    if (found === undefined) return null;
+
+    const observed: PortfolioObservedValues = {
+      snapshotId: found.snapshotId,
+      quantity: nullableStr(found.observed.quantity),
+      costBasis: nullableStr(found.observed.cost_basis),
+      marketValue: nullableStr(found.observed.market_value),
+      currency: str(found.observed.currency),
+    };
+
+    // Les valeurs de staging sont comparées EN TEXTE elles aussi, pour ne pas comparer un
+    // nombre JavaScript à un `numeric`. La règle est portée par `observed-amounts.ts`, où
+    // elle est testée : `1810.000000` et `1810` sont le même nombre, et `null` n'est pas zéro.
+    const changedFields = changedObservedFields(observed, {
+      quantity: nullableStr(row.quantity),
+      costBasis: nullableStr(row.cost_basis),
+      marketValue: nullableStr(row.market_value),
+      currency: nullableStr(row.currency),
+    });
+
+    return {
+      observed,
+      snapshotDate: found.snapshotDate,
+      state: changedFields.length === 0 ? "IDENTICAL" : "DIFFERENT",
+      changedFields,
     };
   }
 
@@ -788,6 +937,14 @@ function createPortfolioImportRepository(): PortfolioImportRepository {
         .order("source_key", { ascending: true }),
       "lecture des résolutions d'instrument",
     ) as Row[];
+
+    // Observations DÉJÀ persistées, uniquement pour une session de POSITION : un événement
+    // de ledger n'écrase aucune observation, et interroger la table serait un aller-retour
+    // sans objet.
+    const existing =
+      str(source.domain) === "PORTFOLIO_POSITION"
+        ? await readExistingObservations(str(source.target_account_id), rows)
+        : new Map<string, { snapshotId: string; snapshotDate: string; observed: Row }>();
 
     const rowCountByKey = new Map<string, number>();
     for (const row of rows) {
@@ -854,6 +1011,7 @@ function createPortfolioImportRepository(): PortfolioImportRepository {
         portfolioEventId: nullableStr(row.portfolio_event_id),
         positionSnapshotId: nullableStr(row.position_snapshot_id),
         commitState: str(row.commit_state) as PortfolioPreviewRow["commitState"],
+        existingObservation: existingObservationFor(row, existing),
         issues: Array.isArray(row.issues) ? (row.issues as ImportIssue[]) : [],
       };
     });

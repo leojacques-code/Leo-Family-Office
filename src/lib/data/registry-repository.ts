@@ -10,6 +10,7 @@ import type {
   BusinessCanonicalIdentity,
   CompanyRegistryProfileCandidate,
   EnrichableField,
+  RegistryCallOptions,
   RegistryCapability,
   RegistryDocumentCandidate,
   RegistryEntityReading,
@@ -135,8 +136,20 @@ function initialStatus(adapter: RegistryProviderAdapter, credentialPresent: bool
 
 export interface RegistryRepository {
   describeConnections(): Promise<RegistryConnectionSummary[]>;
-  search(request: RegistrySearchRequest): Promise<RegistrySearchResponse>;
-  lookupEntity(request: RegistryLookupRequest): Promise<RegistryEntityResponse>;
+  /**
+   * `options.signal` vient de la REQUÊTE HTTP entrante. Quand le navigateur abandonne, la
+   * lecture distante s'arrête au lieu de consommer un quota de registre pour une réponse
+   * que plus personne ne lira. Facultatif : un appelant hors requête HTTP n'a rien à
+   * propager, et le transport garde de toute façon son délai interne.
+   */
+  search(
+    request: RegistrySearchRequest,
+    options?: RegistryCallOptions,
+  ): Promise<RegistrySearchResponse>;
+  lookupEntity(
+    request: RegistryLookupRequest,
+    options?: RegistryCallOptions,
+  ): Promise<RegistryEntityResponse>;
   linkBusiness(request: RegistryLinkRequest): Promise<RegistryLinkSummary>;
   unlinkBusiness(businessId: string, provider: RegistryProvider): Promise<string>;
   proposeEnrichment(request: RegistryProposeRequest): Promise<RegistryEnrichmentPreview>;
@@ -284,16 +297,22 @@ class SupabaseRegistryRepository implements RegistryRepository {
     };
   }
 
-  async search(request: RegistrySearchRequest): Promise<RegistrySearchResponse> {
+  async search(
+    request: RegistrySearchRequest,
+    options?: RegistryCallOptions,
+  ): Promise<RegistrySearchResponse> {
     const adapter = adapterFor(request.provider);
     const sourceId = await this.ensureConnection(adapter);
-    const response = await adapter.search({
-      text: request.text,
-      siren: request.siren,
-      officerName: request.officerName,
-      page: request.page,
-      perPage: request.perPage,
-    });
+    const response = await adapter.search(
+      {
+        text: request.text,
+        siren: request.siren,
+        officerName: request.officerName,
+        page: request.page,
+        perPage: request.perPage,
+      },
+      options,
+    );
 
     const reading =
       response.errorCode === null
@@ -392,7 +411,10 @@ class SupabaseRegistryRepository implements RegistryRepository {
     };
   }
 
-  async lookupEntity(request: RegistryLookupRequest): Promise<RegistryEntityResponse> {
+  async lookupEntity(
+    request: RegistryLookupRequest,
+    options?: RegistryCallOptions,
+  ): Promise<RegistryEntityResponse> {
     const adapter = adapterFor(request.provider);
     const sourceId = await this.ensureConnection(adapter);
 
@@ -422,7 +444,7 @@ class SupabaseRegistryRepository implements RegistryRepository {
       }
     }
 
-    const response = await adapter.entity(request.siren);
+    const response = await adapter.entity(request.siren, options);
     const reading: RegistryEntityReading =
       response.errorCode === null
         ? adapter.readEntity(response)

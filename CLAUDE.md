@@ -89,6 +89,17 @@ Corollaires appliqués dans le code existant, à préserver :
 - l'absence d'événement de frais d'acquisition ou de capex ne vaut pas zéro : une déclaration
   explicite, y compris à 0, est requise pour calculer coût de revient, plus-value et rendement sur
   coût ; un événement futur ne modifie jamais une lecture présente ;
+- une observation persistée ne se remplace que sur DÉCISION, et une décision n'est pas un
+  consentement : un identifiant de ligne ne dit ni pourquoi, ni par qui, ni sur la foi de quel
+  état courant. DÉCISION ≠ CONSENTEMENT, ÉTAT ATTENDU ≠ ÉTAT COURANT, ANCIENNE VALEUR ≠ VALEUR
+  REMPLACÉE, IDENTITÉ DÉCLARÉE ≠ IDENTITÉ CONSTATÉE : le motif, l'avant, l'après et les champs
+  modifiés vont dans une piste immuable, le verrou est pris AVANT la comparaison, et une
+  seconde décision sur un état périmé échoue avec un conflit révisable au lieu d'écraser la
+  première ;
+- un fournisseur distant n'est pas coopératif : `Content-Length` est une DÉCLARATION et non une
+  mesure, un corps se lit de façon incrémentale sous un plafond déclaré, seul du JSON est parsé,
+  et un diagnostic d'échec ne reprend JAMAIS `error.message` — un `fetch` y cite l'URL demandée,
+  jetons de requête compris, et ce message est persisté puis affiché ;
 - les flux immobiliers observés sont convertis par le FX Engine à la date de chaque transaction ;
   une dette future dans une autre devise reste non calculable sans courbe FX future explicite, le
   dernier spot n'étant jamais prolongé silencieusement.
@@ -126,9 +137,10 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **42 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
-42 appliquées, 105 tables publiques). Les neuf dernières sont les cinq verticales
-d'acquisition ajoutées par ce chantier et leur réconciliation :
+Le DÉPÔT porte **43 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
+43 appliquées, 106 tables publiques). Les dix dernières sont les cinq verticales
+d'acquisition ajoutées par ce chantier, leur réconciliation et la correction des findings de
+revue :
 
 - `20260831101500_company_registry_acquisition` ;
 - `20260831154500_document_intelligence_foundation` ;
@@ -138,7 +150,8 @@ d'acquisition ajoutées par ce chantier et leur réconciliation :
 - `20260903120000_open_banking_ais` ;
 - `20260903120500_open_banking_ais_fk_indexes` ;
 - `20260903190000_acquisition_integration_reconciliation` ;
-- `20260903200000_portfolio_findings_no_silent_upsert`.
+- `20260903200000_portfolio_findings_no_silent_upsert` ;
+- `20260904093000_portfolio_correction_audit`.
 
 L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE, et cette section a dérivé
 trois fois de suite pour l'avoir oublié : elle a successivement annoncé « 29 migrations
@@ -153,9 +166,10 @@ dit l'état réel, et le contenu de référence s'extrait de
 `supabase_migrations.schema_migrations`.
 
 La production portait **33 migrations** au dernier état communiqué par le propriétaire du
-schéma. AUCUNE des neuf migrations ci-dessus n'y est appliquée. Leur ordre d'application est
-CELUI DE LEURS NOMS et il n'est pas indifférent : la réconciliation et le volet Portfolio
-supposent que les cinq verticales sont déjà là.
+schéma. AUCUNE des dix migrations ci-dessus n'y est appliquée. Leur ordre d'application est
+CELUI DE LEURS NOMS et il n'est pas indifférent : la réconciliation et les deux volets
+Portfolio supposent que les cinq verticales sont déjà là, et
+`20260904093000_portfolio_correction_audit` reprend la RPC que `20260903200000` a redéfinie.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,

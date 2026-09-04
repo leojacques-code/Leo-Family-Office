@@ -880,12 +880,103 @@ try {
     "Le refus doit laisser l'observation persistée INTACTE",
   );
 
-  // Décision explicite : la correction est écrite, et sa provenance aussi.
-  await rpc("lfo_commit_portfolio_session", {
+  // ── 9 bis. LA DÉCISION EST STRUCTURÉE, ET SA TRACE EST IMMUABLE ───────────────
+  // Un tableau d'identifiants autorisait la mutation sans motif, sans auteur, et sans rien
+  // conserver de la valeur remplacée. Les invariants ci-dessous sont ceux du contrat de
+  // remplacement, chacun vérifié SUR LA BASE et non sur le code applicatif.
+  // L'état attendu est LU DANS LA BASE, en texte, exactement comme la prévisualisation le
+  // lit. Le coder en dur dans le smoke testerait une valeur inventée, et masquerait
+  // précisément l'écart de forme (`1810.000000` contre `1810`) que le contrat doit absorber.
+  const targetSnapshot = await client.query<{
+    id: string;
+    quantity: string | null;
+    cost_basis: string | null;
+    market_value: string | null;
+    currency: string;
+  }>(
+    `select id, quantity::text as quantity, cost_basis::text as cost_basis,
+            market_value::text as market_value, currency
+       from public.position_snapshots
+      where user_id = $1 and snapshot_date = '2026-07-31'`,
+    [userId],
+  );
+  const snapshotId = targetSnapshot.rows[0].id;
+  const expectedState = {
+    snapshot_id: snapshotId,
+    quantity: targetSnapshot.rows[0].quantity,
+    cost_basis: targetSnapshot.rows[0].cost_basis,
+    market_value: targetSnapshot.rows[0].market_value,
+    currency: targetSnapshot.rows[0].currency,
+  };
+  const decision = (overrides: Record<string, unknown> = {}) => ({
     session_id: correctionSession,
     record_ids: correctionIds,
-    correct_record_ids: correctionIds,
+    corrections: correctionIds.map((id) => ({
+      record_id: id,
+      reason: "Le relevé de juillet était provisoire",
+      decided_by: "smoke:portfolio-import",
+      expected: expectedState,
+      ...overrides,
+    })),
   });
+
+  // L'ANCIEN contrat est refusé EXPLICITEMENT. L'ignorer laisserait un appelant resté sur la
+  // forme précédente croire qu'il a décidé.
+  await rejects(
+    "select public.lfo_commit_portfolio_session($1::uuid, $2::jsonb)",
+    [
+      userId,
+      JSON.stringify({
+        session_id: correctionSession,
+        record_ids: correctionIds,
+        corrections: correctionIds,
+      }),
+    ],
+    "Un tableau nu d'identifiants a été accepté comme une décision",
+    "Un identifiant seul n'est pas une décision",
+  );
+
+  // MOTIF NON VIDE, espaces compris : « » et «    » sont le même vide.
+  for (const reason of ["", "   ", "\t\n"]) {
+    await rejects(
+      "select public.lfo_commit_portfolio_session($1::uuid, $2::jsonb)",
+      [userId, JSON.stringify(decision({ reason }))],
+      `Une correction sans motif a été acceptée (motif ${JSON.stringify(reason)})`,
+      "Correction sans motif",
+    );
+  }
+
+  // ÉTAT ATTENDU OBLIGATOIRE : sans lui, une seconde décision écraserait la première.
+  await rejects(
+    "select public.lfo_commit_portfolio_session($1::uuid, $2::jsonb)",
+    [userId, JSON.stringify(decision({ expected: undefined }))],
+    "Une décision SANS état attendu a été acceptée",
+    "Décision de correction incomplète",
+  );
+
+  // CONFLIT : l'état attendu n'est pas l'état courant. C'est le cas de deux corrections
+  // concurrentes, et le message doit nommer le champ, l'attendu et le trouvé.
+  await rejects(
+    "select public.lfo_commit_portfolio_session($1::uuid, $2::jsonb)",
+    [userId, JSON.stringify(decision({ expected: { ...expectedState, market_value: "1234.56" } }))],
+    "Un état attendu PÉRIMÉ a été accepté : la décision d'un autre aurait été écrasée",
+    "l'état attendu n'est plus l'état courant",
+  );
+
+  // `1810.000000` et `1810.0` sont le MÊME nombre : la comparaison est numérique, jamais
+  // textuelle. Un conflit fabriqué sur une différence de forme rendrait le contrat
+  // inutilisable, et c'est bien la forme ABRÉGÉE qui est transmise ici.
+  const abbreviated = {
+    ...expectedState,
+    quantity: expectedState.quantity === null ? null : String(Number(expectedState.quantity)),
+    market_value:
+      expectedState.market_value === null ? null : String(Number(expectedState.market_value)),
+  };
+  assert(
+    abbreviated.market_value !== expectedState.market_value,
+    "Le cas de forme abrégée ne prouve rien si les deux écritures sont identiques",
+  );
+  await rpc("lfo_commit_portfolio_session", decision({ expected: abbreviated }));
   const correctedObservation = await client.query<{
     count: string;
     value: string;
@@ -914,6 +1005,138 @@ try {
     `La provenance d'une observation corrigée est un HISTORIQUE de sessions : obtenu ${correctedObservation.rows[0].links} lien(s)`,
   );
 
+  // ── 9 ter. LA PISTE D'AUDIT PORTE TOUT CE QUI PERMET DE RÉPONDRE PLUS TARD ────
+  // « Pourquoi cette position vaut-elle 1 999 € et non 1 810 € comme le relevé de juillet le
+  // disait ? » — chacune des colonnes ci-dessous est là pour que la réponse existe.
+  const audit = await client.query<{
+    count: string;
+    user_id: string;
+    session_id: string;
+    normalized_record_id: string;
+    position_snapshot_id: string;
+    decided_by: string;
+    executed_by: string;
+    reason: string;
+    before_market: string | null;
+    after_market: string | null;
+    changed: string[];
+    decided_at: string | null;
+  }>(
+    `select (select count(*)::text from public.position_snapshot_corrections where user_id = $1) as count,
+            user_id::text as user_id, session_id::text as session_id,
+            normalized_record_id::text as normalized_record_id,
+            position_snapshot_id::text as position_snapshot_id,
+            decided_by, executed_by, reason,
+            before_values ->> 'market_value' as before_market,
+            after_values ->> 'market_value' as after_market,
+            changed_fields as changed, decided_at::text as decided_at
+       from public.position_snapshot_corrections
+      where user_id = $1`,
+    [userId],
+  );
+  assert(audit.rows.length === 1 && audit.rows[0].count === "1", "Une correction, une trace");
+  const trace = audit.rows[0];
+  assert(trace.user_id === userId, "La trace doit porter son propriétaire");
+  assert(trace.session_id === correctionSession, "La trace doit porter la session qui a décidé");
+  assert(
+    correctionIds.includes(trace.normalized_record_id),
+    "La trace doit porter la ligne normalisée qui portait les valeurs de remplacement",
+  );
+  assert(
+    trace.position_snapshot_id === snapshotId,
+    "La trace doit porter l'observation RÉELLEMENT modifiée",
+  );
+  assert(
+    trace.decided_by === "smoke:portfolio-import",
+    `L'identité DÉCLARÉE doit être conservée telle quelle : obtenu ${trace.decided_by}`,
+  );
+  // IDENTITÉ DÉCLARÉE ≠ IDENTITÉ CONSTATÉE : `executed_by` est posé par la base.
+  assert(
+    trace.executed_by === "service_role",
+    `Le rôle CONSTATÉ doit être celui qui a exécuté : obtenu ${trace.executed_by}`,
+  );
+  assert(
+    trace.reason === "Le relevé de juillet était provisoire",
+    "Le motif doit être conservé mot pour mot",
+  );
+  // AUCUNE ANCIENNE VALEUR PERDUE : c'est le cœur du finding.
+  //
+  // La comparaison est NUMÉRIQUE : la piste conserve les montants tels que PostgreSQL les
+  // sérialise, avec l'échelle de leur colonne (`1810.000000`). Exiger une écriture
+  // particulière testerait la mise en forme de `jsonb_build_object`, pas la conservation de
+  // la valeur — et casserait au premier changement d'échelle de la colonne.
+  assert(
+    trace.before_market !== null && Number(trace.before_market) === 1810,
+    `La valeur AVANT doit survivre à la mutation : obtenu ${trace.before_market}`,
+  );
+  assert(
+    trace.after_market !== null && Number(trace.after_market) === 1999,
+    `La valeur APRÈS doit être conservée : obtenu ${trace.after_market}`,
+  );
+  // CHAMPS RÉELLEMENT MODIFIÉS, dérivés : seule la valeur de marché change ici.
+  assert(
+    trace.changed.length === 1 && trace.changed[0] === "market_value",
+    `Les champs modifiés sont DÉRIVÉS de la comparaison : obtenu ${JSON.stringify(trace.changed)}`,
+  );
+  assert(trace.decided_at !== null, "Une décision est DATÉE");
+
+  // IMMUABILITÉ : ni réécriture du motif, ni suppression de la trace. Une piste d'audit
+  // réécrite n'est pas une piste d'audit.
+  await rejects(
+    "update public.position_snapshot_corrections set reason = 'autre' where user_id = $1",
+    [userId],
+    "Le motif d'une correction a pu être RÉÉCRIT",
+    "immuable",
+  );
+  await rejects(
+    "delete from public.position_snapshot_corrections where user_id = $1",
+    [userId],
+    "Une correction a pu être SUPPRIMÉE",
+    "immuable",
+  );
+  // L'observation corrigée ne se supprime pas non plus : ce serait perdre l'ancienne valeur
+  // par la porte de derrière.
+  await rejects(
+    "delete from public.position_snapshots where id = $1 and user_id = $2",
+    [snapshotId, userId],
+    "L'observation corrigée a pu être supprimée, emportant la seule trace de sa valeur d'avant",
+    "violates foreign key constraint",
+  );
+
+  // CONTRAINTES DE BASE, éprouvées en écriture DIRECTE : un motif vide et une correction ne
+  // nommant aucun champ modifié sont refusés par la base, pas seulement par la RPC.
+  for (const [label, columns, values, expected] of [
+    ["motif vide", "reason", ["   "], "position_snapshot_corrections_reason_ck"],
+    ["auteur vide", "decided_by", [" "], "position_snapshot_corrections_decided_by_ck"],
+  ] as const) {
+    await rejects(
+      `insert into public.position_snapshot_corrections
+         (user_id, session_id, normalized_record_id, position_snapshot_id,
+          decided_by, reason, before_values, after_values, changed_fields)
+       values ($1, $2, $3, $4,
+               ${columns === "decided_by" ? "$5" : "'qui'"},
+               ${columns === "reason" ? "$5" : "'pourquoi'"},
+               '{}'::jsonb, '{}'::jsonb, array['market_value'])`,
+      [userId, correctionSession, correctionIds[0], snapshotId, values[0]],
+      `Une correction avec ${label} a été acceptée`,
+      expected,
+    );
+  }
+  for (const [label, changed] of [
+    ["aucun champ", "array[]::text[]"],
+    ["un champ NULL", "array[null]::text[]"],
+  ] as const) {
+    await rejects(
+      `insert into public.position_snapshot_corrections
+         (user_id, session_id, normalized_record_id, position_snapshot_id,
+          decided_by, reason, before_values, after_values, changed_fields)
+       values ($1, $2, $3, $4, 'qui', 'pourquoi', '{}'::jsonb, '{}'::jsonb, ${changed})`,
+      [userId, correctionSession, correctionIds[0], snapshotId],
+      `Une correction ne nommant ${label} modifié a été acceptée`,
+      "position_snapshot_corrections_changed_ck",
+    );
+  }
+
   // ── 10. Piste d'audit en LECTURE SEULE sous `authenticated` ────────────────────
   await client.query("set local role authenticated");
   for (const table of [
@@ -921,6 +1144,9 @@ try {
     "import_raw_records",
     "import_normalized_records",
     "import_record_links",
+    // Une correction d'observation est la SEULE trace de la valeur remplacée : un client
+    // capable d'y écrire pourrait fabriquer un motif qu'il n'a jamais donné.
+    "position_snapshot_corrections",
   ]) {
     await rejects(
       `insert into public.${table} (user_id) values ($1)`,
@@ -956,6 +1182,47 @@ try {
     "introuvable",
   );
 
+  // AUCUNE CORRECTION CROSS-USER. Les trois clés étrangères de la piste d'audit sont
+  // COMPOSITES avec le propriétaire : une décision ne peut désigner ni la session, ni la
+  // ligne, ni l'observation de quelqu'un d'autre. C'est la base qui le garantit, pas
+  // l'application — un `user_id` mal calculé dans le code ne suffit donc pas à traverser.
+  await rejects(
+    `insert into public.position_snapshot_corrections
+       (user_id, session_id, normalized_record_id, position_snapshot_id,
+        decided_by, reason, before_values, after_values, changed_fields)
+     values ($1, $2, $3, $4, 'voisin', 'tentative', '{}'::jsonb, '{}'::jsonb,
+             array['market_value'])`,
+    [foreignUser, correctionSession, correctionIds[0], snapshotId],
+    "Un autre propriétaire a pu tracer une correction sur la session et l'observation d'autrui",
+    "violates foreign key constraint",
+  );
+  // Le sens inverse est barré de la même façon : ma décision ne peut pas désigner
+  // l'observation du voisin.
+  const foreignPositionId = randomUUID();
+  const foreignSnapshotId = randomUUID();
+  await client.query(
+    `insert into public.positions (id, user_id, account_id, security_id, is_cash, data_kind, confidence)
+     values ($1, $2, $3, $4, false, 'ACTUAL', 'HIGH')`,
+    [foreignPositionId, foreignUser, foreignAccountId, foreignSecurityId],
+  );
+  await client.query(
+    `insert into public.position_snapshots
+       (id, user_id, position_id, snapshot_date, quantity, market_value, currency,
+        data_kind, confidence)
+     values ($1, $2, $3, date '2026-07-31', 5, 500, 'EUR', 'ACTUAL', 'HIGH')`,
+    [foreignSnapshotId, foreignUser, foreignPositionId],
+  );
+  await rejects(
+    `insert into public.position_snapshot_corrections
+       (user_id, session_id, normalized_record_id, position_snapshot_id,
+        decided_by, reason, before_values, after_values, changed_fields)
+     values ($1, $2, $3, $4, 'moi', 'tentative', '{}'::jsonb, '{}'::jsonb,
+             array['market_value'])`,
+    [userId, correctionSession, correctionIds[0], foreignSnapshotId],
+    "Une décision a pu désigner l'observation d'un autre propriétaire",
+    "violates foreign key constraint",
+  );
+
   await client.query("reset role");
   await client.query("rollback");
   succeeded = true;
@@ -981,7 +1248,7 @@ try {
   }
   if (succeeded) {
     console.log(
-      "Smoke Portfolio Import : session RECEIVING, réception par lots atomique, brut immuable et non supprimable, aucun fait avant validation, compteurs DÉRIVÉS des lignes persistées, ABSENT ≠ ZÉRO sur frais quantité et coût de revient, quantité et montants négatifs refusés, nature hors whitelist refusée, achat sans instrument et apport avec instrument refusés dès le staging, ligne prête sans devise/date/valeur de marché refusée, échec au milieu d'un lot annulant tout le lot, instrument résolu sans cible refusé, rejet sans motif refusé en RPC comme en écriture directe, décision propagée par titre, décision humaine non écrasée par une réanalyse, correction sur la lecture laissant le brut intact avec provenance au champ, correction sans contenu refusée, ligne bloquée refusée à la validation, écriture par la RPC EXISTANTE du ledger, provenance vérifiable, fait non supprimable sans sa provenance, idempotence applicative et de base, POSITION OBSERVÉE ≠ TRANSACTION, une détention par enveloppe et instrument, une observation par date, incrémental sans perte d'historique, AUCUN écrasement silencieux d'une observation persistée — rejeu identique sans effet, valeurs différentes refusées sauf décision, correction décidée traçant sa session, piste d'audit en lecture seule sous authenticated, cloisonnement. Aucune donnée persistée.",
+      "Smoke Portfolio Import : session RECEIVING, réception par lots atomique, brut immuable et non supprimable, aucun fait avant validation, compteurs DÉRIVÉS des lignes persistées, ABSENT ≠ ZÉRO sur frais quantité et coût de revient, quantité et montants négatifs refusés, nature hors whitelist refusée, achat sans instrument et apport avec instrument refusés dès le staging, ligne prête sans devise/date/valeur de marché refusée, échec au milieu d'un lot annulant tout le lot, instrument résolu sans cible refusé, rejet sans motif refusé en RPC comme en écriture directe, décision propagée par titre, décision humaine non écrasée par une réanalyse, correction sur la lecture laissant le brut intact avec provenance au champ, correction sans contenu refusée, ligne bloquée refusée à la validation, écriture par la RPC EXISTANTE du ledger, provenance vérifiable, fait non supprimable sans sa provenance, idempotence applicative et de base, POSITION OBSERVÉE ≠ TRANSACTION, une détention par enveloppe et instrument, une observation par date, incrémental sans perte d'historique, AUCUN écrasement silencieux d'une observation persistée — rejeu identique sans effet, valeurs différentes refusées sauf DÉCISION STRUCTURÉE, tableau nu d'identifiants refusé, motif blanc refusé (espace, tabulation, retour à la ligne), état attendu obligatoire, conflit d'état attendu nommé, forme numérique abrégée acceptée, piste d'audit portant auteur déclaré et rôle constaté, motif, avant, après et champs dérivés, immuable en UPDATE comme en DELETE, observation corrigée non supprimable, contraintes de motif d'auteur et de champs éprouvées en écriture directe, correction décidée traçant sa session, piste d'audit en lecture seule sous authenticated, cloisonnement des corrections dans les deux sens. Aucune donnée persistée.",
     );
   }
 }

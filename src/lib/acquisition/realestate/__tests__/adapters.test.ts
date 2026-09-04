@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { dvfCoverage, dvfDescriptor, readDvfRow } from "@/lib/acquisition/realestate/dvf";
-import { DPE_ENERGY_UNIT, dpeDescriptor, readDpeRow } from "@/lib/acquisition/realestate/dpe";
+import {
+  createDvfProvider,
+  dvfCoverage,
+  dvfDescriptor,
+  readDvfRow,
+} from "@/lib/acquisition/realestate/dvf";
+import {
+  createDpeProvider,
+  DPE_ENERGY_UNIT,
+  dpeDescriptor,
+  readDpeRow,
+} from "@/lib/acquisition/realestate/dpe";
 import {
   readArea,
   readCode,
@@ -223,5 +233,128 @@ describe("lecture d'un DPE", () => {
   it("ne déclare AUCUN identifiant stable : un rejet automatique ferait disparaître un fait", () => {
     expect(dpeDescriptor().capabilities.stableRecordId).toBe(false);
     expect(dvfDescriptor().capabilities.stableRecordId).toBe(false);
+  });
+});
+
+/**
+ * PROPAGATION DU SIGNAL DE L'APPELANT — DVF ET DPE
+ *
+ * Le durcissement du transport ne sert à rien si le signal de la requête HTTP entrante
+ * s'arrête à la porte de l'adaptateur. Les deux jeux de données publics sont vérifiés
+ * séparément : ils partagent le transport, pas leur code d'URL.
+ */
+describe("propagation du signal jusqu'au transport", () => {
+  it("DVF : un appelant DÉJÀ parti n'engendre AUCUN appel réseau", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let called = false;
+    const provider = createDvfProvider({
+      baseUrl: "https://dvf.test/mutations",
+      transport: {
+        fetchImpl: async () => {
+          called = true;
+          return new Response("{}", { status: 200 });
+        },
+        maxAttempts: 1,
+      },
+    });
+    const fetched = await provider.fetch(
+      { dataset: "DVF", communeCode: "75056" },
+      { signal: controller.signal },
+    );
+    expect(called).toBe(false);
+    expect(fetched.status).toBe("FAILED");
+    expect(fetched.errorCode).toBe("CANCELLED");
+    // Un abandon reste un FAIT daté, pas une absence de mutations.
+    expect(fetched.sales).toEqual([]);
+  });
+
+  it("DPE : un appelant DÉJÀ parti n'engendre AUCUN appel réseau", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let called = false;
+    const provider = createDpeProvider({
+      baseUrl: "https://dpe.test/certificats",
+      transport: {
+        fetchImpl: async () => {
+          called = true;
+          return new Response("{}", { status: 200 });
+        },
+        maxAttempts: 1,
+      },
+    });
+    const fetched = await provider.fetch(
+      { dataset: "DPE", communeCode: "75056" },
+      { signal: controller.signal },
+    );
+    expect(called).toBe(false);
+    expect(fetched.errorCode).toBe("CANCELLED");
+    expect(fetched.certificates).toEqual([]);
+  });
+
+  it("DVF : le signal transmis à fetch est le COMPOSÉ, non celui de l'appelant", async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | null = null;
+    const provider = createDvfProvider({
+      baseUrl: "https://dvf.test/mutations",
+      transport: {
+        fetchImpl: async (_url, init) => {
+          seen = (init?.signal as AbortSignal) ?? null;
+          return new Response(JSON.stringify({ results: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+        maxAttempts: 1,
+      },
+    });
+    await provider.fetch({ dataset: "DVF", communeCode: "75056" }, { signal: controller.signal });
+    expect(seen).not.toBeNull();
+    expect(seen).not.toBe(controller.signal);
+    expect(seen!.aborted).toBe(false);
+  });
+
+  it("DVF : le plafond de taille se durcit PAR ADAPTATEUR sans second transport", async () => {
+    // Le même corps passe sous un plafond large et est refusé sous un plafond serré : c'est
+    // la surcharge par connexion, et elle n'exige aucune duplication du transport.
+    const body = JSON.stringify({ results: [] });
+    const build = (maxResponseBytes: number) =>
+      createDvfProvider({
+        baseUrl: "https://dvf.test/mutations",
+        transport: {
+          fetchImpl: async () =>
+            new Response(body, { status: 200, headers: { "content-type": "application/json" } }),
+          maxAttempts: 1,
+          maxResponseBytes,
+        },
+      });
+    const large = await build(4_096).fetch({ dataset: "DVF", communeCode: "75056" });
+    const tight = await build(4).fetch({ dataset: "DVF", communeCode: "75056" });
+    expect(large.errorCode).toBeNull();
+    expect(tight.errorCode).toBe("RESPONSE_TOO_LARGE");
+    // NOTRE plafond a tranché : ce n'est pas une absence de mutations.
+    expect(tight.sales).toEqual([]);
+  });
+
+  it("DVF : un diagnostic d'échec ne restitue NI l'URL NI la chaîne de requête", async () => {
+    // L'URL DVF porte les paramètres de la requête, et un point d'accès configuré peut
+    // porter un jeton : le message est persisté puis affiché.
+    const provider = createDvfProvider({
+      baseUrl: "https://dvf.test/mutations?cle=secret-de-test",
+      transport: {
+        fetchImpl: async () => {
+          throw new Error(
+            "request to https://dvf.test/mutations?cle=secret-de-test&code_commune=75056 failed",
+          );
+        },
+        maxAttempts: 1,
+      },
+    });
+    const fetched = await provider.fetch({ dataset: "DVF", communeCode: "75056" });
+    expect(fetched.errorCode).toBe("NETWORK");
+    const surface = `${fetched.errorMessage ?? ""}|${fetched.issues.map((i) => i.message).join("|")}`;
+    expect(surface).not.toContain("secret-de-test");
+    expect(surface).not.toContain("https://");
+    expect(surface).not.toContain("code_commune=");
   });
 });

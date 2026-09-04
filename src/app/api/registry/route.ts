@@ -89,7 +89,13 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      return NextResponse.json(await repository.lookupEntity(parsed.data), { status: 201 });
+      // Le signal de la REQUÊTE ENTRANTE descend jusqu'au transport : quand le navigateur
+      // abandonne, la lecture du registre s'arrête au lieu de consommer un quota
+      // fournisseur pour une réponse que plus personne ne lira.
+      return NextResponse.json(
+        await repository.lookupEntity(parsed.data, { signal: request.signal }),
+        { status: 201 },
+      );
     }
 
     const parsed = registrySearchSchema.safeParse(body && "search" in body ? body.search : body);
@@ -99,7 +105,9 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    return NextResponse.json(await repository.search(parsed.data), { status: 201 });
+    return NextResponse.json(await repository.search(parsed.data, { signal: request.signal }), {
+      status: 201,
+    });
   } catch (error) {
     return failure(error, "Interrogation du registre impossible");
   }

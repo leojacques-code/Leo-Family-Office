@@ -219,8 +219,15 @@ function matchSummary(row: Row): MatchSummary {
 export interface PublicDataRepository {
   adapter: "supabase";
   listSources(): Promise<PublicDataSourceSummary[]>;
+  /**
+   * `options.signal` vient de la REQUÊTE HTTP entrante. Quand le navigateur abandonne, la
+   * lecture du jeu de données public s'arrête au lieu de consommer un quota pour une
+   * réponse que plus personne ne lira. Facultatif : un appelant hors requête HTTP n'a rien
+   * à propager, et le transport garde de toute façon son délai interne.
+   */
   fetchAndStage(
     command: Extract<PublicDataCommand, { action: "fetch" }>,
+    options?: { signal?: AbortSignal },
   ): Promise<PublicDataReadResult>;
   decide(command: Extract<PublicDataCommand, { action: "decide" }>): Promise<MatchSummary[]>;
   promote(
@@ -318,6 +325,7 @@ function createPublicDataRepository(): PublicDataRepository {
 
   async function fetchAndStage(
     command: Extract<PublicDataCommand, { action: "fetch" }>,
+    options?: { signal?: AbortSignal },
   ): Promise<PublicDataReadResult> {
     const property = await loadProperty(command.propertyId);
     const provider = providerFor(command.dataset, command.useFixture);
@@ -333,7 +341,7 @@ function createPublicDataRepository(): PublicDataRepository {
       limit: MAX_RECORDS_PER_SNAPSHOT,
     };
 
-    const fetched: PublicDataFetch = await provider.fetch(query);
+    const fetched: PublicDataFetch = await provider.fetch(query, { signal: options?.signal });
 
     // Le plafond est appliqué AVANT écriture, et le dire est le point : une lecture
     // silencieusement tronquée produirait une médiane sur un échantillon amputé.

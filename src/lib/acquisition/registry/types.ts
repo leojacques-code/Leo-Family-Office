@@ -84,15 +84,26 @@ export type RegistryCapability = (typeof REGISTRY_CAPABILITIES)[number];
  * réessaie, `CREDENTIALS_MISSING` ne s'essaie même pas, `EGRESS_BLOCKED` dit que
  * l'environnement d'exécution refuse la sortie réseau — un fait d'infrastructure, pas une
  * réponse du registre.
+ *
+ * `CANCELLED` et `RESPONSE_TOO_LARGE` viennent du transport commun et sont reprises
+ * TELLES QUELLES, sans être repliées sur un code voisin. `CANCELLED` dit que le demandeur a
+ * renoncé — l'onglet fermé, la requête entrante abandonnée — et non que le registre a été
+ * lent : le classer en `TIMEOUT` lui attribuerait une lenteur qu'il n'a pas eue, et le
+ * rendrait réessayable alors qu'il ne reste personne pour lire la réponse.
+ * `RESPONSE_TOO_LARGE` dit que NOTRE plafond a tranché, et non que le registre a mal
+ * répondu : c'est le seul cas où relever le plafond est la bonne réponse, et le confondre
+ * avec `INVALID_RESPONSE` ferait chercher une malformation inexistante.
  */
 export const REGISTRY_ERROR_CODES = [
   "NETWORK",
   "TIMEOUT",
+  "CANCELLED",
   "RATE_LIMITED",
   "UNAUTHORIZED",
   "CREDENTIALS_MISSING",
   "NOT_FOUND",
   "INVALID_RESPONSE",
+  "RESPONSE_TOO_LARGE",
   "PROVIDER_ERROR",
   "EGRESS_BLOCKED",
 ] as const;
@@ -310,6 +321,19 @@ export interface RegistrySearchQuery {
  * `schemaVersion` versionne le CONTRAT DE LECTURE : quand l'interprétation d'un champ
  * change, les instantanés déjà écrits restent lisibles avec l'ancienne version.
  */
+/**
+ * Options d'UN appel, par opposition à la configuration de la connexion.
+ *
+ * Le signal vient du DEMANDEUR : sur une route Next, c'est `request.signal`. Quand le
+ * navigateur abandonne, la lecture distante s'arrête au lieu de continuer à consommer un
+ * quota de registre pour une réponse que plus personne ne lira. Il est facultatif — un
+ * appelant hors requête HTTP, comme un smoke, n'a rien à propager — et il ne remplace pas
+ * le délai interne du transport, il s'y compose.
+ */
+export interface RegistryCallOptions {
+  signal?: AbortSignal;
+}
+
 export interface RegistryProviderAdapter {
   readonly provider: RegistryProvider;
   readonly label: string;
@@ -328,8 +352,8 @@ export interface RegistryProviderAdapter {
   readonly snapshotTtlMinutes: number | null;
   readonly rateLimitPerMinute: number | null;
 
-  search(query: RegistrySearchQuery): Promise<RegistryRawResponse>;
-  entity(siren: string): Promise<RegistryRawResponse>;
+  search(query: RegistrySearchQuery, options?: RegistryCallOptions): Promise<RegistryRawResponse>;
+  entity(siren: string, options?: RegistryCallOptions): Promise<RegistryRawResponse>;
   readSearch(response: RegistryRawResponse): RegistrySearchReading;
   readEntity(response: RegistryRawResponse): RegistryEntityReading;
 }

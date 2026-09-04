@@ -162,7 +162,81 @@ seule, le même identifiant légitime dans deux domaines cibles, exactement deux
   `BLOCKED_EXTERNAL` ;
 - **aucune validation bancaire réelle revendiquée**.
 
-## 6. Leçons portées dans `CLAUDE.md`
+## 6. Reprise après revue : trois findings corrigés
+
+La revue de l'intégration a rendu un verdict bloquant sur trois points. Ils sont corrigés sur
+cette même branche, et voici ce que chacun a réellement coûté.
+
+### 6.1 Marqueurs de conflit dans `.env.example`
+
+La résolution manuelle de six conflits partagés en a laissé un derrière elle. Il ne cassait ni le
+build ni les tests — `.env.example` n'est lu par aucun module — et il se serait donc propagé
+jusqu'au poste du lecteur suivant, qui aurait copié une variable inexistante ou perdu celle que
+l'autre branche déclarait. La résolution est **cumulative** : `INPI_RNE_TOKEN`,
+`DVF_API_BASE_URL` et `DPE_API_BASE_URL` coexistent, chacune une seule fois.
+
+Un garde-fou est ajouté, parce que la relecture humaine a déjà échoué une fois :
+`npm run check:conflict-markers` balaie **l'arbre suivi** par git, et non un diff. `git diff
+--check` couvre le même besoin mais seulement pour ce qu'un diff donné modifie : un marqueur
+introduit par un commit antérieur à la fenêtre examinée lui échappe. Le contrôle est aussi un test
+de la suite, donc il tourne dans `npm run test` sans qu'on ait à y penser.
+
+MARQUEUR NON AMBIGU ≠ SÉPARATEUR AMBIGU : `<<<<<<<`, `|||||||` et `>>>>>>>` sont refusés partout ;
+`=======` seul est aussi un soulignement Markdown, et n'est retenu que dans un fichier portant déjà
+un marqueur non ambigu. Un garde-fou qui crie à tort finit désactivé.
+
+### 6.2 Audit immuable des corrections de portefeuille
+
+Traité dans `docs/PORTFOLIO_IMPORT.md`, section « Corriger une observation déjà persistée ». En
+résumé : un tableau d'identifiants n'est pas une décision, c'est un consentement anonyme. Il ne
+disait ni pourquoi, ni par qui, ni sur la foi de quel état courant, et la mutation effaçait
+définitivement la valeur remplacée. La migration corrective `20260904093000` ajoute une piste
+immuable, et la décision porte désormais son motif et l'état qu'elle croit corriger — ce qui rend
+deux corrections concurrentes détectables au lieu de silencieuses.
+
+### 6.3 Durcissement du transport HTTP commun
+
+`src/lib/acquisition/transport.ts` lisait le corps d'une réponse **sans borne**, parsait n'importe
+quel type de contenu, n'acceptait aucun signal d'appelant, et recopiait `error.message` dans un
+diagnostic **persisté**. Aucun second transport n'a été créé : le module unique est durci.
+
+| Point                                | Avant                         | Après                                                                                          |
+| ------------------------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| Taille de réponse                    | illimitée (`response.text()`) | plafond déclaré (`maxResponseBytes`, 4 Mio par défaut), surchargeable par connexion            |
+| `Content-Length` au-delà             | ignoré                        | refus **avant lecture**, aucun octet accumulé                                                  |
+| `Content-Length` absent ou mensonger | aucune protection             | lecture **incrémentale**, interrompue au premier octet au-delà, reader annulé                  |
+| `Content-Type`                       | non contrôlé                  | `application/json` et `application/*+json` seuls, paramètres (`charset`) autorisés             |
+| Signal de l'appelant                 | inexistant                    | `AbortSignal` accepté et **composé** avec le délai interne, écouteur retiré à chaque tentative |
+| Abandon vs délai                     | confondus en `TIMEOUT`        | `CANCELLED` distinct, et non réessayable                                                       |
+| Diagnostic                           | `error.message` verbatim      | message **construit**, aucun `error.message`, URL, chaîne de requête, en-tête ni corps         |
+
+Le dernier point est le plus concret : `fetch` de Node cite l'URL demandée dans le texte de son
+exception, cette URL porte les jetons passés en paramètre, et ce message était persisté dans
+l'instantané d'échec puis affiché. Un test vérifie qu'une exception contenant
+`https://…?token=secret` ne laisse apparaître ni l'URL ni le secret dans le résultat.
+
+`RESPONSE_TOO_LARGE` est un code distinct d'`INVALID_RESPONSE` : la source n'a rien fait de mal,
+c'est **notre** plafond qui a tranché. Les confondre ferait chercher une malformation là où il n'y
+a qu'un volume, et masquerait le seul cas où relever le plafond est la bonne réponse.
+
+Le signal descend des routes Next jusqu'au transport : `/api/registry` et
+`/api/real-estate/public-data` transmettent `request.signal`, et un appelant déjà parti n'engendre
+**aucun appel réseau** — donc aucune consommation de quota fournisseur pour une réponse que plus
+personne ne lira.
+
+### 6.4 Findings non bloquants
+
+**Prettier global.** Il n'existe **aucune CI GitHub** dans ce dépôt : le répertoire `.github/` est
+absent, `npm run format:check` n'est donc exécuté par aucun automate. Vingt-deux fichiers de `main`
+ne sont pas conformes ; **aucun** n'est touché par cette intégration. Cette dette est
+**préexistante** et documentée ici plutôt que masquée : la reformater dans cette PR noierait le
+diff de la correction sous des dizaines de fichiers sans rapport. Tous les fichiers touchés par
+cette branche sont, eux, conformes.
+
+**Paquets optionnels ou surnuméraires.** Sur installation propre (`npm ci`), `npm ls --all` ne
+signale ni `extraneous`, ni `invalid`, ni `missing`. Le lockfile n'est pas modifié.
+
+## 7. Leçons portées dans `CLAUDE.md`
 
 Trois règles y sont entrées parce qu'un défaut réel les a coûtées, pas parce qu'elles sonnent bien :
 

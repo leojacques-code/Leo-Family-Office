@@ -151,3 +151,113 @@ describe("fabrique d'adaptateurs", () => {
     expect(createRegistryAdapter("FIXTURE").provider).toBe("FIXTURE");
   });
 });
+
+/**
+ * PROPAGATION DU SIGNAL DE L'APPELANT
+ *
+ * Le durcissement du transport ne sert à rien si le signal de la requête HTTP entrante
+ * s'arrête à la porte de l'adaptateur. Ces cas vérifient le CHAÎNAGE : ce que la route
+ * transmet doit arriver jusqu'à `fetch`, et un appelant déjà parti ne doit produire aucun
+ * appel réseau — donc aucune consommation de quota fournisseur.
+ */
+describe("propagation du signal jusqu'au transport", () => {
+  it("INPI : le signal reçu par entity() est celui que fetch observe", async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | null = null;
+    const adapter = createInpiRneAdapter({
+      token: "jeton",
+      fetchImpl: async (_url, init) => {
+        seen = (init?.signal as AbortSignal) ?? null;
+        return new Response(JSON.stringify({ formality: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    await adapter.entity("900000001", { signal: controller.signal });
+    expect(seen).not.toBeNull();
+    // Le signal transmis est le COMPOSÉ, pas celui de l'appelant : il porte aussi le délai
+    // interne du transport.
+    expect(seen).not.toBe(controller.signal);
+    expect(seen!.aborted).toBe(false);
+  });
+
+  it("INPI : un appelant DÉJÀ parti ne déclenche AUCUN appel réseau", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let called = false;
+    const adapter = createInpiRneAdapter({
+      token: "jeton",
+      fetchImpl: async () => {
+        called = true;
+        return new Response("{}", { status: 200 });
+      },
+    });
+    const response = await adapter.entity("900000001", { signal: controller.signal });
+    // Aucun appel, donc aucun jeton de quota consommé pour une réponse que personne n'attend.
+    expect(called).toBe(false);
+    expect(response.errorCode).toBe("CANCELLED");
+  });
+
+  it("INPI : search() par SIREN transmet le signal à entity()", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let called = false;
+    const adapter = createInpiRneAdapter({
+      token: "jeton",
+      fetchImpl: async () => {
+        called = true;
+        return new Response("{}", { status: 200 });
+      },
+    });
+    const response = await adapter.search({ siren: "900000001" }, { signal: controller.signal });
+    expect(called).toBe(false);
+    expect(response.errorCode).toBe("CANCELLED");
+  });
+
+  it("annuaire ouvert : search() et entity() transmettent tous deux le signal", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    const adapter = createRegistryAdapter("RECHERCHE_ENTREPRISES", {
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response("{}", { status: 200 });
+      },
+    });
+    const search = await adapter.search({ text: "boulangerie" }, { signal: controller.signal });
+    const entity = await adapter.entity("900000001", { signal: controller.signal });
+    expect(calls).toBe(0);
+    expect(search.errorCode).toBe("CANCELLED");
+    expect(entity.errorCode).toBe("CANCELLED");
+  });
+
+  it("la FIXTURE honore le signal, sans quoi un test d'annulation ne prouverait rien", async () => {
+    // Une fixture qui ignorerait le signal ferait passer un test de propagation sur un
+    // double qui ne lit rien : la conduite doit être la même que celle du transport.
+    const controller = new AbortController();
+    controller.abort();
+    const adapter = createFixtureAdapter();
+    const entity = await adapter.entity(FIXTURE_SIREN_COMPLETE, { signal: controller.signal });
+    expect(entity.errorCode).toBe("CANCELLED");
+    // Sans signal, la fixture répond normalement : le garde ne bride pas le cas nominal.
+    expect((await adapter.entity(FIXTURE_SIREN_COMPLETE)).errorCode).toBeNull();
+  });
+
+  it("aucun signal fourni : le comportement nominal est INCHANGÉ", async () => {
+    // Un appelant hors requête HTTP — un smoke, un script — n'a rien à propager, et le
+    // transport garde son propre délai.
+    const adapter = createInpiRneAdapter({
+      token: "jeton",
+      fetchImpl: async (_url, init) => {
+        // Un signal composé est TOUJOURS transmis : c'est lui qui porte le délai interne.
+        expect(init?.signal).toBeDefined();
+        return new Response(JSON.stringify({ formality: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    expect((await adapter.entity("900000001")).errorCode).toBeNull();
+  });
+});

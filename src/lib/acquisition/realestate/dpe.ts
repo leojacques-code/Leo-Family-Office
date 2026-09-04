@@ -254,7 +254,7 @@ export function createDpeProvider(options: {
 
   return {
     descriptor,
-    async fetch(query) {
+    async fetch(query, options) {
       const issues: PublicDataIssue[] = [];
       const params = queryString(query);
       // L'adaptateur ne déclare pas la couverture d'une adresse : un vide y est muet, et le
@@ -287,7 +287,9 @@ export function createDpeProvider(options: {
       }
 
       const url = `${descriptor.baseUrl}?${new URLSearchParams(params).toString()}`;
-      const result = await callJson({ url }, transport, limiter);
+      // Le signal du DEMANDEUR est transmis tel quel : le transport le compose avec
+      // son propre délai, il ne le remplace pas.
+      const result = await callJson({ url, signal: options?.signal }, transport, limiter);
 
       if (result.errorCode !== null) {
         return {

@@ -170,7 +170,20 @@ export interface PublicDataQuery {
 }
 
 /** Un adaptateur. Il ne lève jamais : un échec est un `PublicDataFetch` en échec. */
+/**
+ * Options d'UN appel, par opposition à la configuration de l'adaptateur.
+ *
+ * `signal` vient du DEMANDEUR : sur une route Next, c'est `request.signal`. Quand le
+ * navigateur abandonne, la lecture du jeu de données s'arrête au lieu de continuer à
+ * consommer un quota pour une réponse que plus personne ne lira. Il ne remplace pas le
+ * délai interne du transport, il s'y compose.
+ */
+export interface PublicDataCallOptions {
+  token?: string | null;
+  signal?: AbortSignal;
+}
+
 export interface PublicDataProvider {
   descriptor: AdapterDescriptor;
-  fetch(query: PublicDataQuery, options?: { token?: string | null }): Promise<PublicDataFetch>;
+  fetch(query: PublicDataQuery, options?: PublicDataCallOptions): Promise<PublicDataFetch>;
 }

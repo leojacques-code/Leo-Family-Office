@@ -57,6 +57,7 @@ import {
   type RegistryOfficerCandidate,
   type RegistryProviderAdapter,
   type RegistryRawResponse,
+  type RegistryCallOptions,
   type RegistrySearchQuery,
   type RegistrySearchReading,
 } from "./types";
@@ -249,7 +250,10 @@ export function createInpiRneAdapter(options: InpiRneOptions = {}): RegistryProv
      * Une recherche par raison sociale appartient à l'annuaire ouvert, et prétendre le
      * contraire ferait chercher l'utilisateur au mauvais endroit.
      */
-    async search(query: RegistrySearchQuery): Promise<RegistryRawResponse> {
+    async search(
+      query: RegistrySearchQuery,
+      options?: RegistryCallOptions,
+    ): Promise<RegistryRawResponse> {
       if (!query.siren) {
         return {
           endpoint: "SEARCH",
@@ -264,10 +268,10 @@ export function createInpiRneAdapter(options: InpiRneOptions = {}): RegistryProv
             "Le RNE s'interroge par SIREN. Utilisez l'annuaire ouvert pour une recherche par raison sociale ou par dirigeant",
         };
       }
-      return this.entity(query.siren);
+      return this.entity(query.siren, options);
     },
 
-    async entity(siren: string): Promise<RegistryRawResponse> {
+    async entity(siren: string, options?: RegistryCallOptions): Promise<RegistryRawResponse> {
       const query = { siren };
       if (token === null || token.trim().length === 0) return missingCredential("ENTITY", query);
 
@@ -276,7 +280,9 @@ export function createInpiRneAdapter(options: InpiRneOptions = {}): RegistryProv
         INPI_RNE_BASE_URL,
       ).toString();
       const result = await callRegistry(
-        { url, headers: { authorization: `Bearer ${token}` } },
+        // Le signal du DEMANDEUR est transmis tel quel : le transport le compose avec son
+        // propre délai, il ne le remplace pas.
+        { url, headers: { authorization: `Bearer ${token}` }, signal: options?.signal },
         config,
         limiter,
       );

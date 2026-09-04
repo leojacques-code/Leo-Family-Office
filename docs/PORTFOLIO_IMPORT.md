@@ -338,7 +338,85 @@ privilèges. `scripts/verify-supabase-schema.ts` vérifie `SECURITY DEFINER`, la
 type de retour, la volatilité, le `search_path` verrouillé et l'absence d'`execute` pour
 `public`, `anon` et `authenticated`.
 
-## 12. Fichiers
+## 12. Corriger une observation déjà persistée
+
+Une observation persistée est un **fait**. Un second fichier portant la même date ne suffit pas à
+autoriser son remplacement, et trois cas seulement existent :
+
+| Situation                      | Conduite                                                                           |
+| ------------------------------ | ---------------------------------------------------------------------------------- |
+| rien à cette date              | écriture                                                                           |
+| même date, mêmes valeurs       | **rien**. Rejouer le même fichier reste idempotent, et ce n'est pas une correction |
+| même date, valeurs différentes | **refus**, sauf décision structurée. Le message nomme ce qui changerait            |
+
+### Une décision, pas un consentement
+
+Le contrat d'origine n'exigeait qu'un tableau d'identifiants (`correct_record_ids`). Une revue l'a
+refusé, et à juste titre : un identifiant ne dit ni **pourquoi**, ni **par qui**, ni **sur la foi
+de quel état courant**, et la mutation effaçait définitivement la valeur remplacée. L'écran allait
+au bout de la logique — un bouton déclarait en bloc toutes les lignes retenues, sans motif.
+
+Une décision porte donc quatre choses :
+
+| Champ       | Rôle                                                                               |
+| ----------- | ---------------------------------------------------------------------------------- |
+| `recordId`  | la ligne de staging portant les valeurs de remplacement                            |
+| `reason`    | le motif, **non blanc**. Espace, tabulation et retour à la ligne sont le même vide |
+| `decidedBy` | l'identité **déclarée**, facultative                                               |
+| `expected`  | l'état de l'observation **tel que la prévisualisation l'a montré**                 |
+
+`expected` est le verrou de concurrence. La base verrouille l'observation (`for update`) **avant**
+de comparer, puis confronte l'état attendu à l'état réellement persisté. Deux sessions décidant de
+la même observation ne s'écrasent donc plus : la seconde échoue avec un **conflit révisable** qui
+nomme le champ, l'attendu et le trouvé. Sans état attendu, la seconde décision remplaçait la
+première en silence.
+
+Les montants de `expected` sont des **chaînes**, lues avec un `::text` explicite et renvoyées
+verbatim. Les faire passer par un nombre JavaScript perdrait de la précision sur un
+`numeric(30,10)` : l'écart fabriquerait un conflit, ou en masquerait un. La comparaison, elle, est
+**numérique** côté base — `1810.000000` et `1810` sont le même nombre, et les déclarer différents
+présenterait un rejeu comme une correction.
+
+### La piste d'audit
+
+`position_snapshot_corrections` conserve, pour chaque correction **effective** :
+
+| Colonne                          | Fait conservé                                                    |
+| -------------------------------- | ---------------------------------------------------------------- |
+| `user_id`                        | le propriétaire                                                  |
+| `session_id`                     | la session d'import qui a décidé                                 |
+| `normalized_record_id`           | la ligne normalisée portant les valeurs de remplacement          |
+| `position_snapshot_id`           | l'observation réellement modifiée                                |
+| `decided_by`                     | l'identité **déclarée** par l'appelant                           |
+| `executed_by`                    | le rôle PostgreSQL **constaté**, posé par la base, infalsifiable |
+| `reason`                         | le motif, mot pour mot                                           |
+| `before_values` / `after_values` | l'avant et l'après, champ par champ, `null` compris              |
+| `changed_fields`                 | les champs réellement modifiés, **dérivés** de la comparaison    |
+| `decided_at`                     | la date de décision                                              |
+
+IDENTITÉ DÉCLARÉE ≠ IDENTITÉ CONSTATÉE : les confondre laisserait croire à une identité vérifiée
+là où il n'y a qu'une déclaration.
+
+La table est **immuable** — un trigger refuse `update` et `delete` sans condition — et en **lecture
+seule** pour `authenticated`, comme le reste de la piste d'acquisition. Ses trois clés étrangères
+sont **composites** avec le propriétaire : aucune décision ne traverse la frontière d'un
+propriétaire, et c'est la base qui le garantit. La clé vers l'observation est en `on delete
+restrict` : une observation corrigée ne se supprime pas tant que sa correction existe, sans quoi
+l'ancienne valeur disparaîtrait par la porte de derrière.
+
+La décision lue, l'insertion d'audit, la mutation canonique et le lien de provenance sont dans la
+**même transaction**. Il n'existe aucun chemin par lequel une observation serait corrigée sans sa
+trace, ni tracée sans être corrigée : le smoke de concurrence observe les quatre écritures
+présentes dans la transaction, puis toutes absentes après annulation.
+
+### Ce que la mutation canonique ne peut pas faire échouer
+
+Aucune ligne committable ne peut produire une observation invalide : `import_normalized_records_ready_shape_ck`
+refuse une position `READY` ou `WARNING` sans valeur de marché, `import_normalized_records_security_fk`
+refuse un instrument inexistant, et les deux colonnes `currency` ont la même largeur. Un test
+d'échec de la mutation par la donnée n'est donc pas constructible — et c'est le résultat voulu.
+
+## 13. Fichiers
 
 | Rôle                        | Chemin                                                                |
 | --------------------------- | --------------------------------------------------------------------- |
@@ -356,3 +434,6 @@ type de retour, la volatilité, le `search_path` verrouillé et l'absence d'`exe
 | Écran                       | `src/components/pages/imports/portfolio-section.tsx`                  |
 | Smoke                       | `scripts/smoke-portfolio-import.ts`                                   |
 | Durcissement du gel du brut | `supabase/migrations/20260903090000_import_raw_freeze_hardening.sql`  |
+| Audit des corrections       | `supabase/migrations/20260904093000_portfolio_correction_audit.sql`   |
+| Comparaison de montants     | `src/lib/data/observed-amounts.ts`                                    |
+| Smoke de concurrence        | `scripts/smoke-portfolio-correction-concurrency.ts`                   |

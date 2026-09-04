@@ -8,6 +8,7 @@ import { formatDate, NOT_COMPUTABLE } from "@/components/pages/shared";
 import { uploadToSignedStoragePath } from "@/lib/data/supabase-storage-browser";
 import type {
   ImportRowStatus,
+  PortfolioExistingObservation,
   PortfolioImportKind,
   PortfolioPreview,
   PortfolioPreviewRow,
@@ -93,6 +94,15 @@ function PortfolioSection({ accounts, refresh }: Props) {
   const [preview, setPreview] = useState<PortfolioPreview | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reasons, setReasons] = useState<Record<string, string>>({});
+  /**
+   * MOTIF de la correction d'observations déjà persistées.
+   *
+   * Un seul motif pour la décision, appliqué à chacune des lignes corrigées, et l'écran le
+   * DIT. C'est un choix assumé : le motif porte sur la décision — « le relevé de mars était
+   * provisoire » — et non sur chaque ligne prise séparément. Ce qui n'est pas assumable,
+   * c'est l'absence de motif, et c'est ce que le contrat précédent permettait.
+   */
+  const [correctionReason, setCorrectionReason] = useState("");
 
   // `null` = pas encore choisi : la valeur affichée est DÉRIVÉE des enveloppes, sans effet
   // de bord ni rendu en cascade.
@@ -218,15 +228,31 @@ function PortfolioSection({ accounts, refresh }: Props) {
     [post, preview, refresh],
   );
 
-  const committable = useMemo(() => {
-    if (preview === null) return 0;
+  /** Lignes RETENUES et réellement committables, dans l'ordre de la prévisualisation. */
+  const retained = useMemo(() => {
+    if (preview === null) return [];
     return preview.rows.filter(
       (row) =>
         selected.has(row.recordId) &&
         (row.status === "READY" || row.status === "WARNING") &&
         row.commitState === "PENDING",
-    ).length;
+    );
   }, [preview, selected]);
+
+  const committable = retained.length;
+  const retainedIds = useMemo(() => retained.map((row) => row.recordId), [retained]);
+
+  /**
+   * Lignes retenues qui REMPLACERAIENT une observation déjà persistée.
+   *
+   * Une observation identique n'y figure PAS : rejouer le même fichier reste un rejeu, et le
+   * requalifier en correction gonflerait la piste d'audit de décisions vides. Ce sont
+   * exactement les lignes que la base refuserait sans décision motivée.
+   */
+  const correctable = useMemo(
+    () => retained.filter((row) => row.existingObservation?.state === "DIFFERENT"),
+    [retained],
+  );
 
   const openInstruments = useMemo(
     () =>
@@ -541,6 +567,9 @@ function PortfolioSection({ accounts, refresh }: Props) {
                       <>
                         <th>Valorisation</th>
                         <th>Coût de revient</th>
+                        {/* Ce que la base porte DÉJÀ à cette date. Sans cette colonne,
+                            « corriger » se réduirait à cocher une case. */}
+                        <th>Déjà en base</th>
                       </>
                     )}
                     <th>Anomalies</th>
@@ -573,6 +602,30 @@ function PortfolioSection({ accounts, refresh }: Props) {
               </p>
             ) : null}
 
+            {correctable.length > 0 ? (
+              <Callout tone="warning" title="Des faits déjà écrits seraient remplacés">
+                <p>
+                  {correctable.length} ligne(s) retenue(s) portent d&apos;autres valeurs que
+                  l&apos;observation déjà persistée à la même date. Le tableau ci-dessus nomme,
+                  ligne par ligne, ce qui est actuellement en base et ce qui changerait.
+                </p>
+                <p>
+                  Remplacer un fait est une DÉCISION : elle exige un motif, et elle est conservée
+                  dans une piste que personne ne peut réécrire — avec les valeurs d&apos;avant. Le
+                  motif porte sur la décision et s&apos;applique à chacune des lignes corrigées.
+                </p>
+                <label className="field">
+                  <span>Motif de la correction</span>
+                  <textarea
+                    rows={2}
+                    value={correctionReason}
+                    placeholder="Exemple : le relevé de mars était provisoire, celui d'avril porte les valeurs définitives"
+                    onChange={(event) => setCorrectionReason(event.target.value)}
+                  />
+                </label>
+              </Callout>
+            ) : null}
+
             <div className="form-actions">
               <button
                 type="button"
@@ -590,11 +643,11 @@ function PortfolioSection({ accounts, refresh }: Props) {
                             (row.status === "READY" || row.status === "WARNING"),
                         )
                         .map((row) => row.recordId),
-                      // Aucune correction DÉCLARÉE par ce bouton. Si une observation déjà
-                      // persistée porte d'autres valeurs à la même date, la validation
-                      // REFUSE et nomme ce qui change : le second bouton, ci-dessous, est le
-                      // seul chemin qui remplace un fait, et il est explicite.
-                      correctRecordIds: [],
+                      // Aucune décision de correction. Si une observation déjà persistée
+                      // porte d'autres valeurs à la même date, la validation REFUSE et nomme
+                      // ce qui change : le second bouton, ci-dessous, est le seul chemin qui
+                      // remplace un fait, et il exige un motif.
+                      corrections: [],
                     },
                     "Faits écrits",
                   )
@@ -605,30 +658,42 @@ function PortfolioSection({ accounts, refresh }: Props) {
               <button
                 type="button"
                 className="button secondary"
-                disabled={busy || committable === 0 || preview.session.status !== "ANALYZED"}
-                title="Remplace les observations déjà persistées portant la même date, en le déclarant"
+                disabled={
+                  busy ||
+                  committable === 0 ||
+                  preview.session.status !== "ANALYZED" ||
+                  correctable.length === 0 ||
+                  correctionReason.trim() === ""
+                }
+                title={
+                  correctable.length === 0
+                    ? "Aucune observation retenue ne porte d'autres valeurs à la même date : il n'y a rien à corriger"
+                    : "Remplace les observations déjà persistées portant la même date, en le déclarant et en le motivant"
+                }
                 onClick={() => {
-                  const retained = preview.rows
-                    .filter(
-                      (row) =>
-                        selected.has(row.recordId) &&
-                        (row.status === "READY" || row.status === "WARNING"),
-                    )
-                    .map((row) => row.recordId);
                   void command(
                     {
                       action: "commit",
                       sessionId: preview.session.sessionId,
-                      recordIds: retained,
-                      // DÉCISION explicite de correction. Ce qui est déjà persisté et
-                      // identique n'est pas touché : un rejeu reste un rejeu.
-                      correctRecordIds: retained,
+                      recordIds: retainedIds,
+                      // DÉCISIONS explicites, une par observation RÉELLEMENT remplacée.
+                      //
+                      // Seules les lignes dont l'observation existante DIFFÈRE sont
+                      // décidées : ce qui est déjà persisté et identique n'est pas touché, et
+                      // un rejeu ne devient pas une correction. L'état attendu repart
+                      // VERBATIM tel que la prévisualisation l'a lu — le reformater
+                      // fabriquerait un conflit de concurrence, ou en masquerait un.
+                      corrections: correctable.map((row) => ({
+                        recordId: row.recordId,
+                        reason: correctionReason.trim(),
+                        expected: row.existingObservation!.observed,
+                      })),
                     },
-                    "Faits écrits, observations existantes corrigées",
+                    `Faits écrits, ${correctable.length} observation(s) corrigée(s)`,
                   );
                 }}
               >
-                {busy ? "Écriture…" : "Écrire en CORRIGEANT les observations existantes"}
+                {busy ? "Écriture…" : `Écrire en CORRIGEANT ${correctable.length} observation(s)`}
               </button>
               <button
                 type="button"
@@ -653,6 +718,45 @@ function PortfolioSection({ accounts, refresh }: Props) {
         </>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Ce que la base porte DÉJÀ pour cette détention à cette date.
+ *
+ * La cellule nomme les valeurs, pas seulement l'existence d'un conflit : « observation déjà
+ * présente » ne dit pas à l'utilisateur ce qu'il est en train de remplacer, et une décision
+ * prise sans voir la valeur remplacée n'est pas une décision.
+ *
+ * Les montants sont affichés TELS QUE LA BASE LES REND, en texte. Ils ne sont pas reformatés :
+ * ce sont eux que la décision renvoie comme état attendu, et l'utilisateur doit voir
+ * exactement ce qui sera comparé.
+ */
+function ExistingObservationCell({
+  observation,
+}: {
+  observation: PortfolioExistingObservation | null;
+}) {
+  if (observation === null) return <small>—</small>;
+  if (observation.state === "IDENTICAL") {
+    return (
+      <small>
+        <Check size={13} /> identique
+      </small>
+    );
+  }
+  return (
+    <>
+      <small className="warning-text">
+        <AlertTriangle size={13} /> serait remplacée
+      </small>
+      <small>
+        quantité {observation.observed.quantity ?? NOT_COMPUTABLE} · valorisation{" "}
+        {observation.observed.marketValue ?? NOT_COMPUTABLE} · coût{" "}
+        {observation.observed.costBasis ?? NOT_COMPUTABLE} · {observation.observed.currency}
+      </small>
+      <small>change : {observation.changedFields.join(", ")}</small>
+    </>
   );
 }
 
@@ -700,6 +804,9 @@ function PortfolioRow({
         <>
           <td>{amount(row.marketValue, row.currency)}</td>
           <td>{amount(row.costBasis, row.currency)}</td>
+          <td>
+            <ExistingObservationCell observation={row.existingObservation} />
+          </td>
         </>
       )}
       <td>

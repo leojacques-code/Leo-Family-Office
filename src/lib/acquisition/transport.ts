@@ -14,7 +14,7 @@
  *     classé « erreur réseau », et le diagnostic remonté à l'utilisateur désigne la mauvaise
  *     cause. Le transport le plus riche ne l'avait pas ; il l'a maintenant.
  *
- * Quatre principes :
+ * Six principes :
  *
  *   UN ÉCHEC EST UN FAIT. Le transport ne lève pas : il rend un résultat portant son code
  *   d'erreur. L'appelant persiste cet échec comme un instantané daté, parce que « la source
@@ -32,28 +32,59 @@
  *   PAS DE CACHE EN MÉMOIRE. Le cache de cette couche est la base : un instantané persisté
  *   porte sa date d'observation et sa péremption déclarée. Un cache de processus serait vide
  *   à chaque exécution serverless et donnerait un taux de succès imaginaire.
+ *
+ *   UN FOURNISSEUR N'EST PAS COOPÉRATIF. Il est distant, il n'est pas sous notre contrôle, et
+ *   rien de ce qu'il annonce ne se croit sur parole. `Content-Length` est une DÉCLARATION,
+ *   pas une mesure : le corps est lu de façon incrémentale et interrompu au premier octet
+ *   au-delà du plafond, qu'une longueur ait été annoncée ou non, juste ou fausse. Un flux
+ *   sans fin sur une fonction serverless ne rend pas une mauvaise réponse : il consomme la
+ *   mémoire du processus jusqu'à le tuer, et l'instantané d'échec qui aurait dû être persisté
+ *   ne l'est jamais. `Content-Type` est traité de la même façon : seul du JSON est parsé,
+ *   parce qu'un portail captif ou une page de maintenance rend un HTML en HTTP 200.
+ *
+ *   UN DIAGNOSTIC NE TRANSPORTE AUCUN SECRET. Le message d'échec rendu par ce module est
+ *   CONSTRUIT ici, à partir de faits neutres — un code, un statut, une taille, un type
+ *   annoncé. Il ne reprend jamais `error.message`, ni l'URL appelée, ni sa chaîne de requête,
+ *   ni un en-tête, ni le corps du fournisseur. Ce n'est pas de la prudence décorative : un
+ *   `fetch` de Node cite l'URL demandée dans le texte de son exception, cette URL porte les
+ *   jetons passés en paramètre, et ce message est PERSISTÉ dans l'instantané d'échec puis
+ *   affiché. Le détail brut, lui, part au journal serveur et n'en sort pas.
  */
 
 /**
  * Vocabulaire d'échec, domaine-neutre. C'est l'union des deux vocabulaires antérieurs, et
  * chaque code décrit une CAUSE distincte : les fusionner ferait remonter un diagnostic faux.
+ *
+ * `RESPONSE_TOO_LARGE` est distinct d'`INVALID_RESPONSE` : la source n'a rien fait de mal,
+ * c'est NOTRE plafond qui a tranché. Confondre les deux ferait chercher une malformation
+ * là où il n'y a qu'un volume, et masquerait le seul cas où relever le plafond est la
+ * bonne réponse.
+ *
+ * `CANCELLED` est distinct de `TIMEOUT` : l'appelant a renoncé — requête HTTP entrante
+ * abandonnée par le navigateur, arrêt du processus. Le classer en `TIMEOUT` accuserait la
+ * source d'une lenteur qu'elle n'a peut-être pas eue, et `TIMEOUT` est réessayable là où un
+ * abandon de l'appelant ne doit RIEN relancer.
  */
 export const TRANSPORT_FAILURE_CODES = [
   "NETWORK",
   "TIMEOUT",
+  "CANCELLED",
   "RATE_LIMITED",
   "UNAUTHORIZED",
   "CREDENTIALS_MISSING",
   "NOT_FOUND",
   "INVALID_RESPONSE",
+  "RESPONSE_TOO_LARGE",
   "PROVIDER_ERROR",
   "EGRESS_BLOCKED",
 ] as const;
 export type TransportFailureCode = (typeof TRANSPORT_FAILURE_CODES)[number];
 
 /**
- * Codes réessayables. `UNAUTHORIZED`, `NOT_FOUND`, `INVALID_RESPONSE` et `EGRESS_BLOCKED`
- * n'en font pas partie : aucun ne devient vrai en le redemandant.
+ * Codes réessayables. `UNAUTHORIZED`, `NOT_FOUND`, `INVALID_RESPONSE`, `RESPONSE_TOO_LARGE`,
+ * `CANCELLED` et `EGRESS_BLOCKED` n'en font pas partie : aucun ne devient vrai en le
+ * redemandant. Une réponse trop grosse le sera encore au deuxième appel, et un abandon de
+ * l'appelant ne se rattrape pas en insistant.
  */
 export const RETRYABLE_TRANSPORT_FAILURES: readonly TransportFailureCode[] = [
   "NETWORK",
@@ -88,7 +119,32 @@ export interface TransportConfig {
    * pire qu'un refus explicite.
    */
   maxRateLimitWaitMs: number;
+  /**
+   * PLAFOND DE TAILLE DE CORPS, en octets, avant décodage.
+   *
+   * Il est déclaré, pas implicite, et il est BORNANT dans les deux sens : un
+   * `Content-Length` annoncé au-delà fait refuser l'appel AVANT toute lecture, et la lecture
+   * elle-même est interrompue au premier octet qui le dépasse — la longueur annoncée peut
+   * être absente ou mensongère.
+   *
+   * Un fournisseur plus bavard se configure PAR CONNEXION en surchargeant ce champ, à la
+   * hausse comme à la baisse. Aucun second transport n'est nécessaire pour cela.
+   */
+  maxResponseBytes: number;
 }
+
+/**
+ * Plafond par défaut : 4 Mio.
+ *
+ * Ce chiffre est un ARBITRAGE, et il est écrit ici pour qu'il soit discutable. Les corps
+ * réellement attendus par les adaptateurs de cette couche — une fiche d'entité de registre,
+ * une page de mutations DVF, un lot de certificats DPE — se comptent en dizaines ou centaines
+ * de kilo-octets. 4 Mio laisse donc une marge d'un ordre de grandeur pour une page
+ * inhabituellement large, tout en restant très en dessous de la mémoire d'une fonction
+ * serverless. Il ne prétend pas être la bonne valeur pour un futur fournisseur qui
+ * paginerait mal : c'est précisément à quoi sert la surcharge par connexion.
+ */
+export const DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 export const DEFAULT_TRANSPORT: Omit<TransportConfig, "fetchImpl" | "rateLimitPerMinute"> = {
   clock: systemTransportClock,
@@ -98,21 +154,42 @@ export const DEFAULT_TRANSPORT: Omit<TransportConfig, "fetchImpl" | "rateLimitPe
   backoffBaseMs: 250,
   backoffCapMs: 2_000,
   maxRateLimitWaitMs: 3_000,
+  maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
 };
 
 export interface TransportRequest {
   url: string;
   headers?: Record<string, string>;
+  /**
+   * Signal de l'APPELANT. Sur une route Next, c'est `request.signal` : quand le navigateur
+   * abandonne, la lecture distante s'arrête au lieu de continuer à consommer un quota
+   * fournisseur pour une réponse que personne n'attend plus.
+   *
+   * Il est COMPOSÉ avec le délai interne, il ne le remplace pas : un appelant sans signal
+   * garde son plafond de temps, et un appelant qui en fournit un n'obtient pas le droit
+   * d'attendre indéfiniment.
+   */
+  signal?: AbortSignal;
 }
 
 export interface TransportResult {
   httpStatus: number | null;
   payload: unknown;
-  /** Taille du corps réellement lu. `null` quand rien n'a pu être lu. */
+  /** Taille du corps réellement lu, en OCTETS. `null` quand rien n'a pu être lu. */
   payloadBytes: number | null;
-  /** Corps brut réellement reçu, tel quel. Vide quand la lecture a échoué. */
+  /**
+   * Corps brut réellement reçu, tel quel, UNIQUEMENT sur une lecture réussie.
+   *
+   * Vide dès qu'`errorCode` est renseigné : un corps d'erreur de fournisseur ré-affiche
+   * couramment la requête reçue, chaîne de requête comprise, et il est en aval haché puis
+   * conservé. Ce qui n'est pas exploitable n'a pas à être transporté.
+   */
   rawText: string;
   errorCode: TransportFailureCode | null;
+  /**
+   * Diagnostic NEUTRALISÉ, construit par ce module. Ne contient jamais `error.message`,
+   * l'URL appelée, sa chaîne de requête, un en-tête ni un corps de fournisseur.
+   */
   errorMessage: string | null;
   /** Nombre de tentatives RÉELLEMENT effectuées. Utile pour comprendre une latence. */
   attempts: number;
@@ -155,15 +232,19 @@ export class RateLimiter {
  * Classe une exception de `fetch`. La distinction entre une panne réseau et un refus de
  * politique de sortie est FAITE AU MIEUX : un proxy d'entreprise masque souvent la raison.
  * Le code par défaut est donc `NETWORK`, jamais un diagnostic inventé.
+ *
+ * Le texte brut de l'exception est LU pour classer, et n'est JAMAIS rendu : `fetch` cite
+ * l'URL demandée dans son message, et cette URL porte les jetons passés en paramètre. Le
+ * message rendu est construit ici, à partir du seul code.
  */
 export function classifyFetchFailure(error: unknown): {
   code: TransportFailureCode;
   message: string;
 } {
-  const message = error instanceof Error ? error.message : String(error);
-  const lowered = message.toLowerCase();
+  const raw = error instanceof Error ? error.message : String(error);
+  const lowered = raw.toLowerCase();
   if (error instanceof Error && error.name === "AbortError") {
-    return { code: "TIMEOUT", message };
+    return { code: "TIMEOUT", message: FAILURE_DIAGNOSTICS.TIMEOUT };
   }
   if (
     lowered.includes("proxy") ||
@@ -172,13 +253,24 @@ export function classifyFetchFailure(error: unknown): {
     lowered.includes("407") ||
     lowered.includes("tunneling socket")
   ) {
-    return {
-      code: "EGRESS_BLOCKED",
-      message: `${message} — sortie réseau refusée par la politique d'exécution, ce n'est pas une réponse de la source`,
-    };
+    return { code: "EGRESS_BLOCKED", message: FAILURE_DIAGNOSTICS.EGRESS_BLOCKED };
   }
-  return { code: "NETWORK", message };
+  return { code: "NETWORK", message: FAILURE_DIAGNOSTICS.NETWORK };
 }
+
+/**
+ * Diagnostics NEUTRES, un par cause. Ils décrivent ce qui s'est passé sans citer une seule
+ * donnée venue de l'extérieur : ni message d'exception, ni URL, ni en-tête, ni corps.
+ */
+const FAILURE_DIAGNOSTICS = {
+  TIMEOUT:
+    "Délai d'attente dépassé avant toute réponse exploitable de la source. Ce n'est pas une absence de donnée",
+  CANCELLED:
+    "Appel abandonné par le demandeur avant la fin de la lecture. La source n'a rien refusé, et rien n'est déduit de cet abandon",
+  EGRESS_BLOCKED:
+    "Sortie réseau refusée par la politique d'exécution : la requête n'a pas atteint la source, ce n'est donc pas une réponse de sa part",
+  NETWORK: "Échec réseau avant toute réponse de la source. Aucune valeur n'en est tirée",
+} as const;
 
 /** Classe un statut HTTP. Un 2xx sans corps JSON reste un échec de LECTURE, pas de réseau. */
 export function classifyHttpStatus(status: number): TransportFailureCode | null {
@@ -200,9 +292,183 @@ function readLastModified(response: Response): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
-function truncate(text: string): string {
-  const collapsed = text.replace(/\s+/g, " ").trim();
-  return collapsed.length > 200 ? `${collapsed.slice(0, 197)}…` : collapsed;
+/**
+ * TYPE DE CONTENU ACCEPTÉ : `application/json` et les types structurés compatibles
+ * `application/<quelque chose>+json`.
+ *
+ * Les PARAMÈTRES sont autorisés et ignorés : `application/json; charset=utf-8` est du JSON,
+ * et exiger un en-tête nu refuserait des fournisseurs parfaitement conformes.
+ * `application/problem+json` (RFC 9457) l'est aussi — c'est justement la forme dans laquelle
+ * une API sérieuse décrit son erreur, et refuser de la parser perdrait le diagnostic.
+ *
+ * Un en-tête ABSENT est refusé sur le chemin de succès. Ce n'est pas un formalisme : le corps
+ * qui arrive sans type déclaré est typiquement une page de portail captif ou de maintenance
+ * en HTTP 200, et la parser « au cas où » revient à accepter que n'importe quoi devienne une
+ * donnée patrimoniale.
+ */
+export function isJsonContentType(header: string | null): boolean {
+  if (header === null) return false;
+  const essence = header.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (essence === "application/json") return true;
+  return essence.startsWith("application/") && essence.endsWith("+json");
+}
+
+/** Type annoncé, réduit à son essence et borné : un en-tête est une donnée EXTERNE. */
+function declaredContentType(header: string | null): string {
+  if (header === null) return "aucun";
+  const essence = header.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  // Seuls les caractères d'un type MIME sont conservés, et la longueur est bornée : un
+  // en-tête est écrit par le fournisseur, et il finit dans un diagnostic persisté.
+  const safe = essence.replace(/[^a-z0-9!#$&^_.+-/]/g, "");
+  if (safe.length === 0) return "illisible";
+  return safe.length > 64 ? `${safe.slice(0, 64)}…` : safe;
+}
+
+/** `Content-Length` annoncé. `null` dès qu'il est absent, non numérique ou négatif. */
+function declaredLength(response: Response): number | null {
+  const header = response.headers?.get?.("content-length");
+  if (!header) return null;
+  // CHIFFRES ASCII UNIQUEMENT, comme HTTP le définit. `Number()` accepterait `1e9`, `0x10`,
+  // `Infinity` ou ` 12 ` : un en-tête non conforme deviendrait alors un plafond de un
+  // milliard d'octets, et le refus AVANT lecture tomberait sur une réponse parfaitement
+  // petite. Un en-tête illisible est traité comme ABSENT — la lecture bornée tranche seule,
+  // ce qu'elle sait faire.
+  const trimmed = header.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+interface BodyRead {
+  /** Texte décodé, uniquement quand la lecture a abouti sous le plafond. */
+  text: string;
+  /** Octets réellement lus. `null` quand rien n'a pu être lu. */
+  bytes: number | null;
+  outcome: "OK" | "UNREADABLE" | "TOO_LARGE";
+}
+
+/**
+ * LECTURE INCRÉMENTALE ET BORNÉE.
+ *
+ * `response.text()` accumule tout le corps avant de rendre la main : sur un flux sans fin, ou
+ * simplement très gros, il n'y a pas de réponse à examiner — le processus meurt d'abord, et
+ * l'instantané d'échec qui aurait dû être persisté ne l'est jamais. La lecture se fait donc
+ * morceau par morceau, et s'interrompt au PREMIER morceau qui fait passer le total au-delà du
+ * plafond. Le reader est annulé, ce qui ferme la connexion : sans cela le fournisseur
+ * continuerait d'émettre dans le vide.
+ *
+ * Le décodage n'a lieu qu'APRÈS : décoder au fil de l'eau obligerait à gérer un caractère
+ * multi-octets coupé entre deux morceaux, pour aucun gain — le plafond porte sur les octets.
+ */
+async function readBodyBounded(response: Response, maxBytes: number): Promise<BodyRead> {
+  const body = response.body;
+
+  // Pas de flux exposé : ni un corps vide ni une anomalie. Certaines implémentations de
+  // `Response` (et les doubles de test) ne portent pas de `body` lisible ; on retombe alors
+  // sur la lecture globale, qui reste bornée par le plafond APRÈS coup. C'est moins bon, et
+  // c'est pourquoi le chemin par flux est le chemin normal.
+  if (!body || typeof body.getReader !== "function") {
+    try {
+      const text = await response.text();
+      const bytes = Buffer.byteLength(text, "utf8");
+      if (bytes > maxBytes) return { text: "", bytes, outcome: "TOO_LARGE" };
+      return { text, bytes, outcome: "OK" };
+    } catch {
+      return { text: "", bytes: null, outcome: "UNREADABLE" };
+    }
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        // Annulation IMMÉDIATE : la connexion se ferme, le fournisseur cesse d'émettre, et
+        // les morceaux déjà accumulés sont jetés — un JSON tronqué ne se parse pas, et un
+        // JSON tronqué qui se parserait par accident serait bien pire.
+        await reader.cancel().catch(() => undefined);
+        return { text: "", bytes: total, outcome: "TOO_LARGE" };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    await reader.cancel().catch(() => undefined);
+    return { text: "", bytes: null, outcome: "UNREADABLE" };
+  }
+
+  return { text: Buffer.concat(chunks).toString("utf8"), bytes: total, outcome: "OK" };
+}
+
+/**
+ * Compose le signal de l'appelant avec le délai interne.
+ *
+ * `AbortSignal.any` ferait le travail en une ligne, mais il ne dit pas LAQUELLE des deux
+ * causes a tranché, et la distinction compte : un abandon du demandeur n'est pas une lenteur
+ * de la source, et l'un se réessaie quand l'autre non. Le contrôleur est donc explicite, et
+ * l'écouteur posé sur le signal de l'appelant est RETIRÉ à la fin de chaque tentative — sur
+ * une requête entrante longue, trois tentatives laisseraient sinon trois écouteurs sur un
+ * signal qui vit plus longtemps qu'elles.
+ */
+interface ComposedAbort {
+  signal: AbortSignal;
+  /** Cause réellement survenue, lue APRÈS l'échec. */
+  cause(): "TIMEOUT" | "CANCELLED" | null;
+  release(): void;
+}
+
+function composeAbort(callerSignal: AbortSignal | undefined, timeoutMs: number): ComposedAbort {
+  const controller = new AbortController();
+  let cause: "TIMEOUT" | "CANCELLED" | null = null;
+
+  const timer = setTimeout(() => {
+    if (cause === null) cause = "TIMEOUT";
+    controller.abort();
+  }, timeoutMs);
+
+  const onCallerAbort = () => {
+    if (cause === null) cause = "CANCELLED";
+    controller.abort();
+  };
+
+  if (callerSignal) {
+    // Déjà abandonné AVANT la tentative : le cas d'un appelant qui renonce entre deux
+    // réessais. `addEventListener` ne se déclencherait jamais, et l'appel partirait.
+    if (callerSignal.aborted) onCallerAbort();
+    else callerSignal.addEventListener("abort", onCallerAbort, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    cause: () => cause,
+    release: () => {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", onCallerAbort);
+    },
+  };
+}
+
+function failed(
+  code: TransportFailureCode,
+  message: string,
+  attempts: number,
+  extra: Partial<TransportResult> = {},
+): TransportResult {
+  return {
+    httpStatus: null,
+    payload: null,
+    payloadBytes: null,
+    rawText: "",
+    errorCode: code,
+    errorMessage: message,
+    attempts,
+    providerUpdatedAt: null,
+    ...extra,
+  };
 }
 
 /**
@@ -214,47 +480,38 @@ export async function callJson(
   config: TransportConfig,
   limiter: RateLimiter,
 ): Promise<TransportResult> {
+  const maxBytes = Math.max(1, config.maxResponseBytes);
   let attempts = 0;
-  let last: TransportResult = {
-    httpStatus: null,
-    payload: null,
-    payloadBytes: null,
-    rawText: "",
-    errorCode: "NETWORK",
-    errorMessage: "Aucune tentative effectuée",
-    attempts: 0,
-    providerUpdatedAt: null,
-  };
+  let last: TransportResult = failed("NETWORK", "Aucune tentative effectuée", 0);
 
   for (let attempt = 1; attempt <= Math.max(1, config.maxAttempts); attempt += 1) {
+    // Abandon de l'appelant constaté AVANT d'engager quoi que ce soit : ni attente de quota,
+    // ni jeton consommé, ni appel émis pour une réponse que personne n'attend plus.
+    if (request.signal?.aborted) {
+      return failed("CANCELLED", FAILURE_DIAGNOSTICS.CANCELLED, attempts);
+    }
+
     const wait = limiter.waitFor();
     if (wait > 0) {
       if (wait > config.maxRateLimitWaitMs) {
-        return {
-          httpStatus: null,
-          payload: null,
-          payloadBytes: null,
-          rawText: "",
-          errorCode: "RATE_LIMITED",
-          errorMessage:
-            `Quota du fournisseur atteint : ${Math.ceil(wait / 1000)} s d'attente nécessaires, ` +
+        return failed(
+          "RATE_LIMITED",
+          `Quota du fournisseur atteint : ${Math.ceil(wait / 1000)} s d'attente nécessaires, ` +
             "au-delà de l'attente acceptée. La requête n'a PAS été émise, et la source n'a donc rien refusé",
           attempts,
-          providerUpdatedAt: null,
-        };
+        );
       }
       await config.sleep(wait);
     }
 
     attempts += 1;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+    const abort = composeAbort(request.signal, config.timeoutMs);
     try {
       limiter.record();
       const response = await config.fetchImpl(request.url, {
         method: "GET",
         headers: { accept: "application/json", ...(request.headers ?? {}) },
-        signal: controller.signal,
+        signal: abort.signal,
         redirect: "follow",
         // Le cache HTTP ne décide pas de la fraîcheur d'un fait patrimonial : la péremption
         // est déclarée par la connexion et portée par l'instantané persisté.
@@ -263,27 +520,46 @@ export async function callJson(
       const statusError = classifyHttpStatus(response.status);
       const providerUpdatedAt = readLastModified(response);
 
-      // LECTURE DE CORPS PROTÉGÉE. Un corps interrompu ne doit pas faire PERDRE le statut
-      // que la source a réellement rendu : sans ce garde, un 503 dont le corps se coupe
-      // serait classé « erreur réseau », et le diagnostic désignerait la mauvaise cause.
-      let text = "";
-      let bodyReadFailed = false;
-      try {
-        text = await response.text();
-      } catch {
-        bodyReadFailed = true;
+      // REFUS AVANT LECTURE sur une longueur annoncée au-delà du plafond. Aucun octet de
+      // corps n'est alors accumulé : c'est le seul cas où le fournisseur nous permet de
+      // décider sans rien lire, et il serait absurde de ne pas s'en servir.
+      const announced = declaredLength(response);
+      if (announced !== null && announced > maxBytes) {
+        // Le flux est explicitement annulé : sans cela la connexion resterait ouverte et le
+        // fournisseur continuerait d'émettre un corps que personne ne lira.
+        await response.body?.cancel().catch(() => undefined);
+        return failed(
+          "RESPONSE_TOO_LARGE",
+          tooLargeDiagnostic(announced, maxBytes, true),
+          attempts,
+          {
+            httpStatus: response.status,
+            providerUpdatedAt,
+          },
+        );
       }
 
+      // LECTURE DE CORPS PROTÉGÉE ET BORNÉE. Un corps interrompu ne doit pas faire PERDRE le
+      // statut que la source a réellement rendu : sans ce garde, un 503 dont le corps se
+      // coupe serait classé « erreur réseau », et le diagnostic désignerait la mauvaise
+      // cause. Le plafond s'applique quoi qu'ait annoncé le fournisseur.
+      //
+      // Le type de contenu n'est PAS exigé ici : sur un statut d'erreur, un corps HTML ou
+      // texte est la norme, et il sert au diagnostic. Il n'est exigé que du chemin de
+      // succès, seul endroit où un corps devient une donnée.
+      const read = await readBodyBounded(response, maxBytes);
+
       if (statusError) {
+        // Le statut de la source PRIME sur ce que sa taille de corps a provoqué : un 503 dont
+        // le corps déborde reste un 503, et le requalifier en « réponse trop grosse » ferait
+        // chercher un problème de volume là où la source est en panne.
         last = {
           httpStatus: response.status,
           payload: null,
-          payloadBytes: bodyReadFailed ? null : text.length,
-          rawText: text,
+          payloadBytes: read.bytes,
+          rawText: "",
           errorCode: statusError,
-          errorMessage: bodyReadFailed
-            ? `HTTP ${response.status} : corps illisible, le statut rendu par la source est conservé`
-            : `HTTP ${response.status} : ${truncate(text)}`,
+          errorMessage: errorStatusDiagnostic(response.status, read),
           attempts,
           providerUpdatedAt,
         };
@@ -292,68 +568,121 @@ export async function callJson(
         continue;
       }
 
-      if (bodyReadFailed) {
+      if (read.outcome === "TOO_LARGE") {
+        return failed(
+          "RESPONSE_TOO_LARGE",
+          tooLargeDiagnostic(read.bytes ?? maxBytes, maxBytes, false),
+          attempts,
+          { httpStatus: response.status, payloadBytes: read.bytes, providerUpdatedAt },
+        );
+      }
+
+      if (read.outcome === "UNREADABLE") {
         // Un 2xx dont le corps ne se lit pas : la source a répondu, mais rien n'est
         // exploitable. C'est un échec de CONTRAT, pas de réseau, et il n'est pas retryable.
-        return {
-          httpStatus: response.status,
-          payload: null,
-          payloadBytes: null,
-          rawText: "",
-          errorCode: "INVALID_RESPONSE",
-          errorMessage: `Corps illisible reçu en HTTP ${response.status} : le statut est conservé, aucune valeur n'en est tirée`,
+        return failed(
+          "INVALID_RESPONSE",
+          `Corps illisible reçu en HTTP ${response.status} : le statut est conservé, aucune valeur n'en est tirée`,
           attempts,
-          providerUpdatedAt,
-        };
+          { httpStatus: response.status, providerUpdatedAt },
+        );
+      }
+
+      // TYPE DE CONTENU, sur le chemin de succès UNIQUEMENT. Un HTML en HTTP 200 — portail
+      // captif, page de maintenance, redirection avalée — n'est pas une donnée, et le parser
+      // « au cas où » est exactement ce qui fait entrer n'importe quoi dans le patrimoine.
+      const contentType = response.headers?.get?.("content-type") ?? null;
+      if (!isJsonContentType(contentType)) {
+        return failed(
+          "INVALID_RESPONSE",
+          `Type de contenu non JSON reçu en HTTP ${response.status} (annoncé : ${declaredContentType(contentType)}) : le corps n'est pas parsé, et aucune valeur n'en est tirée`,
+          attempts,
+          { httpStatus: response.status, payloadBytes: read.bytes, providerUpdatedAt },
+        );
       }
 
       let payload: unknown;
       try {
-        payload = JSON.parse(text) as unknown;
+        payload = JSON.parse(read.text) as unknown;
       } catch {
-        // Un 200 qui n'est pas du JSON est un échec de CONTRAT, non retryable : la source a
-        // répondu, simplement pas ce qu'elle documente.
-        return {
-          httpStatus: response.status,
-          payload: null,
-          payloadBytes: text.length,
-          rawText: text,
-          errorCode: "INVALID_RESPONSE",
-          errorMessage: `Corps non JSON reçu en HTTP ${response.status} : ${truncate(text)}`,
+        // Un 200 annoncé JSON qui n'en est pas est un échec de CONTRAT, non retryable : la
+        // source a répondu, simplement pas ce qu'elle documente. Le corps n'est PAS cité :
+        // une page d'erreur ré-affiche couramment la requête reçue, jetons compris.
+        return failed(
+          "INVALID_RESPONSE",
+          `Corps annoncé JSON mais non analysable, reçu en HTTP ${response.status} (${read.bytes ?? 0} octets) : aucune valeur n'en est tirée`,
           attempts,
-          providerUpdatedAt,
-        };
+          { httpStatus: response.status, payloadBytes: read.bytes, providerUpdatedAt },
+        );
       }
 
       return {
         httpStatus: response.status,
         payload,
-        payloadBytes: text.length,
-        rawText: text,
+        payloadBytes: read.bytes,
+        rawText: read.text,
         errorCode: null,
         errorMessage: null,
         attempts,
         providerUpdatedAt,
       };
     } catch (error) {
+      // Un abandon est classé par SA CAUSE RÉELLE, pas par le nom de l'exception : le
+      // contrôleur composé lève un `AbortError` dans les deux cas, et confondre l'abandon du
+      // demandeur avec un dépassement de délai accuserait la source d'une lenteur qu'elle
+      // n'a pas eue — et relancerait un appel dont plus personne n'attend le résultat.
+      const abortCause = abort.cause();
+      if (abortCause !== null) {
+        last = failed(abortCause, FAILURE_DIAGNOSTICS[abortCause], attempts);
+        if (abortCause === "CANCELLED") return last;
+        if (attempt < config.maxAttempts) await config.sleep(backoffDelay(attempt, config));
+        continue;
+      }
+
       const classified = classifyFetchFailure(error);
-      last = {
-        httpStatus: null,
-        payload: null,
-        payloadBytes: null,
-        rawText: "",
-        errorCode: classified.code,
-        errorMessage: classified.message,
-        attempts,
-        providerUpdatedAt: null,
-      };
+      last = failed(classified.code, classified.message, attempts);
       // Une sortie réseau refusée par la politique d'exécution ne se réessaie pas.
       if (classified.code === "EGRESS_BLOCKED") return last;
       if (attempt < config.maxAttempts) await config.sleep(backoffDelay(attempt, config));
     } finally {
-      clearTimeout(timer);
+      // Timer ET écouteur : sur une requête entrante longue, trois tentatives laisseraient
+      // sinon trois écouteurs accrochés à un signal qui vit plus longtemps qu'elles.
+      abort.release();
     }
   }
 
   return last;
+}
+
+/**
+ * Diagnostic de dépassement. Il nomme la CAUSE du refus — annonce du fournisseur ou lecture
+ * réelle — parce que les deux ne se corrigent pas de la même façon : une annonce fausse est
+ * un problème de fournisseur, un dépassement réel un problème de plafond ou de pagination.
+ */
+function tooLargeDiagnostic(bytes: number, maxBytes: number, announced: boolean): string {
+  const observed = announced
+    ? `longueur annoncée par la source : ${bytes} octets`
+    : `lecture interrompue à ${bytes} octets`;
+  return (
+    `Corps au-delà du plafond de ${maxBytes} octets (${observed}). ` +
+    (announced
+      ? "Aucun octet n'a été lu"
+      : "Le flux a été interrompu et les octets déjà reçus sont écartés") +
+    " : c'est NOTRE plafond qui tranche, la source n'a rien refusé, et aucune absence de donnée n'en est déduite"
+  );
+}
+
+/**
+ * Diagnostic d'un statut d'erreur. Le corps du fournisseur n'est PAS cité, seulement mesuré :
+ * une page d'erreur ré-affiche couramment la requête reçue, chaîne de requête et jetons
+ * compris, et ce message est persisté puis affiché.
+ */
+function errorStatusDiagnostic(status: number, read: BodyRead): string {
+  if (read.outcome === "UNREADABLE") {
+    return `HTTP ${status} : corps illisible, le statut rendu par la source est conservé`;
+  }
+  if (read.outcome === "TOO_LARGE") {
+    return `HTTP ${status} : corps au-delà du plafond de lecture, interrompu à ${read.bytes ?? 0} octets. Le statut rendu par la source est conservé`;
+  }
+  return `HTTP ${status} : corps reçu de ${read.bytes ?? 0} octets, non repris dans ce diagnostic. Le statut rendu par la source est conservé`;
 }

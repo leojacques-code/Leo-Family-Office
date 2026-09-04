@@ -53,6 +53,7 @@ const canonicalMigrations = [
   "20260903120500",
   "20260903190000",
   "20260903200000",
+  "20260904093000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -621,6 +622,23 @@ const requiredColumns: Record<string, string[]> = {
     "field_corrections",
     "corrected_at",
   ],
+  // Piste IMMUABLE des corrections d'observations de position. Chaque colonne est un
+  // fait distinct : l'identité DÉCLARÉE n'est pas l'identité CONSTATÉE, l'avant n'est pas
+  // l'après, et « quelque chose a changé » ne dit pas quels champs.
+  position_snapshot_corrections: [
+    "id",
+    "user_id",
+    "session_id",
+    "normalized_record_id",
+    "position_snapshot_id",
+    "decided_by",
+    "executed_by",
+    "reason",
+    "before_values",
+    "after_values",
+    "changed_fields",
+    "decided_at",
+  ],
   import_record_links: [
     "id",
     "user_id",
@@ -1060,6 +1078,7 @@ const userOwnedTables = [
   "securities",
   "positions",
   "position_snapshots",
+  "position_snapshot_corrections",
   "liabilities",
   "loan_schedules",
   "income_sources",
@@ -1155,7 +1174,6 @@ const userOwnedTables = [
   "bank_observed_transactions",
   "bank_balance_observations",
   "bank_reconciliation_decisions",
-  "bank_sync_events",
 ] as const;
 
 const requiredIndexes = [
@@ -1163,6 +1181,13 @@ const requiredIndexes = [
   // Unicité de l'identité démontrée dans le staging : à la VALIDATION, jamais à la LECTURE.
   // Elle remplace deux index concurrents — celui du socle, sans domaine, et celui de la
   // verticale portefeuille, qui interdisait de RELIRE une identité déjà validée.
+  // ── Corrections d'observations de position ─────────────────────────────────────────
+  // Les trois premiers couvrent les clés étrangères composites ; le quatrième sert la seule
+  // lecture qui compte : « l'historique des corrections de CETTE observation ».
+  "position_snapshot_corrections_snapshot_idx",
+  "position_snapshot_corrections_session_idx",
+  "position_snapshot_corrections_record_idx",
+  "position_snapshot_corrections_user_idx",
   "import_normalized_records_committed_external_v2_uidx",
   "import_normalized_records_external_key_idx",
   "scenarios_id_user_uidx",
@@ -1435,12 +1460,14 @@ const requiredTriggers = [
   "real_estate_energy_certificate_frozen",
   "bank_sync_raw_pages_immutable",
   "bank_observed_transactions_frozen",
+  "position_snapshot_corrections_immutable",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
   "import_raw_record_immutable",
   "import_normalized_record_frozen",
   "import_record_link_immutable",
+  "position_snapshot_correction_immutable",
   "fec_entry_line_frozen",
   "lfo_guard_goal_version_update",
   "lfo_guard_goal_v2_update",
@@ -1454,6 +1481,20 @@ const requiredTriggerFunctions = [
 ] as const;
 
 const requiredConstraints = [
+  // ── Corrections d'observations de position ─────────────────────────────────────────
+  // Les cinq contrôles qui empêchent la piste d'audit de mentir : un motif vide, un auteur
+  // vide, un avant ou un après qui ne serait pas un objet, et une correction ne nommant
+  // AUCUN champ modifié — un rejeu déguisé en décision.
+  "position_snapshot_corrections_reason_ck",
+  "position_snapshot_corrections_decided_by_ck",
+  "position_snapshot_corrections_before_ck",
+  "position_snapshot_corrections_after_ck",
+  "position_snapshot_corrections_changed_ck",
+  // Les trois clés composites : aucune décision ne traverse la frontière d'un propriétaire,
+  // et `restrict` sur l'observation garantit qu'aucune ancienne valeur n'est perdue.
+  "position_snapshot_corrections_session_fk",
+  "position_snapshot_corrections_record_fk",
+  "position_snapshot_corrections_snapshot_fk",
   // ── Réconciliation d'intégration ────────────────────────────────────────────────────
   // Formes FINALES des contraintes partagées par plusieurs verticales. Elles remplacent des
   // noms que deux migrations écrites en parallèle avaient choisis identiques :
@@ -2177,6 +2218,10 @@ const readOnlyAuditTables = [
   "bank_balance_observations",
   "bank_reconciliation_decisions",
   "bank_sync_events",
+  // Une correction d'observation de position rejoint la même règle, et pour la raison la
+  // plus dure de toutes : elle est la SEULE trace de ce que la valeur remplacée disait. Un
+  // client capable de la réécrire pourrait faire croire à un motif qu'il n'a pas donné.
+  "position_snapshot_corrections",
 ] as const;
 
 const storagePolicies = [

@@ -64,6 +64,7 @@ import {
   type RegistryProviderAdapter,
   type RegistryRawResponse,
   type RegistrySearchHit,
+  type RegistryCallOptions,
   type RegistrySearchQuery,
   type RegistrySearchReading,
 } from "./types";
@@ -368,9 +369,12 @@ export function createRechercheEntreprisesAdapter(
   async function call(
     endpoint: "SEARCH" | "ENTITY",
     query: RegistrySearchQuery,
+    options?: RegistryCallOptions,
   ): Promise<RegistryRawResponse> {
     const url = searchUrl(query);
-    const result = await callRegistry({ url }, config, limiter);
+    // Le signal du DEMANDEUR est transmis tel quel : le transport le compose avec son propre
+    // délai, il ne le remplace pas.
+    const result = await callRegistry({ url, signal: options?.signal }, config, limiter);
     return {
       endpoint,
       query: { ...query, url },
@@ -396,14 +400,14 @@ export function createRechercheEntreprisesAdapter(
     snapshotTtlMinutes: RECHERCHE_ENTREPRISES_TTL_MINUTES,
     rateLimitPerMinute: RECHERCHE_ENTREPRISES_RATE_LIMIT_PER_MINUTE,
 
-    search: (query) => call("SEARCH", query),
+    search: (query, options) => call("SEARCH", query, options),
 
     /**
      * L'annuaire ouvert n'expose PAS de point d'entrée par SIREN : la fiche s'obtient en
      * cherchant le SIREN. Le dire ici plutôt que d'inventer une route est ce qui permet au
      * lecteur de comprendre pourquoi `endpoint` vaut `ENTITY` sur une URL de recherche.
      */
-    entity: (siren) => call("ENTITY", { siren, perPage: 1, page: 1 }),
+    entity: (siren, options) => call("ENTITY", { siren, perPage: 1, page: 1 }, options),
 
     readSearch(response): RegistrySearchReading {
       const issues: RegistryIssue[] = [];

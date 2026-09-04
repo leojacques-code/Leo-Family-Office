@@ -28,6 +28,7 @@ import type {
   RegistryOfficerCandidate,
   RegistryProviderAdapter,
   RegistryRawResponse,
+  RegistryCallOptions,
   RegistrySearchQuery,
   RegistrySearchReading,
 } from "./types";
@@ -222,6 +223,34 @@ export function createFixtureAdapter(options: FixtureAdapterOptions = {}): Regis
   const clock = options.clock ?? systemRegistryClock;
   const capabilities = options.capabilities ?? FIXTURE_CAPABILITIES;
 
+  /**
+   * La fixture HONORE le signal du demandeur.
+   *
+   * Elle n'appelle rien, donc rien ne l'obligerait techniquement — et c'est exactement le
+   * piège : un test d'annulation qui passe par la fixture confirmerait la propagation d'un
+   * signal que personne ne lit. Un appelant déjà abandonné obtient donc `CANCELLED` ici
+   * aussi, et la fixture reste un double FIDÈLE de la conduite du transport.
+   */
+  function cancellation(
+    endpoint: RegistryRawResponse["endpoint"],
+    query: Record<string, unknown>,
+    options?: RegistryCallOptions,
+  ): RegistryRawResponse | null {
+    if (options?.signal?.aborted !== true) return null;
+    return {
+      endpoint,
+      query,
+      httpStatus: null,
+      payload: null,
+      payloadBytes: null,
+      observedAt: new Date(clock.now()).toISOString(),
+      providerUpdatedAt: null,
+      errorCode: "CANCELLED",
+      errorMessage:
+        "Appel abandonné par le demandeur avant toute lecture. Rien n'est déduit de cet abandon",
+    };
+  }
+
   function response(
     endpoint: RegistryRawResponse["endpoint"],
     query: Record<string, unknown>,
@@ -273,7 +302,12 @@ export function createFixtureAdapter(options: FixtureAdapterOptions = {}): Regis
       options.snapshotTtlMinutes === undefined ? 24 * 60 : options.snapshotTtlMinutes,
     rateLimitPerMinute: null,
 
-    async search(query: RegistrySearchQuery): Promise<RegistryRawResponse> {
+    async search(
+      query: RegistrySearchQuery,
+      options?: RegistryCallOptions,
+    ): Promise<RegistryRawResponse> {
+      const cancelled = cancellation("SEARCH", { ...query }, options);
+      if (cancelled !== null) return cancelled;
       const needle = (query.siren ?? query.text ?? query.officerName ?? "").toLowerCase();
       const hits = Object.values(ENTITIES)
         .map((build) => build())
@@ -292,7 +326,9 @@ export function createFixtureAdapter(options: FixtureAdapterOptions = {}): Regis
       return response("SEARCH", { ...query }, { entities: hits });
     },
 
-    async entity(siren: string): Promise<RegistryRawResponse> {
+    async entity(siren: string, options?: RegistryCallOptions): Promise<RegistryRawResponse> {
+      const cancelled = cancellation("ENTITY", { siren }, options);
+      if (cancelled !== null) return cancelled;
       const build = ENTITIES[siren];
       if (!build) {
         return {

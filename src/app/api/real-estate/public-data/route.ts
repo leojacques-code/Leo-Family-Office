@@ -84,7 +84,13 @@ export async function POST(request: Request) {
 
     switch (command.action) {
       case "fetch":
-        return NextResponse.json(await repository.fetchAndStage(command), { status: 201 });
+        // Le signal de la REQUÊTE ENTRANTE descend jusqu'au transport : quand le navigateur
+        // abandonne, la lecture du jeu de données s'arrête au lieu de consommer un quota
+        // pour une réponse que plus personne ne lira.
+        return NextResponse.json(
+          await repository.fetchAndStage(command, { signal: request.signal }),
+          { status: 201 },
+        );
       case "decide":
         return NextResponse.json({ matches: await repository.decide(command) });
       case "promote":
