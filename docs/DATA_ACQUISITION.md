@@ -73,9 +73,9 @@ donc confrontable à la règle qui l'a produit.
 `EXACT_DUPLICATE` signifie **identité démontrée**, et rien d'autre. Deux choses seulement la
 démontrent :
 
-| Preuve | Portée |
-| ------ | ------ |
-| l'empreinte SHA-256 du **fichier**, au niveau session | un contenu déjà validé pour cette source est refusé avant même d'arriver à la déduplication |
+| Preuve                                                           | Portée                                                                                            |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| l'empreinte SHA-256 du **fichier**, au niveau session            | un contenu déjà validé pour cette source est refusé avant même d'arriver à la déduplication       |
 | un identifiant de transaction dont la **stabilité est déclarée** | la ligne est reconnue comme déjà écrite, **quelle que soit la date** de la transaction historique |
 
 ### Deux recherches, deux portées
@@ -83,10 +83,10 @@ démontrent :
 C'est la distinction la plus importante de cette couche, et le type du moteur la rend
 inévitable : `ExistingTransactionFact` ne porte aucune clé d'identité.
 
-| Recherche | Portée | Pourquoi |
-| --------- | ------ | -------- |
-| identité (`identities`) | **tout l'historique**, aucun filtre de date | une identité stable ne se périme pas. Une opération dont la banque a corrigé la date de deux mois reste la même opération |
-| ressemblance (`existing`) | fenêtre observée du fichier ± 7 jours | une ressemblance de date, montant et libellé ne se cherche qu'au voisinage du fichier |
+| Recherche                 | Portée                                      | Pourquoi                                                                                                                  |
+| ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| identité (`identities`)   | **tout l'historique**, aucun filtre de date | une identité stable ne se périme pas. Une opération dont la banque a corrigé la date de deux mois reste la même opération |
+| ressemblance (`existing`) | fenêtre observée du fichier ± 7 jours       | une ressemblance de date, montant et libellé ne se cherche qu'au voisinage du fichier                                     |
 
 Borner l'identité à la fenêtre de ressemblance avait une conséquence concrète : le moteur
 annonçait « nouvelle », puis l'index unique de la base faisait échouer **tout** le commit —
@@ -113,14 +113,14 @@ donc `PROBABLE_DUPLICATE` : visible, exclue par défaut, écrivable sur décisio
 
 ### Ce que le moteur produit
 
-| Situation | Verdict | Écrite par défaut |
-| --------- | ------- | ----------------- |
-| identifiant stable **déclaré** déjà connu, ou répété dans le fichier | `EXACT_DUPLICATE` | non, et non incluable |
-| tuple identique à une opération connue non encore revendiquée | `PROBABLE_DUPLICATE` | non, incluable |
-| même montant et libellé à quelques jours d'écart | `PROBABLE_DUPLICATE` | non, incluable |
-| même date et montant sous un libellé différent | `POSSIBLE_MATCH` | non, incluable |
-| rien de connu | `NEW` | oui |
-| ligne vide, hors périmètre ou trop incomplète | `null` (non évalué) | non |
+| Situation                                                            | Verdict              | Écrite par défaut     |
+| -------------------------------------------------------------------- | -------------------- | --------------------- |
+| identifiant stable **déclaré** déjà connu, ou répété dans le fichier | `EXACT_DUPLICATE`    | non, et non incluable |
+| tuple identique à une opération connue non encore revendiquée        | `PROBABLE_DUPLICATE` | non, incluable        |
+| même montant et libellé à quelques jours d'écart                     | `PROBABLE_DUPLICATE` | non, incluable        |
+| même date et montant sous un libellé différent                       | `POSSIBLE_MATCH`     | non, incluable        |
+| rien de connu                                                        | `NEW`                | oui                   |
+| ligne vide, hors périmètre ou trop incomplète                        | `null` (non évalué)  | non                   |
 
 Chaque opération connue n'est revendiquée qu'une fois : trois lignes identiques face à deux
 opérations connues rapprochent les deux premières et laissent la troisième **nouvelle**,
@@ -141,10 +141,10 @@ protège.
 
 Deux champs cibles distincts, et une déclaration qui décide de leur rôle :
 
-| Champ | Alimenté par | Peut décider d'une identité |
-| ----- | ------------ | --------------------------- |
-| `externalTransactionId` | « Transaction ID », « Identifiant unique », « Unique reference » | uniquement si la stabilité est **déclarée** pour la session |
-| `reference` | « Référence », « Référence bancaire », « Numéro d'opération », « Motif », « End to end » | jamais |
+| Champ                   | Alimenté par                                                                             | Peut décider d'une identité                                 |
+| ----------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `externalTransactionId` | « Transaction ID », « Identifiant unique », « Unique reference »                         | uniquement si la stabilité est **déclarée** pour la session |
+| `reference`             | « Référence », « Référence bancaire », « Numéro d'opération », « Motif », « End to end » | jamais                                                      |
 
 Une banque peut répéter une référence, la partager entre les lignes d'un lot, ou réutiliser
 le même motif chaque mois. Le nom d'un en-tête ne prouve donc rien : même une colonne
@@ -186,12 +186,12 @@ que la primitive existe pour éviter.
 
 ## 7. Idempotence : deux garanties, aux deux seuls endroits démontrables
 
-| Garantie | Portée |
-| -------- | ------ |
-| `import_sessions_committed_file_uidx` sur `(user_id, source_id, file_hash)` où le statut est `COMMITTED` | un contenu de fichier ne se valide qu'une fois par source ; le repository refuse en plus **avant** tout dépôt au coffre |
-| `import_normalized_records_committed_external_uidx` sur `(user_id, external_key)` | une identité démontrée ne s'écrit qu'une fois |
-| `lfo_commit_import_session` sur une session déjà validée | retourne l'identifiant sans rien réécrire |
-| conservation du fichier au **commit** seulement, à un chemin dérivé du SHA-256 | une analyse abandonnée, réanalysée ou refusée ne dépose rien ; deux validations simultanées du même contenu visent le même objet |
+| Garantie                                                                                                                      | Portée                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `import_sessions_committed_file_uidx` sur `(user_id, source_id, file_hash)` où le statut est `COMMITTED`                      | un contenu de fichier ne se valide qu'une fois par source ; le repository refuse en plus **avant** tout dépôt au coffre                                                  |
+| `import_normalized_records_committed_external_v2_uidx` sur `(user_id, target_domain, external_key)` où l'état est `COMMITTED` | une identité démontrée ne s'écrit qu'une fois PAR DOMAINE CIBLE : le même identifiant de fichier peut légitimement désigner une transaction et une ligne de portefeuille |
+| `lfo_commit_import_session` sur une session déjà validée                                                                      | retourne l'identifiant sans rien réécrire                                                                                                                                |
+| conservation du fichier au **commit** seulement, à un chemin dérivé du SHA-256                                                | une analyse abandonnée, réanalysée ou refusée ne dépose rien ; deux validations simultanées du même contenu visent le même objet                                         |
 
 Il n'existe **délibérément aucune** contrainte d'unicité sur la clé de rapprochement. Ce
 n'est pas un manque : une unicité sur `(compte, date, montant, devise, libellé)` refuserait
@@ -255,8 +255,19 @@ serveur** — c'est le seul niveau qui protège quelque chose, puisque l'applica
 précisément sous un rôle privilégié :
 
 - un enregistrement brut ne se **modifie** jamais ;
-- un enregistrement brut ne se **supprime** que par l'abandon d'une session encore
-  analysée, qui n'a produit aucun fait ;
+- un enregistrement brut ne se **supprime** que par la cascade d'une session **réellement
+  supprimée**, ou par l'abandon **déclaré** d'une session qui n'a produit aucun fait. Le
+  garde-fou lit l'existence de la session **indépendamment de la visibilité RLS de
+  l'appelant** : SESSION ABSENTE ≠ SESSION INVISIBLE. Il lisait auparavant `import_sessions`
+  en `security invoker`, et une lecture rendant zéro ligne — le cas d'un appelant qui ne
+  contourne pas la RLS — lui faisait conclure « session déjà supprimée », donc **autoriser**.
+  Il était correct sous les rôles d'aujourd'hui, mais par accident d'un attribut de rôle, et
+  non par construction. Il s'appuie maintenant d'abord sur la **preuve** qu'un fait canonique
+  existe — un lien de provenance, une ligne normalisée committée, une écriture comptable
+  committée — de sorte qu'un statut de session remis en arrière ne rouvre rien. Et
+  `lfo_discard_import_session` marque la session `DISCARDED` **avant** de libérer ses lignes :
+  une suppression de brut laisse donc une trace dans la piste d'audit, ou elle est refusée.
+  Détail et sondes dans `docs/PORTFOLIO_IMPORT.md` § 11 ;
 - une ligne normalisée **committée** est gelée, et le gel est **exhaustif** : la comparaison
   porte sur la représentation `jsonb` de la ligne entière, pas sur une liste de colonnes.
   Seule exception, explicite : le jumeau désigné (`matched_transaction_id`) peut passer à

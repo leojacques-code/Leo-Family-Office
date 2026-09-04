@@ -1,4 +1,5 @@
 import { requireAuthenticated } from "@/lib/auth";
+import { API_HEADERS } from "@/lib/http";
 import { getRepository } from "@/lib/data/repository";
 import { buildInstitutionalReport } from "@/lib/reporting/report-builder";
 import { renderReportPdf } from "@/lib/reporting/report-pdf";
@@ -6,10 +7,10 @@ import { REPORT_TYPES, type ReportType } from "@/lib/reporting/report-types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-const PRIVATE_NO_STORE = { "Cache-Control": "private, no-store, max-age=0" } as const;
+// En-têtes d'API : la valeur est déclarée dans `@/lib/http`, jamais répétée ici.
 
 const privateJson = (body: unknown, status: number) =>
-  Response.json(body, { status, headers: PRIVATE_NO_STORE });
+  Response.json(body, { status, headers: API_HEADERS });
 
 export async function GET(request: Request) {
   try {
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${filename}"`,
-      ...PRIVATE_NO_STORE,
+      ...API_HEADERS,
       "X-Content-Type-Options": "nosniff",
       "Content-Length": String(pdf.byteLength),
     },

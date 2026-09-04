@@ -13,8 +13,14 @@ import {
 
 import { Callout, EmptyState, SectionHeader } from "@/components/ui";
 import FecSection from "@/components/pages/imports/fec-section";
+import LiasseSection from "@/components/pages/imports/liasse-section";
+import OpenBankingSection from "@/components/pages/imports/open-banking-section";
+import PortfolioSection from "@/components/pages/imports/portfolio-section";
+import PublicDataSection from "@/components/pages/imports/public-data-section";
+import RegistrySection from "@/components/pages/imports/registry-section";
 import { formatDate, NOT_COMPUTABLE } from "@/components/pages/shared";
 import type { SectionProps } from "@/components/pages/shared";
+import type { PublicDataSourceSummary } from "@/lib/data/public-data-contracts";
 import type {
   BankColumnMapping,
   BankTargetField,
@@ -114,11 +120,36 @@ function RowAmount({ row }: { row: ImportPreviewRow }) {
 
 type StatusFilter = "ALL" | ImportRowStatus;
 
+/**
+ * ONGLETS D'ACQUISITION, DÉCLARÉS UNE FOIS
+ *
+ * Le type de l'état en DÉRIVE : ajouter une verticale est une seule ligne, et il devient
+ * impossible qu'un onglet existe dans le rendu sans exister dans le type, ou l'inverse.
+ * C'est exactement ce qui dérivait quand chaque verticale maintenait sa propre union de
+ * littéraux à côté de sa propre entrée de rendu.
+ */
+const IMPORT_DOMAIN_TABS = [
+  ["BANK", "Relevé bancaire"],
+  ["OPEN_BANKING", "Connexion bancaire"],
+  ["FEC", "Comptabilité (FEC)"],
+  ["LIASSE", "Liasse fiscale (PDF)"],
+  ["PORTFOLIO", "Portefeuille"],
+  ["REGISTRY", "Registre d'entreprises"],
+  ["PUBLIC_DATA", "Données publiques (DVF, DPE)"],
+] as const;
+
+type ImportDomainTab = (typeof IMPORT_DOMAIN_TABS)[number][0];
+
 function ImportsPage({ state, refresh }: SectionProps) {
   // Choix explicites de l'utilisateur. `null` = « pas encore choisi » : la valeur affichée
   // est alors DÉRIVÉE des comptes, sans effet de bord ni rendu en cascade.
   /** Domaine d'acquisition affiché. Un seul écran, deux sources : la fondation est commune. */
-  const [domain, setDomain] = useState<"BANK" | "FEC">("BANK");
+  const [domain, setDomain] = useState<ImportDomainTab>("BANK");
+  /**
+   * Adaptateurs de donnée publique déclarés côté serveur. Chargés à la demande, quand
+   * l'onglet est ouvert : la page ne réclame pas au serveur ce qu'elle n'affiche pas.
+   */
+  const [publicSources, setPublicSources] = useState<PublicDataSourceSummary[] | null>(null);
   const [chosenAccountId, setChosenAccountId] = useState<string | null>(null);
   const [chosenCurrency, setChosenCurrency] = useState<string | null>(null);
   const [retainFile, setRetainFile] = useState(true);
@@ -289,6 +320,60 @@ function ImportsPage({ state, refresh }: SectionProps) {
 
   // Les sociétés viennent de l'état du cockpit déjà chargé, comme les comptes : cette page
   // ne lit aucune donnée de domaine par elle-même.
+  /**
+   * Biens détenus, tels que l'état du cockpit les porte déjà. Comme pour les sociétés, cette
+   * page ne lit aucune donnée de domaine par elle-même.
+   */
+  const publicDataProperties = useMemo(
+    () =>
+      (state.realEstateAssets ?? [])
+        .filter((asset) => !asset.archived && asset.disposalDate === null)
+        .map((asset) => ({
+          id: asset.id,
+          name: asset.name,
+          location: asset.location,
+          surfaceSqm: asset.surfaceSqm,
+        })),
+    [state.realEstateAssets],
+  );
+
+  /**
+   * Lit les adaptateurs déclarés. La réponse ne contient AUCUNE URL et AUCUN secret : elle
+   * dit seulement si un adaptateur est configuré côté serveur.
+   */
+  const loadPublicSources = useCallback(async () => {
+    try {
+      const response = await fetch("/api/real-estate/public-data?sources=1");
+      const payload = (await response.json()) as {
+        sources?: PublicDataSourceSummary[];
+        error?: string;
+      };
+      // Un échec de lecture des adaptateurs n'empêche pas d'ouvrir l'onglet : il rend une
+      // liste vide, et l'écran dit alors que rien n'est configuré.
+      setPublicSources(payload.sources ?? []);
+    } catch {
+      setPublicSources([]);
+    }
+  }, []);
+
+  /**
+   * Enveloppes susceptibles de porter un portefeuille. Elles viennent de l'état du cockpit
+   * déjà chargé, comme les sociétés : cette page ne lit aucune donnée de domaine par
+   * elle-même.
+   */
+  const portfolioAccounts = useMemo(
+    () =>
+      // AUCUN pré-filtrage par type d'enveloppe, et c'est délibéré : une assurance-vie est
+      // typée OTHER, un compte peut servir d'enveloppe d'espèces, et restreindre la liste
+      // masquerait un cas légitime au lieu de laisser l'utilisateur choisir.
+      (state.accounts ?? []).map((account) => ({
+        id: account.id,
+        name: `${account.name} — ${account.type}`,
+        currency: account.currency,
+      })),
+    [state.accounts],
+  );
+
   const businesses = useMemo(
     () =>
       (state.businesses ?? [])
@@ -310,17 +395,17 @@ function ImportsPage({ state, refresh }: SectionProps) {
       />
 
       <div className="import-filters">
-        {(
-          [
-            ["BANK", "Relevé bancaire"],
-            ["FEC", "Comptabilité (FEC)"],
-          ] as const
-        ).map(([value, label]) => (
+        {IMPORT_DOMAIN_TABS.map(([value, label]) => (
           <button
             key={value}
             type="button"
             className={`button ${domain === value ? "primary" : "secondary"}`}
-            onClick={() => setDomain(value)}
+            onClick={() => {
+              setDomain(value);
+              // Chargement à la demande, dans le HANDLER et non dans un effet : la liste des
+              // adaptateurs n'est demandée qu'une fois, quand l'onglet est réellement ouvert.
+              if (value === "PUBLIC_DATA" && publicSources === null) void loadPublicSources();
+            }}
           >
             {label}
           </button>
@@ -328,6 +413,24 @@ function ImportsPage({ state, refresh }: SectionProps) {
       </div>
 
       {domain === "FEC" ? <FecSection businesses={businesses} refresh={refresh} /> : null}
+
+      {domain === "LIASSE" ? <LiasseSection businesses={businesses} refresh={refresh} /> : null}
+
+      {domain === "REGISTRY" ? <RegistrySection businesses={businesses} refresh={refresh} /> : null}
+
+      {domain === "PORTFOLIO" ? (
+        <PortfolioSection accounts={portfolioAccounts} refresh={refresh} />
+      ) : null}
+
+      {domain === "PUBLIC_DATA" ? (
+        <PublicDataSection
+          properties={publicDataProperties}
+          sources={publicSources ?? []}
+          refresh={refresh}
+        />
+      ) : null}
+
+      {domain === "OPEN_BANKING" ? <OpenBankingSection refresh={refresh} /> : null}
 
       {domain === "BANK" ? (
         <>

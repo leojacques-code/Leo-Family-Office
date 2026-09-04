@@ -89,6 +89,38 @@ Corollaires appliqués dans le code existant, à préserver :
 - l'absence d'événement de frais d'acquisition ou de capex ne vaut pas zéro : une déclaration
   explicite, y compris à 0, est requise pour calculer coût de revient, plus-value et rendement sur
   coût ; un événement futur ne modifie jamais une lecture présente ;
+- une observation persistée ne se remplace que sur DÉCISION, et une décision n'est pas un
+  consentement : un identifiant de ligne ne dit ni pourquoi, ni par qui, ni sur la foi de quel
+  état courant. DÉCISION ≠ CONSENTEMENT, ÉTAT ATTENDU ≠ ÉTAT COURANT, ANCIENNE VALEUR ≠ VALEUR
+  REMPLACÉE : le motif, l'avant, l'après et les champs modifiés vont dans une piste immuable,
+  le verrou est pris AVANT la comparaison, et une seconde décision sur un état périmé échoue
+  avec un conflit révisable au lieu d'écraser la première ;
+- un état attendu se lit clé par clé, et CLÉ ABSENTE ≠ JSON NULL ≠ CHAÎNE VIDE ≠ ZÉRO : un
+  `coalesce`/`nullif` qui aplatit les trois premiers sur un `NULL` fait passer un OUBLI pour
+  une absence déclarée, l'état attendu s'accorde alors avec une observation dont l'appelant ne
+  sait rien, et le conflit de concurrence ne se déclenche pas. Les montants voyagent en TEXTE
+  et se comparent en `numeric` : un flottant double perdrait la précision d'un
+  `numeric(30,10)`, et `NaN` comme la notation exponentielle sont refusés bien que `numeric`
+  les accepterait ;
+- IDENTITÉ DÉCLARÉE ≠ IDENTITÉ VÉRIFIÉE ≠ RÔLE D'EXÉCUTION : l'acteur d'une décision est
+  l'identité établie CÔTÉ SERVEUR, jamais une chaîne reçue du navigateur — une piste dont le
+  champ « qui » est déclaratif répond à « qui l'appelant a bien voulu nommer », pas à « qui a
+  décidé ». Toute clé d'acteur présente dans une charge est REFUSÉE et non ignorée, et le rôle
+  PostgreSQL constaté reste une colonne distincte. Sans délégation dans le produit, une
+  contrainte impose acteur = propriétaire : c'est là qu'une future délégation devra être
+  décidée, bruyamment ;
+- une limite qu'un appelant peut relever ne protège de rien : un plafond de taille de réponse
+  est un MAXIMUM global, une connexion ne peut que le resserrer, et `Infinity`, `NaN`, un non
+  entier, zéro ou un négatif font refuser l'appel AVANT tout réseau ;
+- un `ON DELETE CASCADE` et un trigger qui refuse tout `DELETE` ne peuvent pas être vrais
+  ensemble : la cascade demande ce que le trigger refuse, et le résultat est une erreur levée
+  au milieu d'une cascade, loin de la cause. Une piste financière se protège par `RESTRICT`,
+  et le départ d'un utilisateur se traite par désactivation ou anonymisation, jamais par
+  effacement de l'historique ;
+- un fournisseur distant n'est pas coopératif : `Content-Length` est une DÉCLARATION et non une
+  mesure, un corps se lit de façon incrémentale sous un plafond déclaré, seul du JSON est parsé,
+  et un diagnostic d'échec ne reprend JAMAIS `error.message` — un `fetch` y cite l'URL demandée,
+  jetons de requête compris, et ce message est persisté puis affiché ;
 - les flux immobiliers observés sont convertis par le FX Engine à la date de chaque transaction ;
   une dette future dans une autre devise reste non calculable sans courbe FX future explicite, le
   dernier spot n'étant jamais prolongé silencieusement.
@@ -126,17 +158,42 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Production et dépôt alignés sur **29 migrations** au 28 août 2026. Les dernières versions
-sont :
+Le DÉPÔT porte **44 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
+44 appliquées, 106 tables publiques). Les onze dernières sont les cinq verticales
+d'acquisition ajoutées par ce chantier, leur réconciliation et les deux tours de correction
+des findings de revue :
 
-- `20260826194551_business_equity_v2_1` ;
-- `20260826194605_business_equity_v2_1_indexes` ;
-- `20260826194644_business_equity_v2_1_blocking_invariants` ;
-- `20260827155134_data_acquisition_foundation` ;
-- `20260827215014_career_tax_v2` ;
-- `20260827215600_career_tax_v2_fk_indexes` ;
-- `20260828131216_fec_corporate_acquisition` ;
-- `20260828131433_fec_corporate_acquisition_fk_indexes`.
+- `20260831101500_company_registry_acquisition` ;
+- `20260831154500_document_intelligence_foundation` ;
+- `20260831171500_real_estate_public_data` ;
+- `20260902093000_portfolio_import_acquisition` ;
+- `20260903090000_import_raw_freeze_hardening` ;
+- `20260903120000_open_banking_ais` ;
+- `20260903120500_open_banking_ais_fk_indexes` ;
+- `20260903190000_acquisition_integration_reconciliation` ;
+- `20260903200000_portfolio_findings_no_silent_upsert` ;
+- `20260904093000_portfolio_correction_audit` ;
+- `20260905090000_portfolio_correction_actor_and_expected`.
+
+L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE, et cette section a dérivé
+trois fois de suite pour l'avoir oublié : elle a successivement annoncé « 29 migrations
+alignées » quand le dépôt en portait 33, puis « 34 », puis « 35 », chaque verticale mettant à
+jour SON chiffre sans voir celui des autres. La dérive ne se corrige pas en écrivant un
+nouveau nombre : elle se corrige en disant d'où vient le nombre.
+
+CELUI-CI vient du gate local, exécuté sans aucun credential : il prouve que les migrations du
+dépôt reconstruisent un schéma conforme DEPUIS ZÉRO. Il ne dit RIEN de la production. Seul
+`npm run db:verify`, exécuté avec des credentials de production hors environnement d'agent,
+dit l'état réel, et le contenu de référence s'extrait de
+`supabase_migrations.schema_migrations`.
+
+La production portait **33 migrations** au dernier état communiqué par le propriétaire du
+schéma. AUCUNE des onze migrations ci-dessus n'y est appliquée. Leur ordre d'application est
+CELUI DE LEURS NOMS et il n'est pas indifférent : la réconciliation et les trois volets
+Portfolio supposent que les cinq verticales sont déjà là, et chacun reprend la RPC que le
+précédent a redéfinie — `20260903200000`, puis `20260904093000`, puis `20260905090000`.
+Chercher la DERNIÈRE version d'une RPC avant de la remplacer n'est pas une précaution
+théorique : c'est la seule façon de ne pas supprimer ce que le volet précédent avait ajouté.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,
@@ -173,7 +230,12 @@ Correctness → données → intégration → calculs → tests → produit → 
 ```text
 faits          Debt · Cash Flow · Canonical Balance Sheet · Portfolio (données + analytics)
                Real Estate (faits + scénarios) · Business Equity (faits + valorisation dérivée)
-               Data Acquisition (staging + provenance + relevé bancaire CSV + FEC)
+               Data Acquisition (staging + provenance + relevé bancaire CSV + FEC
+               + données publiques immobilières DVF/DPE)
+
+               + import de portefeuille CSV/XLSX)
+
+               + Open Banking AIS lecture seule)
                Career + Tax (faits datés + règles fiscales déclarées + calculs dérivés)
 en cours       vérité de schéma · vérité des consommateurs
 suivant        Event Engine → Scenarios V2 → Goals → Decision Lab
@@ -207,6 +269,19 @@ Les mutations qui modifient la quote-part (acquisition, cession, rachat, tour de
 écrivent l'événement et la détention résultante atomiquement ; elles ne demandent jamais à
 l'utilisateur de maintenir deux vérités indépendantes.
 
+La fondation d'acquisition porte SEPT verticales, et leur ordre est celui de leurs
+migrations : relevé bancaire CSV, FEC, registre d'entreprises, Document Intelligence, donnée
+publique immobilière, portefeuille, Open Banking. Le rang de chacune est écrit ici et nulle
+part ailleurs : quatre paragraphes se sont annoncés « troisième verticale » parce que chaque
+verticale s'était numérotée contre une base où les autres n'existaient pas — exactement la
+dérive du compte de migrations, au même endroit et pour la même raison. Un rang, comme un
+nombre de migrations, se lit à sa source, il ne se déduit pas de ce que l'auteur avait sous
+les yeux.
+
+Ce que les verticales PARTAGENT — objets communs, conflits qu'un smoke de verticale unique ne voit
+pas, consolidations — est dans `docs/ACQUISITION_INTEGRATION.md`. Chaque verticale garde son propre
+document pour ce qui n'appartient qu'à elle.
+
 La couche d'acquisition ALIMENTE les moteurs, elle ne les remplace jamais. Elle ne classe
 aucun flux, ne recalcule aucun solde, ne rapproche aucun transfert interne et ne déclare
 aucune profondeur d'historique : une transaction importée naît sans catégorie, et le Cash
@@ -216,7 +291,18 @@ lignes concernées sinon : choisir entre 1,234 et 1 234 sur 800 lignes n'est pas
 décision de présentation. Un enregistrement brut est immuable et sa piste
 d'audit est en LECTURE SEULE pour le client : corriger une lecture modifie le fait
 canonique, jamais ce que la source a écrit, et une transaction importée n'est pas
-supprimable en laissant sa provenance orpheline.
+supprimable en laissant sa provenance orpheline. SESSION ABSENTE ≠ SESSION INVISIBLE : un
+garde-fou qui décide à partir d'une lecture filtrée par la RLS de l'appelant conclut
+« déjà supprimé » sur une simple absence de droit, et autorise. La question « cet objet
+existe-t-il ? » se lit donc indépendamment de la visibilité de l'appelant, et le seul
+`SECURITY DEFINER` du schéma applicatif existe pour cela : `search_path` vide, objets
+qualifiés, aucune écriture, aucun `execute` pour `public`, `anon` ni `authenticated`, et un
+nom hors du contrat `lfo_*`, qui reste sans aucune RPC `SECURITY DEFINER`. UN FAIT ÉCRIT
+GÈLE TOUT LE BRUT DE SA SESSION : l'autorisation s'appuie sur la PREUVE qu'un fait existe,
+jamais sur le statut affiché, sans quoi un statut remis en arrière rouvrirait la suppression
+de sa propre provenance. Et SUPPRIMER LE BRUT D'UNE SESSION VIVANTE N'EST PAS UN ABANDON :
+l'abandon se DÉCLARE avant de libérer les lignes, de sorte qu'un retrait de brut laisse une
+trace dans la piste d'audit ou se fait refuser.
 
 L'IDENTITÉ SE DÉMONTRE, elle ne se présume pas. Une égalité de tuple — compte, date,
 montant, devise, libellé — ne prouve rien entre deux fichiers distincts : un relevé partiel
@@ -273,6 +359,152 @@ de ce qui devient analysable. ÉCHEC DE NETTOYAGE ≠ ÉCHEC DE VALIDATION, mais
 NETTOYAGE ≠ SUCCÈS SILENCIEUX non plus : la référence d'un objet non supprimé est CONSERVÉE,
 sans quoi une comptabilité entière resterait au stockage sans que rien ne sache où. Détail
 dans `docs/FEC_ACQUISITION.md`.
+
+L'acquisition du REGISTRE D'ENTREPRISES est la troisième verticale de cette fondation, et
+elle ne réutilise volontairement PAS ses tables : l'unité d'un import est un FICHIER DE
+LIGNES, celle d'un registre un INSTANTANÉ D'ENTITÉ. Ce qu'elle réutilise est la chaîne, le
+vocabulaire de provenance, les clés composites `(id, user_id)`, la discipline « le client lit,
+les RPC écrivent » et `businesses(id, user_id)` comme unique porte du domaine Business. La
+table `external_sources`, présente depuis la migration initiale sans usage, est ADOPTÉE comme
+registre des connexions externes.
+
+SNAPSHOT ≠ VÉRITÉ CANONIQUE : écrire un instantané ne change rien au patrimoine. CAPACITÉ NON
+SERVIE ≠ DONNÉE ABSENTE ≠ ZÉRO : un fournisseur qui ne publie pas le capital social ne dit
+rien du capital, et la capacité est DÉCLARÉE par la connexion. ACCEPTER UN VIDE N'EST PAS UN
+ENRICHISSEMENT : une décision acceptée sans valeur effacerait une saisie de l'utilisateur au
+motif que la source est muette, et la base la refuse. PROVENANCE PAR CHAMP ≠ PROVENANCE DE
+LIGNE : `businesses.data_kind` qualifie la ligne, il ne bascule donc pas en `EXTERNAL_DATA`
+parce qu'un champ vient du registre — la provenance par champ vit dans
+`business_enrichment_decisions`. UN SIREN, UNE SOCIÉTÉ : deux rattachements du même SIREN
+compteraient deux fois la même participation, et c'est un invariant de la base. Un ÉCHEC de
+fournisseur est un instantané daté, jamais un trou. Une observation PÉRIMÉE reste lisible et
+signalée, jamais corrigée : la péremption est DÉRIVÉE à la lecture et n'est jamais persistée,
+un état qui dépend de l'heure pourrissant en silence dès qu'il est figé. Un registre publie
+une IDENTITÉ, pas une finance : capital social, effectifs et catégorie d'entreprise restent
+des observations et n'entrent pas dans `businesses`. Détail dans
+`docs/COMPANY_REGISTRY_ACQUISITION.md`.
+
+DOCUMENT INTELLIGENCE est la quatrième verticale, et la liasse fiscale en est la première
+application. Elle RÉUTILISE le chemin « navigateur → stockage privé » du FEC, son billet à chemin
+calculé en base, et `import_record_links` comme UNIQUE pont de provenance — une troisième forme
+s'y ajoute, dont l'unité est un RUN et non une ligne. `lfo_record_business_financials` reste le
+chemin d'écriture unique de `business_financials` : cette verticale ne le modifie pas.
+
+DOCUMENT ≠ LECTURE ≠ FAIT CANONIQUE, et VALIDER ≠ RATTACHER : quatre actes, quatre décisions.
+CASE VIDE ≠ CASE À ZÉRO : une case de liasse laissée blanche ne déclare rien, et la compter zéro
+fausserait tout total construit dessus. CONTRÔLE NON CALCULABLE ≠ CONTRÔLE PASSÉ : un contrôle
+dont un opérande est absent, ou ambigu parce que deux cases portent le même code, rend
+`NOT_COMPUTABLE` — le compter réussi laisserait valider une liasse dont l'équilibre n'a jamais
+été vérifié. L'arithmétique des contrôles est faite EN BASE sur les cases persistées, comme la
+partie double du FEC : une charge forgée ne peut pas déclarer un bilan équilibré. VALEUR BRUTE ≠
+VALEUR NORMALISÉE ≠ VALEUR CORRIGÉE : corriger n'efface jamais ce que le document imprimait, et
+une correction ré-évalue les contrôles dans la MÊME transaction. OCR_REQUIRED ≠ ÉCHEC ≠ VALEUR
+SUPPOSÉE : un scan est un fait technique nommé, et aucune valeur n'en est déduite. LIASSE ≠
+COMPTE DE RÉSULTAT NORMALISÉ : seuls le chiffre d'affaires et le résultat de l'exercice sont
+écrits ; EBITDA, EBIT, capex, BFR et marge sont REFUSÉS par la RPC, parce que leur définition est
+une convention qui appartient au ledger de Quality of Earnings.
+
+AUCUN code de case n'est écrit en dur : le code est LU dans le document, à côté de sa valeur. Le
+registre de spécifications ne porte que des ancres de détection et des ancres de libellé, et une
+ancre qui ne s'apparie pas rend le contrôle non calculable, jamais réussi. La colonne d'une case
+n'est déterminée que si les EN-TÊTES sont trouvés : il n'y a pas de colonne par défaut. Détail
+dans `docs/DOCUMENT_INTELLIGENCE.md`.
+
+Avant de remplacer une RPC existante, chercher sa DERNIÈRE version dans l'historique, jamais la
+première : `lfo_record_business_financials` a été révisée trois fois, et la réécrire depuis sa
+version d'origine supprimait son upsert et quatre colonnes. Le gate complet l'a détecté ; le
+smoke d'une seule verticale ne l'aurait pas vu.
+
+L'acquisition de DONNÉE PUBLIQUE immobilière (DVF, DPE) est la cinquième verticale de cette
+fondation, et elle ne valorise RIEN d'elle-même. DVF PUBLIE LES VENTES D'AUTRUI : un jeu de
+comparables n'est pas la valeur d'un bien détenu, et aucune ligne de `real_estate_valuations`
+n'en sort sans décision humaine. UNE ADRESSE NE PROUVE PAS UNE IDENTITÉ : un immeuble porte
+autant de DPE que de lots, la confiance d'un rapprochement d'adresse est donc plafonnée à
+MOYENNE, et accepter exige un motif ÉCRIT — la base le réclame pour toute acceptation de
+confiance faible. RÉSULTAT VIDE ≠ ABSENCE DE MARCHÉ : la couverture est DÉCLARÉE par
+l'adaptateur, jamais présumée, et un instantané vide, en échec ou hors couverture ne fonde
+aucun rapprochement. Une lecture tentée laisse TOUJOURS une trace : l'instantané est écrit
+même en échec, avec son code, et son contenu est immuable. AUCUN PRIX AU M² N'EST PERSISTÉ :
+il est dérivé à la lecture, et une surface absente le rend non calculable — elle ne vaut pas
+zéro. AUCUNE VALIDITÉ DE DPE N'EST CALCULÉE, et ÉTIQUETTE ABSENTE ≠ ÉTIQUETTE G : la
+déduire d'une grille ou d'une règle que ce dépôt ne contient pas produirait une donnée sans
+source. Une mutation MULTI-LOTS n'a pas de prix unitaire, et sous le seuil d'échantillon
+l'estimation est `NOT_COMPUTABLE`, jamais une estimation à confiance basse : un chiffre
+accompagné d'un avertissement finit par être lu sans l'avertissement. Une estimation promue
+est une `MODEL_ASSUMPTION` sous convention NOMMÉE, avec ses intrants et son instantané —
+`COMPARABLE_SALES` ne peut pas emprunter `NOTARY_ESTIMATE`, et la réciproque est interdite.
+La médiane est calculée en TypeScript, jamais en SQL ; la base VÉRIFIE sans recalculer, en
+encadrant la valeur par l'intervalle des prix unitaires réellement persistés — un encadrement
+est un contrôle d'intégrité, pas une valorisation. Détail dans
+`docs/REAL_ESTATE_PUBLIC_DATA.md`.
+
+AVANT DE REMPLACER UNE RPC EXISTANTE, CHERCHER SA DERNIÈRE VERSION DANS L'HISTORIQUE, JAMAIS
+LA PREMIÈRE. Un `create or replace` rédigé depuis une définition périmée supprime en silence
+tout ce que les migrations ultérieures y avaient ajouté, et le gate du domaine concerné ne le
+verra pas : c'est le smoke d'un AUTRE domaine qui le détectera, ou personne. Quand une
+contrainte de forme exige une valeur au moment de l'INSERTION, étendre la RPC existante d'une
+clé de charge optionnelle plutôt que d'ouvrir un second chemin d'écriture : PostgreSQL ne
+connaît pas de contrainte `CHECK` différable, et une seconde porte d'écriture sur une table
+canonique est une seconde vérité.
+
+L'import de PORTEFEUILLE (CSV, XLSX) est la sixième verticale de cette fondation, et elle
+n'ajoute AUCUN ledger : `portfolio_events` et `lfo_record_portfolio_event` existent, elle les
+alimente. POSITION OBSERVÉE ≠ TRANSACTION DU LEDGER : un relevé de positions dit ce qui était
+détenu à une date, pas quand ni à quel prix ; reconstruire un achat depuis une position
+inventerait date, prix et frais, et le coût de revient en paraîtrait calculé tout en étant
+faux. Deux domaines cibles distincts, jamais convertis l'un dans l'autre. INSTRUMENT NON
+RÉSOLU ≠ INSTRUMENT NOUVEAU : un ISIN inconnu ou ambigu BLOQUE ses lignes, et rien n'est créé
+d'office, sans quoi les mêmes titres se répartiraient entre deux entrées du référentiel. La
+décision porte sur le TITRE, pas sur la ligne, et une décision humaine n'est pas écrasée par
+une réanalyse. `lfo_record_portfolio_event` sait CRÉER un instrument décrit par son nom : ce
+chemin est légitime en saisie manuelle et INTERDIT en import, donc seule la forme
+`security: { id }` déjà tranchée lui est transmise. AUCUNE FORMULE XLSX N'EST ÉVALUÉE, et
+VALEUR EN CACHE ≠ VALEUR SAISIE : la valeur mise en cache par le tableur est lue et la cellule
+est NOMMÉE ; une formule sans valeur en cache ne produit rien. Un classeur porteur de macros
+est REFUSÉ, pas lu partiellement. Les plafonds (taille, feuilles, lignes, colonnes, temps
+d'analyse) refusent au lieu de tronquer. `positions` a désormais une unicité par enveloppe et
+instrument, et `position_snapshots` une par date : sans elles, rejouer un fichier scinderait
+une détention et l'idempotence serait impossible ; une observation à la même date CORRIGE la
+précédente, une nouvelle date s'AJOUTE sans supprimer l'historique. AUCUN ADAPTATEUR DE
+COURTIER n'est fourni : sans fixture fiable et non personnelle, l'écrire de mémoire produirait
+un faux support. Détail dans `docs/PORTFOLIO_IMPORT.md`.
+
+LE NOM D'UNE CONTRAINTE N'EST PAS UN NUMÉRO DE VERSION LIBRE. Un `if not exists (… conname =
+'…_v2_ck')` SAUTE l'extension en silence quand une migration antérieure a déjà pris ce nom, et
+le refus se produit alors à la première écriture, très loin de la cause. Avant d'étendre une
+contrainte, lire son état RÉEL en base (`pg_get_constraintdef`) et reprendre sa définition en
+vigueur, puis nommer le successeur. Corollaire du même principe que pour les RPC : chercher la
+DERNIÈRE version, jamais la première, et ne jamais supposer qu'un nom est disponible.
+
+L'OPEN BANKING (AIS) est la septième verticale de cette fondation, et elle l'étend SANS
+ÉLARGIR AUCUNE WHITELIST : une synchronisation bancaire alimente le MÊME domaine cible qu'un
+relevé CSV, `CASH_FLOW_TRANSACTION`, et `import_sources.kind` prévoyait déjà `'API'`. Aucune
+colonne n'est ajoutée à une table du socle. AUCUNE INITIATION DE PAIEMENT n'existe : le
+contrat d'adaptateur n'expose que trois lectures, et deux contrôles le vérifient
+structurellement — un test sur les actions de la route, une assertion SQL sur les fonctions et
+colonnes `bank_*`. OBSERVATION ≠ FAIT CANONIQUE : une opération lue naît observée, et rien
+n'entre au Cash Flow sans DÉCISION humaine, qui est DURABLE et jamais redemandée à la
+synchronisation suivante. PENDING ≠ BOOKED : un remplacement n'est appliqué que DÉCLARÉ par le
+fournisseur et seulement s'il déclare ses identifiants stables, sinon il est signalé ; quand
+l'opération remplacée a déjà été écrite, c'est une CORRECTION, pas une nouvelle dépense. Les
+trois dates — opération, valeur, comptabilisation — sont conservées SÉPARÉMENT, et seule celle
+d'opération date le fait : une date absente BLOQUE au lieu de se replier sur une autre. SOLDE
+ABSENT ≠ SOLDE À ZÉRO, et un solde disponible n'est pas un solde comptable. COMPTE FOURNISSEUR
+≠ COMPTE CANONIQUE : rien n'est créé d'office, et un compte canonique est alimenté par AU PLUS
+UN compte fournisseur — sans cette unicité les mêmes opérations seraient écrites deux fois.
+CAPACITÉ NON DÉCLARÉE ≠ CAPACITÉ ABSENTE : un adaptateur qui ne déclare pas ses identifiants
+stables n'en a pas, et la déduplication automatique est alors INTERDITE. EXPIRATION NON
+DÉCLARÉE ≠ SANS EXPIRATION, RÉVOQUÉ ≠ EXPIRÉ, et la révocation est TERMINALE. PAGE VIDE ≠ FIN
+DE PAGINATION et CURSEUR IDENTIQUE ≠ FIN : seul un curseur nul déclare la fin, une boucle est
+nommée et interrompue, un plafond REFUSE au lieu de tronquer. Le curseur n'avance qu'APRÈS
+écriture réelle, et un échec le CONSERVE avec ses pages. Le BRUT d'une API est la PAGE, pas la
+ligne. RÉFÉRENCE DE SECRET ≠ SECRET : aucune table ne porte de colonne capable d'accueillir un
+jeton, et c'est l'absence de colonne qui garantit, pas une contrainte. Le rejeu d'une
+notification est refusé par la BASE, et un événement non signé ne déclenche rien. AUCUN
+ADAPTATEUR D'AGRÉGATEUR RÉEL n'est fourni : sans contrat ni identifiants, l'écrire de mémoire
+produirait un faux support ; le fournisseur sandbox couvre la chaîne sans réseau, à partir
+d'un catalogue de scénarios CÔTÉ SERVEUR — le navigateur choisit un nom, jamais un contenu.
+Détail dans `docs/OPEN_BANKING.md`.
 
 Ne pas construire une analytique sans la donnée qui l'alimente. Une métrique de
 performance sans ledger d'investissement ne produit que du `NOT_COMPUTABLE`. Le ledger

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { API_HEADERS } from "@/lib/http";
 
 import { requireAuthenticated } from "@/lib/auth";
 import { getImportRepository } from "@/lib/data/import-repository";
@@ -31,12 +32,12 @@ export async function GET(request: Request) {
     if (sessionId) {
       return NextResponse.json(
         { rows: await repository.getSessionRows(sessionId) },
-        { headers: { "Cache-Control": "no-store" } },
+        { headers: API_HEADERS },
       );
     }
     return NextResponse.json(
       { sessions: await repository.listSessions() },
-      { headers: { "Cache-Control": "no-store" } },
+      { headers: API_HEADERS },
     );
   } catch (error) {
     return failure(error, "Lecture des imports impossible");
