@@ -20,6 +20,7 @@ import {
   formatDate,
   formatEur,
   inputNumber,
+  requiredNumberInput,
 } from "@/components/pages/shared";
 import { addMonths, monthBounds } from "@/lib/engine/debt";
 import { shouldDeriveBalance } from "@/lib/data/shared";
@@ -65,6 +66,7 @@ const COVERAGE_SOURCE_LABELS: Record<LedgerCoverageSource, string> = {
 
 function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const [modal, setModal] = useState<"transaction" | "rule" | "category" | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [horizon, setHorizon] = useState(90);
   /**
    * `null` signifie « suivre la valeur persistée ». Conserver une copie locale même après
@@ -183,6 +185,14 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
 
   async function addTransaction(event: React.FormEvent) {
     event.preventDefault();
+    // Le montant est LU avant l'envoi : un champ effacé partait à zéro, donc une transaction
+    // à 0 € entrait dans le ledger et faussait les taux de flux sans laisser de trace.
+    const amount = requiredNumberInput(form.amount, "Montant");
+    if (amount.error !== null) {
+      setFormError(amount.error);
+      return;
+    }
+    setFormError(null);
     const account = state.accounts.find((item) => item.id === form.accountId);
     const canUpdate = shouldDeriveBalance(form.date, account?.balanceDate ?? state.asOfDate);
     const ok = await mutate({
@@ -191,7 +201,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       categoryId: form.categoryId,
       date: form.date,
       label: form.label,
-      amount: inputNumber(form.amount),
+      amount: amount.value,
       updateBalance: canUpdate && form.updateBalance,
     });
     if (ok) {
@@ -202,6 +212,12 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
 
   async function addRule(event: React.FormEvent) {
     event.preventDefault();
+    const ruleAmount = requiredNumberInput(ruleForm.amount, "Montant");
+    if (ruleAmount.error !== null) {
+      setFormError(ruleAmount.error);
+      return;
+    }
+    setFormError(null);
     const category = index.get(ruleForm.categoryId);
     const ok = await mutate({
       action: "add_recurring_rule",
@@ -209,11 +225,13 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       cashFlowKind: category?.cashFlowKind ?? "EXPENSE",
       categoryId: ruleForm.categoryId,
       accountId: null,
-      amount: inputNumber(ruleForm.amount),
+      amount: ruleAmount.value,
       frequency: ruleForm.frequency,
       startDate: ruleForm.startDate,
       endDate: null,
-      dayOfMonth: ruleForm.dayOfMonth ? inputNumber(ruleForm.dayOfMonth) : null,
+      // Le jour du mois est FACULTATIF : `inputNumber` rend maintenant `null` de lui-même
+      // sur un champ vide, la garde ternaire n'a donc plus lieu d'être.
+      dayOfMonth: inputNumber(ruleForm.dayOfMonth),
     });
     if (ok) {
       setModal(null);
@@ -703,8 +721,10 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                       placeholder="—"
                       defaultValue={category.monthlyAmount ?? ""}
                       onBlur={(event) => {
-                        const next =
-                          event.target.value === "" ? null : inputNumber(event.target.value);
+                        // `inputNumber` rend `null` sur un champ vide COMME sur une saisie
+                        // illisible : une charge d'exploitation non déclarée reste inconnue
+                        // au lieu d'être écrite à zéro.
+                        const next = inputNumber(event.target.value);
                         if (next !== category.monthlyAmount)
                           void mutate({
                             action: "update_expense",
@@ -886,6 +906,11 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         subtitle="Une correction manuelle reste prioritaire sur toute future synchronisation"
       >
         <form className="form-grid" onSubmit={addTransaction}>
+          {formError ? (
+            <p className="form-error full" role="alert">
+              {formError}
+            </p>
+          ) : null}
           <label>
             Compte
             <select
@@ -978,6 +1003,11 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         subtitle="Aucune récurrence n’est jamais déduite automatiquement d’un historique"
       >
         <form className="form-grid" onSubmit={addRule}>
+          {formError ? (
+            <p className="form-error full" role="alert">
+              {formError}
+            </p>
+          ) : null}
           <label className="full">
             Nom
             <input

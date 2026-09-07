@@ -17,6 +17,7 @@ import {
 } from "@/lib/engine/business-equity";
 
 import { operationalToday } from "@/lib/financial-date";
+import { isRealCalendarDate } from "@/lib/presentation/input-parse";
 import { isScenarioVersionDefinition } from "@/lib/engine/scenario-engine";
 import type { ScenarioVersionDefinition } from "@/lib/engine/scenario-contracts";
 import { isGoalVersionDefinition } from "@/lib/engine/goal-engine";
@@ -43,10 +44,6 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
  * d'historique est comparée à des bornes de mois, une date fantôme y produirait des
  * dénominateurs faux plutôt qu'une erreur visible.
  */
-function isRealCalendarDate(value: string): boolean {
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}
 
 const cashFlowKind = z.enum([
   "INCOME",

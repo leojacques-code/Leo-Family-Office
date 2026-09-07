@@ -4,9 +4,32 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
-  AreaChart, BriefcaseBusiness, Building2, CalendarRange, ChevronDown, CircleDollarSign, Download,
-  FlaskConical, FolderLock, Landmark, LayoutDashboard, LogOut, Menu, Moon, Network, ReceiptText,
-  RefreshCw, Settings2, ShieldCheck, Sparkles, Sun, Target, TrendingUp, WalletCards, X, FileText,
+  AreaChart,
+  BriefcaseBusiness,
+  Building2,
+  CalendarRange,
+  ChevronDown,
+  CircleDollarSign,
+  Download,
+  FlaskConical,
+  FolderLock,
+  Landmark,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Moon,
+  Network,
+  ReceiptText,
+  RefreshCw,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  Sun,
+  Target,
+  TrendingUp,
+  WalletCards,
+  X,
+  FileText,
   type LucideIcon,
 } from "lucide-react";
 import type { DashboardState, ProjectionEnvelope } from "@/lib/types";
@@ -17,26 +40,32 @@ import { SectionContent } from "@/components/pages";
 import { formatDate } from "@/components/pages/shared";
 
 const ICONS: Record<string, LucideIcon> = {
-  "today": LayoutDashboard,
-  "advisor": Sparkles,
+  today: LayoutDashboard,
+  advisor: Sparkles,
   "net-worth": WalletCards,
   "cash-flow": CircleDollarSign,
-  "investments": TrendingUp,
-  "debt": Landmark,
+  investments: TrendingUp,
+  debt: Landmark,
   "real-estate": Building2,
-  "career": BriefcaseBusiness,
+  career: BriefcaseBusiness,
   "business-equity": Network,
-  "tax": ReceiptText,
-  "scenarios": AreaChart,
+  tax: ReceiptText,
+  scenarios: AreaChart,
   "decision-lab": FlaskConical,
-  "goals": Target,
-  "reports": FileText,
-  "documents": FolderLock,
-  "timeline": CalendarRange,
-  "settings": Settings2,
+  goals: Target,
+  reports: FileText,
+  documents: FolderLock,
+  timeline: CalendarRange,
+  settings: Settings2,
 };
 
-export function AppShell({ initialState, section }: { initialState: DashboardState; section: string }) {
+export function AppShell({
+  initialState,
+  section,
+}: {
+  initialState: DashboardState;
+  section: string;
+}) {
   const router = useRouter();
   const [state, setState] = useState(initialState);
   const [busy, setBusy] = useState(false);
@@ -50,7 +79,11 @@ export function AppShell({ initialState, section }: { initialState: DashboardSta
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mutation) });
+      const response = await fetch("/api/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mutation),
+      });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Modification impossible");
       setState(body);
@@ -72,22 +105,37 @@ export function AppShell({ initialState, section }: { initialState: DashboardSta
       setState(await response.json());
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "Actualisation impossible");
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function runProjection(scenarioId: string, years = 30, simulations = 3000, seed = 19082026) {
+  async function runProjection(
+    scenarioId: string,
+    years = 30,
+    simulations = 3000,
+    seed = 19082026,
+  ) {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/projection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scenarioId, years, simulations, seed }) });
+      const response = await fetch("/api/projection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenarioId, years, simulations, seed }),
+      });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Projection impossible");
       setProjection(body);
       return body as ProjectionEnvelope;
     } catch (projectionError) {
-      setError(projectionError instanceof Error ? projectionError.message : "Projection impossible");
+      setError(
+        projectionError instanceof Error ? projectionError.message : "Projection impossible",
+      );
       return null;
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   function toggleTheme() {
@@ -108,44 +156,150 @@ export function AppShell({ initialState, section }: { initialState: DashboardSta
     <div className="app-shell">
       <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
         <div className="sidebar-top">
-          <div className="brand-lockup"><span className="brand-mark">LF</span><span><strong>Léo</strong><small>Family Office</small></span></div>
-          <button className="icon-button mobile-close" onClick={() => setMobileOpen(false)} aria-label="Fermer le menu"><X size={18} /></button>
+          <div className="brand-lockup">
+            <span className="brand-mark">LF</span>
+            <span>
+              <strong>Léo</strong>
+              <small>Family Office</small>
+            </span>
+          </div>
+          <button
+            className="icon-button mobile-close"
+            onClick={() => setMobileOpen(false)}
+            aria-label="Fermer le menu"
+          >
+            <X size={18} />
+          </button>
         </div>
-        <div className="profile-switch"><span className="avatar">LC</span><span><strong>Patrimoine personnel</strong><small>EUR · France</small></span><ChevronDown size={14} /></div>
+        <div className="profile-switch">
+          <span className="avatar">LC</span>
+          <span>
+            <strong>Patrimoine personnel</strong>
+            <small>EUR · France</small>
+          </span>
+          <ChevronDown size={14} />
+        </div>
         <nav aria-label="Navigation principale">
           {NAV_ITEMS.map((item) => {
             const Icon = ICONS[item.id] ?? LayoutDashboard;
             const active = section === item.id;
             const className = `${active ? "active" : ""} ${item.break ? "nav-break" : ""}`.trim();
-            return <Link key={item.id} href={item.href} className={className} onClick={() => setMobileOpen(false)}><Icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.id === "scenarios" ? <span className="nav-count">{state.scenarios.length}</span> : null}</Link>;
+            return (
+              <Link
+                key={item.id}
+                href={item.href}
+                className={className}
+                onClick={() => setMobileOpen(false)}
+              >
+                <Icon size={17} strokeWidth={1.8} />
+                <span>{item.label}</span>
+                {item.id === "scenarios" ? (
+                  <span className="nav-count">{state.scenarios.length}</span>
+                ) : null}
+              </Link>
+            );
           })}
         </nav>
         <div className="sidebar-footer">
-          <div className="privacy-status"><ShieldCheck size={16} /><span><strong>Private workspace</strong><small>Read-only finance</small></span></div>
-          <button className="logout-button" onClick={logout}><LogOut size={16} />Déconnexion</button>
+          <div className="privacy-status">
+            <ShieldCheck size={16} />
+            <span>
+              <strong>Private workspace</strong>
+              <small>Read-only finance</small>
+            </span>
+          </div>
+          <button className="logout-button" onClick={logout}>
+            <LogOut size={16} />
+            Déconnexion
+          </button>
         </div>
       </aside>
-      {mobileOpen ? <button className="mobile-overlay" aria-label="Fermer le menu" onClick={() => setMobileOpen(false)} /> : null}
+      {mobileOpen ? (
+        <button
+          className="mobile-overlay"
+          aria-label="Fermer le menu"
+          onClick={() => setMobileOpen(false)}
+        />
+      ) : null}
       <div className="app-main">
         <header className="topbar">
-          <div className="topbar-left"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)} aria-label="Ouvrir le menu"><Menu size={19} /></button><div><span className="breadcrumb">Léo Family Office</span><strong>{label}</strong></div></div>
+          <div className="topbar-left">
+            <button
+              className="icon-button menu-button"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Ouvrir le menu"
+            >
+              <Menu size={19} />
+            </button>
+            <div>
+              <span className="breadcrumb">Léo Family Office</span>
+              <strong>{label}</strong>
+            </div>
+          </div>
           <div className="topbar-actions">
-            <span className="as-of"><span className="status-dot" />Au {asOfLabel}</span>
-            <button className="icon-button" onClick={refresh} aria-label="Actualiser" title="Actualiser"><RefreshCw className={busy ? "spin" : ""} size={17} /></button>
-            <button className="icon-button" onClick={toggleTheme} aria-label="Changer de thème" title="Changer de thème">{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button>
+            <span className="as-of">
+              <span className="status-dot" />
+              Au {asOfLabel}
+            </span>
+            <button
+              className="icon-button"
+              onClick={refresh}
+              aria-label="Actualiser"
+              title="Actualiser"
+            >
+              <RefreshCw className={busy ? "spin" : ""} size={17} />
+            </button>
+            <button
+              className="icon-button"
+              onClick={toggleTheme}
+              aria-label="Changer de thème"
+              title="Changer de thème"
+            >
+              {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
+            </button>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- download API route, not a page */}
-            <a className="button secondary export-button" href="/api/export?format=csv"><Download size={15} />Exporter</a>
+            <a className="button secondary export-button" href="/api/export?format=csv">
+              <Download size={15} />
+              Exporter
+            </a>
           </div>
         </header>
-        {error ? <div className="global-error"><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div> : null}
+        {error ? (
+          <div className="global-error">
+            <span>{error}</span>
+            <button onClick={() => setError("")}>
+              <X size={15} />
+            </button>
+          </div>
+        ) : null}
         <main className="content-area">
-          <SectionContent section={section} state={state} mutate={mutate} busy={busy} setExplanation={setExplanation} projection={projection} runProjection={runProjection} refresh={refresh} />
+          <SectionContent
+            section={section}
+            state={state}
+            mutate={mutate}
+            busy={busy}
+            setExplanation={setExplanation}
+            projection={projection}
+            runProjection={runProjection}
+            refresh={refresh}
+          />
         </main>
       </div>
-      <Modal open={Boolean(explanation)} onClose={() => setExplanation(null)} title={explanation?.title ?? "Explain calculation"} subtitle="Formule, inputs, provenance et niveau d’incertitude" wide>
+      <Modal
+        open={Boolean(explanation)}
+        onClose={() => setExplanation(null)}
+        title={explanation?.title ?? "Explain calculation"}
+        subtitle="Formule, inputs, provenance et niveau d’incertitude"
+        wide
+      >
         {explanation ? <ExplanationPanel explanation={explanation} /> : null}
       </Modal>
-      {busy ? <div className="busy-indicator"><RefreshCw className="spin" size={14} />Calcul en cours</div> : null}
+      {busy ? (
+        <div className="busy-indicator">
+          <RefreshCw className="spin" size={14} />
+          Calcul en cours
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -3,6 +3,8 @@
 import type { Mutation } from "@/lib/data/contracts";
 import type { DashboardState, ProjectionEnvelope } from "@/lib/types";
 import { nextDebtEvent } from "@/lib/engine/debt";
+import { parseNumberInput } from "@/lib/presentation/input-parse";
+import { numberErrorMessage } from "@/components/primitives/money-input";
 import type {
   CanonicalAggregate,
   CanonicalBalanceSheet,
@@ -56,7 +58,37 @@ export function formatDate(
   if (Number.isNaN(parsed.getTime())) return iso;
   return new Intl.DateTimeFormat("fr-FR", { ...options, timeZone: "UTC" }).format(parsed);
 }
-export const inputNumber = (value: string) => Number(value.replace(",", "."));
+/**
+ * Lecture d'une saisie numérique de formulaire.
+ *
+ * Rendait auparavant `Number(value.replace(",", "."))`, donc `0` sur une chaîne vide et
+ * `NaN` sur une saisie illisible. Un champ effacé déclarait un montant à zéro, sans qu'aucune
+ * ligne de code n'ait décidé d'un zéro : c'est la violation de `NULL ≠ ZERO` la plus en amont
+ * possible, elle entrait dans la chaîne par le clavier.
+ *
+ * Rend maintenant `null` pour « vide » comme pour « illisible », ce qui force chaque appelant
+ * à trancher explicitement. Les appelants qui ont besoin de distinguer les deux, ou d'un motif
+ * de refus, lisent `parseNumberInput` directement.
+ */
+export const inputNumber = (value: string): number | null => parseNumberInput(value).value;
+
+/**
+ * Lecture d'un champ OBLIGATOIRE : rend le nombre, ou un message français expliquant le refus.
+ *
+ * Sert aux soumissions de formulaire, où un champ requis manquant doit arrêter l'envoi au lieu
+ * de partir à zéro. La validation HTML `required` couvre le champ vide dans un navigateur, mais
+ * elle ne couvre ni une saisie illisible dans un champ texte, ni un formulaire soumis par un
+ * chemin qui la contourne.
+ */
+export function requiredNumberInput(
+  value: string,
+  label: string,
+): { value: number; error: null } | { value: null; error: string } {
+  const draft = parseNumberInput(value);
+  if (draft.state === "VALID") return { value: draft.value, error: null };
+  if (draft.state === "EMPTY") return { value: null, error: `${label} : montant à renseigner.` };
+  return { value: null, error: `${label} : ${numberErrorMessage(draft.reason).toLowerCase()}` };
+}
 
 export const NOT_COMPUTABLE = "Non calculable";
 

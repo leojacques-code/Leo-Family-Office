@@ -1018,7 +1018,9 @@ export function ScenariosTab({ position, context, currency }: TabProps) {
   const [taxRate, setTaxRate] = useState("");
   const [preMoney, setPreMoney] = useState("");
   const [primaryNewMoney, setPrimaryNewMoney] = useState("");
-  const [contribution, setContribution] = useState("0");
+  // Aucun nombre prérempli à zéro : l'aperçu de tour reste masqué tant que l'apport n'est
+  // pas DÉCLARÉ, plutôt que de projeter une dilution calculée sur un apport supposé nul.
+  const [contribution, setContribution] = useState("");
 
   const hold = projectBusinessHold({
     currentEquityValue: position.equityValue.central,

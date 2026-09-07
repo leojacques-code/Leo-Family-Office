@@ -26,12 +26,7 @@ export const GOAL_TARGET_METRICS = [
 export type GoalTargetMetric = (typeof GOAL_TARGET_METRICS)[number];
 
 export type GoalEvaluationStatus =
-  | "ACHIEVED"
-  | "ON_TRACK"
-  | "AT_RISK"
-  | "OFF_TRACK"
-  | "OVERDUE"
-  | "NOT_COMPUTABLE";
+  "ACHIEVED" | "ON_TRACK" | "AT_RISK" | "OFF_TRACK" | "OVERDUE" | "NOT_COMPUTABLE";
 
 export const GOAL_BLOCKER_CODES = [
   "GOAL_INACTIVE",

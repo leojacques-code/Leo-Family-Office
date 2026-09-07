@@ -22,13 +22,14 @@ import {
   formatEur,
   formatNative,
   formatNativeOptional,
-  inputNumber,
+  requiredNumberInput,
   netWorthExplanation,
 } from "@/components/pages/shared";
 
 function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const [modal, setModal] = useState<"add" | "edit" | null>(null);
   const [selected, setSelected] = useState<FinancialAccount | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState({
     institution: "",
     name: "",
@@ -46,11 +47,20 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
     sheet.contributions.find((line) => line.id === `debt:${liabilityId}`) ?? null;
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    // Le solde est LU avant d'être envoyé, et un refus de lecture arrête la soumission.
+    // Le helper de saisie rendait `Number("")`, donc `0` : un solde effacé partait à zéro
+    // et écrasait la vérité du compte sans laisser aucune trace.
+    const balance = requiredNumberInput(form.balance, "Solde");
+    if (balance.error !== null) {
+      setFormError(balance.error);
+      return;
+    }
+    setFormError(null);
     const ok = selected
       ? await mutate({
           action: "update_account",
           accountId: selected.id,
-          balance: inputNumber(form.balance),
+          balance: balance.value,
           balanceDate: form.date,
         })
       : await mutate({
@@ -58,7 +68,7 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
           institution: form.institution,
           name: form.name,
           accountType: form.accountType,
-          balance: inputNumber(form.balance),
+          balance: balance.value,
           currency: form.currency.toUpperCase(),
         });
     if (ok) {
@@ -239,6 +249,11 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
         subtitle="Toute nouvelle valeur conserve un historique daté"
       >
         <form className="form-grid" onSubmit={save}>
+          {formError ? (
+            <p className="form-error full" role="alert">
+              {formError}
+            </p>
+          ) : null}
           {!selected ? (
             <>
               <label>

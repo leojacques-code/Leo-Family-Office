@@ -27,6 +27,7 @@ import {
   chartCurrency,
   formatEur,
   inputNumber,
+  requiredNumberInput,
   projectionExplanation,
 } from "@/components/pages/shared";
 import {
@@ -55,6 +56,7 @@ function ScenariosPage({
     state.scenarios.find((scenario) => scenario.name === "Central")?.id ?? state.scenarios[0].id,
   );
   const [editing, setEditing] = useState<Scenario | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState({ name: "", description: "", horizonYears: "30" });
   const [eventForm, setEventForm] = useState({ label: "", date: "", amount: "", direction: "OUT" });
@@ -87,20 +89,68 @@ function ScenariosPage({
   async function saveScenario(event: React.FormEvent) {
     event.preventDefault();
     if (!editing) return;
-    const patch = {
-      annualReturn: inputNumber(form.annualReturn) / 100,
-      annualVolatility: inputNumber(form.annualVolatility) / 100,
-      annualInflation: inputNumber(form.annualInflation) / 100,
-      monthlySavings: inputNumber(form.monthlySavings),
-      investmentAllocationRate: inputNumber(form.investmentAllocationRate) / 100,
-      salaryGrowth: inputNumber(form.salaryGrowth) / 100,
-      stressProbability: inputNumber(form.stressProbability) / 100,
-      shockYear: form.shockYear ? inputNumber(form.shockYear) : null,
-      shockMagnitude: form.shockMagnitude ? inputNumber(form.shockMagnitude) / 100 : null,
+    /**
+     * Toutes les hypothèses de scénario sont LUES avant d'être envoyées, et le premier
+     * refus arrête la soumission.
+     *
+     * Avant, un champ effacé partait à `Number("") / 100`, donc `0` : un rendement annuel
+     * vidé devenait un rendement DÉCLARÉ à 0 %, et la trajectoire projetée s'aplatissait
+     * sans qu'aucune alerte ne le signale. Une hypothèse absente et une hypothèse à zéro ne
+     * sont pas la même chose, et c'est le sens même d'un scénario qui en dépend.
+     */
+    const required = {
+      annualReturn: requiredNumberInput(form.annualReturn, "Rendement annuel"),
+      annualVolatility: requiredNumberInput(form.annualVolatility, "Volatilité annuelle"),
+      annualInflation: requiredNumberInput(form.annualInflation, "Inflation annuelle"),
+      monthlySavings: requiredNumberInput(form.monthlySavings, "Épargne mensuelle"),
+      investmentAllocationRate: requiredNumberInput(form.investmentAllocationRate, "Part investie"),
+      salaryGrowth: requiredNumberInput(form.salaryGrowth, "Croissance salariale"),
+      stressProbability: requiredNumberInput(form.stressProbability, "Probabilité de stress"),
     };
-    const customAmount = eventForm.amount ? inputNumber(eventForm.amount) : 0;
+    const refused = Object.values(required).find((entry) => entry.error !== null);
+    if (refused && refused.error !== null) {
+      setFormError(refused.error);
+      return;
+    }
+    // Le refus est déjà écarté ci-dessus, mais TypeScript ne le déduit pas d'un `find`.
+    // Cette seconde garde le lui prouve SANS assertion de type : une assertion mentirait au
+    // compilateur, et le mensonge survivrait à un futur remaniement de la garde.
+    if (
+      required.annualReturn.value === null ||
+      required.annualVolatility.value === null ||
+      required.annualInflation.value === null ||
+      required.monthlySavings.value === null ||
+      required.investmentAllocationRate.value === null ||
+      required.salaryGrowth.value === null ||
+      required.stressProbability.value === null
+    ) {
+      setFormError("Hypothèses de scénario incomplètes.");
+      return;
+    }
+    // Les deux champs de choc sont FACULTATIFS : `inputNumber` rend `null` de lui-même sur
+    // un champ vide, et une année de choc non saisie reste inconnue, pas l'an zéro.
+    const shockMagnitude = inputNumber(form.shockMagnitude);
+    const patch = {
+      annualReturn: required.annualReturn.value / 100,
+      annualVolatility: required.annualVolatility.value / 100,
+      annualInflation: required.annualInflation.value / 100,
+      monthlySavings: required.monthlySavings.value,
+      investmentAllocationRate: required.investmentAllocationRate.value / 100,
+      salaryGrowth: required.salaryGrowth.value / 100,
+      stressProbability: required.stressProbability.value / 100,
+      shockYear: inputNumber(form.shockYear),
+      shockMagnitude: shockMagnitude === null ? null : shockMagnitude / 100,
+    };
+    setFormError(null);
+    // `null` et non `0` : un montant d'événement non saisi signifie « pas d'événement
+    // personnalisé », ce que le test ci-dessous exprime maintenant sans passer par un zéro.
+    const customAmount = inputNumber(eventForm.amount);
     const customEvent =
-      editing.definition && eventForm.label.trim() && eventForm.date && customAmount > 0
+      editing.definition &&
+      eventForm.label.trim() &&
+      eventForm.date &&
+      customAmount !== null &&
+      customAmount > 0
         ? {
             id: crypto.randomUUID(),
             operation: "ADD" as const,
@@ -212,10 +262,16 @@ function ScenariosPage({
   }
   async function createScenario(event: React.FormEvent) {
     event.preventDefault();
+    const horizonYears = requiredNumberInput(createForm.horizonYears, "Horizon");
+    if (horizonYears.error !== null) {
+      setFormError(horizonYears.error);
+      return;
+    }
+    setFormError(null);
     const definition = createScenarioVersion({
       scenarioId: crypto.randomUUID(),
       asOfDate: state.asOfDate,
-      horizonMonths: inputNumber(createForm.horizonYears) * 12,
+      horizonMonths: horizonYears.value * 12,
       market: { annualReturn: 0.05, annualVolatility: 0.12, annualInflation: 0.02 },
       investmentAllocationRate: 0,
     });
@@ -684,6 +740,11 @@ function ScenariosPage({
         subtitle="Une nouvelle version est créée à chaque sauvegarde"
       >
         <form className="form-grid" onSubmit={saveScenario}>
+          {formError ? (
+            <p className="form-error full" role="alert">
+              {formError}
+            </p>
+          ) : null}
           <label>
             Rendement annuel
             <input
@@ -848,6 +909,11 @@ function ScenariosPage({
         subtitle="Le scénario démarre de la trajectoire canonique ; vous pourrez ajouter les changements ensuite."
       >
         <form className="form-grid" onSubmit={createScenario}>
+          {formError ? (
+            <p className="form-error full" role="alert">
+              {formError}
+            </p>
+          ) : null}
           <label>
             Nom
             <input

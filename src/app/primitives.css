@@ -1,0 +1,145 @@
+/*
+ * Styles des primitives financières.
+ *
+ * Fichier SÉPARÉ de `globals.css`, qui porte 3 442 lignes accumulées par des PR
+ * successives : la section 10.2 du plan de refonte demande un CSS « découpé par primitives
+ * et workspaces ». C'est le premier de ces fichiers.
+ *
+ * Les tailles respectent le contrat de la section 10.2, que le CSS existant ne respecte pas
+ * encore : corps de texte à 14 px, aucun texte fonctionnel sous 12 px, contrôles d'au moins
+ * 40 px de haut, chiffres en `tabular-nums`. Le CSS historique descend jusqu'à 7,5 px ; sa
+ * remise à niveau est la phase 1, et elle ne se fait pas en abaissant celui-ci pour
+ * « rester cohérent ».
+ */
+
+.fin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fin-field-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/*
+ * FAIT ≠ HYPOTHÈSE, et la distinction doit être VISIBLE sans dépendre de la couleur seule :
+ * un liseré à gauche et une étiquette textuelle la portent, de sorte qu'elle survive au
+ * daltonisme comme à une impression en noir et blanc.
+ */
+.fin-field-assumption {
+  padding-left: 10px;
+  border-left: 3px solid var(--gold);
+}
+
+.fin-field-tag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--gold-soft);
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.fin-field-control {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.fin-input {
+  flex: 1 1 auto;
+  /* Section 10.2 : contrôles d'au moins 40 px. */
+  min-height: 40px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+/*
+ * Chiffres à largeur fixe : sans cela, une colonne de montants se décale à chaque frappe et
+ * la comparaison visuelle de deux valeurs devient fausse.
+ */
+.fin-input-money,
+.fin-input-percent,
+.fin-input-number {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.fin-input-date {
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-input::placeholder {
+  /*
+   * Le placeholder est un EXEMPLE de format, jamais une valeur. Il reste donc nettement plus
+   * pâle que le texte saisi, pour qu'aucune relecture ne le prenne pour une donnée.
+   */
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.fin-input:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+  border-color: var(--teal);
+}
+
+.fin-input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+
+.fin-input[aria-invalid="true"]:focus-visible {
+  outline-color: var(--red);
+}
+
+.fin-input:disabled {
+  background: var(--surface-tint);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.fin-field-unit {
+  display: flex;
+  align-items: center;
+  padding: 0 11px;
+  margin-left: -1px;
+  border: 1px solid var(--border);
+  border-radius: 0 9px 9px 0;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fin-field-control:has(.fin-field-unit) .fin-input {
+  border-radius: 9px 0 0 9px;
+}
+
+.fin-field-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.fin-field-error {
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
