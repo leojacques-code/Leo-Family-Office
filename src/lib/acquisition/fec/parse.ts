@@ -331,13 +331,7 @@ export function normalizeFecLine(
     credit = sens.direction === "CREDIT" ? amount : null;
     if (amount === null) {
       issues.push(
-        issue(
-          "FEC_AMOUNT_MISSING",
-          "ERROR",
-          "Colonne « Montant » non renseignée.",
-          "Montant",
-          null,
-        ),
+        issue("FEC_AMOUNT_MISSING", "ERROR", "Colonne « Montant » non renseignée.", "Montant", null),
       );
     }
   } else {

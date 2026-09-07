@@ -44,8 +44,7 @@ export function isGoalVersionDefinition(value: unknown): value is GoalVersionDef
   const target = item.target;
   const definition = target?.metric ? GOAL_METRIC_REGISTRY[target.metric] : undefined;
   const dateShape =
-    (item.targetDate === null ||
-      (typeof item.targetDate === "string" && realDate(item.targetDate))) &&
+    (item.targetDate === null || (typeof item.targetDate === "string" && realDate(item.targetDate))) &&
     (item.targetWindow === null ||
       (!!item.targetWindow &&
         realDate(item.targetWindow.startDate) &&
@@ -151,7 +150,10 @@ export function legacyGoalDefinition(input: {
   };
 }
 
-export function targetSatisfied(value: number, target: GoalVersionDefinition["target"]): boolean {
+export function targetSatisfied(
+  value: number,
+  target: GoalVersionDefinition["target"],
+): boolean {
   if (target.operator === "AT_LEAST") return value >= target.value;
   if (target.operator === "AT_MOST") return value <= target.value;
   return Math.abs(value - target.value) <= 1e-6;
@@ -255,18 +257,10 @@ export function evaluateGoalCurrent(input: {
 function pointsForTarget(
   goal: GoalVersionDefinition,
   trajectory: ScenarioPath,
-): {
-  candidates: ScenarioPathMetric[];
-  observation: ScenarioPathMetric | null;
-  blockers: GoalBlocker[];
-} {
+): { candidates: ScenarioPathMetric[]; observation: ScenarioPathMetric | null; blockers: GoalBlocker[] } {
   const points = [...trajectory.monthly].sort((a, b) => a.date.localeCompare(b.date));
   if (!points.length) {
-    return {
-      candidates: [],
-      observation: null,
-      blockers: [blocker("TRAJECTORY_NOT_COMPUTABLE", "Trajectoire vide")],
-    };
+    return { candidates: [], observation: null, blockers: [blocker("TRAJECTORY_NOT_COMPUTABLE", "Trajectoire vide")] };
   }
   const last = points.at(-1)!;
   if (goal.targetWindow) {
@@ -274,26 +268,18 @@ function pointsForTarget(
       return {
         candidates: [],
         observation: null,
-        blockers: [
-          blocker("HORIZON_BEFORE_DEADLINE", "L’horizon se termine avant la fenêtre cible"),
-        ],
+        blockers: [blocker("HORIZON_BEFORE_DEADLINE", "L’horizon se termine avant la fenêtre cible")],
       };
     }
     const candidates = points.filter(
-      (point) =>
-        point.date >= goal.targetWindow!.startDate && point.date <= goal.targetWindow!.endDate,
+      (point) => point.date >= goal.targetWindow!.startDate && point.date <= goal.targetWindow!.endDate,
     );
     return {
       candidates,
       observation: candidates.at(-1) ?? null,
       blockers: candidates.length
         ? []
-        : [
-            blocker(
-              "HISTORICAL_TARGET_VALUE_UNAVAILABLE",
-              "Aucun point mensuel dans la fenêtre cible",
-            ),
-          ],
+        : [blocker("HISTORICAL_TARGET_VALUE_UNAVAILABLE", "Aucun point mensuel dans la fenêtre cible")],
     };
   }
   if (goal.targetDate) {
@@ -406,10 +392,11 @@ export function evaluateGoalAgainstTrajectory(input: {
   const attainmentCandidates = input.goal.targetWindow
     ? selected.candidates
     : input.trajectory.monthly.filter((point) => point.date >= input.trajectory.asOfDate);
-  const firstAttainment = attainmentCandidates.find((point) => {
-    const metric = resolveProjectedGoalMetric(input.goal.target, point, input.reportingCurrency);
-    return metric.value !== null && targetSatisfied(metric.value, input.goal.target);
-  });
+  const firstAttainment = attainmentCandidates
+    .find((point) => {
+      const metric = resolveProjectedGoalMetric(input.goal.target, point, input.reportingCurrency);
+      return metric.value !== null && targetSatisfied(metric.value, input.goal.target);
+    });
   const windowSatisfied = selected.candidates.some((point) => {
     const metric = resolveProjectedGoalMetric(input.goal.target, point, input.reportingCurrency);
     return metric.value !== null && targetSatisfied(metric.value, input.goal.target);

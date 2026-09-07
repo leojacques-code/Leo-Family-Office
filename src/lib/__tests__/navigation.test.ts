@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_SECTION,
-  NAV_ITEMS,
-  isRoutedSection,
-  isValidSection,
-  sectionLabel,
-} from "@/lib/navigation";
+import { DEFAULT_SECTION, NAV_ITEMS, isRoutedSection, isValidSection, sectionLabel } from "@/lib/navigation";
 
 describe("navigation", () => {
   it("expose des données sérialisables entre serveur et client", () => {

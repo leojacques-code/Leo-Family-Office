@@ -182,13 +182,7 @@ function aggregateObservation(
 function sumAggregates(left: CanonicalAggregate, right: CanonicalAggregate): CanonicalAggregate {
   const blockers = [...new Set([...left.blockers, ...right.blockers])];
   if (left.value !== null && right.value !== null) {
-    return {
-      value: left.value + right.value,
-      knownValue: left.knownValue + right.knownValue,
-      status: "COMPLETE",
-      coverage: 1,
-      blockers: [],
-    };
+    return { value: left.value + right.value, knownValue: left.knownValue + right.knownValue, status: "COMPLETE", coverage: 1, blockers: [] };
   }
   return {
     value: null,
@@ -219,9 +213,7 @@ function contributionObservation(
       currency: context.reportingCurrency,
       observedAt: context.asOfDate,
       status: "NOT_COMPUTABLE",
-      blockers: [
-        blocker("ENTITY_NOT_FOUND", `Entité ${target.entityId} absente du bilan canonique`),
-      ],
+      blockers: [blocker("ENTITY_NOT_FOUND", `Entité ${target.entityId} absente du bilan canonique`)],
       provenance: {
         source: definition.source,
         methodologyVersion: "CANONICAL_BALANCE_SHEET_V2",
@@ -238,11 +230,7 @@ function contributionObservation(
     value,
     currency: context.reportingCurrency,
     observedAt: context.asOfDate,
-    status: missing.length
-      ? filtered.length === missing.length
-        ? "NOT_COMPUTABLE"
-        : "PARTIAL"
-      : "COMPLETE",
+    status: missing.length ? (filtered.length === missing.length ? "NOT_COMPUTABLE" : "PARTIAL") : "COMPLETE",
     blockers: [
       ...new Set(missing.flatMap((line) => [...line.fx.flags, ...(line.valuationBlockers ?? [])])),
     ].map((code) => blocker(code, code, definition.source)),
@@ -283,12 +271,7 @@ function targetPreconditions(
 ): GoalMetricObservation | null {
   const definition = GOAL_METRIC_REGISTRY[target.metric];
   if (!definition)
-    return unavailable(
-      target,
-      observedAt,
-      "METRIC_NOT_SUPPORTED",
-      `Métrique ${target.metric} inconnue`,
-    );
+    return unavailable(target, observedAt, "METRIC_NOT_SUPPORTED", `Métrique ${target.metric} inconnue`);
   if (!definition.allowedOperators.includes(target.operator)) {
     return unavailable(
       target,
@@ -298,12 +281,7 @@ function targetPreconditions(
     );
   }
   if (definition.entityRequirement === "REQUIRED" && target.entityId === null) {
-    return unavailable(
-      target,
-      observedAt,
-      "MISSING_ENTITY_TARGET",
-      "Cette métrique exige une entité cible",
-    );
+    return unavailable(target, observedAt, "MISSING_ENTITY_TARGET", "Cette métrique exige une entité cible");
   }
   if (target.currency === null)
     return unavailable(target, observedAt, "MISSING_CURRENCY", "Devise cible absente");
@@ -351,12 +329,7 @@ export function resolveCurrentGoalMetric(
         definition.source,
       );
     case "TOTAL_LIABILITIES":
-      return aggregateObservation(
-        target.metric,
-        sheet.totalLiabilities,
-        context,
-        definition.source,
-      );
+      return aggregateObservation(target.metric, sheet.totalLiabilities, context, definition.source);
     case "CONTRACTUAL_DEBT":
       return aggregateObservation(target.metric, sheet.contractualDebt, context, definition.source);
     case "SPECIFIC_DEBT_BALANCE":
@@ -372,8 +345,7 @@ export function resolveCurrentGoalMetric(
       return contributionObservation(
         target.metric,
         sheet.contributions.filter(
-          (line) =>
-            line.domain === "REAL_ESTATE" && line.side === "ASSET" && line.isAccountingPrimary,
+          (line) => line.domain === "REAL_ESTATE" && line.side === "ASSET" && line.isAccountingPrimary,
         ),
         context,
         target,
@@ -382,8 +354,7 @@ export function resolveCurrentGoalMetric(
       return contributionObservation(
         target.metric,
         sheet.contributions.filter(
-          (line) =>
-            line.domain === "BUSINESS_EQUITY" && line.side === "ASSET" && line.isAccountingPrimary,
+          (line) => line.domain === "BUSINESS_EQUITY" && line.side === "ASSET" && line.isAccountingPrimary,
         ),
         context,
         target,
@@ -445,3 +416,4 @@ export function resolveProjectedGoalMetric(
     },
   };
 }
+
