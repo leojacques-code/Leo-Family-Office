@@ -4,7 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { CalendarCheck } from "lucide-react";
 import { Callout, EmptyState, SectionHeader } from "@/components/ui";
-import { type SectionProps, formatDate, formatNative } from "@/components/pages/shared";
+import {
+  formatDate,
+  formatNative,
+  issueSummary,
+  type SectionProps,
+} from "@/components/pages/shared";
 import { buildTodayCockpit } from "@/lib/presentation/today-cockpit";
 import {
   buildTimelineView,
@@ -176,7 +181,7 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
                               {(item.conflict || item.blockers.length > 0) && (
                                 <p className="warning-text">
                                   {item.conflict ? "Conflit Event Engine. " : ""}
-                                  {item.blockers.join(", ") || "À arbitrer"}
+                                  {issueSummary(item.blockers) || "À arbitrer"}
                                 </p>
                               )}
                               <Link href={item.href}>Ouvrir le domaine propriétaire</Link>

@@ -14,13 +14,14 @@ import {
   SectionHeader,
 } from "@/components/ui";
 import {
-  type SectionProps,
   cashFlowExplanation,
   chartCurrency,
   formatDate,
   formatEur,
   inputNumber,
+  issueSummary,
   requiredNumberInput,
+  type SectionProps,
 } from "@/components/pages/shared";
 import { addMonths, monthBounds } from "@/lib/engine/debt";
 import { shouldDeriveBalance } from "@/lib/data/shared";
@@ -326,8 +327,8 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           tone="warning"
           title={`Qualité des données : ${QUALITY_LABELS[observed.dataQuality.status]}`}
         >
-          {observed.dataQuality.reasons.join(" · ")}. Les agrégats portent sur ce qui est réellement
-          classifié, sans substitution.
+          {issueSummary(observed.dataQuality.reasons)}. Les agrégats portent sur ce qui est
+          réellement classifié, sans substitution.
         </Callout>
       ) : null}
       <section className="two-column wide-left">

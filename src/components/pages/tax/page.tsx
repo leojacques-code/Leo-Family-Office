@@ -2,7 +2,12 @@
 
 import { Landmark, ReceiptText, ShieldCheck } from "lucide-react";
 import { Callout, EmptyState, MetricCard, SectionHeader } from "@/components/ui";
-import { OptionalCurrency, formatDate, type SectionProps } from "@/components/pages/shared";
+import {
+  formatDate,
+  issueSummary,
+  OptionalCurrency,
+  type SectionProps,
+} from "@/components/pages/shared";
 
 function TaxPage({ state }: SectionProps) {
   const calculation = state.taxCalculation;
@@ -59,7 +64,7 @@ function TaxPage({ state }: SectionProps) {
 
       {calculation?.blockers.length ? (
         <Callout tone="warning" title="Calcul bloqué">
-          {calculation.blockers.join(" · ")}. Complétez uniquement les faits ou règles réellement
+          {issueSummary(calculation.blockers)}. Complétez uniquement les faits ou règles réellement
           connus ; une donnée absente ne vaut pas zéro.
         </Callout>
       ) : null}

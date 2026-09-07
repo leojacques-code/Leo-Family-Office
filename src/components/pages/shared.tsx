@@ -5,6 +5,7 @@ import type { DashboardState, ProjectionEnvelope } from "@/lib/types";
 import { nextDebtEvent } from "@/lib/engine/debt";
 import { parseNumberInput } from "@/lib/presentation/input-parse";
 import { numberErrorMessage } from "@/components/primitives/money-input";
+import { translateIssues } from "@/lib/presentation/language";
 import type {
   CanonicalAggregate,
   CanonicalBalanceSheet,
@@ -92,6 +93,30 @@ export function requiredNumberInput(
 
 export const NOT_COMPUTABLE = "Non calculable";
 
+/**
+ * Réserves d'un moteur, rendues en une phrase française.
+ *
+ * Les pages écrivaient `blockers.join(" · ")`, ce qui affichait les codes moteur tels quels :
+ * l'utilisateur lisait « LIABILITY_ATTRIBUTION_MISSING · REAL_ESTATE_VALUATION_MISSING », et
+ * dans un cas un UUID entier apparaissait dans le texte. C'est le constat 5.4 du plan.
+ *
+ * Un code inconnu du registre n'est PAS affiché en repli : il serait exactement le défaut
+ * qu'on corrige. Il devient une mention neutre, et `translateIssues` le remonte par ailleurs
+ * comme un incident.
+ */
+export function issueSummary(codes: readonly string[]): string {
+  const { issues, untranslated } = translateIssues(codes);
+  const parts = issues.map((issue) => issue.label);
+  if (untranslated.length > 0) {
+    parts.push(
+      untranslated.length === 1
+        ? "un point non identifié"
+        : `${untranslated.length} points non identifiés`,
+    );
+  }
+  return parts.join(" · ");
+}
+
 /** Montant qui peut être NOT_COMPUTABLE : jamais de zéro affiché à la place d'un inconnu. */
 export function OptionalCurrency({
   value,
@@ -147,7 +172,9 @@ export function AggregateValue({
 }) {
   if (aggregate.value === null)
     return (
-      <span className="warning-text" title={aggregate.blockers.join(" · ")}>
+      // Les réserves sont TRADUITES avant d'atteindre l'infobulle : elle rendait
+      // « LIABILITY_ATTRIBUTION_MISSING · FX_MISSING », c'est-à-dire des codes moteur.
+      <span className="warning-text" title={issueSummary(aggregate.blockers)}>
         {NOT_COMPUTABLE}
       </span>
     );
@@ -365,7 +392,7 @@ export function allocationExplanation(
       unreliable.length
         ? " Une enveloppe dont la composition dépasse sa valeur comptable ne reçoit aucune exposition de marché : sa valeur comptable reste entière dans la tranche sans exposition connue, et les autres enveloppes conservent la leur."
         : ""
-    }${allocation.blockers.length ? ` Points ouverts : ${allocation.blockers.join(", ")}.` : ""}`,
+    }${allocation.blockers.length ? ` Points ouverts : ${issueSummary(allocation.blockers)}.` : ""}`,
   };
 }
 
@@ -389,7 +416,7 @@ export function assetsExplanation(state: DashboardState): Explanation {
     ],
     note: `Les positions PEA et CTO ne sont pas ajoutées : elles expliquent le solde du compte et évitent le double comptage.${
       sheet.grossAssets.value === null
-        ? ` Le total reste non calculable : ${sheet.grossAssets.blockers.join(", ")}.`
+        ? ` Le total reste non calculable : ${issueSummary(sheet.grossAssets.blockers)}.`
         : ""
     }`,
   };
@@ -470,7 +497,7 @@ export function liquidityExplanation(state: DashboardState): Explanation {
         label: "Résultat",
         value:
           coverage.value === null
-            ? `${NOT_COMPUTABLE}${coverage.blockers.length ? ` · ${coverage.blockers.join(", ")}` : ""}`
+            ? `${NOT_COMPUTABLE}${coverage.blockers.length ? ` · ${issueSummary(coverage.blockers)}` : ""}`
             : `${coverage.value.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} mois`,
         kind: "DERIVED",
         date: state.asOfDate,

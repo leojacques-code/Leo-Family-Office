@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { BrainCircuit, ChevronDown } from "lucide-react";
 import { Callout, SectionHeader } from "@/components/ui";
-import { formatDate, formatNative } from "@/components/pages/shared";
+import { formatDate, formatNative, issueSummary } from "@/components/pages/shared";
 import type { SectionProps } from "@/components/pages/shared";
 import { answerAdvisorIntent, buildAdvisorPacket } from "@/lib/advisor/advisor-core";
 import type { AdvisorIntent } from "@/lib/advisor/advisor-types";
@@ -121,7 +121,7 @@ export default function AdvisorPage({ state }: SectionProps) {
                     {item.blockers.length ? (
                       <div className="callout">
                         <strong>Codes techniques</strong>
-                        <p>{item.blockers.join(" · ")}</p>
+                        <p>{issueSummary(item.blockers)}</p>
                       </div>
                     ) : null}
                     {item.evidence.map((proof) => (

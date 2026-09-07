@@ -2,7 +2,12 @@
 
 import { BriefcaseBusiness, CalendarClock, CircleDollarSign, Gem } from "lucide-react";
 import { Callout, EmptyState, MetricCard, SectionHeader } from "@/components/ui";
-import { OptionalCurrency, formatDate, type SectionProps } from "@/components/pages/shared";
+import {
+  formatDate,
+  issueSummary,
+  OptionalCurrency,
+  type SectionProps,
+} from "@/components/pages/shared";
 
 function CareerPage({ state }: SectionProps) {
   const roles = state.careerRoles ?? [];
@@ -71,7 +76,7 @@ function CareerPage({ state }: SectionProps) {
 
           {tax?.blockers.length ? (
             <Callout tone="warning" title="Net non calculable honnêtement">
-              {tax.blockers.join(" · ")}. Le brut reste visible ; aucune règle fiscale ou donnée
+              {issueSummary(tax.blockers)}. Le brut reste visible ; aucune règle fiscale ou donnée
               manquante n’est remplacée par un taux implicite.
             </Callout>
           ) : null}

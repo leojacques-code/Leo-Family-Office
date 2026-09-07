@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { AlertTriangle, Check, CircleHelp, Info, X } from "lucide-react";
 import type { DataKind } from "@/lib/types";
+import { DATA_KIND_LABELS } from "@/lib/presentation/language";
 
 const eur = new Intl.NumberFormat("fr-FR", {
   style: "currency",
@@ -51,16 +52,24 @@ export function Percent({ value, sign = false }: { value: number | null; sign?: 
   );
 }
 
+/**
+ * Nature d'une donnée.
+ *
+ * Les six libellés étaient écrits en ANGLAIS ici même : « Actual », « User assumption »,
+ * « Model assumption », « External », « Derived », « Missing ». Ce sont les codes internes à
+ * peine déguisés, dans une interface dont le plan de refonte exige qu'elle soit entièrement
+ * française. Ils viennent maintenant du registre de langage, unique source de ces mots.
+ *
+ * Le `title` porte la définition, parce qu'un badge de deux mots ne transmet pas à lui seul
+ * que ACTUAL ≠ USER_ASSUMPTION ≠ MODEL_ASSUMPTION.
+ */
 export function DataBadge({ kind }: { kind: DataKind }) {
-  const labels: Record<DataKind, string> = {
-    ACTUAL: "Actual",
-    USER_ASSUMPTION: "User assumption",
-    MODEL_ASSUMPTION: "Model assumption",
-    EXTERNAL_DATA: "External",
-    DERIVED: "Derived",
-    MISSING: "Missing",
-  };
-  return <span className={`data-badge ${kind.toLowerCase()}`}>{labels[kind]}</span>;
+  const entry = DATA_KIND_LABELS[kind];
+  return (
+    <span className={`data-badge ${kind.toLowerCase()}`} title={entry.definition}>
+      {entry.label}
+    </span>
+  );
 }
 
 export function SectionHeader({

@@ -5,7 +5,7 @@ import { ChevronDown, Download, Printer } from "lucide-react";
 import { useMemo, useState } from "react";
 import { SectionHeader } from "@/components/ui";
 import type { SectionProps } from "@/components/pages/shared";
-import { formatDate, formatNative } from "@/components/pages/shared";
+import { formatDate, formatNative, issueSummary } from "@/components/pages/shared";
 import { buildInstitutionalReport } from "@/lib/reporting/report-builder";
 import type { ReportType } from "@/lib/reporting/report-types";
 
@@ -134,7 +134,7 @@ export default function ReportsPage({ state }: SectionProps) {
         {report.manifest.blockers.length ? (
           <div className="callout">
             <strong>Limites explicites</strong>
-            <p>{report.manifest.blockers.join(" · ")}</p>
+            <p>{issueSummary(report.manifest.blockers)}</p>
           </div>
         ) : null}
       </section>
