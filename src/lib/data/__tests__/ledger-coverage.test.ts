@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { completeMonthsPeriod, compareSurplusToScenario } from "@/lib/engine/cash-flow";
 import { readLedgerCoverage } from "@/lib/data/shared";
+import { operationalToday } from "@/lib/financial-date";
 import { mutationSchema } from "@/lib/validation/mutations";
 import type { ExpenseCategory, Provenance, Transaction } from "@/lib/types";
 
@@ -8,10 +9,24 @@ describe("CASE AN — validation", () => {
   const parse = (startDate: string | null) =>
     mutationSchema.safeParse({ action: "set_ledger_coverage", startDate, source: "MANUAL" });
 
-  it("refuse une date postérieure à la date d’observation", () => {
-    // AS_OF_DATE vaut 2026-08-19 : certifier exhaustif un historique à venir n'a aucun sens.
-    expect(parse("2026-12-01").success).toBe(false);
-    expect(parse("2026-08-20").success).toBe(false);
+  /**
+   * Les bornes se DÉRIVENT du jour courant, elles ne sont pas écrites en dur.
+   *
+   * Ce test affirmait auparavant le refus du 2026-08-20, parce que la borne était la
+   * constante `AS_OF_DATE = "2026-08-19"`. Il prouvait donc le bug au lieu de l'invariant :
+   * le lendemain de l'arrêté, le produit refusait toute déclaration de couverture. Un test
+   * dont les bornes sont littérales périme, et il périme en verrouillant la faute.
+   */
+  const shift = (days: number) => {
+    const base = new Date(`${operationalToday()}T00:00:00Z`);
+    base.setUTCDate(base.getUTCDate() + days);
+    return base.toISOString().slice(0, 10);
+  };
+
+  it("refuse une date postérieure au jour courant", () => {
+    // Certifier exhaustif un historique qui n'a pas encore eu lieu n'a aucun sens.
+    expect(parse(shift(1)).success).toBe(false);
+    expect(parse(shift(120)).success).toBe(false);
   });
 
   it("refuse une date qui n’existe pas au calendrier", () => {
@@ -22,10 +37,11 @@ describe("CASE AN — validation", () => {
     expect(parse("01/05/2026").success).toBe(false);
   });
 
-  it("accepte une date passée et accepte null", () => {
-    expect(parse("2026-05-01").success).toBe(true);
+  it("accepte une date passée, le jour courant, et accepte null", () => {
+    expect(parse(shift(-120)).success).toBe(true);
     expect(parse(null).success).toBe(true);
-    expect(parse("2026-08-19").success).toBe(true);
+    // La borne est inclusive : le jour courant est un jour révolu au moment où on le lit.
+    expect(parse(shift(0)).success).toBe(true);
   });
 
   it("refuse une provenance inventée", () => {

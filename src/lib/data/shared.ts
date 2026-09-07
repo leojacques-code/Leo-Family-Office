@@ -36,7 +36,6 @@ import type {
   Transaction,
 } from "@/lib/types";
 
-export const AS_OF_DATE = "2026-08-19";
 export const REPORTING_CURRENCY = "EUR";
 
 /**
@@ -272,7 +271,15 @@ export function readLoanTerms(
 
 export const LEDGER_WINDOW_MONTHS = 6;
 
-export function ledgerWindowStart(asOfDate: string = AS_OF_DATE): string {
+/**
+ * Début de la fenêtre de ledger, à partir d'une date OPÉRATIONNELLE reçue de l'appelant.
+ *
+ * Aucune valeur par défaut : ce paramètre valait `AS_OF_DATE`, une constante gelée au
+ * 19 août 2026, et la fenêtre de six mois restait donc immobile pendant que le calendrier
+ * avançait. Un défaut qui substitue une date à une date manquante est du même ordre qu'un
+ * zéro qui remplace un montant manquant : l'appelant doit dire à quelle date il lit.
+ */
+export function ledgerWindowStart(asOfDate: string): string {
   return monthBounds(addMonths(asOfDate, -(LEDGER_WINDOW_MONTHS - 1))).start;
 }
 
@@ -324,7 +331,8 @@ export function deriveFlowMetrics(
   incomes: IncomeSource[],
   expenses: ExpenseCategory[],
   transactions: Transaction[] = [],
-  asOfDate: string = AS_OF_DATE,
+  // Aucun défaut : la date d'arrêté est une donnée de l'appel, pas une constante du module.
+  asOfDate: string,
 ): DeclaredFlowMetrics {
   const activeIncomes = incomes.filter((income) => income.active);
   const monthlyIncome =
