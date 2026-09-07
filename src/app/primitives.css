@@ -143,3 +143,81 @@
   font-weight: 600;
   line-height: 1.45;
 }
+
+/*
+ * Volet de détail technique.
+ *
+ * Le constat 5.4 du plan n'interdit pas les empreintes et les identifiants : il interdit
+ * qu'ils occupent la surface principale. Ce volet est replié par défaut et se lit en
+ * `monospace`, parce qu'une empreinte se recopie caractère par caractère et qu'un `0` ne doit
+ * pas s'y confondre avec un `O`.
+ */
+.fin-technical {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+
+.fin-technical-summary {
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 600;
+  list-style: revert;
+}
+
+.fin-technical-summary:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.fin-technical-list {
+  margin: 10px 0 0;
+  display: grid;
+  gap: 7px;
+}
+
+.fin-technical-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.fin-technical-row dt {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.fin-technical-row dd {
+  margin: 0;
+  min-width: 0;
+  /* Une empreinte est longue : elle passe à la ligne plutôt que d'élargir la page. */
+  overflow-wrap: anywhere;
+}
+
+.fin-technical-row code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  color: var(--text-soft);
+}
+
+.fin-technical-copy {
+  margin-top: 11px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fin-technical-copy:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}

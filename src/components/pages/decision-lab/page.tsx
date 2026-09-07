@@ -15,6 +15,7 @@ import {
   type SectionProps,
   formatDate,
 } from "@/components/pages/shared";
+import { TechnicalDetails } from "@/components/primitives/technical-details";
 
 const METRICS: Array<[keyof Omit<DecisionMetricSnapshot, "date">, string]> = [
   ["netWorth", "Patrimoine net"],
@@ -460,35 +461,28 @@ export default function DecisionLabPage({ state, mutate, busy }: SectionProps) {
             <div className="panel-header">
               <div>
                 <span className="eyebrow">Provenance</span>
-                <h2>Run reproductible</h2>
+                <h2>Reproductibilité de ce calcul</h2>
               </div>
             </div>
-            <dl className="loan-facts">
-              <div>
-                <dt>Baseline fingerprint</dt>
-                <dd>{result.run.baselineFingerprint}</dd>
-              </div>
-              <div>
-                <dt>Méthodologie</dt>
-                <dd>{result.run.methodologyVersion}</dd>
-              </div>
-              <div>
-                <dt>Mode</dt>
-                <dd>{result.run.runMode}</dd>
-              </div>
-              <div>
-                <dt>Case version</dt>
-                <dd>v{result.run.caseVersion}</dd>
-              </div>
-              <div>
-                <dt>État stale</dt>
-                <dd>{result.run.staleStatus}</dd>
-              </div>
-              <div>
-                <dt>Moteurs</dt>
-                <dd>{result.options[0]?.provenance.engines.join(" · ")}</dd>
-              </div>
-            </dl>
+            {/* Ces six valeurs sont des identifiants techniques : une empreinte, une version
+                de méthodologie, un mode d'exécution, un état de péremption. Elles servent à
+                rejouer un calcul à l'identique, pas à décider. Elles occupaient un panneau
+                entier de la surface principale, en anglais ; le constat 5.4 les replie dans
+                un volet copiable, sans les perdre. */}
+            <TechnicalDetails
+              entries={[
+                { label: "Empreinte de référence", value: result.run.baselineFingerprint },
+                { label: "Version de méthodologie", value: result.run.methodologyVersion },
+                { label: "Mode d’exécution", value: result.run.runMode },
+                { label: "Version du cas", value: `v${result.run.caseVersion}` },
+                { label: "État de péremption", value: result.run.staleStatus },
+                {
+                  label: "Moteurs mobilisés",
+                  value: result.options[0]?.provenance.engines.join(" · ") ?? "—",
+                },
+              ]}
+              summary="Détail technique du calcul"
+            />
           </section>
         </>
       ) : null}

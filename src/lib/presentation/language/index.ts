@@ -48,6 +48,72 @@ export const DATA_KIND_LABELS: Readonly<Record<DataKind, DataKindLabel>> = {
   },
 };
 
+/**
+ * Niveau de preuve d'une grandeur, en français.
+ *
+ * OBSERVED ≠ CONTRACTUAL ≠ PROJECTED est un invariant de la constitution du produit, et c'est
+ * une taxonomie DISTINCTE de `DataKind` : la première dit d'où vient la certitude, la seconde
+ * dit qui a produit la valeur. Une même grandeur peut être `ACTUAL` et `OBSERVED`, ou
+ * `ACTUAL` et `CONTRACTUAL` : un encours relevé sur un extrait et un encours calculé depuis
+ * l'échéancier signé sont tous deux des faits, mais pas de la même façon.
+ *
+ * La bande de provenance d'Aujourd'hui rendait les deux taxonomies côte à côte, en majuscules
+ * et sans soulignés, comme si elles n'en formaient qu'une.
+ */
+export type EvidenceLevel = "OBSERVED" | "CONTRACTUAL" | "PROJECTED";
+
+export const EVIDENCE_LEVEL_LABELS: Readonly<Record<EvidenceLevel, DataKindLabel>> = {
+  OBSERVED: {
+    label: "Observé",
+    definition: "Constaté sur une pièce : relevé, extrait, document daté.",
+  },
+  CONTRACTUAL: {
+    label: "Contractuel",
+    definition: "Découle d’un engagement signé : échéancier, bail, contrat de travail.",
+  },
+  PROJECTED: {
+    label: "Projeté",
+    definition: "Produit par une projection. Ce n’est ni un constat ni un engagement.",
+  },
+};
+
+/**
+ * Complétude d'un calcul, en français.
+ *
+ * `READY`, `PARTIAL` et `NOT_COMPUTABLE` étaient rendus TELS QUELS sur Aujourd'hui et sur
+ * Beyonder, les deux pages les plus visibles du produit. Ce sont des unions de moteur
+ * (`GlobalFinancialModelCompleteness`, `DecisionCompleteness`), pas des mots français.
+ *
+ * La traduction porte l'état de présentation avec elle : « partiel » ne dit rien à lui seul,
+ * mais `PARTIAL` associé à `RENDER_WITH_RESERVE` dit à la surface de montrer la valeur ET sa
+ * limite, au lieu de la masquer ou de l'afficher sans réserve.
+ */
+export type CompletenessCode = "READY" | "PARTIAL" | "NOT_COMPUTABLE";
+
+export const COMPLETENESS_LABELS: Readonly<
+  Record<CompletenessCode, { readonly label: string; readonly state: PresentationState }>
+> = {
+  READY: { label: "Calcul complet", state: "AVAILABLE" },
+  PARTIAL: { label: "Calcul partiel", state: "PARTIAL" },
+  NOT_COMPUTABLE: { label: "Calcul impossible en l’état", state: "UNKNOWN_ACTIVATABLE" },
+};
+
+/**
+ * Traduit une complétude. Un code inattendu ne s'affiche PAS en repli : il devient un
+ * incident, parce que le produit ne sait alors pas ce qu'il devrait dire.
+ */
+export function translateCompleteness(code: string): {
+  readonly label: string;
+  readonly state: PresentationState;
+} {
+  return (
+    COMPLETENESS_LABELS[code as CompletenessCode] ?? {
+      label: "État de calcul inconnu",
+      state: "SYSTEM_ERROR" as PresentationState,
+    }
+  );
+}
+
 /** Réserve traduite, prête à être affichée, avec son identifiant technique mis à part. */
 export interface TranslatedIssue {
   /** Ce que l'utilisateur lit. */

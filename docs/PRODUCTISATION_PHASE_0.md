@@ -406,18 +406,125 @@ un projet `dom` s'ajoute pour les `*.test.tsx`.
 
 ## Étape 5 : implémentation
 
-Voir le diff de la branche. Ordre suivi : contexte de date, correction des dates fabriquées,
-langage, primitives, registres, gates, tests.
+Cinq lots, dans cet ordre, chacun avec ses gates verts avant le suivant.
+
+### Lot 1 : la date financière
+
+`src/lib/financial-date.ts` remplace la constante par un contexte à rôles nommés. Les 21 usages
+du repository sont reclassés UN PAR UN, pas remplacés en bloc : fenêtre de ledger, année fiscale
+et règles fiscales en vigueur sur `today` ; contextes de domaine, bilan canonique, ledger et
+analytics portefeuille, immobilier, Business Equity et métriques de flux sur `asOfDate` ; les
+trois écritures sur `today`, parce qu'une écriture constate un acte au moment où il est fait.
+
+Deux conséquences non prévues par le plan sont apparues à l'implémentation :
+
+1. `mutations.ts` bornait deux saisies à la constante. Le lendemain de l'arrêté, toute date de
+   fait Business et toute déclaration de couverture de ledger étaient donc REFUSÉES. Le produit
+   devenait inutilisable le jour suivant sa clôture.
+2. Le seul test en échec, `ledger-coverage.test.ts`, affirmait le refus du 20 août 2026. Il
+   prouvait le bug au lieu de l'invariant. Ses bornes se dérivent maintenant du jour courant, de
+   sorte qu'il ne périme plus.
+
+### Lot 2 : la saisie
+
+`src/lib/presentation/input-parse.ts` rend un résultat DISCRIMINÉ, et quatre primitives
+(`MoneyInput`, `PercentInput`, `DateInput`, `OptionalNumberInput`) distinguent la valeur
+committée, la chaîne en cours d'édition et le résultat de lecture. C'est l'absence de cette
+distinction qui produisait le `015000` du constat 5.2.
+
+Les 24 appels d'`inputNumber` ont été corrigés un par un, TypeScript ayant servi à les trouver.
+Trois fabrications de zéro étaient réellement atteignables :
+
+- un rendement annuel effacé partait à `Number("") / 100`, donc un rendement DÉCLARÉ à 0 %, et la
+  trajectoire projetée s'aplatissait sans alerte ;
+- une priorité d'objectif vide devenait `Math.max(1, Math.trunc(0))`, donc priorité MAXIMALE, et
+  l'objectif remontait en tête du cockpit ; une cible vide devenait un objectif de 0 € atteint
+  d'office ;
+- `eventForm.amount ? … : 0` écrivait le zéro en clair.
+
+`optionalNumber` de Business Equity était une TROISIÈME convention de lecture, qui acceptait
+`1e5` et confondait illisible avec vide. Elle délègue désormais à la lecture unique.
+`isRealCalendarDate` était dupliquée dans la validation : deux définitions, c'est un champ qui
+accepte ce que l'écriture refuse.
+
+### Lot 3 : le langage
+
+`src/lib/presentation/language/` porte les huit états de la section 6.3, leur comportement, la
+taxonomie d'inbox à quatre familles, les six natures de donnée en français et 172 traductions de
+codes de réserve.
+
+Le registre est construit sur la source AUTORITATIVE et non sur une heuristique. Une première
+extraction par proximité du mot `blockers` rendait 284 candidats dont la moitié étaient des
+membres d'unions de domaine (`RENT_RECEIPT`, `REVENUE_MULTIPLE`, `MODEL_ASSUMPTION`) : les
+traduire comme des réserves aurait fait passer une valeur normale pour un problème.
+
+Business Equity portait DÉJÀ son traducteur français, `business-equity-explain.ts`, et il fait
+mieux : il résout un identifiant de société en NOM et date le motif. Ses 59 codes ont donc été
+RETIRÉS du registre après y avoir été écrits, et ses unions sont exclues du gate avec leur motif.
+Deux libellés concurrents pour le même code, sans que rien ne dise lequel fait foi, aurait été
+pire que l'absence de traduction.
+
+### Lot 4 : les registres
+
+Les quatre contrats de la section 39, les quatorze manifestes de page, 48 KPI et 44
+objectifs. Ces trois nombres se lisent à leur source, `pages.ts`, `kpis.ts` et
+`objectives.ts` : la constitution du dépôt rappelle qu'un compte écrit de mémoire dérive,
+et la section 5 de `CLAUDE.md` en porte trois exemples.
+Le registre des champs reste VIDE : la section 39 place les `FieldDefinition` « avant
+l'implémentation d'une page », donc dans la phase du domaine.
+
+### Lot 5 : les gates et le volet technique
+
+Six sites rendaient une empreinte en clair, dont les bandeaux d'Aujourd'hui et de Beyonder, les
+deux pages les plus consultées. Aujourd'hui rendait en outre `kind.replaceAll("_", " ")`, ce qui
+donnait « MODEL ASSUMPTION » : un code dont on a retiré la ponctuation n'est pas devenu du
+français. La même bande mélangeait DEUX taxonomies distinctes, la nature de la donnée et le
+niveau de preuve, comme si elles n'en formaient qu'une.
+
+`TechnicalDetails` est le volet prévu par le constat 5.4 : replié par défaut, copiable,
+`monospace`. Il est le SEUL endroit exempté du gate de contenu, et l'exemption est nominative.
 
 ## Étape 6 : validation
 
 | Gate                 | État                                                            |
 | -------------------- | --------------------------------------------------------------- |
-| `npm run lint`       | à exécuter en fin de phase                                      |
-| `npm run test`       | à exécuter en fin de phase                                      |
-| `npm run build`      | à exécuter en fin de phase                                      |
+| `npm run lint`       | vert                                                            |
+| `npm run test`       | vert, 1 966 tests dans 106 fichiers, dont 27 tests composants   |
+| `npx tsc --noEmit`   | vert                                                            |
+| `npm run build`      | vert                                                            |
 | `npm run gate:local` | non requis : le périmètre DB est inchangé (section 36 étape 6)  |
 | `npm run db:verify`  | non requis, et hors environnement d'agent en tout état de cause |
+
+Les quatre gates ajoutés par cette phase tournent dans `npm run test`, donc dans `npm run check`
+sans modification de script :
+
+| Gate                      | Ce qu'il refuse                                                           |
+| ------------------------- | ------------------------------------------------------------------------- |
+| `language.test.ts`        | un code de réserve déclaré sans traduction, et une traduction morte       |
+| `registry.test.ts`        | les cinq refus vérifiables de la section 39, plus trois contrôles croisés |
+| `surface-content.test.ts` | une empreinte, un UUID ou un identifiant rendu comme texte                |
+| `money-input.test.tsx`    | qu'effacer un montant produise un zéro                                    |
+
+Chacun est prouvé sur un cas construit exprès, et pas seulement sur les registres livrés : une
+règle qui ne trouve rien peut être verte parce qu'elle est correcte, ou verte parce qu'elle ne
+cherche pas. Le contrôle de contenu a d'ailleurs été corrigé par son propre test, qui a révélé
+qu'il manquait `<p>Empreinte : {…}</p>`, c'est-à-dire le motif exact que la page Rapports
+portait.
+
+### Limites connues des gates, écrites plutôt que découvertes plus tard
+
+- le gate de traduction lit les unions de réserve DÉCLARÉES. Les moteurs qui poussent leurs codes
+  en littéraux sans type nommé (bilan canonique, analytics portefeuille, cash-flow, carrière,
+  modèle mensuel) y échappent. `translateIssues` les couvre à l'exécution en traitant tout code
+  inconnu comme un incident. Faire déclarer leur union à ces moteurs fermerait la brèche, mais
+  reviendrait à modifier `src/lib/engine/`, hors périmètre ;
+- le contrôle de contenu est LEXICAL et non syntaxique : il ne suit pas une variable
+  intermédiaire, et il ne lit pas le rendu réel. Un contrôle exact demanderait de monter les
+  pages avec un état complet, ce qui est le travail de la recette de la section 41 ;
+- le sixième refus de la section 39, « une section générée dynamiquement hors manifeste », n'est
+  pas vérifiable tant qu'aucune page n'est branchée sur son manifeste. `unverifiableRules()` le
+  NOMME plutôt que de le taire : un gate silencieux sur une règle donne l'illusion qu'elle est
+  tenue.
 
 ## Étape 7 : revue indépendante
 
