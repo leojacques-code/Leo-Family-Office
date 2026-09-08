@@ -41,6 +41,7 @@ import { WorkspaceShell } from "@/components/workstation/workspace-shell";
 import { Inspector, type InspectorFact } from "@/components/workstation/inspector";
 import { SourceRail, type RailSource } from "@/components/workstation/source-rail";
 import { railSourcesFor } from "@/lib/presentation/rail-sources";
+import { PrimaryActionProvider } from "@/components/workstation/primary-action";
 
 /**
  * Icônes des six entrées, selon le mapping stable du §9 de la spécification V10 : les icônes
@@ -110,6 +111,14 @@ export function AppShell({
     section: string;
     id: string;
   } | null>(null);
+  /**
+   * Action primaire enregistrée par la page courante, zone A du §17.
+   *
+   * `null` quand la page ne sert pas encore son action déclarée : le bouton n'est alors pas
+   * rendu, plutôt que rendu inerte. Un contrôle qui ne fait rien coûte plus qu'un contrôle
+   * absent, parce qu'il se présente comme un chemin praticable.
+   */
+  const [primaryAction, setPrimaryAction] = useState<{ run: () => void } | null>(null);
 
   async function mutate(mutation: Mutation) {
     setBusy(true);
@@ -459,6 +468,17 @@ export function AppShell({
             manifest={manifest}
             mode={mode}
             onModeChange={setMode}
+            primaryAction={
+              // Le libellé vient du MANIFESTE, jamais du code de la page : le §17 autorise
+              // une action primaire au plus, et le §16 interdit à un agent de choisir son
+              // intitulé. Les deux conditions sont nécessaires — un libellé sans action
+              // rendrait un bouton inerte, une action sans libellé un bouton sans nom.
+              manifest?.primaryAction && primaryAction ? (
+                <button className="button primary" onClick={primaryAction.run} type="button">
+                  {manifest.primaryAction}
+                </button>
+              ) : undefined
+            }
             sourceRail={
               <SourceRail
                 onSelect={(id) => setSelectedSource({ section, id })}
@@ -467,16 +487,18 @@ export function AppShell({
               />
             }
           >
-            <SectionContent
-              busy={busy}
-              mutate={mutate}
-              projection={projection}
-              refresh={refresh}
-              runProjection={runProjection}
-              section={section}
-              setExplanation={setExplanation}
-              state={state}
-            />
+            <PrimaryActionProvider onChange={setPrimaryAction}>
+              <SectionContent
+                busy={busy}
+                mutate={mutate}
+                projection={projection}
+                refresh={refresh}
+                runProjection={runProjection}
+                section={section}
+                setExplanation={setExplanation}
+                state={state}
+              />
+            </PrimaryActionProvider>
           </WorkspaceShell>
         </div>
       </div>

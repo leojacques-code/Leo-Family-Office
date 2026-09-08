@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
 import { Archive, Edit3, Flag, Pause, Play, Plus, Save } from "lucide-react";
 import { Callout, Currency, EmptyState, Modal, SectionHeader } from "@/components/ui";
 import { type SectionProps, formatDate, requiredNumberInput } from "@/components/pages/shared";
@@ -158,6 +159,15 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
       "",
   );
   const [creating, setCreating] = useState(false);
+  /**
+   * Action primaire de la zone A, §17 du plan de refonte.
+   *
+   * §29 : le formulaire essentiel d'un objectif. Le manifeste déclare « Créer un objectif ».
+   * Le libellé n'est PAS écrit ici : il vient du manifeste, et la page ne fournit que
+   * ce que l'action déclenche. Écrire les deux au même endroit permettrait à un écran de
+   * proposer une action que son contrat ne déclare pas.
+   */
+  useRegisterPrimaryAction(() => setCreating(true));
   const [editing, setEditing] = useState<Goal | null>(null);
   const [form, setForm] = useState<GoalForm>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
@@ -307,11 +317,6 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
         eyebrow="Goals engine"
         title="Goals"
         description="Des intentions versionnées, évaluées sur le bilan canonique et la trajectoire Scenarios V2 sélectionnée."
-        actions={
-          <button className="button primary" onClick={openCreate} disabled={busy}>
-            <Plus size={15} /> Nouvel objectif
-          </button>
-        }
       />
 
       <section className="panel">
