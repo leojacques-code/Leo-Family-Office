@@ -56,6 +56,96 @@ export type RealityMode =
  */
 export type ViewportStrategy = "DESKTOP_ONLY" | "DESKTOP_AND_TABLET" | "ALL_VIEWPORTS";
 
+// ─── Zone B : déclaration de source (section 17, §6 de V10) ───────────────────────────────
+
+/**
+ * Catégories de source, reprises du §6 de V10.
+ *
+ * La liste est CLOSE, et elle est ici plutôt que dans le composant de rendu parce qu'un
+ * manifeste doit pouvoir la référencer : une catégorie déclarée par une page et inconnue du
+ * rail serait une composition que rien ne peut afficher. « Data », « Inputs », « Context » et
+ * « Truth » y restent refusés — ils ne disent pas à l'utilisateur quelle pièce aller chercher
+ * dans ses dossiers.
+ */
+export type SourceCategory =
+  | "BANQUE"
+  | "ECHEANCIER"
+  | "CONTRAT"
+  | "BULLETIN"
+  | "RELEVE_COURTIER"
+  | "LIASSE"
+  | "FEC"
+  | "ACTE"
+  | "DEVIS"
+  | "AVIS_FISCAL"
+  // Les trois suivantes viennent du §17 du PLAN, qui énumère « contrat, échéancier, compte,
+  // relevé, fiche de paie, liasse, FEC, acte, BAIL, avis fiscal, VALORISATION, DOCUMENT ou
+  // donnée manuelle ». Le §6 de V10 les omet. Le plan tranche, comme pour le plancher
+  // typographique : V10 est une aide de conception, le plan est la référence. Les omettre
+  // rendrait indéclarables le bail d'un bien loué et la valorisation d'un actif, que le §17
+  // nomme explicitement comme des sources.
+  | "BAIL"
+  | "VALORISATION"
+  | "DOCUMENT"
+  | "SAISIE_MANUELLE";
+
+/**
+ * Famille de faits dont la PRÉSENCE prouve que l'utilisateur détient cette source.
+ *
+ * C'est le point qui distingue un rail honnête d'un rail décoratif. Le §17 veut que chaque
+ * source affiche son état ; or une page ne peut pas le DÉCLARER, puisqu'il dépend de ce que
+ * l'utilisateur a réellement fourni. Le manifeste déclare donc la QUESTION — « quels faits
+ * prouveraient que cette source existe ? » — et la réponse est lue dans les faits.
+ *
+ * SOURCE DÉCLARÉE PERTINENTE ≠ SOURCE DÉTENUE. Sans cette indirection, il faudrait écrire un
+ * état dans le manifeste, c'est-à-dire affirmer qu'un contrat est fourni sans l'avoir vérifié.
+ */
+export type SourceEvidence =
+  | "BANK_ACCOUNTS"
+  | "BANK_TRANSACTIONS"
+  | "LIABILITIES"
+  | "LIABILITY_PROVIDED_SCHEDULE"
+  | "POSITIONS"
+  | "PORTFOLIO_EVENTS"
+  | "REAL_ESTATE_ASSETS"
+  | "REAL_ESTATE_VALUATIONS"
+  | "REAL_ESTATE_OPERATING_TERMS"
+  | "BUSINESS_ENTITIES"
+  | "BUSINESS_FINANCIALS"
+  | "CAREER_ROLES"
+  | "CAREER_COMPENSATION"
+  | "TAX_OBSERVATIONS"
+  | "TAX_RULE_SETS"
+  | "DOCUMENTS"
+  | "GOALS"
+  | "SCENARIOS"
+  | "DECISION_CASES"
+  | "RECURRING_RULES"
+  | "MONTHLY_CLOSES";
+
+/**
+ * Une ligne du rail de sources, telle que la page la DÉCLARE.
+ *
+ * La section 16 interdit à un agent de décider quelles sources apparaissent : elles sont donc
+ * écrites au registre, avec le passage du plan qui les fonde, et non calculées à la lecture.
+ */
+export interface PageSourceDeclaration {
+  /** Identifiant stable dans la page. Sert de clé de sélection dans le rail. */
+  readonly id: string;
+  readonly category: SourceCategory;
+  /** Nom compréhensible. Au plus DEUX mots : budget de texte du §3 de V10. */
+  readonly name: string;
+  readonly evidence: SourceEvidence;
+  /**
+   * Passage du plan ou de V10 qui fonde cette ligne.
+   *
+   * Non décoratif : une source sans référence serait une composition inventée, et le gate de
+   * registre la refuse. C'est la trace qui permet de relire une déclaration sans rouvrir
+   * l'historique de la branche.
+   */
+  readonly planRef: string;
+}
+
 // ─── 39.1 PageManifest ────────────────────────────────────────────────────────────────────
 
 export interface PageManifest {
@@ -79,6 +169,15 @@ export interface PageManifest {
   readonly question: string;
   /** Ordre des zones. Toute zone absente est volontairement absente. */
   readonly zones: readonly PageZone[];
+  /**
+   * Sources du domaine, dans l'ordre du rail.
+   *
+   * Section 17, zone B : « il montre uniquement les sources PERTINENTES pour le domaine ».
+   * Vide quand la page ne déclare pas la zone `SOURCE_RAIL` — Today, par exemple, n'a pas de
+   * source propre : il lit les vérités des autres domaines. Le gate de registre refuse les
+   * deux incohérences symétriques, une zone déclarée sans source et des sources sans zone.
+   */
+  readonly sources: readonly PageSourceDeclaration[];
   /**
    * Action primaire, ou `null`.
    *

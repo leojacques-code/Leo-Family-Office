@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Repeat } from "lucide-react";
+import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
+import { Repeat } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   Callout,
@@ -67,6 +68,15 @@ const COVERAGE_SOURCE_LABELS: Record<LedgerCoverageSource, string> = {
 
 function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const [modal, setModal] = useState<"transaction" | "rule" | "category" | null>(null);
+  /**
+   * Action primaire de la zone A, §17 du plan de refonte.
+   *
+   * §22 : « ajouter, éditer, scinder, fusionner, supprimer une saisie manuelle ». Le manifeste déclare « Ajouter une opération ».
+   * Le libellé n'est PAS écrit ici : il vient du manifeste, et la page ne fournit que
+   * ce que l'action déclenche. Écrire les deux au même endroit permettrait à un écran de
+   * proposer une action que son contrat ne déclare pas.
+   */
+  useRegisterPrimaryAction(() => setModal("transaction"));
   const [formError, setFormError] = useState<string | null>(null);
   const [horizon, setHorizon] = useState(90);
   /**
@@ -282,16 +292,10 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         title="Cash Flow"
         description="Ce que chaque euro signifie réellement : revenu, consommation, impôt, service de dette, allocation de capital ou simple déplacement entre poches."
         actions={
-          <>
-            <button className="button secondary" onClick={() => setModal("rule")}>
-              <Repeat size={15} />
-              Règle récurrente
-            </button>
-            <button className="button primary" onClick={() => setModal("transaction")}>
-              <Plus size={16} />
-              Ajouter une transaction
-            </button>
-          </>
+          <button className="button secondary" onClick={() => setModal("rule")}>
+            <Repeat size={15} />
+            Règle récurrente
+          </button>
         }
       />
       <section className="metrics-grid four">

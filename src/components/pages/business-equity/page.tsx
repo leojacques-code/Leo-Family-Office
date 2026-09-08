@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
 import { Building2, Plus } from "lucide-react";
 
 import type { BusinessEquityPosition } from "@/lib/engine/business-equity";
@@ -76,6 +77,15 @@ export default function BusinessPage({ state, mutate, busy }: SectionProps) {
   const [tab, setTab] = useState<BusinessTabId>("overview");
   const [editor, setEditor] = useState<EditorKind | null>(null);
   const [quickStart, setQuickStart] = useState(false);
+  /**
+   * Action primaire de la zone A, §17 du plan de refonte.
+   *
+   * §27 : « SIREN ou identité manuelle ». Le manifeste déclare « Ajouter une société ».
+   * Le libellé n'est PAS écrit ici : il vient du manifeste, et la page ne fournit que
+   * ce que l'action déclenche. Écrire les deux au même endroit permettrait à un écran de
+   * proposer une action que son contrat ne déclare pas.
+   */
+  useRegisterPrimaryAction(() => setQuickStart(true));
 
   const context: ExplainContext = useMemo(
     () => ({
@@ -97,11 +107,6 @@ export default function BusinessPage({ state, mutate, busy }: SectionProps) {
       eyebrow="Private assets"
       title="Business Equity"
       description="Participations privées : le moteur dérive la valorisation, le pont EV → Equity, la fourchette et la performance à partir de vos faits. Aucune Enterprise Value ne vous est demandée."
-      actions={
-        <button className="button primary" onClick={() => setQuickStart(true)}>
-          <Plus size={15} /> Nouvelle société
-        </button>
-      }
     />
   );
 

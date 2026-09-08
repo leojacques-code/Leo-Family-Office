@@ -23,8 +23,10 @@ vi.mock("@/components/pages", () => ({
 const { AppShell } = await import("@/components/app-shell");
 
 /**
- * État minimal. Le shell ne lit que `asOfDate` : tout le reste traverse vers le contenu de
- * domaine, qui est ici remplacé. Le cast est donc exact sur ce que ce test exerce.
+ * État minimal. Le shell lit `asOfDate` pour la zone A, et les familles de faits que les
+ * manifestes déclarent en source pour la zone B : un état vide y répond « À fournir » partout,
+ * ce qui est exactement ce que ce test veut du rail. Tout le reste traverse vers le contenu de
+ * domaine, qui est ici remplacé.
  */
 const state = { asOfDate: "2026-09-08" } as DashboardState;
 

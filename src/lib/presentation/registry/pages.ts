@@ -59,6 +59,8 @@ export const PAGE_REGISTRY = manifests([
       "AVAILABLE_ANALYSIS",
       "INSPECTOR",
     ],
+    // Aucune source propre : Today n’est pas un domaine, il lit les vérités des autres (§20).
+    sources: [],
     primaryAction: null,
     essentialKpis: [
       "net_worth",
@@ -97,6 +99,46 @@ export const PAGE_REGISTRY = manifests([
     title: "Patrimoine",
     question: "Que possédé-je réellement, que dois-je et quelle part est liquide ?",
     zones: [...STANDARD_ZONES],
+    // §21 : le canvas répartit liquide, financier, immobilier, entreprise et passifs. Une ligne
+    // de rail par famille, et rien d’autre : « le Net Worth ne lit jamais directement une API
+    // externe, il consomme les vérités canoniques des domaines ».
+    sources: [
+      {
+        id: "bank",
+        category: "BANQUE",
+        name: "Banque",
+        evidence: "BANK_ACCOUNTS",
+        planRef: "§21 canvas : « répartition liquide »",
+      },
+      {
+        id: "broker",
+        category: "RELEVE_COURTIER",
+        name: "Relevé courtier",
+        evidence: "POSITIONS",
+        planRef: "§21 canvas : « répartition ... financier »",
+      },
+      {
+        id: "deed",
+        category: "ACTE",
+        name: "Acte",
+        evidence: "REAL_ESTATE_ASSETS",
+        planRef: "§21 canvas : « répartition ... immobilier »",
+      },
+      {
+        id: "accounts",
+        category: "LIASSE",
+        name: "Liasse",
+        evidence: "BUSINESS_FINANCIALS",
+        planRef: "§21 canvas : « répartition ... entreprise »",
+      },
+      {
+        id: "loan-contract",
+        category: "CONTRAT",
+        name: "Contrat",
+        evidence: "LIABILITIES",
+        planRef: "§21 canvas : « bilan visuel actifs / passifs »",
+      },
+    ],
     primaryAction: "Ajouter un actif ou un passif",
     essentialKpis: [
       "net_worth",
@@ -138,6 +180,39 @@ export const PAGE_REGISTRY = manifests([
     question:
       "Où va mon argent, quelle part est contrainte et combien puis-je réellement épargner ?",
     zones: [...STANDARD_ZONES],
+    // §22 : le formulaire essentiel d’un flux porte « source » et « lien éventuel vers salaire,
+    // dette, bien, société, investissement, impôt ou objectif ». Le rail nomme les pièces d’où
+    // les flux VIENNENT, pas les domaines vers lesquels ils pointent.
+    sources: [
+      {
+        id: "statement",
+        category: "BANQUE",
+        name: "Banque",
+        evidence: "BANK_TRANSACTIONS",
+        planRef: "§22 formulaire essentiel : « source » ; §17 zone B : « relevé »",
+      },
+      {
+        id: "payslip",
+        category: "BULLETIN",
+        name: "Bulletin",
+        evidence: "CAREER_COMPENSATION",
+        planRef: "§22 : « lien éventuel vers salaire »",
+      },
+      {
+        id: "schedule",
+        category: "ECHEANCIER",
+        name: "Échéancier",
+        evidence: "LIABILITIES",
+        planRef: "§22 : « lien éventuel vers ... dette »",
+      },
+      {
+        id: "recurring",
+        category: "SAISIE_MANUELLE",
+        name: "Récurrences",
+        evidence: "RECURRING_RULES",
+        planRef: "§22 actions indispensables : « créer ou arrêter une règle récurrente »",
+      },
+    ],
     primaryAction: "Ajouter une opération",
     essentialKpis: [
       "observed_income",
@@ -180,6 +255,32 @@ export const PAGE_REGISTRY = manifests([
     question:
       "Que détiens-je, combien cela vaut, quels risques je porte et quelle performance est réellement prouvable ?",
     zones: [...STANDARD_ZONES],
+    // §23 : le canvas montre « positions et mouvements » et « cash d’enveloppe ». Les trois
+    // pièces correspondantes, et pas une quatrième : l’IFU et l’avis d’opéré sont nommés au
+    // §32 mais aucun fait de l’état courant ne prouverait leur présence.
+    sources: [
+      {
+        id: "holdings",
+        category: "RELEVE_COURTIER",
+        name: "Relevé courtier",
+        evidence: "POSITIONS",
+        planRef: "§23 canvas : « positions et mouvements »",
+      },
+      {
+        id: "trades",
+        category: "RELEVE_COURTIER",
+        name: "Opérations",
+        evidence: "PORTFOLIO_EVENTS",
+        planRef: "§23 canvas : « positions et mouvements » ; §32 : « avis d’opéré »",
+      },
+      {
+        id: "envelope-cash",
+        category: "BANQUE",
+        name: "Banque",
+        evidence: "BANK_ACCOUNTS",
+        planRef: "§23 canvas : « valeur totale et cash d’enveloppe »",
+      },
+    ],
     primaryAction: "Importer un portefeuille",
     essentialKpis: [
       "portfolio_value",
@@ -220,6 +321,33 @@ export const PAGE_REGISTRY = manifests([
     question:
       "Combien dois-je, quand le cash sort-il, quel est le coût restant et quelles options ai-je ?",
     zones: [...STANDARD_ZONES],
+    // §6.2 donne le rail de Dette mot pour mot : « Contrat, échéancier, compte débité ». Le §24
+    // ajoute la priorité : « l’échéancier bancaire fourni domine la reconstruction », donc il
+    // vient EN PREMIER. L’assurance, quatrième priorité du §12 de V10, n’est pas déclarée :
+    // elle est un champ de la dette, aucun fait distinct n’en prouverait la fourniture.
+    sources: [
+      {
+        id: "provided-schedule",
+        category: "ECHEANCIER",
+        name: "Échéancier",
+        evidence: "LIABILITY_PROVIDED_SCHEDULE",
+        planRef: "§24 règle document-first : « l’échéancier bancaire fourni domine la reconstruction »",
+      },
+      {
+        id: "contract",
+        category: "CONTRAT",
+        name: "Contrat",
+        evidence: "LIABILITIES",
+        planRef: "§6.2 : « Contrat, échéancier, compte débité »",
+      },
+      {
+        id: "debit",
+        category: "BANQUE",
+        name: "Compte débité",
+        evidence: "BANK_TRANSACTIONS",
+        planRef: "§6.2 : « compte débité » ; §24 : « le rapprochement compare service contractuel et débit bancaire »",
+      },
+    ],
     // Section 24 : « la règle document-first ». L'action primaire est l'import de
     // l'échéancier, pas l'ouverture d'un formulaire de contrat.
     primaryAction: "Importer un échéancier",
@@ -263,6 +391,39 @@ export const PAGE_REGISTRY = manifests([
     question:
       "Que vaut ce bien ou projet, quelle économie produit-il et quel risque financier porte-t-il ?",
     zones: [...STANDARD_ZONES],
+    // §25 : le formulaire essentiel commun part de « identité/adresse/lot et type ». Le §17
+    // nomme l’acte, le bail et la valorisation comme sources. Le financement est rattaché,
+    // jamais recalculé : la ligne pointe la dette existante, elle ne porte aucun passif.
+    sources: [
+      {
+        id: "deed",
+        category: "ACTE",
+        name: "Acte",
+        evidence: "REAL_ESTATE_ASSETS",
+        planRef: "§25 formulaire essentiel : « identité/adresse/lot et type » ; §17 zone B : « acte »",
+      },
+      {
+        id: "valuation",
+        category: "VALORISATION",
+        name: "Valorisation",
+        evidence: "REAL_ESTATE_VALUATIONS",
+        planRef: "§17 zone B : « valorisation »",
+      },
+      {
+        id: "lease",
+        category: "BAIL",
+        name: "Bail",
+        evidence: "REAL_ESTATE_OPERATING_TERMS",
+        planRef: "§17 zone B : « bail » ; §25 : exploitation locative",
+      },
+      {
+        id: "financing",
+        category: "ECHEANCIER",
+        name: "Échéancier",
+        evidence: "LIABILITIES",
+        planRef: "§8 espace Immobilier : « valeur, dette liée, equity »",
+      },
+    ],
     primaryAction: "Ajouter un bien ou un projet",
     essentialKpis: [
       "property_value",
@@ -303,6 +464,31 @@ export const PAGE_REGISTRY = manifests([
     title: "Carrière",
     question: "Quels revenus mon activité produit-elle réellement et comment peuvent-ils évoluer ?",
     zones: [...STANDARD_ZONES],
+    // §26 énumère la source du formulaire essentiel : « contrat, avenant, bulletin, banque ou
+    // manuel ». Le §15 de V10 en donne l’ordre de confirmation : Contrat → Bulletin → Banque.
+    sources: [
+      {
+        id: "contract",
+        category: "CONTRAT",
+        name: "Contrat",
+        evidence: "CAREER_ROLES",
+        planRef: "§26 formulaire essentiel : « source : contrat, avenant, bulletin, banque ou manuel »",
+      },
+      {
+        id: "payslip",
+        category: "BULLETIN",
+        name: "Bulletin",
+        evidence: "CAREER_COMPENSATION",
+        planRef: "§26 idem ; §15 de V10 : rail de confirmation « Payslip »",
+      },
+      {
+        id: "bank",
+        category: "BANQUE",
+        name: "Banque",
+        evidence: "BANK_TRANSACTIONS",
+        planRef: "§26 idem ; §15 de V10 : rail de confirmation « Bank »",
+      },
+    ],
     primaryAction: "Ajouter une activité",
     essentialKpis: ["gross_compensation", "net_cash_received"],
     allowedObjectives: [
@@ -334,6 +520,27 @@ export const PAGE_REGISTRY = manifests([
     title: "Entreprises",
     question: "Quelle valeur économique et quels flux me reviennent de chaque entreprise ?",
     zones: [...STANDARD_ZONES],
+    // §27 énumère « source : liasse, comptes, FEC, registre, cap table, acte ou manuel ». Seules
+    // les deux dont la présence est PROUVABLE dans l’état courant sont déclarées. FEC, registre
+    // et cap table ne le sont pas : aucun fait de `DashboardState` ne répond « l’utilisateur
+    // détient-il un FEC ? », et une ligne dont l’état serait indéterminable afficherait « À
+    // fournir » sur une comptabilité déjà importée.
+    sources: [
+      {
+        id: "liasse",
+        category: "LIASSE",
+        name: "Liasse",
+        evidence: "BUSINESS_FINANCIALS",
+        planRef: "§27 formulaire essentiel : « période des comptes » et « source : liasse, comptes »",
+      },
+      {
+        id: "identity",
+        category: "SAISIE_MANUELLE",
+        name: "Identité",
+        evidence: "BUSINESS_ENTITIES",
+        planRef: "§27 formulaire essentiel : « SIREN ou identité manuelle »",
+      },
+    ],
     primaryAction: "Ajouter une société",
     essentialKpis: [
       "business_equity_value",
@@ -373,6 +580,32 @@ export const PAGE_REGISTRY = manifests([
     question:
       "Qu’ai-je réellement payé, que reste-t-il potentiellement dû et avec quel niveau de certitude ?",
     zones: [...STANDARD_ZONES],
+    // §28 énumère « source : avis, déclaration, IFU, relevé, document ou manuel », et son canvas
+    // sépare l’impôt « retenu » du « payé ». Trois pièces différentes répondent à ces trois
+    // questions, et c’est pourquoi le bulletin figure ici sans faire doublon avec Carrière.
+    sources: [
+      {
+        id: "notice",
+        category: "AVIS_FISCAL",
+        name: "Avis fiscal",
+        evidence: "TAX_OBSERVATIONS",
+        planRef: "§28 formulaire essentiel : « source : avis, déclaration, IFU, relevé »",
+      },
+      {
+        id: "withholding",
+        category: "BULLETIN",
+        name: "Bulletin",
+        evidence: "CAREER_COMPENSATION",
+        planRef: "§28 canvas : « retenu »",
+      },
+      {
+        id: "payments",
+        category: "BANQUE",
+        name: "Banque",
+        evidence: "BANK_TRANSACTIONS",
+        planRef: "§28 canvas : « payé »",
+      },
+    ],
     primaryAction: "Ajouter un document fiscal",
     essentialKpis: ["tax_paid", "tax_estimate", "upcoming_obligations_30d"],
     allowedObjectives: ["tax_track_payments", "tax_estimate_liability", "tax_compare_before_after"],
@@ -399,6 +632,32 @@ export const PAGE_REGISTRY = manifests([
     title: "Objectifs",
     question: "Quel objectif finance-je, où en suis-je et quel effort réaliste reste nécessaire ?",
     zones: [...STANDARD_ZONES],
+    // §29 : le formulaire essentiel porte « actif, compte ou flux affecté » et « montant déjà
+    // constitué ». Un objectif n’a pas de pièce justificative propre : sa définition EST une
+    // saisie, et ce qui le finance vient des enveloppes réelles.
+    sources: [
+      {
+        id: "definition",
+        category: "SAISIE_MANUELLE",
+        name: "Objectifs",
+        evidence: "GOALS",
+        planRef: "§29 formulaire essentiel : « type d’objectif », « montant ou résultat cible »",
+      },
+      {
+        id: "funding-cash",
+        category: "BANQUE",
+        name: "Banque",
+        evidence: "BANK_ACCOUNTS",
+        planRef: "§29 : « actif, compte ou flux affecté »",
+      },
+      {
+        id: "funding-invest",
+        category: "RELEVE_COURTIER",
+        name: "Relevé courtier",
+        evidence: "POSITIONS",
+        planRef: "§29 : « actif, compte ou flux affecté »",
+      },
+    ],
     primaryAction: "Créer un objectif",
     essentialKpis: ["goal_progress", "goal_monthly_effort"],
     allowedObjectives: ["goal_set_target", "goal_plan_effort"],
@@ -425,6 +684,18 @@ export const PAGE_REGISTRY = manifests([
     title: "Scénarios",
     question: "Que devient ma trajectoire si je change une ou plusieurs hypothèses ?",
     zones: [...STANDARD_ZONES],
+    // §30 : un scénario est fait d’hypothèses, et il se compare au réel. Sa seule source PROPRE
+    // est donc sa définition. Les vérités canoniques dont il part appartiennent aux domaines,
+    // et les énumérer ici les compterait deux fois dans le rail.
+    sources: [
+      {
+        id: "definition",
+        category: "SAISIE_MANUELLE",
+        name: "Scénarios",
+        evidence: "SCENARIOS",
+        planRef: "§30 : « hypothèses déterminantes, comparaison au réel »",
+      },
+    ],
     primaryAction: "Créer un scénario",
     essentialKpis: ["scenario_trajectory", "net_worth", "cash_runway"],
     allowedObjectives: [
@@ -460,6 +731,25 @@ export const PAGE_REGISTRY = manifests([
     question:
       "Quel arbitrage répond à mon objectif, compte tenu de la liquidité, du risque, du temps et de la fiscalité ?",
     zones: [...STANDARD_ZONES],
+    // §31 : le formulaire essentiel porte « question de décision » et « scénario associé à chaque
+    // option ». Deux saisies distinctes, donc deux lignes : un cas sans scénario ne compare
+    // rien, et l’absence de l’un ne se déduit pas de la présence de l’autre.
+    sources: [
+      {
+        id: "case",
+        category: "SAISIE_MANUELLE",
+        name: "Décisions",
+        evidence: "DECISION_CASES",
+        planRef: "§31 formulaire essentiel : « question de décision »",
+      },
+      {
+        id: "scenarios",
+        category: "SAISIE_MANUELLE",
+        name: "Scénarios",
+        evidence: "SCENARIOS",
+        planRef: "§31 formulaire essentiel : « scénario associé à chaque option »",
+      },
+    ],
     primaryAction: "Poser une question de décision",
     essentialKpis: ["decision_option_comparison"],
     allowedObjectives: [
@@ -499,6 +789,32 @@ export const PAGE_REGISTRY = manifests([
       "CONTEXTUAL_ACTIONS",
       "INSPECTOR",
     ],
+    // §32 : « l’utilisateur commence par le type de source qu’il possède, pas par le nom d’un
+    // pipeline technique ». Le rail liste donc les trois premières entrées de son organisation :
+    // connexions, documents, imports structurés.
+    sources: [
+      {
+        id: "connections",
+        category: "BANQUE",
+        name: "Connexions",
+        evidence: "BANK_ACCOUNTS",
+        planRef: "§32 organisation : « 1. connexions »",
+      },
+      {
+        id: "documents",
+        category: "DOCUMENT",
+        name: "Documents",
+        evidence: "DOCUMENTS",
+        planRef: "§32 organisation : « 2. documents »",
+      },
+      {
+        id: "imports",
+        category: "RELEVE_COURTIER",
+        name: "Imports",
+        evidence: "PORTFOLIO_EVENTS",
+        planRef: "§32 organisation : « 3. imports structurés »",
+      },
+    ],
     primaryAction: "Ajouter une source",
     essentialKpis: ["source_freshness", "pending_review_count"],
     allowedObjectives: ["sources_connect_bank", "sources_review_inbox"],
@@ -531,6 +847,9 @@ export const PAGE_REGISTRY = manifests([
       "CONTEXTUAL_ACTIONS",
       "INSPECTOR",
     ],
+    // Aucun rail : un rapport ne s’alimente pas, il restitue. Le §33 n’en déclare pas, et la zone
+    // `SOURCE_RAIL` est absente de ce manifeste.
+    sources: [],
     primaryAction: "Produire un rapport",
     essentialKpis: ["close_summary", "net_worth_change_since_close"],
     allowedObjectives: ["track_net_worth_change"],

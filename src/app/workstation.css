@@ -700,7 +700,8 @@
 .sidebar .icon-button,
 .inspector-header .icon-button,
 .drawer-header .icon-button,
-.topbar-actions .button {
+.topbar-actions .button,
+.workstation-controls .button {
   min-height: 40px;
 }
 
@@ -714,7 +715,14 @@
 }
 
 /* `.button` déclare 10,5 px, sous le plancher de 12 px du §10.2. La correction est portée par
-   le conteneur de shell, pour la même raison de périmètre que ci-dessus. */
-.topbar-actions .button {
+   le conteneur de shell, pour la même raison de périmètre que ci-dessus.
+
+   `.workstation-controls .button` porte l'action primaire de la zone A. Elle a été ajoutée en
+   même temps que le rendu de cette action : sans elle, le bouton le plus important de l'écran
+   serait le seul contrôle du shell sous le plancher, parce que le gate est NOMINATIF et ne
+   voit que les sélecteurs qu'on lui nomme. Un contrôle ajouté hors de sa liste échappe au
+   contrôle en silence, ce qui est exactement le mode de panne qu'un cliquet doit empêcher. */
+.topbar-actions .button,
+.workstation-controls .button {
   font-size: 12px;
 }

@@ -294,6 +294,10 @@ export const SHELL_CONTROL_SELECTORS = [
   ".inspector-header .icon-button",
   ".drawer-header .icon-button",
   ".topbar-actions .button",
+  // Action primaire de la zone A. Elle entre dans la liste EN MÊME TEMPS que son rendu :
+  // ajouter un contrôle de shell sans l'y inscrire le ferait échapper au plancher en silence,
+  // et un cliquet qui ne voit pas ce qu'on ajoute ne cliquette pas.
+  ".workstation-controls .button",
 ] as const;
 
 export interface ControlSizeFinding extends DesignFinding {

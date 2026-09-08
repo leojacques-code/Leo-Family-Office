@@ -1,5 +1,6 @@
 "use client";
 
+import type { SourceCategory } from "@/lib/presentation/registry/contracts";
 import {
   Banknote,
   Building,
@@ -10,6 +11,7 @@ import {
   Landmark,
   Plus,
   Receipt,
+  Shield,
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
@@ -33,23 +35,14 @@ import {
  */
 
 /**
- * Catégories de source, reprises du §6 de V10.
+ * Catégories de source : la liste close vit au CONTRAT, pas ici.
  *
- * La liste est CLOSE : « Data », « Inputs », « Context » et « Truth » y sont refusés parce
- * qu'ils ne disent pas à l'utilisateur quelle pièce aller chercher dans ses dossiers.
+ * Elle a déménagé dans `registry/contracts.ts` parce qu'un manifeste doit pouvoir la
+ * référencer. Deux listes, l'une pour déclarer et l'autre pour rendre, divergeraient au
+ * premier ajout, et la page déclarerait alors une catégorie que le rail ne saurait pas
+ * dessiner. Le type reste ré-exporté d'ici pour les consommateurs de rendu.
  */
-export type SourceCategory =
-  | "BANQUE"
-  | "ECHEANCIER"
-  | "CONTRAT"
-  | "BULLETIN"
-  | "RELEVE_COURTIER"
-  | "LIASSE"
-  | "FEC"
-  | "ACTE"
-  | "DEVIS"
-  | "AVIS_FISCAL"
-  | "SAISIE_MANUELLE";
+export type { SourceCategory };
 
 const CATEGORY_LABELS: Readonly<Record<SourceCategory, string>> = {
   BANQUE: "Banque",
@@ -62,6 +55,9 @@ const CATEGORY_LABELS: Readonly<Record<SourceCategory, string>> = {
   ACTE: "Acte",
   DEVIS: "Devis",
   AVIS_FISCAL: "Avis fiscal",
+  BAIL: "Bail",
+  VALORISATION: "Valorisation",
+  DOCUMENT: "Document",
   SAISIE_MANUELLE: "Saisie manuelle",
 };
 
@@ -77,6 +73,11 @@ const CATEGORY_ICONS: Readonly<Record<SourceCategory, LucideIcon>> = {
   ACTE: Building,
   DEVIS: FileText,
   AVIS_FISCAL: Receipt,
+  BAIL: FileText,
+  // Le §9 de V10 mappe `Shield` sur « verified / protected » : une valorisation est
+  // l'observation attestée d'une valeur, pas un contrat ni un relevé.
+  VALORISATION: Shield,
+  DOCUMENT: FileText,
   SAISIE_MANUELLE: Database,
 };
 

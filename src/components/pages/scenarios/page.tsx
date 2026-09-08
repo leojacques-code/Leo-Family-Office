@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
 import { Archive, Copy, Plus, Save, Sparkles } from "lucide-react";
 import {
   Area,
@@ -58,6 +59,15 @@ function ScenariosPage({
   const [editing, setEditing] = useState<Scenario | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  /**
+   * Action primaire de la zone A, §17 du plan de refonte.
+   *
+   * §30 : la création d'un scénario. Le manifeste déclare « Créer un scénario ».
+   * Le libellé n'est PAS écrit ici : il vient du manifeste, et la page ne fournit que
+   * ce que l'action déclenche. Écrire les deux au même endroit permettrait à un écran de
+   * proposer une action que son contrat ne déclare pas.
+   */
+  useRegisterPrimaryAction(() => setCreating(true));
   const [createForm, setCreateForm] = useState({ name: "", description: "", horizonYears: "30" });
   const [eventForm, setEventForm] = useState({ label: "", date: "", amount: "", direction: "OUT" });
   const [form, setForm] = useState({
