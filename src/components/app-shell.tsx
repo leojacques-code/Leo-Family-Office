@@ -452,18 +452,24 @@ export function AppShell({
             }
             fallbackTitle={secondary?.label ?? sectionLabel(section)}
             inspector={
-              <Inspector
-                facts={inspectorFacts}
-                onClose={() => setExplanation(null)}
-                title={explanation?.title ?? null}
-              >
-                {explanation ? (
-                  <>
-                    <p className="inspector-formula">{explanation.formula}</p>
-                    {explanation.note ? <p>{explanation.note}</p> : null}
-                  </>
-                ) : null}
-              </Inspector>
+              // La zone E n'est passée QUE lorsqu'un chiffre est sélectionné.
+              //
+              // `Inspector` rend déjà `null` sans titre, mais le passer quand même suffisait à
+              // faire poser `data-with-inspector="true"` sur la racine : la grille réservait
+              // alors les 2,75 colonnes sur 16 de l'inspecteur à un élément qui n'existait
+              // pas, et le canvas perdait un sixième de sa largeur sur les quatorze écrans, en
+              // permanence. C'est un test de couverture des zones qui l'a trouvé, pas une
+              // relecture : le DOM était correct, seule la géométrie était fausse.
+              explanation ? (
+                <Inspector
+                  facts={inspectorFacts}
+                  onClose={() => setExplanation(null)}
+                  title={explanation.title}
+                >
+                  <p className="inspector-formula">{explanation.formula}</p>
+                  {explanation.note ? <p>{explanation.note}</p> : null}
+                </Inspector>
+              ) : undefined
             }
             manifest={manifest}
             mode={mode}

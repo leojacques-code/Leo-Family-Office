@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import type { PageManifest, RealityMode } from "@/lib/presentation/registry/contracts";
+import { FinancialCanvas } from "./financial-canvas";
 import { RealityModeSwitch, SimulationWatermark } from "./reality-mode";
 
 /**
@@ -102,11 +103,8 @@ export function WorkspaceShell({
 
       <div className="workstation-body">
         {showRail ? sourceRail : null}
-        {/* Zone C : le canvas. `main` et non `div` : c'est le contenu principal de la page, et
-            un lecteur d'écran doit pouvoir y sauter directement. */}
-        <main aria-label={question ?? title} className="financial-canvas">
-          {children}
-        </main>
+        {/* Zone C. Son contrat vit dans son module, que le §10.2 nomme. */}
+        <FinancialCanvas label={question ?? title}>{children}</FinancialCanvas>
         {inspector}
       </div>
     </div>

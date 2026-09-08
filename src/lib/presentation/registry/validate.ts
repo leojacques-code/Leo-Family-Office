@@ -297,7 +297,7 @@ export function unverifiableRules(): readonly { rule: 6; message: string }[] {
     {
       rule: 6,
       message:
-        "« Une section générée dynamiquement hors manifeste » : non vérifiable en phase 0, aucune page n’étant encore branchée sur son manifeste. La vérification appartient à la phase 1, qui installe le shell et la composition par zones.",
+        "« Une section générée dynamiquement hors manifeste » : vérifiée sur les quatre zones que le cadre implémente — en-tête, rail de sources, canvas, inspecteur — par `zone-coverage.test.tsx`, qui monte chaque page et compare les conteneurs rendus aux zones déclarées. Elle NE l’est pas sur `AVAILABLE_ANALYSIS` ni `CONTEXTUAL_ACTIONS`, que douze manifestes déclarent et que le cadre ne rend pas encore : la première est le catalogue « Aller plus loin » du §17, la seconde la boîte de réception que le §37 place en phase 2. Le CONTENU du canvas reste hors de portée d’un gate de registre : il est composé par la page, et c’est le gate visuel du §12.3 qui en juge.",
     },
   ];
 }

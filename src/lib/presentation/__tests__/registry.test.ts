@@ -86,12 +86,15 @@ describe("gate : les cinq refus vérifiables de la section 39", () => {
     expect(violations.some((violation) => violation.rule === 5)).toBe(true);
   });
 
-  it("NOMME la règle qu’il ne peut pas vérifier à cette phase", () => {
-    // Un gate silencieux sur une règle donne l'illusion qu'elle est tenue.
+  it("NOMME ce qui reste non vérifié de la règle 6, et ce qui l’est désormais", () => {
+    // Un gate silencieux sur une règle donne l'illusion qu'elle est tenue. La phase 1 a rendu
+    // la règle vérifiable sur les quatre zones qu'elle implémente ; les deux autres restent
+    // déclarées sans être rendues, et le message doit le DIRE plutôt que se taire.
     const unverifiable = unverifiableRules();
     expect(unverifiable).toHaveLength(1);
     expect(unverifiable[0].rule).toBe(6);
-    expect(unverifiable[0].message).toContain("phase 1");
+    expect(unverifiable[0].message).toContain("AVAILABLE_ANALYSIS");
+    expect(unverifiable[0].message).toContain("CONTEXTUAL_ACTIONS");
   });
 });
 
