@@ -1,0 +1,720 @@
+/*
+ * Poste de travail financier : les trois zones, leur géométrie et leur typographie.
+ *
+ * Deuxième fichier du découpage CSS demandé par le §10.2 du plan de refonte, après
+ * `primitives.css`. Il ne touche pas à `globals.css`, qui porte 3 442 lignes accumulées et
+ * dont la remise à niveau appartient à chaque phase de domaine.
+ *
+ * GÉOMÉTRIE, §2 de V10 : grille conceptuelle de 16 colonnes, rail de 2,5 à 3 colonnes, canvas
+ * de 9 à 10,5, inspecteur de 2,5 à 3. En-tête de 88 px au plus, poste de travail de 580 px au
+ * minimum sur desktop, canvas visible sans défilement sur un 1440 × 900.
+ *
+ * TYPOGRAPHIE : le §26 de V10 et le §10.2 du plan se contredisent sur un point, et le plan
+ * l'emporte comme le propriétaire du produit l'a acté. V10 propose des libellés de canvas à
+ * 10-12 px et des libellés d'inspecteur à 10-11 px ; le §10.2 impose « aucun texte fonctionnel
+ * sous 12 px ». Le plancher retenu est donc 12 px, y compris là où V10 descendait plus bas.
+ * Le reste de l'échelle de V10 est repris tel quel : corps 14 px, valeurs d'inspecteur
+ * 13-16 px, question de domaine 24-36 px, chiffres majeurs 22-32 px.
+ */
+
+.workstation {
+  --ws-gap: 18px;
+  /* Le rail et l'inspecteur sont exprimés en fraction de la grille de 16 colonnes du §2 de
+     V10 : 2,75/16 tient dans la fourchette 2,5-3 et laisse au canvas 10,5 colonnes. */
+  --ws-rail: calc((100% - 2 * var(--ws-gap)) * 2.75 / 16);
+  --ws-inspector: calc((100% - 2 * var(--ws-gap)) * 2.75 / 16);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* Corps du cockpit : 14 px, intersection de « 13-14 px » (§26 de V10) et de « 14-15 px »
+     (§10.2 du plan). */
+  font-size: 14px;
+}
+
+/* ─── Zone A : en-tête opérationnel ──────────────────────────────────────────────────── */
+
+.workstation-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px 22px;
+  /* §2 de V10 : « top header maximum height ~88 px ». Un maximum, pas une hauteur fixe :
+     une question courte n'a pas à occuper 88 px. */
+  max-height: 88px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.workstation-identity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workstation-domain {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.workstation-question {
+  margin: 0;
+  /* §26 de V10 : question de domaine 24-36 px. `clamp` la fait respirer sans descendre sous
+     la borne basse ni dépasser la haute. */
+  font-size: clamp(24px, 2.4vw, 32px);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  /* Le §3 de V10 borne la question à 14-16 mots ; au-delà, elle passe sur deux lignes et
+     l'en-tête dépasse ses 88 px. La borne est portée par le manifeste, pas par le CSS, mais
+     l'ellipse évite qu'un manifeste trop long casse la géométrie sans qu'on le voie. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.workstation-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.workstation-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Réel / Simulation ──────────────────────────────────────────────────────────────── */
+
+.reality-switch {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.reality-switch-option {
+  /* §8 de V10 : contrôles de 36 à 40 px. Le §10.2 du plan impose au moins 40 px, donc 40. */
+  min-height: 40px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-soft);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reality-switch-option[aria-checked="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+/* §25 de V10 : « scenario / modelled: violet ». L'accent n'est pas décoratif, il est
+   sémantique, et il ne sert qu'à cela. */
+.reality-switch-option[data-mode="SIMULATION"][aria-checked="true"] {
+  color: var(--simulation);
+  box-shadow: inset 0 0 0 1px var(--simulation-soft);
+}
+
+.reality-switch-option:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+
+.simulation-watermark {
+  margin: 0;
+  padding: 7px 13px;
+  border-left: 3px solid var(--simulation);
+  border-radius: 0 8px 8px 0;
+  background: var(--simulation-soft);
+  color: var(--simulation);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+/*
+ * §5 de V10 : basculer le mode TRANSFORME la surface, il ne pose pas un badge. La géométrie
+ * de la simulation est « dashed / translucent projection geometry », et elle descend d'ici
+ * vers tout le canvas plutôt que d'être répétée par chaque composant de domaine.
+ */
+.workstation[data-reality-mode="SIMULATION"] .financial-canvas {
+  border-color: var(--simulation-soft);
+  border-style: dashed;
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent,
+    transparent 9px,
+    var(--simulation-wash) 9px,
+    var(--simulation-wash) 10px
+  );
+}
+
+/* ─── Corps : rail, canvas, inspecteur ───────────────────────────────────────────────── */
+
+.workstation-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--ws-gap);
+  /* §2 de V10 : « main workstation: minimum 580 px desktop ». */
+  min-height: 580px;
+  align-items: start;
+}
+
+.workstation[data-with-rail="true"] .workstation-body {
+  grid-template-columns: var(--ws-rail) minmax(0, 1fr);
+}
+
+.workstation[data-with-inspector="true"] .workstation-body {
+  grid-template-columns: minmax(0, 1fr) var(--ws-inspector);
+}
+
+.workstation[data-with-rail="true"][data-with-inspector="true"] .workstation-body {
+  grid-template-columns: var(--ws-rail) minmax(0, 1fr) var(--ws-inspector);
+}
+
+/* ─── Zone B : rail de sources ───────────────────────────────────────────────────────── */
+
+.source-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+
+.source-rail-title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.source-rail-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.source-rail-list li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.source-row {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.source-row[aria-current="true"] {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.source-row:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+
+.source-tile {
+  /* §4.2 de V10 : « 32-36 px icon tile ». */
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--surface-tint);
+  color: var(--teal-dark);
+}
+
+.source-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.source-text strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  /* Le §3 de V10 borne le titre à deux mots ; l'ellipse protège la géométrie si un domaine
+     dépasse, sans masquer l'information puisque le survol la donne. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-text small {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-status {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.source-row[data-status="ACTIVE"] .source-status {
+  color: var(--green);
+}
+.source-row[data-status="A_RENOUVELER"] .source-status {
+  color: var(--gold);
+}
+/*
+ * Une source absente n'est pas une alerte. Le §6 de V10 : « no warning paragraph, no empty
+ * KPI card, small + / upload state in rail ». Elle est donc en gris de texte doux, pas en
+ * rouge : le rouge dirait qu'il y a un problème, alors qu'il y a une pièce à fournir.
+ */
+.source-row[data-status="ABSENTE"] .source-status {
+  color: var(--text-muted);
+}
+
+.source-provide {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.source-provide:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+
+/* ─── Zone C : canvas financier ──────────────────────────────────────────────────────── */
+
+.financial-canvas {
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* ─── Zone E : inspecteur ────────────────────────────────────────────────────────────── */
+
+.inspector {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 15px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+
+.inspector:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.inspector-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 9px;
+}
+
+.inspector-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.inspector-facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+/*
+ * §4.4 de V10 : « only the most relevant 4-6 facts are visible by default ». Au-delà, la
+ * liste défile au lieu d'allonger la colonne : un inspecteur de vingt lignes redevient la
+ * page de contenu que le §0 rejette.
+ */
+.inspector-facts[data-overflowing="true"] {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 5px;
+}
+
+.inspector-fact dt {
+  /* §26 de V10 : libellés d'inspecteur 10-11 px. Le §10.2 du plan interdit tout texte
+     fonctionnel sous 12 px, et le plan l'emporte : 12 px. */
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.inspector-fact dd {
+  margin: 0;
+  /* §26 de V10 : valeurs d'inspecteur 13-16 px. */
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.inspector-fact dd small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.inspector-extra {
+  padding-top: 11px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+
+/* ─── Tiroir d'édition ───────────────────────────────────────────────────────────────── */
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(16, 27, 24, 0.34);
+}
+
+.financial-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  height: 100%;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.financial-drawer:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -3px;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 11px;
+  padding: 17px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.drawer-header h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.drawer-header p {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.drawer-sections {
+  display: flex;
+  gap: 4px;
+  padding: 9px 17px;
+  border-bottom: 1px solid var(--border-soft);
+  overflow-x: auto;
+}
+
+.drawer-section-tab {
+  min-height: 40px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-soft);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.drawer-section-tab[aria-current="true"] {
+  border-color: var(--border);
+  background: var(--surface-tint);
+  color: var(--text);
+}
+
+.drawer-section-tab:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+
+.drawer-body {
+  flex: 1 1 auto;
+  padding: 17px;
+  overflow-y: auto;
+}
+
+/* ─── Responsive desktop et tablette ─────────────────────────────────────────────────── */
+
+/*
+ * Le §11 du plan demande « responsive desktop/tablette ». En dessous de 1 280 px, les trois
+ * zones ne tiennent plus dans les proportions du §2 : l'inspecteur passe sous le canvas
+ * plutôt que d'écraser les deux autres. Il reste une colonne persistante, pas un dialogue,
+ * parce qu'à cette largeur il y a encore la place de le lire à côté de son contexte.
+ */
+@media (max-width: 1279px) {
+  .workstation[data-with-rail="true"][data-with-inspector="true"] .workstation-body {
+    grid-template-columns: var(--ws-rail) minmax(0, 1fr);
+  }
+  .workstation[data-with-inspector="true"] .inspector {
+    grid-column: 1 / -1;
+  }
+}
+
+/*
+ * En dessous de 1 024 px, le rail passe aussi sous le canvas et devient une liste
+ * horizontale : à cette largeur, une colonne de 2,75/16 fait 176 px, ce qui ne suffit plus
+ * pour un nom de source et son état sur la même ligne.
+ */
+@media (max-width: 1023px) {
+  .workstation-body,
+  .workstation[data-with-rail="true"] .workstation-body,
+  .workstation[data-with-inspector="true"] .workstation-body,
+  .workstation[data-with-rail="true"][data-with-inspector="true"] .workstation-body {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .source-rail-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .source-rail-list li {
+    flex: 1 1 220px;
+  }
+  .workstation-header {
+    max-height: none;
+  }
+}
+
+/*
+ * Une page déclarée `DESKTOP_ONLY` par son manifeste le dit à l'écran au lieu de se rendre en
+ * version tronquée. Le §31 du plan le motive pour Decision Lab : deux ou trois options côte à
+ * côte n'ont pas de sens sur un téléphone, et en montrer une version amputée ferait croire à
+ * une comparaison complète.
+ */
+@media (max-width: 899px) {
+  .workstation[data-viewport="DESKTOP_ONLY"] .financial-canvas::before {
+    content: "Cet écran demande une fenêtre plus large pour être lu sans perte.";
+    display: block;
+    margin-bottom: 13px;
+    padding: 11px 13px;
+    border-left: 3px solid var(--gold);
+    border-radius: 0 8px 8px 0;
+    background: var(--gold-soft);
+    color: var(--gold);
+    font-size: 13px;
+    font-weight: 600;
+  }
+}
+
+/*
+ * ─── Shell : navigation à six entrées, menu de profil, en-tête simplifié ─────────────
+ *
+ * Ces styles complètent ceux de `globals.css` pour ce que la phase 1 ajoute. Ils vivent ici
+ * et non là-bas : `globals.css` porte 3 442 lignes accumulées, et y ajouter reviendrait à
+ * grossir le fichier que le §10.2 du plan demande de découper.
+ */
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * Sous-vues du groupe COURANT uniquement. Les déplier tous remettrait à l'écran les
+ * dix-huit destinations que le regroupement du §7 vient de réduire, avec une indentation en
+ * plus : ce serait le constat 5.5 déguisé.
+ */
+.nav-subviews {
+  display: flex;
+  flex-direction: column;
+  margin: 1px 0 5px;
+  /* L'alignement se fait sur le TEXTE de l'entrée parente, pas sur son icône : c'est ce qui
+     fait lire la sous-vue comme une précision et non comme une entrée de même rang. */
+  padding-left: 37px;
+  border-left: 1px solid rgba(236, 243, 240, 0.11);
+  margin-left: 18px;
+}
+
+.nav-subviews a {
+  min-height: 34px;
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  color: rgba(236, 243, 240, 0.5);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.nav-subviews a:hover {
+  color: var(--sidebar-text);
+}
+
+.nav-subviews a.active {
+  background: var(--sidebar-soft);
+  color: var(--sidebar-text);
+  font-weight: 600;
+}
+
+.nav-subviews a:focus-visible {
+  outline: 2px solid var(--sidebar-text);
+  outline-offset: 2px;
+}
+
+/* Menu de profil : c'est l'accès à Paramètres depuis le §34 du plan. */
+.profile-menu {
+  display: flex;
+  flex-direction: column;
+  margin: 0 10px 6px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--sidebar-soft);
+}
+
+.profile-menu a {
+  min-height: 40px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-radius: 8px;
+  color: rgba(236, 243, 240, 0.72);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.profile-menu a:hover,
+.profile-menu a.active {
+  color: var(--sidebar-text);
+}
+
+.profile-menu a:focus-visible {
+  outline: 2px solid var(--sidebar-text);
+  outline-offset: 2px;
+}
+
+/*
+ * En-tête simplifié. Le fil d'Ariane « Léo Family Office » suivi du nom de section a été
+ * retiré : le §4.1 de V10 refuse le « long breadcrumb narrative », et l'identité du domaine
+ * est désormais portée par la zone A du poste de travail, avec sa question. Ne reste que le
+ * groupe courant, qui situe sans raconter.
+ */
+.topbar-group {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Formule d'un chiffre, dans l'inspecteur. Le §4.4 de V10 la compte parmi ce qu'il répond. */
+.inspector-formula {
+  margin: 0 0 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * TAILLE DES CONTRÔLES DU SHELL — §10.2 du plan de refonte : « contrôles d'au moins 40 px ».
+ *
+ * Le bloc est PLACÉ EN FIN DE FEUILLE et regroupé, parce qu'il corrige des règles écrites
+ * ailleurs : la barre latérale dimensionnait ses entrées à 35 px, les sous-vues à 34 px, et
+ * l'en-tête réutilisait un bouton icône de 34 px. Sur une tablette, une cible de 34 px se
+ * rate, et l'utilisateur clique la ligne voisine.
+ *
+ * `min-height` et non `height` : le libellé d'une entrée peut passer sur deux lignes en
+ * français, et une hauteur fixe le couperait. Le minimum élargit, il ne contraint pas.
+ *
+ * LE PÉRIMÈTRE EST CELUI DU SHELL. `.icon-button` et `.button` sont des classes PARTAGÉES avec
+ * les contrôles internes des pages : les redimensionner globalement changerait la densité des
+ * quatorze domaines dans la PR du shell, ce que le §11 refuse comme « grande PR de redesign
+ * transversal ». Les règles sont donc portées par leurs conteneurs de shell, et chaque phase
+ * de domaine traitera les siens.
+ */
+.sidebar nav a,
+.nav-subviews a,
+.profile-switch,
+.profile-menu a,
+.logout-button,
+.source-provide,
+.topbar .icon-button,
+.sidebar .icon-button,
+.inspector-header .icon-button,
+.drawer-header .icon-button,
+.topbar-actions .button {
+  min-height: 40px;
+}
+
+/* Un bouton icône reste CARRÉ : sans minimum de largeur, la cible serait haute et étroite,
+   donc toujours ratée dans l'autre direction. */
+.topbar .icon-button,
+.sidebar .icon-button,
+.inspector-header .icon-button,
+.drawer-header .icon-button {
+  min-width: 40px;
+}
+
+/* `.button` déclare 10,5 px, sous le plancher de 12 px du §10.2. La correction est portée par
+   le conteneur de shell, pour la même raison de périmètre que ci-dessus. */
+.topbar-actions .button {
+  font-size: 12px;
+}
