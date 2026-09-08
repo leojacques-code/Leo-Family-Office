@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Archive, Edit3, Flag, Pause, Play, Plus, Save } from "lucide-react";
 import { Callout, Currency, EmptyState, Modal, SectionHeader } from "@/components/ui";
-import { type SectionProps, formatDate, inputNumber } from "@/components/pages/shared";
+import { type SectionProps, formatDate, requiredNumberInput } from "@/components/pages/shared";
 import type { DashboardState, Goal, Scenario } from "@/lib/types";
 import {
   GOAL_CONSTRAINT_STRENGTHS,
@@ -160,6 +160,7 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Goal | null>(null);
   const [form, setForm] = useState<GoalForm>(EMPTY_FORM);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const selectedScenario =
     state.scenarios.find((scenario) => scenario.id === selectedScenarioId) ?? state.scenarios[0];
@@ -190,29 +191,52 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
     }));
   }
 
-  function definitionFromForm(goalId: string): GoalVersionDefinition {
-    return createGoalVersion({
-      goalId,
-      name: form.name,
-      description: form.description,
-      priority: Math.max(1, Math.min(99, Math.trunc(inputNumber(form.priority)))),
-      constraintStrength: form.constraintStrength,
-      target: {
-        metric: form.metric,
-        operator: form.operator,
-        value: inputNumber(form.targetValue),
-        currency: state.reportingCurrency,
-        entityId: form.entityId || null,
-      },
-      targetDate: form.targetDate || null,
-      status: editing?.definition?.status ?? editing?.status ?? "ACTIVE",
-    });
+  /**
+   * Construit la définition, ou rend le premier refus de lecture.
+   *
+   * La priorité passait par `Math.trunc(inputNumber(...))` : un champ vide devenait `0`,
+   * puis `Math.max(1, 0)` le remontait à 1. Un objectif sans priorité saisie se retrouvait
+   * donc PRIORITÉ MAXIMALE, et remontait en tête du cockpit sans que personne ne l'ait
+   * demandé. Une cible vide devenait de son côté un objectif de 0 €, atteint d'office.
+   */
+  function definitionFromForm(
+    goalId: string,
+  ): { definition: GoalVersionDefinition; error: null } | { definition: null; error: string } {
+    const priority = requiredNumberInput(form.priority, "Priorité");
+    if (priority.error !== null) return { definition: null, error: priority.error };
+    const targetValue = requiredNumberInput(form.targetValue, "Cible");
+    if (targetValue.error !== null) return { definition: null, error: targetValue.error };
+    return {
+      definition: createGoalVersion({
+        goalId,
+        name: form.name,
+        description: form.description,
+        priority: Math.max(1, Math.min(99, Math.trunc(priority.value))),
+        constraintStrength: form.constraintStrength,
+        target: {
+          metric: form.metric,
+          operator: form.operator,
+          value: targetValue.value,
+          currency: state.reportingCurrency,
+          entityId: form.entityId || null,
+        },
+        targetDate: form.targetDate || null,
+        status: editing?.definition?.status ?? editing?.status ?? "ACTIVE",
+      }),
+      error: null,
+    };
   }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     const goalId = editing?.id ?? crypto.randomUUID();
-    let definition = definitionFromForm(goalId);
+    const built = definitionFromForm(goalId);
+    if (built.error !== null) {
+      setFormError(built.error);
+      return;
+    }
+    setFormError(null);
+    let definition = built.definition;
     if (editing) {
       definition = {
         ...definition,
@@ -487,6 +511,11 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
         wide
       >
         <form className="form-grid" onSubmit={submit}>
+          {formError ? (
+            <p className="form-error full" role="alert">
+              {formError}
+            </p>
+          ) : null}
           <label className="full">
             Nom
             <input

@@ -16,7 +16,8 @@ import {
   DERIVED_VALUATION_METHODS,
 } from "@/lib/engine/business-equity";
 
-import { AS_OF_DATE } from "@/lib/data/shared";
+import { operationalToday } from "@/lib/financial-date";
+import { isRealCalendarDate } from "@/lib/presentation/input-parse";
 import { isScenarioVersionDefinition } from "@/lib/engine/scenario-engine";
 import type { ScenarioVersionDefinition } from "@/lib/engine/scenario-contracts";
 import { isGoalVersionDefinition } from "@/lib/engine/goal-engine";
@@ -43,10 +44,6 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
  * d'historique est comparée à des bornes de mois, une date fantôme y produirait des
  * dénominateurs faux plutôt qu'une erreur visible.
  */
-function isRealCalendarDate(value: string): boolean {
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}
 
 const cashFlowKind = z.enum([
   "INCOME",
@@ -467,12 +464,21 @@ const realEstateFinancingLinkSchema = z
  * Deux règles de forme y sont vérifiées avant toute écriture, parce qu'elles portent des
  * invariants économiques et non des contraintes de saisie :
  *   — une base de valorisation DÉRIVÉE ne transporte jamais son résultat ;
- *   — une date de fait n'est jamais postérieure à la date d'arrêté du dossier. Un fait
- *     futur n'est pas un fait.
+ *   — une date de fait n'est jamais postérieure au JOUR COURANT. Un fait futur n'est pas
+ *     un fait.
+ *
+ * La borne est le jour courant, PAS la date d'arrêté du reporting. Elle l'était, et la
+ * conséquence n'était pas théorique : une date d'arrêté gelée au 19 août 2026 refusait
+ * toute saisie de septembre, donc le produit devenait inutilisable le lendemain de sa
+ * clôture. ARRÊTÉ DE REPORTING ≠ AUJOURD'HUI : un fait constaté après l'arrêté reste un
+ * fait, ce sont les moteurs aval qui décident s'il entre dans la période présentée.
+ *
+ * `operationalToday()` est appelé DANS le prédicat : un `refine` s'évalue à la lecture, la
+ * borne suit donc le calendrier au lieu de figer la date de démarrage du serveur.
  */
 const businessDate = realDate.refine(
-  (value) => value <= AS_OF_DATE,
-  `Date postérieure à l’arrêté du ${AS_OF_DATE} : un fait futur n’est pas un fait`,
+  (value) => value <= operationalToday(),
+  "Date postérieure au jour courant : un fait futur n’est pas un fait",
 );
 const ownershipRate = finite.min(0).max(1);
 const shareCount = finite.positive().nullable();
@@ -1356,8 +1362,8 @@ export const mutationSchema = z.discriminatedUnion("action", [
     startDate: date
       .refine(isRealCalendarDate, "Date inexistante au calendrier")
       .refine(
-        (value) => value <= AS_OF_DATE,
-        "La couverture ne peut pas être postérieure à la date d'observation",
+        (value) => value <= operationalToday(),
+        "La couverture ne peut pas être postérieure au jour courant",
       )
       .nullable(),
     source: z.enum(["MANUAL", "IMPORT", "API"]),

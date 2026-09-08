@@ -5,9 +5,10 @@ import { ChevronDown, Download, Printer } from "lucide-react";
 import { useMemo, useState } from "react";
 import { SectionHeader } from "@/components/ui";
 import type { SectionProps } from "@/components/pages/shared";
-import { formatDate, formatNative } from "@/components/pages/shared";
+import { formatDate, formatNative, issueSummary } from "@/components/pages/shared";
 import { buildInstitutionalReport } from "@/lib/reporting/report-builder";
 import type { ReportType } from "@/lib/reporting/report-types";
+import { TechnicalDetails } from "@/components/primitives/technical-details";
 
 const TYPES: Array<{ type: ReportType; title: string; description: string }> = [
   {
@@ -106,8 +107,10 @@ export default function ReportsPage({ state }: SectionProps) {
           {report.manifest.nonComputableSections.length ? "PARTIEL" : "CALCULABLE"}
         </span>
         <span className="completeness">
-          <strong>{report.manifest.blockers.length}</strong> blocker(s) ·{" "}
-          {report.manifest.financialFingerprint}
+          {/* L'empreinte financière complète s'affichait ici, dans le bandeau principal du
+              rapport. Elle est en bas de page, dans le volet technique. */}
+          <strong>{report.manifest.blockers.length}</strong>{" "}
+          {report.manifest.blockers.length > 1 ? "points à compléter" : "point à compléter"}
         </span>
         <span className="data-badge observed">LECTURE SEULE</span>
       </div>
@@ -134,7 +137,7 @@ export default function ReportsPage({ state }: SectionProps) {
         {report.manifest.blockers.length ? (
           <div className="callout">
             <strong>Limites explicites</strong>
-            <p>{report.manifest.blockers.join(" · ")}</p>
+            <p>{issueSummary(report.manifest.blockers)}</p>
           </div>
         ) : null}
       </section>
@@ -186,11 +189,17 @@ export default function ReportsPage({ state }: SectionProps) {
           <ChevronDown size={15} />
           <strong>Méthodologie et preuves</strong>
         </summary>
-        <p>Opening: {report.manifest.openingFingerprint}</p>
-        <p>Events: {report.manifest.eventSetVersion}</p>
-        <p>Fingerprint financier: {report.manifest.financialFingerprint}</p>
+        <TechnicalDetails
+          entries={[
+            { label: "Empreinte d’ouverture", value: report.manifest.openingFingerprint },
+            { label: "Version du jeu d’événements", value: report.manifest.eventSetVersion },
+            { label: "Empreinte financière", value: report.manifest.financialFingerprint },
+          ]}
+          summary="Empreintes de reproductibilité"
+        />
         <p>
-          La date technique de génération du PDF est séparée et n’entre pas dans ce fingerprint.
+          La date technique de génération du PDF est séparée : elle n’entre dans aucune de ces
+          empreintes, de sorte que deux rapports produits le même jour restent comparables.
         </p>
       </details>
     </div>

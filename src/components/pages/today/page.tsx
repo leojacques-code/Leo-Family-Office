@@ -2,9 +2,17 @@
 
 import Link from "next/link";
 import { CalendarCheck } from "lucide-react";
-import { Callout, Currency, MetricCard, ProgressBar, SectionHeader } from "@/components/ui";
+import {
+  Callout,
+  Currency,
+  DataBadge,
+  MetricCard,
+  ProgressBar,
+  SectionHeader,
+} from "@/components/ui";
 import { type SectionProps, formatDate } from "@/components/pages/shared";
 import { buildTodayCockpit, goalProgress } from "@/lib/presentation/today-cockpit";
+import { EVIDENCE_LEVEL_LABELS, translateCompleteness } from "@/lib/presentation/language";
 
 export default function TodayPage({ state, mutate, busy }: SectionProps) {
   const view = buildTodayCockpit(state);
@@ -28,23 +36,28 @@ export default function TodayPage({ state, mutate, busy }: SectionProps) {
         }
       />
       <div className="uncertainty-strip" aria-label="Provenance des données">
-        {(
-          [
-            "ACTUAL",
-            "OBSERVED",
-            "CONTRACTUAL",
-            "PROJECTED",
-            "USER_ASSUMPTION",
-            "MODEL_ASSUMPTION",
-          ] as const
-        ).map((kind) => (
-          <span key={kind} className={`data-badge ${kind.toLowerCase()}`}>
-            {kind.replaceAll("_", " ")}
+        {/* Deux taxonomies DISTINCTES étaient rendues ici côte à côte comme si elles n'en
+            formaient qu'une : la nature de la donnée (qui l'a produite) et le niveau de
+            preuve (d'où vient la certitude). Et toutes en majuscules sans soulignés, ce qui
+            donnait « MODEL ASSUMPTION » : un code dont on a retiré la ponctuation n'est pas
+            devenu du français. Les deux sont traduites, et restent séparées. */}
+        {(["ACTUAL", "USER_ASSUMPTION", "MODEL_ASSUMPTION"] as const).map((kind) => (
+          <DataBadge key={kind} kind={kind} />
+        ))}
+        {(["OBSERVED", "CONTRACTUAL", "PROJECTED"] as const).map((level) => (
+          <span
+            className={`data-badge ${level.toLowerCase()}`}
+            key={level}
+            title={EVIDENCE_LEVEL_LABELS[level].definition}
+          >
+            {EVIDENCE_LEVEL_LABELS[level].label}
           </span>
         ))}
         <span className="completeness">
-          <strong>{view.context.completeness}</strong> · fingerprint{" "}
-          {view.context.baseline.eventSetVersion.slice(0, 10)}
+          {/* `READY`, `PARTIAL` et `NOT_COMPUTABLE` étaient rendus tels quels, et une
+              empreinte tronquée à dix caractères s'affichait à côté. Sur la page la plus
+              consultée du produit. Le constat 5.4 les envoie au volet technique. */}
+          <strong>{translateCompleteness(view.context.completeness).label}</strong>
         </span>
       </div>
       <section className="metrics-grid four" aria-label="Situation actuelle">

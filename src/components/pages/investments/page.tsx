@@ -14,13 +14,14 @@ import {
 } from "@/components/ui";
 import {
   AggregateValue,
-  ConversionNotice,
-  NOT_COMPUTABLE,
-  OptionalCurrency,
   canonicalLineLabel,
+  ConversionNotice,
   formatEur,
   formatNative,
   formatNativeOptional,
+  issueSummary,
+  NOT_COMPUTABLE,
+  OptionalCurrency,
   type SectionProps,
 } from "@/components/pages/shared";
 import {
@@ -499,7 +500,7 @@ function InvestmentsPage({ state, mutate, busy, setExplanation }: SectionProps) 
           ) : (
             <EmptyState
               title="Allocation non calculable"
-              detail={analytics.allocation.blockers.join(", ") || "Exposition absente"}
+              detail={issueSummary(analytics.allocation.blockers) || "Exposition absente"}
             />
           )}
         </article>

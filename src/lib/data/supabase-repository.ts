@@ -6,7 +6,6 @@ import { DOCUMENTS_BUCKET, ownerId, supabaseAdmin } from "@/lib/data/supabase-cl
 import {
   ACCOUNT_TYPE_ORDER,
   ALERT_SEVERITY_ORDER,
-  AS_OF_DATE,
   REPORTING_CURRENCY,
   SCENARIO_NAME_ORDER,
   composeDashboardMetrics,
@@ -15,6 +14,7 @@ import {
   readLedgerCoverage,
   readLoanTerms,
 } from "@/lib/data/shared";
+import { buildFinancialDateContext, currentTaxYear, operationalToday } from "@/lib/financial-date";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
 import { debtCashOut, monthBounds } from "@/lib/engine/debt";
 import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
@@ -235,7 +235,13 @@ export function mapGoal(
       priority,
       status,
       reportingCurrency: reportingCurrency || null,
-      createdAt: str(row.updated_at || row.created_at || `${AS_OF_DATE}T00:00:00.000Z`),
+      // `goals.created_at` et `goals.updated_at` sont `not null default now()` depuis la
+      // migration Goals V2 : leur absence SIMULTANÉE ne signale pas une donnée manquante,
+      // elle signale une chaîne de migrations incomplète. Une date d'arrêté était fabriquée
+      // ici, ce qui faisait passer un schéma cassé pour un objectif créé le 19 août 2026.
+      createdAt: str(
+        requiredField(row, "updated_at", context) ?? requiredField(row, "created_at", context),
+      ),
     });
   return {
     id,
@@ -345,11 +351,16 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     });
   }
 
-  async function fetchLedgerWindow(): Promise<{
+  /**
+   * La fenêtre de six mois se calcule sur la date OPÉRATIONNELLE, pas sur la date d'arrêté :
+   * elle sert à charger le ledger que l'utilisateur consulte aujourd'hui. Elle était calculée
+   * sur une constante gelée au 19 août 2026, et n'avançait donc plus avec le calendrier.
+   */
+  async function fetchLedgerWindow(today: string): Promise<{
     data: Row[] | null;
     error: PostgrestError | null;
   }> {
-    const since = ledgerWindowStart(AS_OF_DATE);
+    const since = ledgerWindowStart(today);
     // Même règle que pour le ledger portefeuille : une fenêtre tronquée produirait des
     // agrégats de flux calculés sur un historique amputé, sans que rien ne le signale.
     return readAllPages<Row, PostgrestError>(`transactions depuis ${since}`, async (from, to) => {
@@ -368,6 +379,11 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
   }
 
   async function getDashboardState(): Promise<DashboardState> {
+    // UNE seule lecture d'horloge pour toute la construction de l'état. Deux appels
+    // encadrant minuit produiraient une fenêtre de ledger et une date d'arrêté
+    // incohérentes entre elles, un soir sur mille et sans rien signaler.
+    const now = new Date();
+    const today = operationalToday(now);
     const [
       institutionRows,
       accountRows,
@@ -442,7 +458,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       mine("income_sources"),
       mine("expense_categories"),
       mine("budgets"),
-      fetchLedgerWindow(),
+      fetchLedgerWindow(today),
       mine("scenarios"),
       mine("scenario_versions"),
       mine("goals"),
@@ -519,6 +535,18 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       .filter((row) => str(row.status) === "ACTIVE")
       .map((row) => {
         const balance = latestBalances.get(str(row.id));
+        // Un compte sans observation de solde datée n'existe pas : `finiteNumber` refusait
+        // déjà la ligne juste en dessous. Les deux replis qui suivaient (`AS_OF_DATE` pour
+        // la date, la provenance de la ligne de compte) étaient donc du CODE MORT écrit
+        // comme un repli, ce qui est plus dangereux qu'un refus : une relecture y voit une
+        // tolérance, et la première fois que la branche devient atteignable elle fabrique
+        // une date. Le refus est rendu explicite et les branches sont supprimées.
+        if (!balance) {
+          throw new Error(
+            `Supabase donnée invalide (financial_accounts[id=${str(row.id)}]) : ` +
+              "aucune observation de solde datée",
+          );
+        }
         return {
           id: str(row.id),
           institutionId: str(row.institution_id),
@@ -527,12 +555,12 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           type: str(row.account_type) as FinancialAccount["type"],
           currency: str(row.currency),
           balance: finiteNumber(
-            balance?.balance,
+            balance.balance,
             `account_balances[account_id=${str(row.id)}].balance`,
           ),
-          balanceDate: balance ? str(balance.balance_date) : AS_OF_DATE,
+          balanceDate: str(balance.balance_date),
           liquidity: str(row.liquidity) as FinancialAccount["liquidity"],
-          provenance: balance ? provenance(balance) : provenance(row),
+          provenance: provenance(balance),
         };
       })
       .sort(
@@ -548,6 +576,17 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       .map((row) => {
         const security = securities.get(str(row.security_id));
         const snapshot = latestSnapshots.get(str(row.id));
+        // Même constat que pour les comptes : `finiteNumber(snapshot?.market_value)` refuse
+        // déjà une position sans valorisation datée, donc TOUTES les branches `snapshot ? …`
+        // de repli qui suivaient étaient du code mort. L'une d'elles fabriquait une date
+        // d'arrêté, l'autre fabriquait une DEVISE (`REPORTING_CURRENCY`), ce qui aurait
+        // rendu un titre en dollars avec un symbole euro : FX ABSENT ≠ FX ÉGAL À 1.
+        if (!snapshot) {
+          throw new Error(
+            `Supabase donnée invalide (positions[id=${str(row.id)}]) : ` +
+              "aucune valorisation datée",
+          );
+        }
         return {
           id: str(row.id),
           accountId: str(row.account_id),
@@ -555,26 +594,24 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           securityName: security ? str(security.name) : "",
           ticker: security ? optional(security.ticker) : undefined,
           assetClass: security ? (assetClassNames.get(str(security.asset_class_id)) ?? "") : "",
-          quantity: snapshot
-            ? (nullableFiniteNumber(
-                snapshot.quantity,
-                `position_snapshots[position_id=${str(row.id)}].quantity`,
-              ) ?? undefined)
-            : undefined,
-          costBasis: snapshot
-            ? (nullableFiniteNumber(
-                snapshot.cost_basis,
-                `position_snapshots[position_id=${str(row.id)}].cost_basis`,
-              ) ?? undefined)
-            : undefined,
+          quantity:
+            nullableFiniteNumber(
+              snapshot.quantity,
+              `position_snapshots[position_id=${str(row.id)}].quantity`,
+            ) ?? undefined,
+          costBasis:
+            nullableFiniteNumber(
+              snapshot.cost_basis,
+              `position_snapshots[position_id=${str(row.id)}].cost_basis`,
+            ) ?? undefined,
           value: finiteNumber(
-            snapshot?.market_value,
+            snapshot.market_value,
             `position_snapshots[position_id=${str(row.id)}].market_value`,
           ),
-          currency: snapshot ? str(snapshot.currency) : REPORTING_CURRENCY,
-          valuationDate: snapshot ? str(snapshot.snapshot_date) : AS_OF_DATE,
+          currency: str(snapshot.currency),
+          valuationDate: str(snapshot.snapshot_date),
           isCash: bool(row.is_cash),
-          provenance: snapshot ? provenance(snapshot) : provenance(row),
+          provenance: provenance(snapshot),
         };
       })
       .sort((a, b) => b.value - a.value);
@@ -811,7 +848,18 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             `liability_balance_observations[liability_id=${str(row.id)}].balance`,
           ),
           currency: str(row.currency || profileRows[0]?.reporting_currency || REPORTING_CURRENCY),
-          balanceDate: observation ? str(observation.observed_at) : AS_OF_DATE,
+          // `liabilities.current_balance` est `not null` mais
+          // `liability_balance_observations` est une table ARRIVÉE PLUS TARD : un prêt saisi
+          // avant elle porte donc un encours SANS observation datée. Ce cas est le seul des
+          // quatre replis de date qui soit réellement atteignable, et il fabriquait une date
+          // d'arrêté : l'encours se présentait comme observé le 19 août 2026, indistinguable
+          // d'une vraie observation, et sa fraîcheur en était déduite.
+          //
+          // `Liability.balanceDate` est OPTIONNEL : la date inconnue est donc simplement
+          // absente, sans qu'aucun typage ne change. Les moteurs qui en ont besoin décident
+          // eux-mêmes de leur convention (`balance-sheet.ts` retombe sur la date d'arrêté du
+          // bilan, ce qui est SA décision et non un fait inventé par la couche de données).
+          ...(observation ? { balanceDate: str(observation.observed_at) } : {}),
           annualRate: finiteNumber(row.annual_rate, `liabilities[id=${str(row.id)}].annual_rate`),
           monthlyPayment: finiteNumber(
             row.monthly_payment,
@@ -1082,6 +1130,23 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           b.createdAt.localeCompare(a.createdAt) ||
           b.id.localeCompare(a.id),
       );
+
+    /**
+     * Contexte de date financière de cette lecture.
+     *
+     * `asOfDate` est la date de la dernière clôture RÉELLEMENT persistée, et non une
+     * constante : c'est ce qui rend l'arrêté immuable entre deux consultations tout en
+     * laissant « aujourd'hui » avancer. Faute de clôture, l'arrêté se replie sur le jour
+     * courant et le DÉCLARE (`asOfDateSource`), au lieu de laisser croire à un arrêté qui
+     * n'a jamais eu lieu.
+     *
+     * `now` est l'instant capté en tête de fonction : la fenêtre de ledger déjà chargée et
+     * cette date reposent donc sur la même lecture d'horloge.
+     */
+    const dates = buildFinancialDateContext({
+      closeDates: monthlyCloses.map((close) => close.closeDate),
+      now,
+    });
 
     const documents: DocumentRecord[] = documentRows
       .map((row) => ({
@@ -1661,7 +1726,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       source: row.source ? str(row.source) : null,
       confidence: str(row.confidence) as TaxObservation["confidence"],
     }));
-    const taxYear = Number(AS_OF_DATE.slice(0, 4));
+    const taxYear = currentTaxYear(dates);
     const careerMonthly = buildCareerMonthlyConsequences({
       roles: careerRoles,
       terms: careerCompensationTerms,
@@ -1673,14 +1738,14 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     });
     const careerAnalytics = buildCareerAnalytics({
       consequences: careerMonthly,
-      asOfDate: AS_OF_DATE,
+      asOfDate: dates.asOfDate,
     });
     const activeTaxProfile =
       taxProfiles
         .filter(
           (item) =>
-            item.effectiveFrom <= AS_OF_DATE &&
-            (item.effectiveTo === null || item.effectiveTo >= AS_OF_DATE),
+            item.effectiveFrom <= dates.today &&
+            (item.effectiveTo === null || item.effectiveTo >= dates.today),
         )
         .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0] ?? null;
     const activeRuleSet =
@@ -1688,8 +1753,8 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         .filter(
           (item) =>
             item.taxYear === taxYear &&
-            item.effectiveFrom <= AS_OF_DATE &&
-            (item.effectiveTo === null || item.effectiveTo >= AS_OF_DATE),
+            item.effectiveFrom <= dates.today &&
+            (item.effectiveTo === null || item.effectiveTo >= dates.today),
         )
         .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0] ?? null;
     const taxCalculation = calculateEmploymentTax({
@@ -1710,7 +1775,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     // Il ne produit AUCUNE ligne de passif : la dette immobilière est déjà portée par
     // `liabilities`, et le bilan la lit là. En émettre une ici la compterait deux fois.
     const realEstate = buildRealEstatePortfolio({
-      asOfDate: AS_OF_DATE,
+      asOfDate: dates.asOfDate,
       reportingCurrency,
       assets: realEstateAssets,
       valuations: realEstateValuations,
@@ -1727,7 +1792,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     // lui-même valorisation, pont EV → Equity, fourchette et performance. Aucune valeur
     // dérivée n'a transité par la base.
     const businessEquity = buildBusinessEquityPortfolio({
-      asOfDate: AS_OF_DATE,
+      asOfDate: dates.asOfDate,
       reportingCurrency,
       businesses,
       ownership: businessOwnership,
@@ -1742,7 +1807,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       currencyRates,
     });
     const balanceSheet = buildCanonicalBalanceSheet({
-      asOfDate: AS_OF_DATE,
+      asOfDate: dates.asOfDate,
       reportingCurrency,
       accounts,
       positions,
@@ -1756,7 +1821,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     // Le ledger portefeuille est une lecture DÉRIVÉE : il ne produit aucune ligne de bilan
     // et n'entre dans aucun total patrimonial. Il mesure des écarts, il ne recompose rien.
     const portfolioLedger = buildPortfolioLedger({
-      asOfDate: AS_OF_DATE,
+      asOfDate: dates.asOfDate,
       accounts,
       positions,
       events: portfolioEvents,
@@ -1765,7 +1830,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       expenseCategories,
     });
     const portfolioAnalytics = buildPortfolioAnalytics({
-      asOfDate: AS_OF_DATE,
+      asOfDate: dates.asOfDate,
       reportingCurrency,
       accounts,
       positions,
@@ -1787,10 +1852,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       incomes,
       expenseCategories,
       transactions,
-      AS_OF_DATE,
+      dates.asOfDate,
     );
     const dashboardState: DashboardState = {
-      asOfDate: AS_OF_DATE,
+      asOfDate: dates.asOfDate,
       reportingCurrency,
       ledgerCoverageStart: coverage.start,
       ledgerCoverageSource: coverage.source,
@@ -2546,7 +2611,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             p_account_type: mutation.accountType,
             p_balance: finiteNumber(mutation.balance, "add_account.balance"),
             p_currency: mutation.currency,
-            p_as_of_date: AS_OF_DATE,
+            p_as_of_date: operationalToday(),
           }),
           "création atomique de compte",
         );
@@ -2577,7 +2642,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
               data_kind: "USER_ASSUMPTION",
               confidence: "HIGH",
               source: "Saisie manuelle",
-              effective_date: AS_OF_DATE,
+              effective_date: operationalToday(),
             })
             .eq("user_id", user)
             .eq("category_id", mutation.categoryId)
@@ -2868,7 +2933,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             p_cash_flow_kind: mutation.cashFlowKind,
             p_essentiality: mutation.essentiality,
             p_expense_behavior: mutation.behavior,
-            p_as_of_date: AS_OF_DATE,
+            p_as_of_date: operationalToday(),
           }),
           "création atomique de catégorie",
         );

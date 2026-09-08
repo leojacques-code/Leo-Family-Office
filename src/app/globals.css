@@ -25,6 +25,23 @@
   --sidebar-text: #e9f0ed;
   --radius: 15px;
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /*
+   * Police à largeur fixe, utilisée pour les empreintes et les identifiants du volet
+   * technique. Le dossier de la phase 0 avait DIFFÉRÉ ce token à la phase 1 avec la
+   * typographie, en notant que son repli `monospace` restait valide entre-temps.
+   */
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /*
+   * Accent de simulation, §25 de la spécification V10 : « scenario / modelled: violet ». Il
+   * est SÉMANTIQUE et ne sert qu'à cela : le §6.4 du plan de refonte exige qu'une hypothèse
+   * ne puisse jamais être confondue avec une donnée actuelle, et une couleur réutilisée
+   * ailleurs perdrait ce pouvoir de distinction.
+   */
+  --simulation: #6b5bb5;
+  --simulation-soft: #ecebf8;
+  /* Trame de fond du canvas en simulation : assez visible pour changer la géométrie perçue,
+     assez discrète pour ne pas gêner la lecture des chiffres. */
+  --simulation-wash: rgba(107, 91, 181, 0.07);
 }
 
 :root[data-theme="dark"] {
@@ -51,6 +68,9 @@
   --shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
   --sidebar: #0b1210;
   --sidebar-soft: #17241f;
+  --simulation: #a99ae0;
+  --simulation-soft: #2a2545;
+  --simulation-wash: rgba(169, 154, 224, 0.09);
 }
 
 * {
@@ -130,7 +150,7 @@ button {
 .brand-lockup small {
   margin-top: 4px;
   color: rgba(234, 242, 238, 0.56);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -167,7 +187,7 @@ button {
   background: #dfeae6;
   color: #1f4b43;
   font-weight: 750;
-  font-size: 10px;
+  font-size: 12px;
 }
 .profile-switch > span:nth-child(2) {
   min-width: 0;
@@ -179,13 +199,13 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 .profile-switch small {
   margin-top: 3px;
   color: rgba(234, 242, 238, 0.5);
-  font-size: 9.5px;
+  font-size: 12px;
 }
 .profile-switch > svg {
   color: rgba(255, 255, 255, 0.44);
@@ -208,7 +228,7 @@ button {
   gap: 10px;
   color: rgba(236, 243, 240, 0.61);
   border-radius: 9px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 510;
   transition:
     color 0.15s,
@@ -240,7 +260,7 @@ button {
   place-items: center;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.09);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
 }
 .sidebar-footer {
@@ -263,11 +283,11 @@ button {
 }
 .privacy-status strong {
   color: rgba(255, 255, 255, 0.78);
-  font-size: 10.5px;
+  font-size: 12px;
 }
 .privacy-status small {
   margin-top: 2px;
-  font-size: 9px;
+  font-size: 12px;
 }
 .logout-button {
   width: 100%;
@@ -279,7 +299,7 @@ button {
   border-radius: 8px;
   background: transparent;
   color: rgba(236, 243, 240, 0.47);
-  font-size: 10.5px;
+  font-size: 12px;
   cursor: pointer;
 }
 .logout-button:hover {
@@ -309,33 +329,23 @@ button {
   align-items: center;
   gap: 11px;
 }
-.topbar-left > div {
-  display: flex;
-  flex-direction: column;
-}
-.breadcrumb {
-  margin-bottom: 2px;
-  color: var(--text-muted);
-  font-size: 8.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.topbar-left strong {
-  font-size: 12px;
-}
+/*
+ * Le fil d'Ariane « Léo Family Office » suivi du nom de section, son conteneur en colonne et
+ * son titre en gras ont été RETIRÉS avec le balisage qui les portait : le §4.1 de V10 refuse
+ * le « long breadcrumb narrative », et l'identité du domaine est désormais en zone A du poste
+ * de travail, avec sa question. Les règles ne sont pas conservées « au cas où » : un sélecteur
+ * sans balisage se met à décrire un écran qui n'existe plus.
+ */
 .topbar-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.as-of {
-  margin-right: 4px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--text-muted);
-  font-size: 10px;
-}
+/*
+ * `.as-of` portait la date dans l'ancien en-tête. La date est maintenant en zone A du poste de
+ * travail, portée par `.workstation-date` : garder les deux laisserait deux vérités de style
+ * pour une seule information.
+ */
 .status-dot {
   width: 6px;
   height: 6px;
@@ -2566,7 +2576,7 @@ dd {
   background: var(--surface);
   color: var(--text-soft);
   box-shadow: var(--shadow);
-  font-size: 8px;
+  font-size: 12px;
 }
 .spin {
   animation: spin 0.8s linear infinite;
@@ -2584,7 +2594,7 @@ dd {
   justify-content: space-between;
   background: var(--red-soft);
   color: var(--red);
-  font-size: 9px;
+  font-size: 12px;
 }
 .global-error button {
   border: 0;
@@ -3153,8 +3163,7 @@ dd {
   .topbar {
     padding: 0 20px;
   }
-  .export-button,
-  .as-of {
+  .export-button {
     display: none;
   }
   .dashboard-grid {
@@ -3334,7 +3343,7 @@ dd {
   font-size: 13px;
 }
 .import-history small {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 11.5px;
 }
 .import-facts {
@@ -3350,7 +3359,7 @@ dd {
   gap: 2px;
 }
 .import-facts small {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -3367,7 +3376,7 @@ dd {
 }
 .import-issues p {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--text-muted);
   margin: 0;
 }
 .import-issues strong {
@@ -3395,7 +3404,7 @@ dd {
 }
 .import-table .table-row small {
   display: block;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 11px;
 }
 @media (max-width: 1080px) {
@@ -3425,7 +3434,7 @@ dd {
   color: inherit;
 }
 .report-type-card.selected {
-  outline: 2px solid var(--accent, #2f6f62);
+  outline: 2px solid var(--teal);
 }
 @media print {
   .sidebar,
@@ -3439,4 +3448,44 @@ dd {
   details {
     break-inside: avoid;
   }
+}
+
+/*
+ * ANNEAU DE FOCUS DU SHELL — phase 1 de productisation.
+ *
+ * Critère du §11 du plan de refonte pour cette phase : « états focus et dialogs
+ * accessibles ». Avant cette phase, `globals.css` ne contenait AUCUNE règle `focus-visible` :
+ * les navigateurs appliquaient leur anneau par défaut là où rien ne le supprimait, et rien du
+ * tout là où une règle le neutralisait. Un utilisateur au clavier ne savait donc pas où il
+ * se trouvait dans la barre latérale.
+ *
+ * `:focus-visible` et non `:focus` : le second dessine aussi l'anneau au clic à la souris, ce
+ * qui pousse à le supprimer, ce qui casse le clavier. C'est la chaîne de causalité qui a
+ * produit l'état constaté.
+ *
+ * Le périmètre est celui de la phase : shell, navigation, en-tête. Les contrôles internes aux
+ * pages relèvent de la phase de leur domaine, et les traiter ici reviendrait au « nettoyage
+ * global non lié » que le §36-2 interdit.
+ */
+.sidebar nav a:focus-visible,
+.profile-switch:focus-visible,
+.logout-button:focus-visible,
+.icon-button:focus-visible,
+.mobile-overlay:focus-visible,
+.export-button:focus-visible,
+.app-shell .button:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/*
+ * Dans la barre latérale, l'anneau bleu-vert du thème clair disparaîtrait sur le fond
+ * graphite. Le texte de barre latérale sert donc d'anneau : même rôle, contraste conservé.
+ */
+.sidebar nav a:focus-visible,
+.profile-switch:focus-visible,
+.logout-button:focus-visible,
+.sidebar .icon-button:focus-visible {
+  outline-color: var(--sidebar-text);
 }

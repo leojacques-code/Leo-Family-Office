@@ -31,6 +31,7 @@ import {
 } from "@/lib/engine/business-equity-explain";
 import { fundingRoundOutcome } from "@/lib/engine/business-ownership";
 import { formatMoney } from "@/components/pages/business-equity/display";
+import { parseNumberInput } from "@/lib/presentation/input-parse";
 
 export type Mutate = (mutation: Mutation) => Promise<boolean>;
 
@@ -49,11 +50,17 @@ export type Mutate = (mutation: Mutation) => Promise<boolean>;
  * et ils sont nommés comme tels.
  */
 
+/**
+ * Lecture d'un montant FACULTATIF.
+ *
+ * Délègue à `parseNumberInput`, la lecture unique du produit. C'était auparavant une
+ * TROISIÈME convention de lecture, à côté de `inputNumber` et de la validation serveur :
+ * elle acceptait `1e5` comme cent mille et confondait une saisie illisible avec un champ
+ * vide, les deux rendant `null`. Trois conventions de lecture, c'est un champ qui accepte
+ * ce qu'un autre refuse.
+ */
 export function optionalNumber(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed.replace(/\s/g, "").replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : null;
+  return parseNumberInput(value).value;
 }
 
 export function optionalRate(value: string): number | null {
@@ -2185,7 +2192,10 @@ export function FundingRoundForm({
   const [preMoney, setPreMoney] = useState("");
   const [primaryNewMoney, setPrimaryNewMoney] = useState("");
   const [secondaryAmount, setSecondaryAmount] = useState("");
-  const [investorContribution, setInvestorContribution] = useState("0");
+  // Un apport d'investisseur NON DÉCLARÉ n'est pas un apport nul : il change la quote-part
+  // résultante. Le champ partait prérempli à « 0 », ce que la section 18.3 interdit
+  // explicitement (« aucun nombre prérempli à zéro »).
+  const [investorContribution, setInvestorContribution] = useState("");
   const [preferredRightsKnown, setPreferredRightsKnown] = useState(false);
   const [source, setSource] = useState("");
 

@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { BrainCircuit, ChevronDown } from "lucide-react";
 import { Callout, SectionHeader } from "@/components/ui";
-import { formatDate, formatNative } from "@/components/pages/shared";
+import { formatDate, formatNative, issueSummary } from "@/components/pages/shared";
 import type { SectionProps } from "@/components/pages/shared";
 import { answerAdvisorIntent, buildAdvisorPacket } from "@/lib/advisor/advisor-core";
 import type { AdvisorIntent } from "@/lib/advisor/advisor-types";
+import { translateCompleteness } from "@/lib/presentation/language";
 
 const QUESTIONS: Array<{ intent: AdvisorIntent; label: string }> = [
   { intent: "NOW", label: "Que dois-je regarder maintenant ?" },
@@ -29,12 +30,11 @@ export default function AdvisorPage({ state }: SectionProps) {
         description="Priorités déterministes fondées exclusivement sur le contexte financier canonique — aucune décision ni exécution autonome."
       />
       <div className="uncertainty-strip">
-        <span className="data-badge observed">CORE DÉTERMINISTE</span>
+        <span className="data-badge observed">Analyse déterministe</span>
         <span className="completeness">
-          <strong>{packet.completeness}</strong> · fingerprint{" "}
-          {packet.contextFingerprint.slice(0, 24)}
+          <strong>{translateCompleteness(packet.completeness).label}</strong>
         </span>
-        <span className="data-badge model_assumption">IA · BLOCKED EXTERNAL</span>
+        <span className="data-badge model_assumption">Aucun appel externe</span>
       </div>
       <section className="metrics-grid four" aria-label="Synthèse Beyonder">
         <article className="metric-card">
@@ -121,7 +121,7 @@ export default function AdvisorPage({ state }: SectionProps) {
                     {item.blockers.length ? (
                       <div className="callout">
                         <strong>Codes techniques</strong>
-                        <p>{item.blockers.join(" · ")}</p>
+                        <p>{issueSummary(item.blockers)}</p>
                       </div>
                     ) : null}
                     {item.evidence.map((proof) => (

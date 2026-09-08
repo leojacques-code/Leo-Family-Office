@@ -25,12 +25,13 @@ import {
   SectionHeader,
 } from "@/components/ui";
 import {
-  NOT_COMPUTABLE,
-  type SectionProps,
   AggregateValue,
   formatDate,
   formatEur,
   formatNativeOptional,
+  issueSummary,
+  NOT_COMPUTABLE,
+  type SectionProps,
 } from "@/components/pages/shared";
 import {
   CAPITAL_EVENT_LABELS,
@@ -47,7 +48,7 @@ import {
 function Derived({ amount, sign = false }: { amount: DerivedAmount; sign?: boolean }) {
   if (amount.value === null)
     return (
-      <span className="warning-text" title={amount.blockers.join(" · ")}>
+      <span className="warning-text" title={issueSummary(amount.blockers)}>
         {NOT_COMPUTABLE}
       </span>
     );
@@ -57,7 +58,7 @@ function Derived({ amount, sign = false }: { amount: DerivedAmount; sign?: boole
 function DerivedPercent({ amount }: { amount: DerivedAmount }) {
   if (amount.value === null)
     return (
-      <span className="warning-text" title={amount.blockers.join(" · ")}>
+      <span className="warning-text" title={issueSummary(amount.blockers)}>
         {NOT_COMPUTABLE}
       </span>
     );
@@ -67,7 +68,7 @@ function DerivedPercent({ amount }: { amount: DerivedAmount }) {
 function DerivedRatio({ amount, unit = "×" }: { amount: DerivedAmount; unit?: string }) {
   if (amount.value === null)
     return (
-      <span className="warning-text" title={amount.blockers.join(" · ")}>
+      <span className="warning-text" title={issueSummary(amount.blockers)}>
         {NOT_COMPUTABLE}
       </span>
     );
@@ -930,7 +931,7 @@ function AssetScenarios({
           <dt>TRI patrimonial</dt>
           <dd>
             {hold.equityIrr === null ? (
-              <span className="warning-text" title={hold.blockers.join(" · ")}>
+              <span className="warning-text" title={issueSummary(hold.blockers)}>
                 {NOT_COMPUTABLE}
               </span>
             ) : (
@@ -1163,7 +1164,7 @@ function ProspectiveStudy({
             label="TRI du projet"
             value={
               result.equityIrr === null ? (
-                <span className="warning-text" title={result.blockers.join(" · ")}>
+                <span className="warning-text" title={issueSummary(result.blockers)}>
                   {NOT_COMPUTABLE}
                 </span>
               ) : (

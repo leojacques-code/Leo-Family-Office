@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+// CSS des primitives financières, séparé de `globals.css` : premier fichier du découpage
+// « par primitives et workspaces » demandé par la section 10.2 du plan de refonte.
+import "./primitives.css";
+// CSS du poste de travail : zones, géométrie et typographie de la phase 1.
+import "./workstation.css";
 
 export const metadata: Metadata = {
   title: "Léo Family Office",
