@@ -360,3 +360,180 @@ pas une relecture.
 5. **`getDashboardState()` sérialise toujours tout l'état.** Mesure technique du §13, non
    traitée, cf. 4.6.
 6. **La géométrie n'est pas vérifiée automatiquement**, cf. Étape 6.
+
+---
+
+# Complément du 8 septembre 2026 — reprise de la phase 1 sur `origin/main`
+
+Ce complément n'efface rien de ce qui précède. Il consigne une seconde passe sur la MÊME
+phase, demandée après que la première a été mergée, et il corrige les points où la première
+avait laissé son résultat obligatoire incomplet.
+
+## C.0 — Ce que la base était réellement
+
+La phase 1 était DÉJÀ dans `main`. La PR #46, intitulée « Phase 0 » et dont la description ne
+décrit que la phase 0, portait neuf commits dont les trois `feat(phase-1)` ci-dessus. Elle a
+été mergée le 8 septembre 2026 à 08:44.
+
+|                              |                                                |
+| ---------------------------- | ---------------------------------------------- |
+| `origin/main` au départ      | `c86b834`                                      |
+| Écart branche / `main`       | 0 commit dans les deux sens                    |
+| Gates sur cette base         | lint vert, `tsc` vert, 110 fichiers, 2 009 tests vert |
+
+Conséquence de procédure : la phase 1 n'a jamais eu son propre sas §36, et son Étape 7 n'a
+jamais été conduite. Le propriétaire du produit a arbitré de la COMPLÉTER EN PLACE plutôt que
+de révoquer les trois commits, `main` restant la base que l'Étape 0 impose.
+
+## C.1 — Écarts relevés dans le code mergé
+
+Chacun est vérifié dans le code, pas repris du dossier ci-dessus.
+
+### E1 — `SourceRail` n'était monté par aucune page
+
+`app-shell.tsx` ne l'importait pas. Douze manifestes sur quatorze déclaraient pourtant
+`SOURCE_RAIL` dans leurs zones : ils décrivaient une colonne que rien ne dessinait. La trame
+V10 comptait donc DEUX zones persistantes sur trois, et le critère 3 du gate visuel du §12.3
+— « les sources restent invisibles » — était rouge sur les quatorze écrans.
+
+### E2 — `manifest.primaryAction` était ignoré
+
+Treize manifestes sur quatorze portaient le libellé de leur action primaire. La prop
+`primaryAction` de `WorkspaceShell` existait et n'était jamais passée. Le §17 déclare la zone A
+« toujours présente » avec « une action primaire maximum ».
+
+### E3 — `FinancialCanvas` n'existait pas comme module
+
+Nommé au §10.2 dans la structure cible et listé au §11 parmi les composants de la PR UX-1. La
+zone C était un `<main>` écrit en ligne dans le cadre.
+
+### E4 — La zone E réservait sa colonne à vide
+
+`Inspector` rend `null` sans sélection, et le cadre le passait quand même : la racine portait
+donc toujours `data-with-inspector="true"`, et la grille réservait 2,75 colonnes sur 16 à un
+élément inexistant. Le canvas perdait un sixième de sa largeur sur les quatorze écrans, contre
+les 9 à 10,5 colonnes que le §2 de V10 lui donne. Non relevé par la première passe, et
+invisible dans le DOM : seule la géométrie était fausse.
+
+### E5 — `FinancialDrawer` n'est monté par aucune page
+
+Constat maintenu, et non corrigé : voir C.4.
+
+## C.2 — Arbitrage D5 : la pertinence se déclare, l'état se lit
+
+SOURCE PERTINENTE ≠ SOURCE DÉTENUE. Le §17 veut que chaque source du rail affiche son état et
+sa fraîcheur ; une page ne peut pas les DÉCLARER, puisqu'ils dépendent de ce que l'utilisateur
+a fourni. Écrire l'état au manifeste aurait annoncé « À jour » sur une dette saisie à la main,
+ou « À fournir » sur une comptabilité déjà importée.
+
+`PageManifest` gagne donc `sources`, où chaque ligne déclare une catégorie, un nom, la FAMILLE
+DE FAITS qui prouverait la possession, et le passage du plan qui la fonde. `rail-sources.ts`
+lit la réponse dans les faits. Aucune finance n'y est calculée : ni montant, ni conversion, ni
+moteur, seulement des présences et des dates que les faits portent déjà.
+
+### D5.1 — `A_RENOUVELER` n'est jamais émis
+
+Décider qu'un relevé est « à actualiser » suppose un seuil : trois mois, deux ans ? La
+section 16 interdit de décider « si une anomalie est assez importante pour alerter », et la
+section 40 range la fraîcheur parmi les couches dont les règles restent versionnées et
+sourcées. Le plan n'en donne aucun. La date est AFFICHÉE, l'utilisateur juge, et un test
+vérifie qu'aucun état intermédiaire ne sort même sur des faits vieux de dix ans.
+
+### D5.2 — Le plan tranche encore contre V10 sur les catégories
+
+Le §17 énumère « contrat, échéancier, compte, relevé, fiche de paie, liasse, FEC, acte, BAIL,
+avis fiscal, VALORISATION, DOCUMENT ou donnée manuelle ». Le §6 de V10 omet les trois dernières.
+Le plan tranche, comme en D1 : sans elles, le bail d'un bien loué et la valorisation d'un actif
+seraient indéclarables alors que le §17 les nomme comme sources.
+
+### D5.3 — Ce qui n'est pas prouvable n'est pas déclaré
+
+Le §27 nomme le FEC, le registre et la cap table parmi les sources d'Entreprises. Aucun fait de
+`DashboardState` ne répond « l'utilisateur détient-il un FEC ? » : les écritures vivent en base
+et ne traversent pas l'état. Une ligne dont l'état serait indéterminable afficherait « À
+fournir » sur une comptabilité déjà là. Elles ne sont donc PAS déclarées, et leur absence est
+écrite ici plutôt que laissée à constater.
+
+## C.3 — Arbitrage D6 : un libellé déclaré n'est pas une action servie
+
+LIBELLÉ DÉCLARÉ ≠ ACTION SERVIE. « Importer un échéancier » n'a pas d'implémentation avant la
+phase 3, « Ajouter un document fiscal » avant la phase 7 : rendre les treize libellés aurait
+produit des boutons inertes, qui se présentent comme des chemins praticables sans en être. Le
+cadre exige donc DEUX conditions — un libellé au manifeste et une action enregistrée par la
+page — et ne rend rien sinon. Même raisonnement que le sélecteur Réel/Simulation masqué sur une
+page à mode unique.
+
+Quatre pages sont servies, celles dont le formulaire EXISTANT répond à l'intention du libellé :
+
+| Page         | Libellé du manifeste     | Formulaire existant ouvert |
+| ------------ | ------------------------ | -------------------------- |
+| Objectifs    | Créer un objectif        | « Créer un objectif »      |
+| Scénarios    | Créer un scénario        | « Nouveau scénario »       |
+| Entreprises  | Ajouter une société      | « Nouvelle société »       |
+| Flux         | Ajouter une opération    | « Ajouter une transaction » |
+
+Neuf ne le sont pas, et la dette est plafonnée par `PRIMARY_ACTION_DEBT`. Le gate LIT LES
+FICHIERS de page pour vérifier que les quatre annoncées appellent réellement le hook : sans
+cela, la liste serait une intention qu'on pourrait rallonger sans rien brancher.
+
+Trois boutons primaires quittent le canvas — Objectifs, Entreprises, Flux — parce qu'ils
+déclenchaient l'action que la zone A porte désormais et que le §17 en autorise UNE. Les boutons
+d'ÉTAT VIDE restent : le §11 veut qu'un profil vide obtienne un parcours d'installation.
+
+## C.4 — Hors périmètre de ce complément, explicitement
+
+- **Les formulaires ne migrent pas vers `FinancialDrawer`.** Le §7 de V10 dit « right drawer OR
+  MODAL editor » : les quatre pages servies utilisent déjà une modale, donc aucune des deux
+  sources n'exige la migration, et la faire changerait la surface de saisie de quatre domaines
+  dans la PR du shell. `FinancialDrawer` reste monté par ses seuls tests.
+- **L'action secondaire « Gérer les indicateurs » du §17 reste absente.** Son comportement —
+  afficher, masquer, épingler — est la personnalisation du §23, que le §37 place en phase 10.
+  Un contrôle permanent qui n'agirait pas serait le mensonge que D6 refuse.
+- **Le sélecteur d'entité du §17 reste absent.** Le §17 le veut « seulement si plusieurs
+  existent », et aucun manifeste ne déclare comment une page énumère ses entités.
+- **Un clic sur une source surligne sa ligne, il ne remplit pas l'inspecteur.** Le §4.2 de V10
+  le demande ; la provenance par source appartient à la phase du domaine qui la possède.
+- **Les compositions des quatorze domaines, la dette typographique des pages,
+  `getDashboardState()`** : inchangés, comme en 4.5.
+
+## C.5 — Validation
+
+| Gate                 | Résultat                                                                |
+| -------------------- | ----------------------------------------------------------------------- |
+| `npm run lint`       | vert                                                                    |
+| `npx tsc --noEmit`   | vert                                                                    |
+| `npm run test`       | 116 fichiers, 2 061 tests, vert (contre 110 et 2 009 sur la base)        |
+| `npm run build`      | vert                                                                    |
+| `npm run gate:local` | NON EXÉCUTÉ, et sans objet : aucune migration, aucune RPC, aucun accès base |
+
+`git diff origin/main -- src/lib/engine` est VIDE : aucun calcul financier n'est modifié.
+
+### Défauts trouvés par les tests écrits ici, dans du code de ce complément
+
+1. `rail-sources.ts` faisait confiance au type de `DashboardState`, qui déclare plusieurs
+   familles comme obligatoires alors que l'état réellement construit ne les porte pas toujours.
+   La page tombait au lieu de répondre « À fournir » à une question qui a une réponse.
+2. Le hook d'action primaire écrivait sa référence PENDANT le rendu, ce qui ne déclenche aucune
+   mise à jour et se lit différemment selon l'ordre des rendus.
+3. Le bouton de la zone A vivait dans `.workstation-controls`, que le gate du système de design
+   ne regardait pas : sa liste de contrôles est NOMINATIVE. Le bouton le plus important de
+   l'écran était le seul contrôle du shell sous 40 px et sous 12 px. La règle CSS et
+   l'inscription au gate ont été ajoutées ensemble.
+
+### Ce que les tests ne prouvent toujours pas
+
+La géométrie réellement rendue. Le défaut E4 en est la démonstration : le DOM était correct et
+seule la grille était fausse, donc aucun test de DOM ne pouvait le voir — c'est un test de
+COUVERTURE DES ZONES, comparant le rendu au manifeste, qui l'a attrapé. jsdom n'a pas de mise
+en page ; la vérification visuelle reste humaine.
+
+## C.6 — Étape 7
+
+**ELLE N'EST TOUJOURS PAS FAITE, ET CE N'EST PAS À L'AGENT DE L'APPROUVER.** Elle porte
+désormais sur la phase 1 ENTIÈRE, les trois commits mergés compris, qui n'avaient jamais été
+revus visuellement. Aux quatre critères du §11 déjà listés en Étape 7 s'ajoutent :
+
+5. le rail de sources est-il lisible, et son état correspond-il à ce que vous avez fourni ?
+6. l'action primaire est-elle au bon endroit sur les quatre pages qui la servent, et son
+   absence est-elle acceptable sur les neuf autres ?
+7. le canvas a-t-il retrouvé sa largeur, l'inspecteur n'apparaissant plus qu'à la sélection ?
