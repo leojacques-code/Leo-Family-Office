@@ -203,6 +203,72 @@ export function validateRegistries(input: RegistryInput = {}): RegistryViolation
         message: `Page « ${id} » : elle ne sait pas rendre un incident technique, et le présenterait comme une information financière.`,
       });
     }
+
+    // ── Zone B : les deux incohérences symétriques ────────────────────────────────────
+    // Une zone déclarée sans source rendrait un rail vide, c'est-à-dire la carte vide que le
+    // §6 de V10 refuse. Des sources sans la zone seraient une composition que le cadre
+    // n'affiche jamais : la déclaration mentirait sur ce que la page montre.
+    const declaresRail = page.zones.includes("SOURCE_RAIL");
+    if (declaresRail && page.sources.length === 0) {
+      violations.push({
+        rule: 4,
+        message: `Page « ${id} » : elle déclare la zone SOURCE_RAIL sans aucune source. Un rail vide n’est pas un rail.`,
+      });
+    }
+    if (!declaresRail && page.sources.length > 0) {
+      violations.push({
+        rule: 4,
+        message: `Page « ${id} » : elle déclare des sources sans la zone SOURCE_RAIL, qui ne les affichera jamais.`,
+      });
+    }
+
+    const sourceIds = new Set<string>();
+    const sourceEvidence = new Set<string>();
+    for (const source of page.sources) {
+      if (sourceIds.has(source.id)) {
+        violations.push({
+          rule: 4,
+          message: `Page « ${id} » : deux sources portent l’identifiant « ${source.id} », donc la sélection du rail en désignerait deux à la fois.`,
+        });
+      }
+      sourceIds.add(source.id);
+
+      // Deux lignes sur la même famille de faits porteraient TOUJOURS le même état : l'une
+      // des deux n'apprend rien, et l'utilisateur croirait avoir deux pièces à fournir là
+      // où il n'en manque qu'une.
+      if (sourceEvidence.has(source.evidence)) {
+        violations.push({
+          rule: 4,
+          message: `Page « ${id} » : deux sources s’appuient sur la preuve « ${source.evidence} », elles afficheraient toujours le même état.`,
+        });
+      }
+      sourceEvidence.add(source.evidence);
+
+      // Budget de texte du §3 de V10 : titre de source à deux mots au plus. Ce n'est pas une
+      // coquetterie : le rail est large de 2,5 à 3 colonnes sur 16, un titre plus long s'y
+      // replie et détruit le rythme vertical.
+      const words = source.name.trim().split(/\s+/).filter(Boolean);
+      if (words.length === 0) {
+        violations.push({
+          rule: 4,
+          message: `Page « ${id} » : la source « ${source.id} » n’a pas de nom.`,
+        });
+      } else if (words.length > 2) {
+        violations.push({
+          rule: 4,
+          message: `Page « ${id} » : le nom de source « ${source.name} » fait ${words.length} mots, le §3 de V10 en autorise deux.`,
+        });
+      }
+
+      // Une source sans référence au plan est une composition inventée, ce que la section 16
+      // interdit. La référence n'est pas vérifiable automatiquement, mais son ABSENCE l'est.
+      if (source.planRef.trim().length === 0) {
+        violations.push({
+          rule: 4,
+          message: `Page « ${id} » : la source « ${source.id} » ne cite aucun passage du plan. Une source non fondée est une composition inventée (section 16).`,
+        });
+      }
+    }
   }
 
   // ── Règle 5 : un code interne sans traduction ───────────────────────────────────────

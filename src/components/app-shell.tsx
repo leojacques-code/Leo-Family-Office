@@ -39,6 +39,8 @@ import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
 import type { RealityMode } from "@/lib/presentation/registry/contracts";
 import { WorkspaceShell } from "@/components/workstation/workspace-shell";
 import { Inspector, type InspectorFact } from "@/components/workstation/inspector";
+import { SourceRail, type RailSource } from "@/components/workstation/source-rail";
+import { railSourcesFor } from "@/lib/presentation/rail-sources";
 
 /**
  * Icônes des six entrées, selon le mapping stable du §9 de la spécification V10 : les icônes
@@ -51,6 +53,19 @@ const GROUP_ICONS: Record<string, LucideIcon> = {
   projects: Target,
   decisions: Scale,
   sources: ShieldCheck,
+};
+
+/**
+ * Format de la date d'une ligne de rail.
+ *
+ * Le §3 de V10 borne l'indication d'une source à quatre mots : « Au 19 août 2026 » les tient,
+ * « Au dix-neuf août deux mille vingt-six » non. Le mois est abrégé pour que la colonne du
+ * rail, large de 2,5 à 3 colonnes sur 16, n'ait pas à se replier.
+ */
+const SHORT_DATE: Intl.DateTimeFormatOptions = {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
 };
 
 const SECONDARY_ICONS: Record<string, LucideIcon> = {
@@ -83,6 +98,18 @@ export function AppShell({
    * simulation.
    */
   const [mode, setMode] = useState<RealityMode>("REAL");
+  /**
+   * Source sélectionnée dans le rail, ET la section où elle l'a été.
+   *
+   * La section est stockée AVEC l'identifiant parce que les identifiants de source sont
+   * locaux à leur page : « bank » existe dans Patrimoine, Flux, Dette, Carrière et Fiscalité.
+   * Ne garder que l'identifiant ferait apparaître une ligne surlignée sur une page où
+   * l'utilisateur n'a rien cliqué, dès qu'il change de domaine.
+   */
+  const [selectedSource, setSelectedSource] = useState<{
+    section: string;
+    id: string;
+  } | null>(null);
 
   async function mutate(mutation: Mutation) {
     setBusy(true);
@@ -180,6 +207,25 @@ export function AppShell({
       note: input.date,
     }));
   }, [explanation]);
+
+  /**
+   * Zone B. Le manifeste déclare QUELLES sources comptent pour le domaine, les faits disent
+   * lesquelles existent, et l'indication porte la date la plus récente trouvée.
+   *
+   * `A_RENOUVELER` n'est jamais produit : aucun seuil de fraîcheur n'est déclaré par le plan,
+   * et la section 16 interdit d'en choisir un ici. Voir `rail-sources.ts`.
+   */
+  const railSources = useMemo<RailSource[]>(
+    () =>
+      railSourcesFor(manifest, state).map((source) => ({
+        id: source.id,
+        category: source.category,
+        name: source.name,
+        status: source.status,
+        hint: source.latestDate ? `Au ${formatDate(source.latestDate, SHORT_DATE)}` : undefined,
+      })),
+    [manifest, state],
+  );
 
   return (
     <div className="app-shell">
@@ -413,6 +459,13 @@ export function AppShell({
             manifest={manifest}
             mode={mode}
             onModeChange={setMode}
+            sourceRail={
+              <SourceRail
+                onSelect={(id) => setSelectedSource({ section, id })}
+                selectedId={selectedSource?.section === section ? selectedSource.id : null}
+                sources={railSources}
+              />
+            }
           >
             <SectionContent
               busy={busy}

@@ -3,7 +3,8 @@ import { KPI_REGISTRY } from "@/lib/presentation/registry/kpis";
 import { OBJECTIVE_REGISTRY } from "@/lib/presentation/registry/objectives";
 import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
 import { unverifiableRules, validateRegistries } from "@/lib/presentation/registry/validate";
-import type { FieldDefinition } from "@/lib/presentation/registry/contracts";
+import type { FieldDefinition, PageManifest } from "@/lib/presentation/registry/contracts";
+import { SOURCE_CATEGORY_LABELS } from "@/components/workstation/source-rail";
 
 describe("gate : les cinq refus vérifiables de la section 39", () => {
   it("ne trouve AUCUNE violation dans les registres livrés", () => {
@@ -353,5 +354,152 @@ describe("couverture croisée des registres", () => {
     }
     const orphans = Object.keys(KPI_REGISTRY).filter((id) => !used.has(id));
     expect(orphans, "KPI qu’aucune page ni objectif n’utilise").toEqual([]);
+  });
+});
+
+describe("gate : zone B, les sources déclarées d'une page", () => {
+  /** Manifeste minimal valide, pour n'exercer qu'une règle à la fois. */
+  function page(patch: Partial<PageManifest>): PageManifest {
+    return {
+      id: "essai",
+      version: 1,
+      title: "Essai",
+      question: "Question ?",
+      zones: ["OPERATIONAL_HEADER", "SOURCE_RAIL", "FINANCIAL_CANVAS"],
+      sources: [
+        { id: "bank", category: "BANQUE", name: "Banque", evidence: "BANK_ACCOUNTS", planRef: "§17" },
+      ],
+      primaryAction: null,
+      essentialKpis: ["net_worth"],
+      allowedObjectives: [],
+      supportedStates: ["AVAILABLE", "SYSTEM_ERROR"],
+      realityModes: ["REAL"],
+      viewport: "ALL_VIEWPORTS",
+      deferred: [],
+      ...patch,
+    } as PageManifest;
+  }
+
+  function violationsOf(patch: Partial<PageManifest>) {
+    return validateRegistries({ pages: { essai: page(patch) } })
+      .filter((v) => v.rule === 4)
+      .map((v) => v.message);
+  }
+
+  it("accepte le manifeste de référence", () => {
+    expect(violationsOf({})).toEqual([]);
+  });
+
+  it("refuse une zone SOURCE_RAIL sans aucune source", () => {
+    // Un rail vide n'est pas un rail : c'est la carte vide que le §6 de V10 refuse.
+    expect(violationsOf({ sources: [] }).join(" ")).toContain("sans aucune source");
+  });
+
+  it("refuse des sources sans la zone qui les affiche", () => {
+    expect(
+      violationsOf({ zones: ["OPERATIONAL_HEADER", "FINANCIAL_CANVAS"] }).join(" "),
+    ).toContain("sans la zone SOURCE_RAIL");
+  });
+
+  it("refuse deux sources de même identifiant", () => {
+    expect(
+      violationsOf({
+        sources: [
+          { id: "x", category: "BANQUE", name: "Banque", evidence: "BANK_ACCOUNTS", planRef: "§17" },
+          { id: "x", category: "CONTRAT", name: "Contrat", evidence: "LIABILITIES", planRef: "§17" },
+        ],
+      }).join(" "),
+    ).toContain("portent l’identifiant");
+  });
+
+  it("refuse deux sources appuyées sur la même preuve", () => {
+    // Elles afficheraient toujours le même état : l'utilisateur croirait avoir deux pièces à
+    // fournir là où il n'en manque qu'une.
+    expect(
+      violationsOf({
+        sources: [
+          { id: "a", category: "BANQUE", name: "Banque", evidence: "BANK_ACCOUNTS", planRef: "§17" },
+          { id: "b", category: "DOCUMENT", name: "Relevé", evidence: "BANK_ACCOUNTS", planRef: "§17" },
+        ],
+      }).join(" "),
+    ).toContain("s’appuient sur la preuve");
+  });
+
+  it("refuse un nom de source de plus de deux mots", () => {
+    expect(
+      violationsOf({
+        sources: [
+          {
+            id: "a",
+            category: "BANQUE",
+            name: "Relevé de compte bancaire",
+            evidence: "BANK_ACCOUNTS",
+            planRef: "§17",
+          },
+        ],
+      }).join(" "),
+    ).toContain("autorise deux");
+  });
+
+  it("accepte un nom de deux mots et refuse un nom vide", () => {
+    expect(
+      violationsOf({
+        sources: [
+          {
+            id: "a",
+            category: "RELEVE_COURTIER",
+            name: "Relevé courtier",
+            evidence: "POSITIONS",
+            planRef: "§23",
+          },
+        ],
+      }),
+    ).toEqual([]);
+    expect(
+      violationsOf({
+        sources: [
+          { id: "a", category: "BANQUE", name: "   ", evidence: "BANK_ACCOUNTS", planRef: "§17" },
+        ],
+      }).join(" "),
+    ).toContain("n’a pas de nom");
+  });
+
+  it("refuse une source qui ne cite aucun passage du plan", () => {
+    // Une source non fondée est une composition inventée, ce que la section 16 interdit.
+    expect(
+      violationsOf({
+        sources: [
+          { id: "a", category: "BANQUE", name: "Banque", evidence: "BANK_ACCOUNTS", planRef: "" },
+        ],
+      }).join(" "),
+    ).toContain("ne cite aucun passage");
+  });
+
+  it("le registre réel passe ses propres gates", () => {
+    const railViolations = validateRegistries().filter(
+      (v) => v.rule === 4 && v.message.includes("source"),
+    );
+    expect(railViolations).toEqual([]);
+  });
+
+  it("chaque page à rail déclare au moins une source, et les autres aucune", () => {
+    for (const [id, manifest] of Object.entries(PAGE_REGISTRY)) {
+      if (manifest.zones.includes("SOURCE_RAIL")) {
+        expect(manifest.sources.length, `page ${id}`).toBeGreaterThan(0);
+      } else {
+        expect(manifest.sources, `page ${id}`).toEqual([]);
+      }
+    }
+  });
+
+  it("toute catégorie déclarée est dessinable par le rail", () => {
+    // Une catégorie déclarée par une page et inconnue du composant serait une composition
+    // que rien ne peut afficher. C'est la raison pour laquelle la liste close a déménagé
+    // dans le contrat.
+    for (const manifest of Object.values(PAGE_REGISTRY)) {
+      for (const source of manifest.sources) {
+        expect(SOURCE_CATEGORY_LABELS[source.category]).toBeTruthy();
+      }
+    }
   });
 });
