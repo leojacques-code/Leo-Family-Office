@@ -1,188 +1,168 @@
 "use client";
 
-import Link from "next/link";
-import { CalendarCheck } from "lucide-react";
-import {
-  Callout,
-  Currency,
-  DataBadge,
-  MetricCard,
-  ProgressBar,
-  SectionHeader,
-} from "@/components/ui";
-import { type SectionProps, formatDate } from "@/components/pages/shared";
-import { buildTodayCockpit, goalProgress } from "@/lib/presentation/today-cockpit";
-import { EVIDENCE_LEVEL_LABELS, translateCompleteness } from "@/lib/presentation/language";
+import { useCallback, useState } from "react";
+import { Inbox } from "lucide-react";
+import { FinancialDrawer } from "@/components/workstation/financial-drawer";
+import { TaskInbox } from "@/components/workstation/task-inbox";
+import type {
+  DeclarableDomain,
+  DomainApplicability,
+  InboxTask,
+  TodayReadModel,
+} from "@/lib/presentation/today/contracts";
+import { TodayCanvas } from "./canvas";
+import { Installation } from "./installation";
 
-export default function TodayPage({ state, mutate, busy }: SectionProps) {
-  const view = buildTodayCockpit(state);
-  const goal = view.primaryGoal;
-  const progress = goalProgress(goal?.evaluation?.gap?.relativeGap);
+/**
+ * Page Aujourd'hui (§20 du plan de refonte).
+ *
+ * ELLE NE REÇOIT PLUS `DashboardState`, et c'est le changement structurant. Le §10.2 demande
+ * de remplacer `getDashboardState()` par des modèles de lecture ciblés, et cette page est la
+ * première servie par `getTodayReadModel()`. Ce qu'elle reçoit est un objet dont chaque champ
+ * est déjà une décision d'affichage : elle n'appelle aucun moteur, ne connaît aucun agrégat et
+ * ne peut donc pas recomposer une finance parallèle. Le §2 de la constitution du dépôt est
+ * tenu par le TYPE, plus par la discipline.
+ *
+ * LES TREIZE AUTRES PAGES GARDENT L'ÉTAT GLOBAL. Le §14 interdit de « refaire toutes les pages
+ * dans une seule PR », et chacune obtiendra son modèle dans sa phase.
+ *
+ * TAILLE : cette page ORCHESTRE, elle ne compose pas. Le canvas, le parcours d'installation et
+ * l'inbox vivent dans leurs modules. La mesure technique du §13 recommande 400 lignes par
+ * composant de page ; une page qui dessinerait elle-même les six réponses les dépasserait, et
+ * surtout elle rendrait le canvas intestable sans monter la page entière.
+ */
+
+export interface TodayPageProps {
+  model: TodayReadModel;
+  /** Remplace le modèle après une écriture. La page ne parle jamais au dépôt directement. */
+  onModelChange: (model: TodayReadModel) => void;
+}
+
+export default function TodayPage({ model, onModelChange }: TodayPageProps) {
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const declare = useCallback(
+    async (domain: DeclarableDomain, applicability: DomainApplicability) => {
+      setBusy(true);
+      setError("");
+      try {
+        const response = await fetch("/api/today", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ domain, applicability }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error ?? "Déclaration impossible");
+        // La route rend le MODÈLE LOCAL, pas l'état global : le §10.2 l'exige de toute
+        // mutation, et c'est ce qui permet à cette page de se rafraîchir sans que le reste du
+        // produit ne recharge.
+        onModelChange(body as TodayReadModel);
+      } catch (declarationError) {
+        setError(
+          declarationError instanceof Error ? declarationError.message : "Déclaration impossible",
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onModelChange],
+  );
+
   return (
-    <div className="page-stack">
-      <SectionHeader
-        eyebrow={`${formatDate(view.context.asOfDate)} · ${view.context.reportingCurrency}`}
-        title="Today"
-        description="Votre situation, le changement observé et la prochaine décision — issus du contexte financier partagé."
-        actions={
-          <button
-            className="button primary"
-            disabled={busy}
-            onClick={() => mutate({ action: "create_monthly_close", closeDate: state.asOfDate })}
-          >
-            <CalendarCheck size={16} />
-            Clôturer le mois
-          </button>
-        }
-      />
-      <div className="uncertainty-strip" aria-label="Provenance des données">
-        {/* Deux taxonomies DISTINCTES étaient rendues ici côte à côte comme si elles n'en
-            formaient qu'une : la nature de la donnée (qui l'a produite) et le niveau de
-            preuve (d'où vient la certitude). Et toutes en majuscules sans soulignés, ce qui
-            donnait « MODEL ASSUMPTION » : un code dont on a retiré la ponctuation n'est pas
-            devenu du français. Les deux sont traduites, et restent séparées. */}
-        {(["ACTUAL", "USER_ASSUMPTION", "MODEL_ASSUMPTION"] as const).map((kind) => (
-          <DataBadge key={kind} kind={kind} />
-        ))}
-        {(["OBSERVED", "CONTRACTUAL", "PROJECTED"] as const).map((level) => (
-          <span
-            className={`data-badge ${level.toLowerCase()}`}
-            key={level}
-            title={EVIDENCE_LEVEL_LABELS[level].definition}
-          >
-            {EVIDENCE_LEVEL_LABELS[level].label}
-          </span>
-        ))}
-        <span className="completeness">
-          {/* `READY`, `PARTIAL` et `NOT_COMPUTABLE` étaient rendus tels quels, et une
-              empreinte tronquée à dix caractères s'affichait à côté. Sur la page la plus
-              consultée du produit. Le constat 5.4 les envoie au volet technique. */}
-          <strong>{translateCompleteness(view.context.completeness).label}</strong>
-        </span>
-      </div>
-      <section className="metrics-grid four" aria-label="Situation actuelle">
-        <MetricCard
-          label="Patrimoine net"
-          value={<Currency value={view.netWorth} />}
-          detail="Bilan canonique · observation"
-        />
-        <MetricCard
-          label="Liquidité"
-          value={<Currency value={view.liquidity} />}
-          detail="Actifs liquides identifiés · observation"
-        />
-        <MetricCard
-          label="Cash flow mensuel"
-          value={<Currency value={view.cashFlow} sign />}
-          detail="Flux déclarés · inconnu ≠ zéro"
-        />
-        <MetricCard
-          label="Dette"
-          value={<Currency value={view.debt} />}
-          detail="Passifs du bilan canonique"
-        />
-      </section>
-      <section className="dashboard-grid">
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Changement fiable</span>
-              <h2>Depuis la clôture précédente</h2>
-            </div>
-          </div>
-          {view.closeChange ? (
-            <>
-              <div className="metric-value">
-                <Currency value={view.closeChange.amount} sign />
-              </div>
-              <p>
-                {formatDate(view.closeChange.from.closeDate)} →{" "}
-                {formatDate(view.closeChange.to.closeDate)} · deux observations clôturées
-              </p>
-            </>
-          ) : (
-            <Callout title="Variation non calculable">
-              Deux clôtures fiables sont nécessaires ; aucune valeur zéro n’est substituée.
-            </Callout>
-          )}
-        </article>
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Goal prioritaire</span>
-              <h2>{goal?.goal.name ?? "Aucun Goal actif"}</h2>
-            </div>
-          </div>
-          {goal ? (
-            <>
-              <p>
-                Priorité {goal.goal.definition?.priority ?? goal.goal.priority} · statut{" "}
-                {goal.evaluation?.status ?? "NOT_COMPUTABLE"}
-              </p>
-              {progress === null ? (
-                <p className="warning-text">Progression non calculable</p>
-              ) : (
-                <ProgressBar value={progress} />
-              )}
-              <Link className="button secondary" href="/goals">
-                Ouvrir Goals
-              </Link>
-            </>
-          ) : (
-            <Link className="button secondary" href="/goals">
-              Définir un Goal
-            </Link>
-          )}
-        </article>
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Prochaine échéance tous domaines</span>
-              <h2>{view.nextEvent?.type.replaceAll("_", " ") ?? "Aucun événement"}</h2>
-            </div>
-          </div>
-          <p>
-            {view.nextEvent
-              ? `${formatDate(view.nextEvent.effectiveDate)} · ${view.nextEvent.domain} · ${view.nextEvent.dataKind}`
-              : "Aucune échéance canonique dans l’horizon explicite de 80 ans."}
-          </p>
-          <Link className="button secondary" href="/timeline">
-            Voir la Timeline
-          </Link>
-        </article>
-        <article className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Risque principal</span>
-              <h2>{view.context.blockers[0]?.code ?? "Aucun blocker"}</h2>
-            </div>
-          </div>
-          <p>
-            {view.context.blockers[0]?.message ?? "Le contexte partagé ne signale pas de blocker."}
-          </p>
-        </article>
-      </section>
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <span className="eyebrow">Attention maintenant</span>
-            <h2>Actions déterministes</h2>
-          </div>
-        </div>
-        <div className="quick-actions">
-          {view.actions.map((action) => (
-            <Link key={action.id} className="button secondary" href={action.href}>
-              {action.label}
-            </Link>
-          ))}
-        </div>
-        <p>
-          {view.decisions.length
-            ? `${view.decisions.length} décision(s) ouverte(s) ou récemment évaluée(s).`
-            : "Aucun Decision Case ouvert."}{" "}
-          <Link href="/decision-lab">Ouvrir Decision Lab</Link>
+    <div className="today-page" data-stage={model.profileStage}>
+      {model.readOnlyDemo ? (
+        <p className="today-demo-banner" role="status">
+          Espace de démonstration, en lecture seule. Les données sont synthétiques et aucune
+          modification n’est enregistrée.
         </p>
-      </section>
+      ) : null}
+
+      {error ? (
+        <p className="today-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      {/*
+       * L'ORDRE EST CELUI DU §11 : « un profil vide obtient un parcours d'installation ». Sur
+       * un profil vide, le parcours vient AVANT le canvas — un cockpit dont les six réponses
+       * sont non calculables n'aide personne, et l'afficher en premier est exactement la
+       * « succession d'erreurs » que le critère refuse. Dès l'installation commencée, les deux
+       * coexistent, et le parcours disparaît une fois toutes ses étapes faites ou closes.
+       */}
+      {model.installation && model.profileStage === "EMPTY" ? (
+        <Installation
+          busy={busy}
+          domains={model.domains}
+          onDeclare={declare}
+          path={model.installation}
+          readOnly={model.readOnlyDemo}
+        />
+      ) : null}
+
+      <TodayCanvas model={model} onOpenInbox={() => setInboxOpen(true)} />
+
+      {/* Les actions prioritaires : au plus TROIS, plafond appliqué par le modèle de lecture
+          et vérifié par un test. Le §17 zone F veut que chaque demande explique ce qui s'est
+          passé, pourquoi cela compte, la preuve et l'effet — d'où le `title` porteur, et le
+          détail complet dans l'inbox. */}
+      {model.actions.length > 0 ? (
+        <section aria-label="Actions prioritaires" className="today-actions">
+          <p className="today-question">Trois actions au plus</p>
+          <ul>
+            {model.actions.map((action) => (
+              <li key={action.id}>
+                <a className="button primary" href={action.href}>
+                  {action.label}
+                </a>
+                <span className="today-action-why">{action.importance}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {model.installation && model.profileStage !== "EMPTY" ? (
+        <Installation
+          busy={busy}
+          domains={model.domains}
+          onDeclare={declare}
+          path={model.installation}
+          readOnly={model.readOnlyDemo}
+        />
+      ) : null}
+
+      <button className="today-inbox-open" onClick={() => setInboxOpen(true)} type="button">
+        <Inbox size={16} />
+        Boîte de réception
+      </button>
+
+      {/*
+       * L'INBOX EST UN TIROIR, pas une septième section de la page.
+       *
+       * Le §11 de V10 la veut en « compact drawer / side tray », et le §7 : « forms do not
+       * occupy the main canvas ». C'est aussi ce qui monte enfin `FinancialDrawer`, écrit et
+       * testé en phase 1 mais importé par aucune page — le point E5 de ses limites connues.
+       */}
+      <FinancialDrawer
+        onClose={() => setInboxOpen(false)}
+        open={inboxOpen}
+        subtitle="Ce qui demande une décision, un arbitrage ou rien du tout"
+        title="Boîte de réception"
+      >
+        <TaskInbox
+          inbox={model.inbox}
+          renderAction={(task: InboxTask) =>
+            task.href ? (
+              <a className="button secondary" href={task.href}>
+                Traiter
+              </a>
+            ) : null
+          }
+        />
+      </FinancialDrawer>
     </div>
   );
 }

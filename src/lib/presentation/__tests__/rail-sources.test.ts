@@ -23,12 +23,30 @@ describe("railSourcesFor — pertinence déclarée, état lu dans les faits", ()
   });
 
   it("ne rend aucune source pour une page qui ne déclare pas la zone", () => {
-    // Today et Rapports n'ont pas de rail : Today lit les vérités des autres domaines, un
-    // rapport restitue au lieu de s'alimenter.
-    expect(PAGE_REGISTRY.today.zones).not.toContain("SOURCE_RAIL");
-    expect(railSourcesFor(PAGE_REGISTRY.today, empty)).toEqual([]);
+    // Rapports n'a pas de rail : un rapport restitue au lieu de s'alimenter.
     expect(PAGE_REGISTRY.reports.zones).not.toContain("SOURCE_RAIL");
     expect(railSourcesFor(PAGE_REGISTRY.reports, empty)).toEqual([]);
+  });
+
+  it("rend le rail d'Aujourd'hui, que la version 2 du manifeste a réintroduit", () => {
+    // La version 1 du manifeste supprimait la zone B d'Aujourd'hui, au motif que la page ne
+    // possède aucun fait. C'est vrai, et insuffisant : les six réponses du §3 changent de sens
+    // selon la fraîcheur de ce qui les alimente, et le gate visuel du §12.3 fait échouer une
+    // page dont « les sources restent invisibles ». Le manifeste v2 déclare donc les sources
+    // dont l'absence ou la date CHANGE une réponse.
+    expect(PAGE_REGISTRY.today.version).toBe(2);
+    expect(PAGE_REGISTRY.today.zones).toContain("SOURCE_RAIL");
+    const derived = railSourcesFor(PAGE_REGISTRY.today, empty);
+    expect(derived.map((source) => source.id)).toEqual([
+      "bank",
+      "broker",
+      "statement",
+      "closes",
+      "schedule",
+      "goals",
+    ]);
+    // Sur un état vide, TOUTES sont à fournir : aucune ligne n'est annoncée active sans fait.
+    expect(derived.every((source) => source.status === "ABSENTE")).toBe(true);
   });
 
   it("ignore des sources déclarées si la zone ne l'est pas", () => {
@@ -91,7 +109,7 @@ describe("railSourcesFor — pertinence déclarée, état lu dans les faits", ()
       PAGE_REGISTRY.debt,
       stateWith({
         liabilities: [
-          { balanceDate: "2026-08-31", providedSchedule: [] },
+          { balanceDate: "2026-07-31", providedSchedule: [] },
           {
             balanceDate: "2026-08-31",
             providedSchedule: [{ dueDate: "2026-09-05" }, { dueDate: "2026-12-05" }],
@@ -101,7 +119,12 @@ describe("railSourcesFor — pertinence déclarée, état lu dans les faits", ()
     );
     const schedule = derived.find((s) => s.id === "provided-schedule");
     expect(schedule?.status).toBe("ACTIVE");
-    expect(schedule?.latestDate).toBe("2026-12-05");
+    // HORIZON ≠ FRAÎCHEUR. Ce test attendait « 2026-12-05 », la dernière échéance du prêt :
+    // une date FUTURE, affichée par le rail sous « Au … », qui annonce une date de mise à
+    // jour. Un prêt à échéance 2027 s'annonçait donc relu en 2027. Le défaut est resté
+    // invisible tant qu'aucune page ne montait de rail, et il s'est vu au premier écran
+    // d'Aujourd'hui. La fraîcheur d'un échéancier est celle de l'encours qu'il accompagne.
+    expect(schedule?.latestDate).toBe("2026-08-31");
   });
 
   it("ne lève jamais sur une famille de faits absente de l'état", () => {

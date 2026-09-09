@@ -677,14 +677,6 @@ button {
   color: var(--red);
 }
 
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-}
-.dashboard-grid .span-2 {
-  grid-column: span 2;
-}
 .hero-chart {
   height: 244px;
 }
@@ -3166,12 +3158,6 @@ dd {
   .export-button {
     display: none;
   }
-  .dashboard-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .dashboard-grid .span-2 {
-    grid-column: span 2;
-  }
   .underwriting-layout,
   .business-layout,
   .decision-workbench,
@@ -3205,7 +3191,6 @@ dd {
   }
   .metrics-grid.four,
   .metrics-grid.two,
-  .dashboard-grid,
   .two-column,
   .two-column.wide-left,
   .career-layout,
@@ -3213,9 +3198,6 @@ dd {
   .decision-results,
   .goals-grid {
     grid-template-columns: 1fr;
-  }
-  .dashboard-grid .span-2 {
-    grid-column: span 1;
   }
   .metric-card {
     min-height: 108px;

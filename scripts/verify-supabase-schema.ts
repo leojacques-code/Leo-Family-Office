@@ -55,6 +55,7 @@ const canonicalMigrations = [
   "20260903200000",
   "20260904093000",
   "20260905090000",
+  "20260908090000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -1069,10 +1070,24 @@ const requiredColumns: Record<string, string[]> = {
     "decided_at",
     "decided_reason",
   ],
+  // ── Déclaration d'applicabilité d'un domaine (phase 2 de productisation) ──────────
+  // « je ne suis pas concerné » est un FAIT (§18.1), et il ne se déduit d'aucune absence.
+  user_domain_declarations: [
+    "id",
+    "user_id",
+    "domain",
+    "applicability",
+    "declared_on",
+    "revision",
+    "note",
+    "created_at",
+    "executed_by",
+  ],
 };
 
 const userOwnedTables = [
   "profiles",
+  "user_domain_declarations",
   "institutions",
   "asset_classes",
   "financial_accounts",
@@ -1187,6 +1202,11 @@ const userOwnedTables = [
 ] as const;
 
 const requiredIndexes = [
+  // Lecture de la déclaration COURANTE d'un domaine : la plus récente par domaine.
+  "user_domain_declarations_current_idx",
+  // Un rang par domaine : sans elle, deux écritures concurrentes partageraient un rang et
+  // l'ordre total que le rang construit serait perdu.
+  "user_domain_declarations_revision_uidx",
   // ── Réconciliation d'intégration ────────────────────────────────────────────────────
   // Unicité de l'identité démontrée dans le staging : à la VALIDATION, jamais à la LECTURE.
   // Elle remplace deux index concurrents — celui du socle, sans domaine, et celui de la
@@ -1471,6 +1491,7 @@ const requiredTriggers = [
   "bank_sync_raw_pages_immutable",
   "bank_observed_transactions_frozen",
   "position_snapshot_corrections_immutable",
+  "user_domain_declarations_immutable",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1488,6 +1509,7 @@ const requiredTriggerFunctions = [
   "real_estate_public_row_frozen",
   "bank_sync_raw_page_immutable",
   "bank_observed_transaction_frozen",
+  "user_domain_declaration_immutable",
 ] as const;
 
 const requiredConstraints = [
@@ -1985,6 +2007,7 @@ const requiredConstraints = [
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
+  lfo_declare_domain_applicability: "p_user_id uuid, p_payload jsonb",
   lfo_add_account:
     "p_user_id uuid, p_institution text, p_name text, p_account_type text, p_balance numeric, p_currency text, p_as_of_date date",
   lfo_add_transaction:
@@ -2139,6 +2162,9 @@ const requiredRpcs: Record<string, string> = {
  * l'information utile à l'appelant, davantage que l'identifiant de la ligne créée.
  */
 const declaredReturnTypeRpcs: Record<string, string> = {
+  // Rend `null` quand la déclaration courante est déjà celle-là : rendre un identifiant
+  // fabriqué laisserait croire à une écriture qui n'a pas eu lieu.
+  lfo_declare_domain_applicability: "uuid",
   lfo_fec_entry_balance: "TABLE(entries integer, unbalanced integer)",
   lfo_save_scenario_version_v2: "integer",
   lfo_validate_goal_definition_v2: "void",
@@ -2240,6 +2266,9 @@ const readOnlyAuditTables = [
   // plus dure de toutes : elle est la SEULE trace de ce que la valeur remplacée disait. Un
   // client capable de la réécrire pourrait faire croire à un motif qu'il n'a pas donné.
   "position_snapshot_corrections",
+  // Une déclaration d'applicabilité est append-only : un client capable de la réécrire
+  // pourrait faire disparaître le jour où un domaine a cessé d'être « non concerné ».
+  "user_domain_declarations",
 ] as const;
 
 const storagePolicies = [

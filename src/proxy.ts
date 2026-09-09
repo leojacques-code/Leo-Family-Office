@@ -43,6 +43,11 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isPublic =
     pathname === "/login" ||
+    // Espace de démonstration du §19.3, atteignable depuis l'écran de connexion et donc sans
+    // session. Le SEUL élargissement de la surface publique de la refonte, et il ne repose pas
+    // sur une promesse : la route ne peut pas lire de donnée réelle, parce que son module de
+    // données n'importe ni le dépôt ni le client Supabase. Voir `today-demo.ts`.
+    pathname === "/demo" ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico" ||

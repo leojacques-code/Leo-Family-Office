@@ -31,7 +31,7 @@ const { AppShell } = await import("@/components/app-shell");
 const state = { asOfDate: "2026-09-08" } as DashboardState;
 
 function renderShell(section: string) {
-  return render(<AppShell initialState={state} section={section} />);
+  return render(<AppShell source={{ kind: "SECTION", state }} section={section} />);
 }
 
 describe("navigation du shell", () => {

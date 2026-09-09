@@ -5,6 +5,10 @@ import "./globals.css";
 import "./primitives.css";
 // CSS du poste de travail : zones, géométrie et typographie de la phase 1.
 import "./workstation.css";
+// Canvas d'Aujourd'hui, parcours d'installation et boîte de réception : troisième fichier du
+// découpage CSS du §10.2. La phase 2 solde la dette typographique de SON périmètre, pas celle
+// des treize autres pages.
+import "./today.css";
 
 export const metadata: Metadata = {
   title: "Léo Family Office",

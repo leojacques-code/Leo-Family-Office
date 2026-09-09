@@ -47,26 +47,91 @@ export const PAGE_REGISTRY = manifests([
   // ─── Section 20 ─────────────────────────────────────────────────────────────────────
   {
     id: "today",
-    version: 1,
+    // VERSION 2, révisée par la phase 2 qui implémente la page. Le §39 exige que le manifeste
+    // soit « revu » avant l'implémentation, et deux points de la version 1 ne tenaient pas à
+    // la lecture :
+    //
+    //   * la version 1 déclarait « aucune source propre » et supprimait la zone B. C'est vrai
+    //     que Today ne possède aucun fait, et faux qu'il n'a rien à montrer là : les six
+    //     réponses du §3 changent de sens selon la FRAÎCHEUR de ce qui les alimente, et le
+    //     gate visuel du §12.3 fait échouer une page dont « les sources restent invisibles ».
+    //     Un patrimoine net au 30 juin lu le 8 septembre n'est pas le même chiffre. Le rail
+    //     porte donc les sources dont l'absence ou la date CHANGE une réponse — pas la liste
+    //     de tout ce qui alimente le patrimoine, qui est le rail de Patrimoine ;
+    //   * `goal_progress` manquait aux KPI essentiels alors que le §20 item 4 impose une
+    //     « trajectoire courte vers les objectifs actifs » au canvas. La cinquième question du
+    //     §3, « où vais-je si je ne change rien ? », n'avait donc aucun KPI de registre, et la
+    //     servir quand même aurait été la composition libre que le §16 interdit.
+    version: 2,
     title: "Aujourd’hui",
     question: "Que dois-je comprendre et faire maintenant ?",
-    // Pas de rail de sources : Today n'est pas un domaine, il n'a pas de source propre. Il
-    // lit les vérités des autres domaines et n'a donc rien à montrer dans cette zone.
     zones: [
       "OPERATIONAL_HEADER",
+      "SOURCE_RAIL",
       "FINANCIAL_CANVAS",
       "CONTEXTUAL_ACTIONS",
       "AVAILABLE_ANALYSIS",
       "INSPECTOR",
     ],
-    // Aucune source propre : Today n’est pas un domaine, il lit les vérités des autres (§20).
-    sources: [],
+    // Six lignes, et chacune répond à « quelle réponse du §3 cette source décide-t-elle ? ».
+    // Une source qui ne change aucune réponse n'a rien à faire dans ce rail : le §17 le borne
+    // aux sources « pertinentes pour le domaine », et Today n'est pas un inventaire des
+    // sources du produit — c'est la page Sources du §32.
+    sources: [
+      {
+        id: "bank",
+        category: "BANQUE",
+        name: "Banque",
+        evidence: "BANK_ACCOUNTS",
+        planRef: "§20 item 1 : « patrimoine net, liquidité immédiatement disponible »",
+      },
+      {
+        id: "broker",
+        category: "RELEVE_COURTIER",
+        name: "Relevé courtier",
+        evidence: "POSITIONS",
+        planRef: "§20 item 1 : « patrimoine net » — les enveloppes en composent la part financière",
+      },
+      {
+        id: "statement",
+        category: "BANQUE",
+        name: "Opérations",
+        evidence: "BANK_TRANSACTIONS",
+        planRef: "§20 item 3 : « flux du mois : revenu, dépenses essentielles, service de dette »",
+      },
+      {
+        // Une clôture n'est ni un document reçu ni une saisie : c'est une VALORISATION datée
+        // de l'ensemble du patrimoine, produite par le produit. La catégorie du §17 qui le dit
+        // le mieux est `VALORISATION`. Sans deux clôtures comparables, la troisième question du
+        // §3 n'a pas de réponse, et le §20 interdit d'en fabriquer une.
+        id: "closes",
+        category: "VALORISATION",
+        name: "Clôtures",
+        evidence: "MONTHLY_CLOSES",
+        planRef: "§20 item 2 : « variation depuis la dernière clôture comparable »",
+      },
+      {
+        id: "schedule",
+        category: "ECHEANCIER",
+        name: "Échéancier",
+        evidence: "LIABILITY_PROVIDED_SCHEDULE",
+        planRef: "§20 item 6 : « prochaines échéances contractuelles à 30 jours »",
+      },
+      {
+        id: "goals",
+        category: "SAISIE_MANUELLE",
+        name: "Objectifs",
+        evidence: "GOALS",
+        planRef: "§20 item 4 : « trajectoire courte vers les objectifs actifs »",
+      },
+    ],
     primaryAction: null,
     essentialKpis: [
       "net_worth",
       "immediate_cash",
       "net_worth_change_since_close",
       "free_cash_flow_after_debt",
+      "goal_progress",
       "pending_review_count",
       "upcoming_obligations_30d",
     ],
@@ -331,7 +396,8 @@ export const PAGE_REGISTRY = manifests([
         category: "ECHEANCIER",
         name: "Échéancier",
         evidence: "LIABILITY_PROVIDED_SCHEDULE",
-        planRef: "§24 règle document-first : « l’échéancier bancaire fourni domine la reconstruction »",
+        planRef:
+          "§24 règle document-first : « l’échéancier bancaire fourni domine la reconstruction »",
       },
       {
         id: "contract",
@@ -345,7 +411,8 @@ export const PAGE_REGISTRY = manifests([
         category: "BANQUE",
         name: "Compte débité",
         evidence: "BANK_TRANSACTIONS",
-        planRef: "§6.2 : « compte débité » ; §24 : « le rapprochement compare service contractuel et débit bancaire »",
+        planRef:
+          "§6.2 : « compte débité » ; §24 : « le rapprochement compare service contractuel et débit bancaire »",
       },
     ],
     // Section 24 : « la règle document-first ». L'action primaire est l'import de
@@ -400,7 +467,8 @@ export const PAGE_REGISTRY = manifests([
         category: "ACTE",
         name: "Acte",
         evidence: "REAL_ESTATE_ASSETS",
-        planRef: "§25 formulaire essentiel : « identité/adresse/lot et type » ; §17 zone B : « acte »",
+        planRef:
+          "§25 formulaire essentiel : « identité/adresse/lot et type » ; §17 zone B : « acte »",
       },
       {
         id: "valuation",
@@ -472,7 +540,8 @@ export const PAGE_REGISTRY = manifests([
         category: "CONTRAT",
         name: "Contrat",
         evidence: "CAREER_ROLES",
-        planRef: "§26 formulaire essentiel : « source : contrat, avenant, bulletin, banque ou manuel »",
+        planRef:
+          "§26 formulaire essentiel : « source : contrat, avenant, bulletin, banque ou manuel »",
       },
       {
         id: "payslip",
@@ -531,7 +600,8 @@ export const PAGE_REGISTRY = manifests([
         category: "LIASSE",
         name: "Liasse",
         evidence: "BUSINESS_FINANCIALS",
-        planRef: "§27 formulaire essentiel : « période des comptes » et « source : liasse, comptes »",
+        planRef:
+          "§27 formulaire essentiel : « période des comptes » et « source : liasse, comptes »",
       },
       {
         id: "identity",

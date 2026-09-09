@@ -42,6 +42,8 @@ import { Inspector, type InspectorFact } from "@/components/workstation/inspecto
 import { SourceRail, type RailSource } from "@/components/workstation/source-rail";
 import { railSourcesFor } from "@/lib/presentation/rail-sources";
 import { PrimaryActionProvider } from "@/components/workstation/primary-action";
+import TodayPage from "@/components/pages/today/page";
+import type { TodayReadModel } from "@/lib/presentation/today/contracts";
 
 /**
  * Icônes des six entrées, selon le mapping stable du §9 de la spécification V10 : les icônes
@@ -75,15 +77,32 @@ const SECONDARY_ICONS: Record<string, LucideIcon> = {
   settings: Settings,
 };
 
-export function AppShell({
-  initialState,
-  section,
-}: {
-  initialState: DashboardState;
-  section: string;
-}) {
+/**
+ * Le shell sert DEUX formes de source, et c'est la trace visible de la phase 2.
+ *
+ * Aujourd'hui reçoit son modèle de lecture (`getTodayReadModel()` du §10.2) et RIEN d'autre :
+ * `initialState` est alors `null`, de sorte que la page ne peut pas accéder à l'état global
+ * même par accident. Les treize autres sections reçoivent `DashboardState` comme avant, et
+ * l'obtiendront en modèle ciblé dans leur propre phase (§14).
+ *
+ * LES DEUX SONT EXCLUSIFS PAR CONSTRUCTION. Passer les deux laisserait Aujourd'hui lire l'état
+ * global tout en affichant son modèle, c'est-à-dire garder ouverte la porte que cette phase
+ * referme, et personne ne s'en apercevrait avant la mesure technique du §13.
+ */
+export type AppShellSource =
+  | { readonly kind: "TODAY"; readonly model: TodayReadModel }
+  | { readonly kind: "SECTION"; readonly state: DashboardState };
+
+export function AppShell({ source, section }: { source: AppShellSource; section: string }) {
   const router = useRouter();
-  const [state, setState] = useState(initialState);
+  // L'état global n'existe que pour les sections qui en dépendent encore. `null` sur
+  // Aujourd'hui n'est pas un cas dégradé : c'est le contrat.
+  const [state, setState] = useState<DashboardState | null>(
+    source.kind === "SECTION" ? source.state : null,
+  );
+  const [todayModel, setTodayModel] = useState<TodayReadModel | null>(
+    source.kind === "TODAY" ? source.model : null,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -141,13 +160,23 @@ export function AppShell({
     }
   }
 
+  /**
+   * Actualisation, par la route de la section courante.
+   *
+   * Aujourd'hui recharge SON modèle, pas l'état global : le §13 veut que « chaque route ne
+   * charge que son modèle de lecture », et un bouton d'actualisation qui rapatrie tout
+   * l'état depuis la page d'accueil annulerait le bénéfice de la frontière.
+   */
   async function refresh() {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/state", { cache: "no-store" });
+      const isToday = todayModel !== null;
+      const response = await fetch(isToday ? "/api/today" : "/api/state", { cache: "no-store" });
       if (!response.ok) throw new Error("Actualisation impossible");
-      setState(await response.json());
+      const body = await response.json();
+      if (isToday) setTodayModel(body as TodayReadModel);
+      else setState(body as DashboardState);
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "Actualisation impossible");
     } finally {
@@ -198,7 +227,9 @@ export function AppShell({
   const manifest = PAGE_REGISTRY[section] ?? null;
   const activeGroup = groupOfSection(section);
   const secondary = secondarySection(section);
-  const asOfLabel = formatDate(state.asOfDate);
+  // La date d'arrêté vient de la source servie, quelle qu'elle soit. Les deux la portent, et
+  // aucune n'est supposée : une date de repli inventée ici s'afficherait comme un fait.
+  const asOfLabel = formatDate(todayModel?.asOfDate ?? state?.asOfDate ?? "");
 
   /**
    * L'explication devient les faits de l'inspecteur.
@@ -224,17 +255,28 @@ export function AppShell({
    * `A_RENOUVELER` n'est jamais produit : aucun seuil de fraîcheur n'est déclaré par le plan,
    * et la section 16 interdit d'en choisir un ici. Voir `rail-sources.ts`.
    */
-  const railSources = useMemo<RailSource[]>(
-    () =>
-      railSourcesFor(manifest, state).map((source) => ({
+  const railSources = useMemo<RailSource[]>(() => {
+    // Sur Aujourd'hui, le rail est DANS le modèle : il a été dérivé côté serveur, comme le
+    // reste. Le recalculer ici demanderait l'état global, c'est-à-dire exactement ce que la
+    // page n'a plus.
+    if (todayModel) {
+      return todayModel.railSources.map((source) => ({
         id: source.id,
         category: source.category,
         name: source.name,
         status: source.status,
-        hint: source.latestDate ? `Au ${formatDate(source.latestDate, SHORT_DATE)}` : undefined,
-      })),
-    [manifest, state],
-  );
+        hint: source.hint ? `Au ${formatDate(source.hint, SHORT_DATE)}` : undefined,
+      }));
+    }
+    if (!state) return [];
+    return railSourcesFor(manifest, state).map((source) => ({
+      id: source.id,
+      category: source.category,
+      name: source.name,
+      status: source.status,
+      hint: source.latestDate ? `Au ${formatDate(source.latestDate, SHORT_DATE)}` : undefined,
+    }));
+  }, [manifest, state, todayModel]);
 
   return (
     <div className="app-shell">
@@ -486,24 +528,39 @@ export function AppShell({
               ) : undefined
             }
             sourceRail={
-              <SourceRail
-                onSelect={(id) => setSelectedSource({ section, id })}
-                selectedId={selectedSource?.section === section ? selectedSource.id : null}
-                sources={railSources}
-              />
+              // La zone B n'est passée QUE si le rail a des lignes, exactement comme la zone E
+              // n'est passée que si un chiffre est sélectionné.
+              //
+              // `SourceRail` rend déjà `null` sur zéro source, mais le passer quand même
+              // suffisait à faire poser `data-with-rail="true"` sur la racine : la grille
+              // réservait alors les 2,75 colonnes sur 16 du rail à une colonne vide. C'est le
+              // MÊME défaut que le point E4 de la phase 1, de l'autre côté du canvas — et il
+              // est structurel, parce qu'un `ReactNode` ne dit pas s'il rendra quelque chose.
+              // La décision appartient donc à l'appelant, qui connaît le compte.
+              railSources.length > 0 ? (
+                <SourceRail
+                  onSelect={(id) => setSelectedSource({ section, id })}
+                  selectedId={selectedSource?.section === section ? selectedSource.id : null}
+                  sources={railSources}
+                />
+              ) : undefined
             }
           >
             <PrimaryActionProvider onChange={setPrimaryAction}>
-              <SectionContent
-                busy={busy}
-                mutate={mutate}
-                projection={projection}
-                refresh={refresh}
-                runProjection={runProjection}
-                section={section}
-                setExplanation={setExplanation}
-                state={state}
-              />
+              {todayModel ? (
+                <TodayPage model={todayModel} onModelChange={setTodayModel} />
+              ) : state ? (
+                <SectionContent
+                  busy={busy}
+                  mutate={mutate}
+                  projection={projection}
+                  refresh={refresh}
+                  runProjection={runProjection}
+                  section={section}
+                  setExplanation={setExplanation}
+                  state={state}
+                />
+              ) : null}
             </PrimaryActionProvider>
           </WorkspaceShell>
         </div>

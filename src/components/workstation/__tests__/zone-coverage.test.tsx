@@ -32,7 +32,11 @@ vi.mock("@/components/pages", () => ({
           expose le même geste, pour que la zone E puisse être exercée. */}
       <button
         onClick={() =>
-          setExplanation({ title: "Encours observé", formula: "solde au dernier relevé", inputs: [] })
+          setExplanation({
+            title: "Encours observé",
+            formula: "solde au dernier relevé",
+            inputs: [],
+          })
         }
         type="button"
       >
@@ -67,7 +71,10 @@ const INSPECTOR_ZONE: PageZone = "INSPECTOR";
 
 function renderShell(section: string) {
   return render(
-    <AppShell initialState={{ asOfDate: "2026-09-08" } as DashboardState} section={section} />,
+    <AppShell
+      source={{ kind: "SECTION", state: { asOfDate: "2026-09-08" } as DashboardState }}
+      section={section}
+    />,
   );
 }
 

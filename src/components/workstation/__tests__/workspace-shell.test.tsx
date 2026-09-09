@@ -49,6 +49,14 @@ describe("WorkspaceShell", () => {
   it("n'annonce ni rail ni inspecteur quand il n'y a rien à y mettre", () => {
     // Une carte vide « aucune source » est exactement ce que le §6 de V10 refuse : le rail
     // disparaît, il ne se remplit pas d'un avertissement.
+    //
+    // LA ZONE EST DONC ABSENTE, pas vide. Ce test passait auparavant en passant
+    // `<SourceRail sources={[]} />`, qui rend `null` — mais pour la mauvaise raison : le
+    // manifeste `today` de la version 1 ne déclarait pas la zone. Depuis qu'il la déclare, le
+    // cas révèle que `Boolean(sourceRail)` est vrai pour un élément qui ne rendra rien, et
+    // qu'un `ReactNode` ne peut pas dire s'il aura du contenu. La décision appartient à
+    // l'appelant, qui connaît le compte de sources : `app-shell` ne passe la zone que
+    // non vide, et `source-rail-wiring.test.tsx` en est le garde-fou.
     const { container } = render(
       <WorkspaceShell
         dateLabel="8 septembre 2026"
@@ -56,7 +64,6 @@ describe("WorkspaceShell", () => {
         manifest={today}
         mode="REAL"
         onModeChange={noop}
-        sourceRail={<SourceRail sources={[]} />}
       >
         <p>Canvas</p>
       </WorkspaceShell>,

@@ -10,5 +10,10 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   const { section } = await params;
   if (!isRoutedSection(section)) notFound();
   const repository = await getRepository();
-  return <AppShell initialState={await repository.getDashboardState()} section={section} />;
+  return (
+    <AppShell
+      section={section}
+      source={{ kind: "SECTION", state: await repository.getDashboardState() }}
+    />
+  );
 }
