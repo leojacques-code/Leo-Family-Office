@@ -137,6 +137,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
         key={`${contractEditor}-${loan?.id ?? "new"}`}
         loan={contractEditor === "edit" ? (loan ?? null) : null}
         asOfDate={state.asOfDate}
+        reportingCurrency={state.reportingCurrency}
         busy={busy}
         onCancel={() => setContractEditor(null)}
         onSave={(contract: DebtContractInput) => mutate({ action: "save_debt_contract", contract })}
