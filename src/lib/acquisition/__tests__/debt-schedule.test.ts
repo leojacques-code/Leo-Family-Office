@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDebtSchedule, SCHEDULE_HEADER } from "../debt-schedule";
+import { parseDebtSchedule, SCHEDULE_HEADER, summarizeDebtSchedule } from "../debt-schedule";
 const row = "2026-12-05;16745;273,70;0;11,02;0;16471,30;284,72";
 describe("échéancier bancaire — lecture sans invention", () => {
   it("sépare la mensualité CIC entre principal et assurance sur la ligne documentée", () => {
@@ -20,6 +20,31 @@ describe("échéancier bancaire — lecture sans invention", () => {
     expect(result.errors).toEqual([]);
     expect(result.rows).toHaveLength(4);
     expect(result.rows.filter((entry) => entry.principal > 0)).toHaveLength(1);
+    expect(summarizeDebtSchedule(result.rows)).toEqual({
+      debitCount: 4,
+      principalPaymentCount: 1,
+      firstCashOutDate: "2026-09-05",
+      firstPrincipalDate: "2026-12-05",
+      lastProvidedDate: "2026-12-05",
+      openingBalance: 16745,
+      closingBalance: 16471.3,
+      totalPrincipal: 273.7,
+      totalInterest: 0,
+      totalInsurance: 44.08,
+      totalFees: 0,
+      totalFutureCost: 44.08,
+      totalCashOut: 317.78,
+    });
+  });
+  it("retourne une synthèse vide explicite sans échéancier", () => {
+    expect(summarizeDebtSchedule([])).toMatchObject({
+      debitCount: 0,
+      firstCashOutDate: null,
+      openingBalance: null,
+      closingBalance: null,
+      totalFutureCost: 0,
+      totalCashOut: 0,
+    });
   });
   it.each([
     row.replace(";11,02;", ";;"),

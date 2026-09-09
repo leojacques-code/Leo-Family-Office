@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   parseDebtSchedule,
   SCHEDULE_HEADER,
+  summarizeDebtSchedule,
   type SchedulePreview,
 } from "@/lib/acquisition/debt-schedule";
 import type { DebtContractInput } from "@/lib/data/contracts";
@@ -18,6 +19,14 @@ export function ScheduleImport({
   const [source, setSource] = useState("");
   const [preview, setPreview] = useState<SchedulePreview | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const summary = preview && !preview.errors.length ? summarizeDebtSchedule(preview.rows) : null;
+  const formatAmount = (value: number | null) =>
+    value === null
+      ? "Non fourni"
+      : value.toLocaleString("fr-FR", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
   return (
     <section className="full" aria-label="Importer un échéancier">
       <h3>Commencer par l’échéancier bancaire</h3>
@@ -93,17 +102,42 @@ export function ScheduleImport({
           ))}
         </ul>
       ) : null}
-      {preview && !preview.errors.length ? (
+      {preview && summary ? (
         <div>
+          <h4>Synthèse des lignes fournies</h4>
+          <dl>
+            <div>
+              <dt>Encours au début de l’extrait</dt>
+              <dd>{formatAmount(summary.openingBalance)}</dd>
+            </div>
+            <div>
+              <dt>Capital remboursé</dt>
+              <dd>{formatAmount(summary.totalPrincipal)}</dd>
+            </div>
+            <div>
+              <dt>Coût futur</dt>
+              <dd>{formatAmount(summary.totalFutureCost)}</dd>
+            </div>
+            <div>
+              <dt>Sorties de trésorerie</dt>
+              <dd>{formatAmount(summary.totalCashOut)}</dd>
+            </div>
+            <div>
+              <dt>Encours à la fin de l’extrait</dt>
+              <dd>{formatAmount(summary.closingBalance)}</dd>
+            </div>
+          </dl>
           <p>
-            {preview.rows.length} dates de débit ;{" "}
-            {preview.rows.filter((row) => row.principal > 0).length} remboursements de capital.
+            {summary.debitCount} débits ; {summary.principalPaymentCount} remboursements de capital.
+            Première sortie : {summary.firstCashOutDate ?? "Aucune dans les lignes fournies"}.
+            Premier remboursement de capital :{" "}
+            {summary.firstPrincipalDate ?? "Aucun dans les lignes fournies"}. Dernière date fournie
+            : {summary.lastProvidedDate ?? "Aucune"}.
           </p>
           <p>
-            Première sortie : {preview.rows[0]!.dueDate}. Premier remboursement de capital :{" "}
-            {preview.rows.find((row) => row.principal > 0)?.dueDate ??
-              "Aucun dans les lignes fournies"}
-            . Dernière date fournie : {preview.rows.at(-1)!.dueDate}.
+            Coût ventilé : {formatAmount(summary.totalInterest)} d’intérêts,{" "}
+            {formatAmount(summary.totalInsurance)} d’assurance et {formatAmount(summary.totalFees)}{" "}
+            de frais. Devise du contrat à confirmer.
           </p>
           <div style={{ overflowX: "auto", maxHeight: 280 }}>
             <table>

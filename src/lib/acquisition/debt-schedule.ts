@@ -5,6 +5,68 @@ import type { DebtContractInput } from "@/lib/data/contracts";
 export const SCHEDULE_HEADER = "date;ouverture;principal;interet;assurance;frais;cloture;total";
 type Row = DebtContractInput["providedSchedule"][number];
 export type SchedulePreview = { rows: Row[]; errors: string[] };
+export type DebtScheduleSummary = {
+  debitCount: number;
+  principalPaymentCount: number;
+  firstCashOutDate: string | null;
+  firstPrincipalDate: string | null;
+  lastProvidedDate: string | null;
+  openingBalance: number | null;
+  closingBalance: number | null;
+  totalPrincipal: number;
+  totalInterest: number;
+  totalInsurance: number;
+  totalFees: number;
+  totalFutureCost: number;
+  totalCashOut: number;
+};
+
+const toCents = (value: number) => Math.round(value * 100);
+const fromCents = (value: number) => value / 100;
+
+/** Synthèse strictement bornée aux lignes fournies par la banque. */
+export function summarizeDebtSchedule(rows: Row[]): DebtScheduleSummary {
+  const totals = rows.reduce(
+    (sum, row) => ({
+      principal: sum.principal + toCents(row.principal),
+      interest: sum.interest + toCents(row.interest),
+      insurance: sum.insurance + toCents(row.insurance),
+      fees: sum.fees + toCents(row.fees),
+    }),
+    { principal: 0, interest: 0, insurance: 0, fees: 0 },
+  );
+  const totalFutureCost = totals.interest + totals.insurance + totals.fees;
+  return {
+    debitCount: rows.filter(
+      (row) =>
+        toCents(row.principal) +
+          toCents(row.interest) +
+          toCents(row.insurance) +
+          toCents(row.fees) >
+        0,
+    ).length,
+    principalPaymentCount: rows.filter((row) => toCents(row.principal) > 0).length,
+    firstCashOutDate:
+      rows.find(
+        (row) =>
+          toCents(row.principal) +
+            toCents(row.interest) +
+            toCents(row.insurance) +
+            toCents(row.fees) >
+          0,
+      )?.dueDate ?? null,
+    firstPrincipalDate: rows.find((row) => toCents(row.principal) > 0)?.dueDate ?? null,
+    lastProvidedDate: rows.at(-1)?.dueDate ?? null,
+    openingBalance: rows.length ? rows[0]!.openingBalance : null,
+    closingBalance: rows.length ? rows.at(-1)!.closingBalance : null,
+    totalPrincipal: fromCents(totals.principal),
+    totalInterest: fromCents(totals.interest),
+    totalInsurance: fromCents(totals.insurance),
+    totalFees: fromCents(totals.fees),
+    totalFutureCost: fromCents(totalFutureCost),
+    totalCashOut: fromCents(totals.principal + totalFutureCost),
+  };
+}
 
 /** Format explicite : aucun montant absent ni ventilation de coût ne sont devinés. */
 export function parseDebtSchedule(text: string): SchedulePreview {
@@ -46,13 +108,15 @@ export function parseDebtSchedule(text: string): SchedulePreview {
         number,
         number,
       ];
-    const cents = (value: number) => Math.round(value * 100);
-    if (cents(openingBalance) - cents(principal) !== cents(closingBalance)) {
+    if (toCents(openingBalance) - toCents(principal) !== toCents(closingBalance)) {
       errors.push(
         `Ligne ${row.rowNumber} : ouverture moins principal ne correspond pas à la clôture. Vérifiez la source ; aucune correction automatique.`,
       );
     }
-    if (cents(principal) + cents(interest) + cents(insurance) + cents(fees) !== cents(total)) {
+    if (
+      toCents(principal) + toCents(interest) + toCents(insurance) + toCents(fees) !==
+      toCents(total)
+    ) {
       errors.push(
         `Ligne ${row.rowNumber} : le total diffère du capital, des intérêts, de l’assurance et des frais.`,
       );
@@ -60,7 +124,7 @@ export function parseDebtSchedule(text: string): SchedulePreview {
     const previous = rows.at(-1);
     if (
       previous &&
-      (previous.dueDate >= date || cents(previous.closingBalance) !== cents(openingBalance))
+      (previous.dueDate >= date || toCents(previous.closingBalance) !== toCents(openingBalance))
     ) {
       errors.push(
         `Ligne ${row.rowNumber} : date dupliquée, ordre des dates ou continuité des soldes à vérifier.`,
