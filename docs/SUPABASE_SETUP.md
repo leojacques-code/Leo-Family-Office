@@ -200,6 +200,34 @@ Une divergence dans l'autre sens — le dépôt en avance sur la production — 
 
 Ces deux migrations ne portent que des index. La seconde remplace l'index de la première : l'état final ne contient que `net_worth_snapshot_items_snapshot_owner_idx`, sur `(snapshot_id, user_id)`, qui couvre la FK composite posée par `20260825021742`. Le verifier contrôle désormais cet état final, et refuse une base qui porterait encore l'index intermédiaire : une base peut inscrire les deux versions dans son historique sans avoir appliqué la seconde.
 
+## Migration 45 — déclaration d'applicabilité de domaine
+
+`20260908090000_user_domain_declarations`, ajoutée par la phase 2 de productisation. **Elle
+n'est PAS appliquée en production** : le dépôt en porte 45, la production 33 au dernier état
+communiqué.
+
+Ce qu'elle ajoute : une table `user_domain_declarations`, un trigger d'immuabilité
+`user_domain_declarations_immutable`, une RPC `lfo_declare_domain_applicability(uuid, jsonb)`
+réservée à `service_role`. Elle est strictement ADDITIVE : aucune table, contrainte ou RPC
+existante n'est modifiée.
+
+Ce qu'elle ne fait pas : aucune formule financière, aucune écriture dans une table de faits,
+aucun élargissement des droits de `authenticated`, qui n'obtient qu'un `select`.
+
+Points de contrat à relire avant application :
+
+- la table est APPEND-ONLY, protégée en `UPDATE` et en `DELETE` direct. La cascade de
+  suppression d'un utilisateur reste ouverte, et le trigger s'en exclut par
+  `pg_trigger_depth()` : la constitution du dépôt rappelle qu'« un `ON DELETE CASCADE` et un
+  trigger qui refuse tout `DELETE` ne peuvent pas être vrais ensemble » ;
+- la déclaration courante d'un domaine est DÉRIVÉE, jamais persistée : c'est la plus récente
+  par `(declared_on, revision)` ;
+- l'ordre est total grâce au rang, et non grâce à un horodatage : `now()` est le timestamp de
+  la TRANSACTION, donc deux déclarations écrites dans le même appel le partagent. C'est un
+  smoke qui l'a établi, pas une relecture ;
+- deux listes closes vivent en base — les huit domaines du §19.1 et les trois réponses du
+  §18.1 — et elles doivent rester identiques à celles de `src/lib/presentation/today/`.
+
 ## 4. Vérifications
 
 Après application :

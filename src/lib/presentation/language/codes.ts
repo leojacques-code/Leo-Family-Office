@@ -203,6 +203,46 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
   NO_MARKET_EXPOSURE: { label: "Aucune exposition de marché", state: N },
   NO_INVESTMENT_ENVELOPE: { label: "Aucune enveloppe d’investissement", state: N },
   NON_POSITIVE_MARKET_POSITION: { label: "Position de marché non positive", state: C },
+
+  // ─── Réconciliation d'enveloppe : les six codes du bilan canonique ──────────────────
+  //
+  // AJOUTÉS PAR LA PHASE 2, et l'occasion de leur ajout est instructive. `code-inventory.ts`
+  // signalait déjà la brèche en phase 0 : « le bilan canonique, les analytiques de
+  // portefeuille, le cash-flow, la carrière et le modèle mensuel poussent leurs codes en
+  // littéraux, sans type nommé. Ceux-là échappent à ce gate. » Ils ont donc traversé la
+  // phase 0 sans traduction, et personne ne l'a vu — parce qu'aucune page n'était branchée
+  // sur le traducteur. Aujourd'hui est la première, et le jeu de démonstration a fait
+  // apparaître « Réserve non traduite » au premier essai.
+  //
+  // Ces six-là sont traduits parce qu'ils ATTEIGNENT la surface d'Aujourd'hui. Les codes des
+  // autres moteurs non déclarés y arriveront de la même façon, dans la phase de leur domaine.
+  //
+  // POSITION SOUS-EXPLIQUÉE ≠ ERREUR. Un PEA observé à 31 400 € dont les positions saisies
+  // n'expliquent que 20 000 € n'est pas faux : il reste 11 400 € que rien ne décrit, et
+  // l'invariant du dépôt est que « les positions expliquent la composition d'une enveloppe,
+  // elles ne s'y ajoutent pas ». Le total du bilan est donc juste ; c'est sa DÉCOMPOSITION
+  // qui est incomplète. L'état est `PARTIAL` et non un conflit.
+  POSITION_UNDER_EXPLAINED: {
+    label: "Composition de l’enveloppe incomplète",
+    state: P,
+  },
+  // À l'inverse, des positions qui valent PLUS que l'enveloppe observée est une
+  // contradiction : l'une des deux sources se trompe, et il faut arbitrer.
+  POSITION_OVER_EXPLAINED: {
+    label: "Positions supérieures à la valeur de l’enveloppe",
+    state: C,
+  },
+  POSITION_MISSING: { label: "Valeur d’une position à renseigner", state: A },
+  POSITION_ORPHAN: { label: "Position rattachée à un compte inconnu", state: C },
+  POSITION_OUTSIDE_ENVELOPE: {
+    label: "Position logée hors enveloppe d’investissement",
+    state: C,
+  },
+  // `POSITION_NOT_APPLICABLE` n'existe PAS ici, et ce n'est pas un oubli : le bilan ne
+  // l'émet que pour les états différents de `RECONCILED`, et `NOT_APPLICABLE` désigne un
+  // compte sans position à réconcilier — un compte courant. Il n'atteint donc jamais la
+  // liste des réserves. Le déclarer produirait une traduction morte, que le gate inverse du
+  // registre (`literalCodesInLib`) refuse.
   NON_POSITIVE_PORTFOLIO_VALUE: { label: "Valeur de portefeuille non positive", state: C },
 
   // ─── Flux externes et rapprochement bancaire ────────────────────────────────────────

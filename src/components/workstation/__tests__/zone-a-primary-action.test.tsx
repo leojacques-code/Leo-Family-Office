@@ -33,7 +33,10 @@ const { AppShell } = await import("@/components/app-shell");
 
 function renderShell(section: string) {
   return render(
-    <AppShell initialState={{ asOfDate: "2026-09-08" } as DashboardState} section={section} />,
+    <AppShell
+      source={{ kind: "SECTION", state: { asOfDate: "2026-09-08" } as DashboardState }}
+      section={section}
+    />,
   );
 }
 

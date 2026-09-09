@@ -82,10 +82,14 @@ import {
   finiteNumber,
   nullableBoolean,
   nullableFiniteNumber,
+  nullableString,
   requiredField,
+  requiredString,
 } from "@/lib/data/row-validation";
 import { readAllPages } from "@/lib/data/pagination";
-import type { FamilyOfficeRepository } from "@/lib/data/repository";
+import type { DomainDeclarationInput, FamilyOfficeRepository } from "@/lib/data/repository";
+import type { DomainDeclaration } from "@/lib/presentation/today/contracts";
+import { DOMAIN_IDS } from "@/lib/presentation/today/domains";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type {
   Alert,
@@ -3374,5 +3378,83 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     ) as string;
   }
 
-  return { adapter: "supabase", getDashboardState, mutateState, storeDocument, saveSimulation };
+  /**
+   * Les déclarations COURANTES d'applicabilité de domaine.
+   *
+   * La table est APPEND-ONLY : elle porte l'historique, et la déclaration courante d'un domaine
+   * en est la plus récente. L'ordre est (date économique, rang) et non (date économique,
+   * horodatage) : `created_at` est le timestamp de la TRANSACTION, donc deux déclarations
+   * écrites dans le même appel le partagent, et trier par lui ne donne aucun ordre du tout. La
+   * migration porte la même explication à côté de la colonne.
+   *
+   * Un domaine jamais déclaré n'apparaît PAS dans le résultat. Lui rendre une valeur neutre
+   * ferait passer un silence pour une réponse.
+   */
+  async function getDomainDeclarations(): Promise<DomainDeclaration[]> {
+    const rows = unwrap(
+      await db
+        .from("user_domain_declarations")
+        .select("domain, applicability, declared_on, note, revision")
+        .eq("user_id", user)
+        .order("declared_on", { ascending: false })
+        .order("revision", { ascending: false }),
+      "lecture des déclarations de domaine",
+    ) as Row[];
+    const current = new Map<string, DomainDeclaration>();
+    for (const row of rows) {
+      const domain = requiredString(row.domain, "déclaration de domaine : domaine");
+      // Les lignes arrivent de la plus récente à la plus ancienne : la PREMIÈRE vue d'un
+      // domaine est donc sa déclaration courante, et les suivantes sont son historique.
+      if (current.has(domain)) continue;
+      current.set(domain, {
+        domain: domain as DomainDeclaration["domain"],
+        applicability: requiredString(
+          row.applicability,
+          "déclaration de domaine : applicabilité",
+        ) as DomainDeclaration["applicability"],
+        declaredOn: requiredString(row.declared_on, "déclaration de domaine : date"),
+        note: nullableString(row.note, "déclaration de domaine : motif"),
+      });
+    }
+    // L'ordre de sortie est celui du registre de présentation, pas celui de la base : une
+    // liste de domaines dont l'ordre change avec les dates de déclaration ferait bouger les
+    // lignes du parcours d'installation à chaque réponse.
+    return DOMAIN_IDS.map((id) => current.get(id)).filter(
+      (declaration): declaration is DomainDeclaration => declaration !== undefined,
+    );
+  }
+
+  /**
+   * Écrit une déclaration par la RPC, jamais par un `insert` direct.
+   *
+   * La table est en LECTURE SEULE pour `authenticated` et son écriture passe par
+   * `lfo_declare_domain_applicability`, qui prend le verrou du domaine avant de comparer à la
+   * déclaration courante. Rend `false` quand la RPC n'a rien écrit — sa valeur de retour est
+   * alors `null`, ce qui est une information et non un échec.
+   */
+  async function declareDomainApplicability(input: DomainDeclarationInput): Promise<boolean> {
+    const result = await db.rpc("lfo_declare_domain_applicability", {
+      p_user_id: user,
+      p_payload: {
+        domain: input.domain,
+        applicability: input.applicability,
+        declared_on: input.declaredOn,
+        note: input.note,
+      },
+    });
+    if (result.error) {
+      throw new Error(`Supabase déclaration d'applicabilité : ${result.error.message}`);
+    }
+    return result.data !== null;
+  }
+
+  return {
+    adapter: "supabase",
+    getDashboardState,
+    mutateState,
+    storeDocument,
+    saveSimulation,
+    getDomainDeclarations,
+    declareDomainApplicability,
+  };
 }

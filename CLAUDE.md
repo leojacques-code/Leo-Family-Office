@@ -158,10 +158,11 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **44 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
-44 appliquées, 106 tables publiques). Les onze dernières sont les cinq verticales
-d'acquisition ajoutées par ce chantier, leur réconciliation et les deux tours de correction
-des findings de revue :
+Le DÉPÔT porte **45 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
+45 appliquées, 107 tables publiques). La dernière est la déclaration d'applicabilité de
+domaine, ajoutée par la phase 2 de productisation ; les onze précédentes sont les cinq
+verticales d'acquisition, leur réconciliation et les deux tours de correction des findings de
+revue :
 
 - `20260831101500_company_registry_acquisition` ;
 - `20260831154500_document_intelligence_foundation` ;
@@ -173,7 +174,16 @@ des findings de revue :
 - `20260903190000_acquisition_integration_reconciliation` ;
 - `20260903200000_portfolio_findings_no_silent_upsert` ;
 - `20260904093000_portfolio_correction_audit` ;
-- `20260905090000_portfolio_correction_actor_and_expected`.
+- `20260905090000_portfolio_correction_actor_and_expected` ;
+- `20260908090000_user_domain_declarations` — réponses à « êtes-vous concerné ? » (§18.1 du
+  plan de refonte). APPEND-ONLY : un changement d'avis ajoute une observation datée, il
+  n'écrase rien, et la déclaration courante est DÉRIVÉE comme la plus récente par domaine.
+  ABSENCE DE LIGNE ≠ `UNDECIDED` ≠ `DECLARED_NONE` : la première dit que la question n'a jamais
+  été posée, la deuxième qu'elle l'a été et que la réponse est « pas encore », la troisième que
+  l'utilisateur a déclaré n'être pas concerné. HORODATAGE ≠ ORDRE : `now()` est le timestamp de
+  la TRANSACTION, donc deux déclarations d'un même appel le partagent ; l'ordre total vient
+  d'un rang par domaine, attribué sous verrou. Une déclaration ne porte AUCUN montant et
+  n'entre dans aucun moteur : elle change ce que l'interface montre et demande.
 
 L'ALIGNEMENT AVEC LA PRODUCTION N'EST PAS ÉTABLI PAR CE CHIFFRE, et cette section a dérivé
 trois fois de suite pour l'avoir oublié : elle a successivement annoncé « 29 migrations
@@ -188,7 +198,7 @@ dit l'état réel, et le contenu de référence s'extrait de
 `supabase_migrations.schema_migrations`.
 
 La production portait **33 migrations** au dernier état communiqué par le propriétaire du
-schéma. AUCUNE des onze migrations ci-dessus n'y est appliquée. Leur ordre d'application est
+schéma. AUCUNE des douze migrations ci-dessus n'y est appliquée. Leur ordre d'application est
 CELUI DE LEURS NOMS et il n'est pas indifférent : la réconciliation et les trois volets
 Portfolio supposent que les cinq verticales sont déjà là, et chacun reprend la RPC que le
 précédent a redéfinie — `20260903200000`, puis `20260904093000`, puis `20260905090000`.

@@ -97,8 +97,28 @@ export function literalCodesInLib(root: string): Set<string> {
     // seul mot, et l'exiger l'avait fait passer pour une traduction morte. Cette recherche
     // ne sert qu'à détecter les traductions mortes : un faux positif y est inoffensif,
     // là où un faux négatif accuserait une traduction valide.
+    const literals: string[] = [];
     for (const match of source.matchAll(/["`]([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[A-Z][A-Z0-9]{3,})/g)) {
       found.add(match[1]);
+      literals.push(match[1]);
+    }
+    // CODES ASSEMBLÉS PAR INTERPOLATION.
+    //
+    // Le bilan canonique n'écrit pas ses codes de réconciliation en littéraux : il fait
+    // `` `POSITION_${item.state}:${item.accountId}` ``, où `state` parcourt les membres de
+    // `ReconciliationState`. La recherche de littéraux ne voyait donc que `POSITION`, et
+    // `POSITION_UNDER_EXPLAINED` — un code que l'utilisateur LIT — passait pour une
+    // traduction morte. C'est ce qui est arrivé au premier essai de la phase 2, avec une
+    // traduction pourtant correcte.
+    //
+    // Chaque préfixe interpolé est donc recomposé avec TOUS les littéraux majuscules du même
+    // fichier. Le résultat est un SURENSEMBLE, et c'est acceptable ici et nulle part
+    // ailleurs : ce gate ne détecte que les traductions MORTES, où un faux positif se traduit
+    // par une vérification un peu plus faible sur ce préfixe, jamais par une accusation
+    // fausse. La recherche d'inventaire (`inventoryReserveCodes`), qui elle accuse, ne s'en
+    // sert pas.
+    for (const match of source.matchAll(/`([A-Z][A-Z0-9]*_)\$\{/g)) {
+      for (const literal of literals) found.add(`${match[1]}${literal}`);
     }
   }
   return found;

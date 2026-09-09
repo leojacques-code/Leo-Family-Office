@@ -111,9 +111,19 @@ function readEvidence(
       const withSchedule = listOf(state.liabilities).filter((l) => l.providedSchedule.length > 0);
       return {
         count: withSchedule.length,
-        latestDate: maxDate(
-          withSchedule.flatMap((l) => l.providedSchedule.map((entry) => entry.dueDate)),
-        ),
+        // HORIZON D'UN ÉCHÉANCIER ≠ FRAÎCHEUR D'UN ÉCHÉANCIER, et la première version de ce
+        // module confondait les deux : elle rendait la plus récente des dates d'échéance,
+        // c'est-à-dire une date FUTURE — la dernière échéance du prêt. Le rail l'affichait sous
+        // « Au … », qui annonce une date de mise à jour : un prêt à échéance 2027 s'affichait
+        // « Au 1 août 2027 », ce qui laissait croire à une source relue dans le futur.
+        //
+        // Le défaut est resté invisible tant qu'aucune page ne montait de rail. Aujourd'hui est
+        // la première, et il s'est vu au premier écran du jeu de démonstration.
+        //
+        // La date de mise à jour d'un échéancier est celle de l'encours qu'il accompagne :
+        // c'est le `balanceDate` de la dette, qui est daté par sa source. `null` quand elle
+        // n'en porte pas — une date inventée ici serait pire que pas de date.
+        latestDate: maxDate(withSchedule.map((l) => l.balanceDate)),
       };
     }
     case "POSITIONS":

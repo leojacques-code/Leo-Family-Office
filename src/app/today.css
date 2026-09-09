@@ -1,0 +1,895 @@
+/*
+ * Canvas d'Aujourd'hui, parcours d'installation et boîte de réception.
+ *
+ * Troisième fichier du découpage CSS demandé par le §10.2, après `primitives.css` et
+ * `workstation.css`. Il ne touche pas à `globals.css` : la phase 2 solde la dette
+ * typographique de SON périmètre, pas celle des treize autres pages.
+ *
+ * PLANCHER TYPOGRAPHIQUE : 12 px, sans exception. Le §10.2 impose « aucun texte fonctionnel
+ * sous 12 px » et le §26 de V10 descendait à 10 px pour les libellés de canvas — le plan
+ * l'emporte, comme la phase 1 l'a acté (son arbitrage D1). Aucune déclaration de ce fichier
+ * n'est sous 12 px, et le cliquet de `design-system.ts` le vérifie.
+ *
+ * CONTRÔLES : 40 px au minimum, §10.2. Les boutons de réponse du cadrage, les onglets de
+ * l'inbox et l'entrée vers la boîte de réception les portent explicitement.
+ *
+ * SÉMANTIQUE DES COULEURS, §25 de V10 : observé en teal, cash positif en vert, dette et
+ * pression en corail, incomplet en or, simulé en violet. Les tokens existent déjà dans
+ * `globals.css` et ne sont pas redéfinis ici : un domaine « peut teinter des surfaces mais
+ * jamais redéfinir la sémantique ».
+ */
+
+.today-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  font-size: 14px;
+}
+
+/* ─── Texte de service : bandeau de démonstration et erreur ───────────────────────────── */
+
+.today-demo-banner,
+.today-error {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.today-demo-banner {
+  border: 1px solid var(--simulation-soft);
+  background: var(--simulation-wash);
+  color: var(--text-soft);
+}
+
+.today-error {
+  border: 1px solid var(--red-soft);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* ─── Canvas : la composition des six réponses ───────────────────────────────────────── */
+
+/*
+ * DEUX COLONNES, PAS UNE GRILLE DE CARTES.
+ *
+ * La colonne large porte les objets de STOCK et de FLUX — patrimoine, écart, ruban du mois ;
+ * la colonne étroite porte ce qui se lit en une ligne — trajectoire, échéances, décision.
+ * C'est une composition, non une répétition : le critère 2 du gate visuel du §12.3 fait
+ * échouer une page dont « une grille générique de KPI constitue la composition par défaut »,
+ * et quatre cartes de largeur égale en sont la définition.
+ */
+.today-canvas {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  grid-template-areas:
+    "stock trajectory"
+    "delta obligations"
+    "ribbon decision";
+  gap: 18px;
+  align-items: start;
+}
+
+.today-stock {
+  grid-area: stock;
+}
+.today-delta {
+  grid-area: delta;
+}
+.today-ribbon {
+  grid-area: ribbon;
+}
+.today-trajectory {
+  grid-area: trajectory;
+}
+.today-obligations {
+  grid-area: obligations;
+}
+.today-decision {
+  grid-area: decision;
+}
+
+.today-canvas > section {
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/*
+ * La question du §3, au-dessus de sa réponse.
+ *
+ * Elle est la seule PHRASE permanente de chaque bloc : le §3 de V10 interdit le paragraphe
+ * explicatif sous un visuel, et le critère 1 du gate visuel fait échouer une page dont « plus
+ * d'un paragraphe se trouve au-dessus de la ligne de flottaison ».
+ */
+.today-question {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+/* §26 de V10 : chiffres majeurs 22-32 px. Tabular nums, §10.2. */
+.today-figure {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 620;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-figure.small {
+  font-size: 22px;
+}
+
+.today-figure[data-sign="up"] {
+  color: var(--green);
+}
+.today-figure[data-sign="down"] {
+  color: var(--red);
+}
+
+.today-amount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/*
+ * Ce qui remplace une valeur absente : son ÉTAT, jamais « Non calculable » quatre fois.
+ *
+ * La couleur suit la sémantique du §25 : or pour l'incomplet, corail pour un conflit ou un
+ * incident, gris pour une déclaration de non-concernement — qui n'est pas un problème.
+ */
+.today-unavailable {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-tint);
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.today-unavailable[data-state="UNKNOWN_ACTIVATABLE"],
+.today-unavailable[data-state="UNKNOWN_BLOCKING"],
+.today-unavailable[data-state="PARTIAL"] {
+  border-color: var(--gold);
+  background: var(--gold-soft);
+  color: var(--gold);
+}
+
+.today-unavailable[data-state="SOURCE_CONFLICT"],
+.today-unavailable[data-state="SYSTEM_ERROR"] {
+  border-color: var(--red);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.today-subline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--text-soft);
+}
+
+.today-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.today-share {
+  color: var(--teal);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Une réserve, UNE SEULE : le §17 borne la zone C à « au plus une réserve de qualité locale ». */
+.today-reserve {
+  margin: 10px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--gold);
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ─── Q1 et Q2 : la part liquide encodée par une largeur ─────────────────────────────── */
+
+.today-liquidity-bar {
+  position: relative;
+  height: 10px;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: var(--surface-tint);
+  overflow: hidden;
+}
+
+.today-liquidity-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--liquid-share, 0%);
+  border-radius: 999px;
+  /* Vert : « positive cash », §25 de V10. La liquidité est du cash disponible. */
+  background: var(--green);
+}
+
+/* ─── Q3 : l'écart et ses causes ─────────────────────────────────────────────────────── */
+
+.today-causes {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.today-causes li {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.today-cause-bar {
+  height: var(--cause-share, 0%);
+  min-height: 8px;
+  border-radius: 999px;
+  background: var(--teal);
+}
+
+.today-cause-bar[data-sign="down"] {
+  background: var(--red);
+}
+
+.today-cause-label {
+  color: var(--text-soft);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Q4 : le ruban du mois ──────────────────────────────────────────────────────────── */
+
+.today-flow {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.today-flow-segment {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "bar bar"
+    "label amount";
+  gap: 4px 12px;
+  font-size: 13px;
+}
+
+.today-flow-bar {
+  grid-area: bar;
+  display: block;
+  height: 12px;
+  width: var(--flow-share, 0%);
+  min-width: 2px;
+  border-radius: 3px;
+}
+
+/* Sémantique du §11 de V10 : entrée en vert, incompressible en or, dette en corail, solde
+   libre en teal. Aucune couleur n'est choisie pour l'esthétique. */
+.today-flow-segment[data-kind="income"] .today-flow-bar {
+  background: var(--green);
+}
+.today-flow-segment[data-kind="essentialExpenses"] .today-flow-bar {
+  background: var(--gold);
+}
+.today-flow-segment[data-kind="debtService"] .today-flow-bar {
+  background: var(--red);
+}
+.today-flow-segment[data-kind="freeCashFlow"] .today-flow-bar {
+  background: var(--teal);
+}
+
+.today-flow-label {
+  grid-area: label;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.today-flow-segment .today-amount {
+  grid-area: amount;
+  font-weight: 600;
+}
+
+/* ─── Q5 : la trajectoire ────────────────────────────────────────────────────────────── */
+
+.today-goal-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 620;
+}
+
+.today-track {
+  position: relative;
+  height: 26px;
+  margin-top: 12px;
+  border-radius: 8px;
+  background: var(--surface-tint);
+  overflow: hidden;
+}
+
+.today-track-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--goal-share, 0%);
+  background: var(--teal-soft);
+  border-right: 2px solid var(--teal);
+}
+
+.today-track-value {
+  position: absolute;
+  inset: 0 10px 0 auto;
+  display: flex;
+  align-items: center;
+  color: var(--teal-dark);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Q4bis : les échéances à trente jours ───────────────────────────────────────────── */
+
+.today-obligation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.today-obligation-list li {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+
+.today-obligation-list li:first-child {
+  border-top: 0;
+}
+
+.today-obligation-date {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-obligation-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.today-obligation-label strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.today-obligation-label small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ─── Q6 : l'entrée vers la boîte de réception ───────────────────────────────────────── */
+
+.today-inbox-entry,
+.today-inbox-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.today-inbox-entry:hover,
+.today-inbox-open:hover {
+  border-color: var(--teal);
+}
+
+.today-inbox-open {
+  align-self: flex-start;
+}
+
+.today-inbox-count {
+  min-width: 26px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--teal);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* ─── Actions prioritaires : trois au plus ───────────────────────────────────────────── */
+
+.today-actions {
+  padding: 16px 18px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.today-actions ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.today-actions li {
+  display: grid;
+  grid-template-columns: minmax(200px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.today-action-why {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ─── Parcours d'installation ────────────────────────────────────────────────────────── */
+
+.today-installation {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+
+.installation-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.installation-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 640;
+}
+
+.installation-progress {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.installation-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.installation-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.installation-step:first-child {
+  border-top: 0;
+}
+
+.installation-step-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.installation-step[data-status="DONE"] .installation-step-icon {
+  color: var(--green);
+}
+/* Or pour ce qui reste à faire, et NEUTRE pour un domaine déclaré sans objet : une réponse
+   n'est pas un manquement, et la colorer en avertissement contredirait le §18.1. */
+.installation-step[data-status="TODO"] .installation-step-icon {
+  color: var(--gold);
+}
+
+.installation-step-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.installation-step-text strong {
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.installation-step-text small {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.installation-step-status {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.installation-qualify {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.installation-qualify h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 640;
+}
+
+.installation-hint {
+  margin: 0 0 12px;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.installation-domains,
+.installation-declared ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.installation-domains li,
+.installation-declared li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.installation-domain-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.installation-domain-answer {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.installation-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* §10.2 : « contrôles d'au moins 40 px ». Les trois réponses du §18.1 en sont. */
+.installation-answer {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.installation-answer:hover:not(:disabled) {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.installation-answer:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.installation-declared {
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+.installation-declared summary {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  color: var(--text-soft);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ─── Boîte de réception ─────────────────────────────────────────────────────────────── */
+
+.task-inbox {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 14px;
+}
+
+/* Les six vues sont des ONGLETS, pas six sections empilées : le §13 de V10 veut que « the same
+   shell changes the canvas instead of stacking five panels vertically ». */
+.inbox-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inbox-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inbox-tab[aria-selected="true"] {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+}
+
+.inbox-tab-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-tint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-empty {
+  margin: 0;
+  padding: 14px 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inbox-item {
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.inbox-item[data-state="SOURCE_CONFLICT"],
+.inbox-item[data-state="SYSTEM_ERROR"] {
+  border-left-color: var(--red);
+}
+
+.inbox-item[data-state="UNKNOWN_ACTIVATABLE"],
+.inbox-item[data-state="UNKNOWN_BLOCKING"],
+.inbox-item[data-state="PARTIAL"] {
+  border-left-color: var(--gold);
+}
+
+.inbox-item[data-state="AVAILABLE"],
+.inbox-item[data-state="DECLARED_NONE"] {
+  border-left-color: var(--green);
+}
+
+.inbox-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inbox-item-title {
+  font-weight: 600;
+}
+
+.inbox-item-state {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.inbox-item-body {
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/*
+ * Les quatre explications du §11 : fait, importance, preuve, effet.
+ *
+ * Elles sont REPLIÉES par défaut et n'apparaissent qu'à l'ouverture d'une tâche : le §4.4 de
+ * V10 veut que « explanation appears on interaction, not permanently », et six vues dépliant
+ * chacune quatre paragraphes seraient la page de logs que le §35 refuse.
+ */
+.inbox-explanation {
+  margin: 14px 0 0;
+  display: grid;
+  grid-template-columns: minmax(140px, auto) minmax(0, 1fr);
+  gap: 8px 16px;
+  font-size: 13px;
+}
+
+.inbox-explanation dt {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 640;
+}
+
+.inbox-explanation dd {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.inbox-item-actions {
+  margin-top: 14px;
+}
+
+/* ─── Responsive : tablette puis mobile ──────────────────────────────────────────────── */
+
+/*
+ * Sous 1100 px, la composition passe en UNE colonne dans l'ordre du §20.
+ *
+ * L'ordre n'est pas celui de la grille de bureau : c'est celui du plan — patrimoine,
+ * évolution, flux du mois, trajectoire, échéances, décision. Le §38 règle 5 exige une
+ * justification utilisateur pour tout changement d'ordre de page, et l'ordre du §20 EST cette
+ * justification.
+ */
+@media (max-width: 1100px) {
+  .today-canvas {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "stock"
+      "delta"
+      "ribbon"
+      "trajectory"
+      "obligations"
+      "decision";
+  }
+}
+
+@media (max-width: 720px) {
+  .today-figure {
+    font-size: 26px;
+  }
+
+  .today-actions li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inbox-explanation {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px 0;
+  }
+
+  .inbox-explanation dd {
+    margin-bottom: 8px;
+  }
+}
+
+/* ─── Espace de démonstration (§19.3) ────────────────────────────────────────────────── */
+
+.demo-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 100vh;
+  padding: 20px clamp(16px, 4vw, 44px) 44px;
+  background: var(--bg);
+}
+
+.demo-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.demo-header .button {
+  margin-left: auto;
+}
+
+.demo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--simulation-soft);
+  border-radius: 999px;
+  background: var(--simulation-wash);
+  color: var(--simulation);
+  font-size: 12px;
+  font-weight: 640;
+}
+
+/* Le lien de démonstration de l'écran de connexion. 40 px de haut, §10.2. */
+.login-demo {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  margin-top: 14px;
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

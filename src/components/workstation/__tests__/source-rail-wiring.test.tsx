@@ -25,7 +25,7 @@ const { AppShell } = await import("@/components/app-shell");
 function renderShell(section: string, state: Partial<DashboardState> = {}) {
   return render(
     <AppShell
-      initialState={{ asOfDate: "2026-09-08", ...state } as DashboardState}
+      source={{ kind: "SECTION", state: { asOfDate: "2026-09-08", ...state } as DashboardState }}
       section={section}
     />,
   );
@@ -43,9 +43,12 @@ describe("zone B branchée sur le shell", () => {
   });
 
   it("ne rend AUCUN rail sur une page qui ne déclare pas la zone", () => {
-    // Today lit les vérités des autres domaines : un rail y afficherait des pièces que la
-    // page ne consomme pas directement.
-    renderShell("today");
+    // Rapports RESTITUE au lieu de s'alimenter : son manifeste ne déclare pas la zone B.
+    //
+    // C'était Aujourd'hui, jusqu'à ce que la version 2 de son manifeste lui donne un rail :
+    // les six réponses du §3 changent de sens selon la fraîcheur de ce qui les alimente, et le
+    // gate visuel du §12.3 fait échouer une page dont « les sources restent invisibles ».
+    renderShell("reports");
     expect(screen.queryByRole("complementary", { name: "Sources du domaine" })).toBeNull();
   });
 
@@ -57,9 +60,27 @@ describe("zone B branchée sur le shell", () => {
   it("marque le poste de travail comme portant un rail, pour que le CSS place la colonne", () => {
     const { container } = renderShell("debt");
     expect(container.querySelector(".workstation")?.getAttribute("data-with-rail")).toBe("true");
-    renderShell("today");
+    renderShell("reports");
     const shells = [...document.querySelectorAll(".workstation")];
     expect(shells.some((el) => el.getAttribute("data-with-rail") === null)).toBe(true);
+  });
+
+  it("ne réserve PAS la colonne du rail à un rail sans ligne", () => {
+    // Le défaut est structurel et il vaut la peine d'être gardé : `Boolean(sourceRail)` est
+    // vrai pour un élément qui rendra `null`, et la racine porterait alors
+    // `data-with-rail="true"` pour une colonne vide — les 2,75 colonnes sur 16 du rail
+    // retirées au canvas, en permanence. C'est le point E4 de la phase 1, côté rail.
+    //
+    // Le gate de registre interdit aujourd'hui un manifeste qui déclare la zone sans source,
+    // donc le cas n'est pas atteignable par un manifeste ; ce test garde la DÉCISION, pour que
+    // le prochain qui passera la zone inconditionnellement le voie ici.
+    const { container } = render(
+      <AppShell
+        section="reports"
+        source={{ kind: "SECTION", state: { asOfDate: "2026-09-08" } as DashboardState }}
+      />,
+    );
+    expect(container.querySelector(".workstation")).not.toHaveAttribute("data-with-rail");
   });
 
   it("annonce « À fournir » sur un état vide, jamais un état inventé", () => {
@@ -84,7 +105,13 @@ describe("zone B branchée sur le shell", () => {
     const rail = screen.getByRole("complementary", { name: "Sources du domaine" });
     expect(rail.textContent).toContain("À jour");
     // Mois abrégé : le §3 de V10 borne l'indication à quatre mots.
-    expect(rail.textContent).toContain("nov. 2031");
+    //
+    // La date attendue était « nov. 2031 », la dernière ÉCHÉANCE du prêt. C'est son horizon,
+    // pas sa fraîcheur, et le rail l'affiche sous « Au … » : le prêt s'annonçait donc relu en
+    // 2031. HORIZON ≠ FRAÎCHEUR, et la fraîcheur d'un échéancier est celle de l'encours qu'il
+    // accompagne. Le défaut est resté invisible tant qu'aucune page ne montait de rail.
+    expect(rail.textContent).toContain("31 août 2026");
+    expect(rail.textContent).not.toContain("2031");
   });
 
   it("la sélection d'une source ne fuit pas d'une page à l'autre", async () => {
