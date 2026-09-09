@@ -14,11 +14,13 @@ Le parcours distingue nombre de dates de débit et nombre de remboursements de p
 
 Les cinq valeurs essentielles du mode manuel — capital, encours initial, taux nominal, paiement et nombre d'échéances — utilisent désormais les primitives financières de la phase 0. Un nouveau contrat les présente vides. Effacer un champ le rend incomplet et bloque l'enregistrement ; aucune chaîne vide ne devient zéro. Chaque montant annonce sa devise et le taux est saisi comme pourcentage puis transmis au contrat sous forme décimale.
 
+L'aperçu calcule en centimes une synthèse strictement limitée aux lignes fournies : encours d'ouverture et de clôture de l'extrait, capital remboursé, coût futur ventilé, sorties de trésorerie, nombre de débits, première sortie, première date d'amortissement et dernière date fournie. Il ne présente jamais la dernière date d'un extrait comme l'échéance contractuelle complète.
+
 ## Vérification
 
-12 tests ajoutés : lecture de la ligne CIC décrite dans les remarques (273,70 de capital et 11,02 d'assurance pour 284,72 de débit), trois débits sans principal avant décembre, champs manquants, total incohérent, solde incohérent, date inexistante, notation exponentielle, précision excessive, doublons, confirmation UI avant utilisation des lignes, formulaire initial sans zéro et refus d'enregistrer les valeurs essentielles absentes.
+La couverture ajoutée vérifie notamment la ligne CIC décrite dans les remarques (273,70 de capital et 11,02 d'assurance pour 284,72 de débit), les trois débits sans principal avant décembre, les synthèses vide et partielle, les champs manquants, totaux et soldes incohérents, dates inexistantes, notation exponentielle, précision excessive, doublons, confirmation UI avant utilisation des lignes, formulaire initial sans zéro et refus d'enregistrer les valeurs essentielles absentes.
 
-Suite complète : 2 141 tests / 124 fichiers. ESLint et build Next.js verts. Aucun changement de moteur financier ni de schéma. La vérification UI est exécutée avec jsdom ; aucune revue visuelle navigateur de cette tranche n'est revendiquée.
+Suite complète : 2 144 tests / 125 fichiers. ESLint, TypeScript et build Next.js verts. Aucun changement de moteur financier ni de schéma. La vérification UI est exécutée avec jsdom ; aucune revue visuelle navigateur du formulaire authentifié n'est revendiquée.
 
 ## Ce qui reste avant clôture de la phase 3
 

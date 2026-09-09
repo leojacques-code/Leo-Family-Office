@@ -103,7 +103,7 @@ export function ScheduleImport({
         </ul>
       ) : null}
       {preview && summary ? (
-        <div>
+        <div className="result-summary">
           <h4>Synthèse des lignes fournies</h4>
           <dl>
             <div>
