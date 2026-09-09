@@ -604,7 +604,7 @@ try {
     "delete from public.portfolio_events where id = $1",
     [eventId.rows[0].id],
     "Un fait importé a pu être supprimé sans sa provenance",
-    "violates foreign key constraint",
+    "foreign key constraint",
   );
 
   // Idempotence applicative : un second commit ne réécrit rien.
@@ -1273,7 +1273,7 @@ try {
     "delete from public.position_snapshots where id = $1 and user_id = $2",
     [snapshotId, userId],
     "L'observation corrigée a pu être supprimée, emportant la seule trace de sa valeur d'avant",
-    "violates foreign key constraint",
+    "foreign key constraint",
   );
 
   // CONTRAINTES DE BASE, éprouvées en écriture DIRECTE : un motif vide et une correction ne
@@ -1429,7 +1429,7 @@ try {
              array['market_value'])`,
     [foreignUser, correctionSession, correctionIds[0], snapshotId],
     "Un autre propriétaire a pu tracer une correction sur la session et l'observation d'autrui",
-    "violates foreign key constraint",
+    "foreign key constraint",
   );
   // Le sens inverse est barré de la même façon : ma décision ne peut pas désigner
   // l'observation du voisin.
@@ -1455,7 +1455,7 @@ try {
              array['market_value'])`,
     [userId, correctionSession, correctionIds[0], foreignSnapshotId],
     "Une décision a pu désigner l'observation d'un autre propriétaire",
-    "violates foreign key constraint",
+    "foreign key constraint",
   );
 
   await client.query("reset role");

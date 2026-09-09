@@ -22,10 +22,8 @@ import { Amount, Unavailable, share } from "./figures";
  *
  * CE QUI REMPLACE LES CARTES, poste par poste, et pourquoi cette forme-là :
  *
- *   * Q1 et Q2 partagent UN objet de stock. Le patrimoine net porte une barre dont la part
- *     remplie est la liquidité immédiate : « combien je possède » et « combien est disponible »
- *     sont la même quantité vue à deux échelles, et deux cartes côte à côte n'en disent rien.
- *     Le §10 de V10 le formule pour Patrimoine : « height / area encodes magnitude ».
+ *   * Q1 et Q2 affichent le patrimoine net et la trésorerie séparément : une dette peut
+ *     rendre le patrimoine net inférieur au cash, qui n'en constitue donc pas une part.
  *   * Q3 est une barre d'écart entre deux clôtures, décomposée en ses CAUSES, dont les largeurs
  *     sont proportionnelles à leur valeur absolue. Un nombre signé seul ne dit pas d'où il
  *     vient, et le §20 item 2 demande la variation « avec causes principales ».
@@ -52,7 +50,6 @@ function Stock({
   cash: AnswerView;
   currency: string;
 }) {
-  const liquidShare = share(cash.value, netWorth.value);
   return (
     <section aria-label={netWorth.question} className="today-stock">
       <p className="today-question">{netWorth.question}</p>
@@ -63,26 +60,12 @@ function Stock({
           <Amount currency={currency} value={netWorth.value} />
         )}
       </p>
-      {/* La barre n'existe QUE si la part est calculable. Une piste vide laisserait croire à
-          une liquidité nulle, ce qui est une affirmation et non une absence. */}
-      {liquidShare === null ? null : (
-        <div
-          aria-hidden="true"
-          className="today-liquidity-bar"
-          style={{ ["--liquid-share" as string]: `${(liquidShare * 100).toFixed(2)}%` }}
-        >
-          <span className="today-liquidity-fill" />
-        </div>
-      )}
       <p className="today-subline">
         <span className="today-label">{cash.question}</span>
         {cash.value === null ? (
           <Unavailable answer={cash} />
         ) : (
           <Amount currency={currency} value={cash.value} />
-        )}
-        {liquidShare === null ? null : (
-          <span className="today-share">{Math.round(liquidShare * 100)} % du patrimoine</span>
         )}
       </p>
       {netWorth.reserve ? <p className="today-reserve">{netWorth.reserve}</p> : null}

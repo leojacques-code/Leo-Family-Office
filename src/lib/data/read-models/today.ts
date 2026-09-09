@@ -127,7 +127,10 @@ export function todayViewInputFrom(
     month.end,
     { ledgerCoverageStart: state.ledgerCoverageStart, asOfDate: state.asOfDate },
   );
-  const ranked = rankGoals(state.goals ?? [], context);
+  const ranked = rankGoals(
+    (state.goals ?? []).filter((goal) => goal.status === "ACTIVE"),
+    context,
+  );
   const primary = ranked[0] ?? null;
   const goal: GoalTrajectoryInput | null = primary
     ? {
@@ -135,6 +138,7 @@ export function todayViewInputFrom(
         name: primary.goal.name,
         targetDate: primary.goal.definition?.targetDate ?? primary.goal.targetDate ?? null,
         relativeGap: primary.evaluation?.gap?.relativeGap ?? null,
+        satisfiedNow: primary.evaluation?.satisfiedNow ?? null,
         blockers: (primary.evaluation?.blockers ?? [])
           .filter((blocker) => blocker.blocking)
           .map((blocker) => blocker.code),

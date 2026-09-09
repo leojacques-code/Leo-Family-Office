@@ -3392,14 +3392,14 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
    */
   async function getDomainDeclarations(): Promise<DomainDeclaration[]> {
     const rows = unwrap(
-      await db
-        .from("user_domain_declarations")
-        .select("domain, applicability, declared_on, note, revision")
-        .eq("user_id", user)
-        .order("declared_on", { ascending: false })
-        .order("revision", { ascending: false }),
+      await fetchAllPages("user_domain_declarations", "declared_on"),
       "lecture des déclarations de domaine",
     ) as Row[];
+    rows.sort(
+      (a, b) =>
+        String(b.declared_on).localeCompare(String(a.declared_on)) ||
+        Number(b.revision) - Number(a.revision),
+    );
     const current = new Map<string, DomainDeclaration>();
     for (const row of rows) {
       const domain = requiredString(row.domain, "déclaration de domaine : domaine");

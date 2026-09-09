@@ -87,6 +87,7 @@ beforeEach(() => {
           filters.every(([key, value]) => row[key] === value),
         );
         if (range) data = data.slice(range[0], range[1] + 1);
+        else data = data.slice(0, 1000);
         return Promise.resolve(resolve({ data: structuredClone(data), error: null }));
       },
     };
@@ -240,4 +241,27 @@ describe("repository Decision Lab rechargeable", () => {
       netWorth: null,
     });
   });
+});
+
+it("conserve les déclarations après la première page PostgREST", async () => {
+  tables.user_domain_declarations = Array.from({ length: 1000 }, (_, index) => ({
+    id: `row-${index}`,
+    user_id: "owner",
+    domain: "BANQUE",
+    applicability: "APPLICABLE",
+    declared_on: "2026-09-09",
+    revision: index + 1,
+    note: null,
+  }));
+  tables.user_domain_declarations.push({
+    id: "debt",
+    user_id: "owner",
+    domain: "DETTE",
+    applicability: "DECLARED_NONE",
+    declared_on: "2026-09-08",
+    revision: 1,
+    note: null,
+  });
+  const declarations = await createSupabaseRepository().getDomainDeclarations();
+  expect(declarations.find((row) => row.domain === "DETTE")?.applicability).toBe("DECLARED_NONE");
 });
