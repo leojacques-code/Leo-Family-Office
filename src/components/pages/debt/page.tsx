@@ -39,6 +39,7 @@ import {
 } from "@/components/pages/shared";
 import type { DebtContractInput } from "@/lib/data/contracts";
 import type { Liability } from "@/lib/types";
+import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
 import { DebtContractForm } from "@/components/pages/debt/debt-contract-form";
 
 const PROFILE_LABELS: Record<Liability["amortisationProfile"], string> = {
@@ -67,6 +68,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const [selectedId, setSelectedId] = useState(state.liabilities[0]?.id ?? "");
   const [investmentReturn, setInvestmentReturn] = useState(5.5);
   const [contractEditor, setContractEditor] = useState<"new" | "edit" | null>(null);
+  useRegisterPrimaryAction(() => setContractEditor(loan ? "edit" : "new"));
   const [balanceEditor, setBalanceEditor] = useState(false);
   const [balance, setBalance] = useState({ value: "", date: state.asOfDate, notes: "" });
   const loan = state.liabilities.find((item) => item.id === selectedId) ?? state.liabilities[0];
@@ -161,7 +163,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
         {header}
         <EmptyState
           title="Aucune dette enregistrée"
-          detail="Le service de dette mensuel vaut 0 € et aucun échéancier n’est projeté tant qu’aucun passif n’est saisi."
+          detail="Ajoutez un contrat ou un échéancier pour connaître vos engagements. Une absence de saisie ne signifie pas une absence de dette."
           action={
             <button className="button primary" onClick={() => setContractEditor("new")}>
               <Plus size={15} /> Enregistrer une dette

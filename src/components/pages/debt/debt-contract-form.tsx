@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { ScheduleImport } from "./schedule-import";
 import { Plus, Save, Trash2 } from "lucide-react";
 
 import type { DebtContractInput } from "@/lib/data/contracts";
@@ -121,6 +122,16 @@ export function DebtContractForm({
 
   return (
     <form className="form-grid debt-contract-form" onSubmit={submit}>
+      <ScheduleImport
+        disabled={busy}
+        onConfirm={(rows, source) =>
+          setContract((current) => ({
+            ...current,
+            providedSchedule: rows,
+            notes: [current.notes, `Échéancier fourni : ${source}`].filter(Boolean).join("\n"),
+          }))
+        }
+      />
       <label>
         Nom de la dette
         <input
@@ -140,7 +151,7 @@ export function DebtContractForm({
         />
       </label>
       <label>
-        Capital contractuel
+        Capital initial emprunté (hors assurance et frais futurs)
         <input
           className="text-input"
           type="number"
@@ -210,7 +221,7 @@ export function DebtContractForm({
         />
       </label>
       <label>
-        Nombre d’échéances
+        Nombre d’échéances du contrat hors lignes fournies
         <input
           className="text-input"
           type="number"
@@ -224,7 +235,7 @@ export function DebtContractForm({
         />
       </label>
       <label>
-        Première échéance
+        Première échéance du calendrier reconstruit
         <input
           className="text-input"
           type="date"
@@ -744,7 +755,7 @@ export function DebtContractForm({
         </NestedSection>
 
         <NestedSection
-          title="Échéancier bancaire fourni (source ACTUAL)"
+          title="Lignes bancaires confirmées"
           onAdd={() =>
             setContract({
               ...contract,
@@ -824,7 +835,7 @@ export function DebtContractForm({
         </button>
         <button className="button primary" disabled={busy}>
           <Save size={15} />
-          Enregistrer atomiquement
+          Enregistrer la dette
         </button>
       </div>
     </form>
