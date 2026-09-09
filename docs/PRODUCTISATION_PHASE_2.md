@@ -270,7 +270,7 @@ alertes », et le plafond de trois actions est appliqué par le modèle et véri
 ### Fichiers créés
 
 ```text
-supabase/migrations/20260908090000_user_domain_declarations.sql
+supabase/migrations/20260909190841_user_domain_declarations.sql
 scripts/smoke-domain-declarations.ts
 src/lib/presentation/language/events.ts
 src/lib/presentation/today/{contracts,domains,answers,flow,obligations,inbox,actions,onboarding,view}.ts

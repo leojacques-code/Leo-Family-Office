@@ -83,7 +83,7 @@ export function buildTodayView(input: TodayViewInput): TodayReadModel {
   const profileStage = profileStageOf(domains, installation.steps);
 
   const monthFlow = buildMonthFlow(input.observedFlow);
-  const closeChange = buildCloseChange(input.closes);
+  const closeChange = buildCloseChange(input.closes, input.reportingCurrency);
   const goalTrajectory = buildGoalTrajectory(input.goal);
 
   return {

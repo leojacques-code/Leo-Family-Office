@@ -102,6 +102,7 @@ function expectedAmount(event: CanonicalEvent, reportingCurrency: string): numbe
   const consequences = event.consequences ?? [];
   if (consequences.length === 0) return null;
   if (consequences.some((consequence) => consequence.currency !== reportingCurrency)) return null;
+  if (consequences.some((item) => item.cashOut === null || item.cashIn === null)) return null;
   let total = 0;
   let known = false;
   for (const consequence of consequences) {

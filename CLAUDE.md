@@ -175,7 +175,7 @@ revue :
 - `20260903200000_portfolio_findings_no_silent_upsert` ;
 - `20260904093000_portfolio_correction_audit` ;
 - `20260905090000_portfolio_correction_actor_and_expected` ;
-- `20260908090000_user_domain_declarations` — réponses à « êtes-vous concerné ? » (§18.1 du
+- `20260909190841_user_domain_declarations` — réponses à « êtes-vous concerné ? » (§18.1 du
   plan de refonte). APPEND-ONLY : un changement d'avis ajoute une observation datée, il
   n'écrase rien, et la déclaration courante est DÉRIVÉE comme la plus récente par domaine.
   ABSENCE DE LIGNE ≠ `UNDECIDED` ≠ `DECLARED_NONE` : la première dit que la question n'a jamais
@@ -197,13 +197,12 @@ dépôt reconstruisent un schéma conforme DEPUIS ZÉRO. Il ne dit RIEN de la pr
 dit l'état réel, et le contenu de référence s'extrait de
 `supabase_migrations.schema_migrations`.
 
-La production portait **33 migrations** au dernier état communiqué par le propriétaire du
-schéma. AUCUNE des douze migrations ci-dessus n'y est appliquée. Leur ordre d'application est
-CELUI DE LEURS NOMS et il n'est pas indifférent : la réconciliation et les trois volets
-Portfolio supposent que les cinq verticales sont déjà là, et chacun reprend la RPC que le
-précédent a redéfinie — `20260903200000`, puis `20260904093000`, puis `20260905090000`.
-Chercher la DERNIÈRE version d'une RPC avant de la remplacer n'est pas une précaution
-théorique : c'est la seule façon de ne pas supprimer ce que le volet précédent avait ajouté.
+La production porte **45 migrations**, contrôlées par le connecteur Supabase le 9 septembre
+2026 après le merge de #48. La dernière est `20260909190841_user_domain_declarations`,
+appliquée depuis le SQL de la phase 2. La plateforme a attribué son identifiant ; le fichier
+local a été renommé sans changer le SQL ni réécrire l’historique distant. Les onze migrations
+précédentes étaient déjà appliquées avant cette réparation. Les anciens chiffres de 33 sont
+historiques et ne décrivent plus la production.
 
 Business Equity V2.1 a été appliqué en production puis contrôlé par assertions SQL,
 smoke transactionnel intégralement rollbacké, test d'isolation sous rôle `authenticated`,

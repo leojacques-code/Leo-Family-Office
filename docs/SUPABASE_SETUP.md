@@ -202,9 +202,7 @@ Ces deux migrations ne portent que des index. La seconde remplace l'index de la 
 
 ## Migration 45 — déclaration d'applicabilité de domaine
 
-`20260908090000_user_domain_declarations`, ajoutée par la phase 2 de productisation. **Elle
-n'est PAS appliquée en production** : le dépôt en porte 45, la production 33 au dernier état
-communiqué.
+`20260909190841_user_domain_declarations`, appliquée le 9 septembre 2026 après le merge de #48. Le connecteur Supabase a attribué cet identifiant au SQL initialement nommé `20260908090000_user_domain_declarations`. Le fichier est renommé sans modification de son SQL ; aucun identifiant de l’historique distant n’est réécrit. Le dépôt et la production portent 45 migrations.
 
 Ce qu'elle ajoute : une table `user_domain_declarations`, un trigger d'immuabilité
 `user_domain_declarations_immutable`, une RPC `lfo_declare_domain_applicability(uuid, jsonb)`

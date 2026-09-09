@@ -92,9 +92,15 @@ export interface CloseChangeResult {
  * son montant : il est simplement absent de la liste, faute de quoi l'apparition d'un poste
  * ressemblerait à un enrichissement.
  */
-export function buildCloseChange(closes: readonly MonthlyClose[]): CloseChangeResult {
+export function buildCloseChange(
+  closes: readonly MonthlyClose[],
+  reportingCurrency: string,
+): CloseChangeResult {
   const ordered = orderedCloses([...closes]).slice(-2);
   const blockers = historicalBlockers(ordered);
+  if (ordered.some((close) => close.reportingCurrency !== reportingCurrency)) {
+    blockers.push("HISTORICAL_CURRENCY_MISMATCH");
+  }
   if (blockers.length > 0) {
     const translated = translateIssues(blockers);
     return {
@@ -148,6 +154,8 @@ export interface GoalTrajectoryInput {
   readonly targetDate: string | null;
   /** Écart relatif rendu par l'évaluation d'objectif. `null` = non calculable. */
   readonly relativeGap: number | null;
+  /** Satisfaction évaluée par le moteur, y compris au-delà de la cible. */
+  readonly satisfiedNow: boolean | null;
   /** Codes de réserve de l'évaluation, non traduits. */
   readonly blockers: readonly string[];
 }
@@ -164,7 +172,12 @@ export function buildGoalTrajectory(input: GoalTrajectoryInput | null): GoalTraj
     goalId: input.goalId,
     name: input.name,
     targetDate: input.targetDate,
-    progress: goalProgressOf(input.relativeGap),
+    progress:
+      input.blockers.length > 0 || input.satisfiedNow === null
+        ? null
+        : input.satisfiedNow
+          ? 1
+          : goalProgressOf(input.relativeGap),
     reserve: translated.issues[0]?.label ?? null,
   };
 }
