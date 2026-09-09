@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { ScheduleImport } from "./schedule-import";
 import { Plus, Save, Trash2 } from "lucide-react";
+import { MoneyInput } from "@/components/primitives/money-input";
+import { OptionalNumberInput } from "@/components/primitives/optional-number-input";
+import { PercentInput } from "@/components/primitives/percent-input";
 
 import type { DebtContractInput } from "@/lib/data/contracts";
 import type { Liability } from "@/lib/types";
@@ -100,12 +104,14 @@ const nullableNumber = (value: string) => (value === "" ? null : number(value));
 export function DebtContractForm({
   loan,
   asOfDate,
+  reportingCurrency,
   busy,
   onSave,
   onCancel,
 }: {
   loan: Liability | null;
   asOfDate: string;
+  reportingCurrency: string;
   busy: boolean;
   onSave: (contract: DebtContractInput) => Promise<boolean>;
   onCancel: () => void;
@@ -113,14 +119,62 @@ export function DebtContractForm({
   const [contract, setContract] = useState<DebtContractInput>(() =>
     loan ? fromLiability(loan) : blankContract(asOfDate),
   );
+  const [requiredValues, setRequiredValues] = useState(() => ({
+    principal: loan?.principal ?? null,
+    initialBalance: loan ? null : null,
+    annualRate: loan?.annualRate ?? null,
+    paymentAmount: loan?.monthlyPayment ?? null,
+    paymentCount: loan?.paymentCount ?? null,
+  }));
+  const [formError, setFormError] = useState<string | null>(null);
+
+  function setRequiredValue(key: keyof typeof requiredValues, value: number | null) {
+    setRequiredValues((current) => ({ ...current, [key]: value }));
+    if (value !== null) setContract((current) => ({ ...current, [key]: value }));
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (await onSave(contract)) onCancel();
+    const missing =
+      requiredValues.principal === null ||
+      requiredValues.annualRate === null ||
+      requiredValues.paymentAmount === null ||
+      requiredValues.paymentCount === null ||
+      !Number.isInteger(requiredValues.paymentCount) ||
+      requiredValues.paymentCount < 1 ||
+      (!loan && requiredValues.initialBalance === null);
+    if (missing) {
+      setFormError(
+        "Complétez les montants, le taux et le nombre d’échéances avant l’enregistrement.",
+      );
+      return;
+    }
+    setFormError(null);
+    if (
+      await onSave({
+        ...contract,
+        principal: requiredValues.principal!,
+        initialBalance: loan ? null : requiredValues.initialBalance,
+        annualRate: requiredValues.annualRate!,
+        paymentAmount: requiredValues.paymentAmount!,
+        paymentCount: requiredValues.paymentCount!,
+      })
+    )
+      onCancel();
   }
 
   return (
     <form className="form-grid debt-contract-form" onSubmit={submit}>
+      <ScheduleImport
+        disabled={busy}
+        onConfirm={(rows, source) =>
+          setContract((current) => ({
+            ...current,
+            providedSchedule: rows,
+            notes: [current.notes, `Échéancier fourni : ${source}`].filter(Boolean).join("\n"),
+          }))
+        }
+      />
       <label>
         Nom de la dette
         <input
@@ -139,33 +193,27 @@ export function DebtContractForm({
           required
         />
       </label>
-      <label>
-        Capital contractuel
-        <input
-          className="text-input"
-          type="number"
-          min="0"
-          step="0.01"
-          value={contract.principal}
-          onChange={(event) => setContract({ ...contract, principal: number(event.target.value) })}
+      <MoneyInput
+        id="debt-principal"
+        label="Capital initial emprunté (hors assurance et frais futurs)"
+        currency={loan?.currency ?? reportingCurrency}
+        value={requiredValues.principal}
+        onChange={(draft) =>
+          setRequiredValue("principal", draft.state === "VALID" ? draft.value : null)
+        }
+        required
+      />
+      {!loan ? (
+        <MoneyInput
+          id="debt-initial-balance"
+          label="Encours observé initial"
+          currency={reportingCurrency}
+          value={requiredValues.initialBalance}
+          onChange={(draft) =>
+            setRequiredValue("initialBalance", draft.state === "VALID" ? draft.value : null)
+          }
           required
         />
-      </label>
-      {!loan ? (
-        <label>
-          Encours observé initial
-          <input
-            className="text-input"
-            type="number"
-            min="0"
-            step="0.01"
-            value={contract.initialBalance ?? ""}
-            onChange={(event) =>
-              setContract({ ...contract, initialBalance: nullableNumber(event.target.value) })
-            }
-            required
-          />
-        </label>
       ) : null}
       {!loan ? (
         <label>
@@ -179,52 +227,38 @@ export function DebtContractForm({
           />
         </label>
       ) : null}
+      <PercentInput
+        id="debt-annual-rate"
+        label="Taux annuel"
+        rateNature="NOMINAL"
+        value={requiredValues.annualRate}
+        onChange={(draft) =>
+          setRequiredValue("annualRate", draft.state === "VALID" ? draft.value : null)
+        }
+        required
+      />
+      <MoneyInput
+        id="debt-payment"
+        label="Paiement par échéance"
+        currency={loan?.currency ?? reportingCurrency}
+        value={requiredValues.paymentAmount}
+        onChange={(draft) =>
+          setRequiredValue("paymentAmount", draft.state === "VALID" ? draft.value : null)
+        }
+        required
+      />
+      <OptionalNumberInput
+        id="debt-payment-count"
+        label="Nombre d’échéances du contrat hors lignes fournies"
+        unit="échéances"
+        value={requiredValues.paymentCount}
+        onChange={(draft) =>
+          setRequiredValue("paymentCount", draft.state === "VALID" ? draft.value : null)
+        }
+        required
+      />
       <label>
-        Taux annuel
-        <div className="suffix-input">
-          <input
-            type="number"
-            min="0"
-            step="0.001"
-            value={contract.annualRate * 100}
-            onChange={(event) =>
-              setContract({ ...contract, annualRate: number(event.target.value) / 100 })
-            }
-            required
-          />
-          <span>%</span>
-        </div>
-      </label>
-      <label>
-        Paiement par échéance
-        <input
-          className="text-input"
-          type="number"
-          min="0"
-          step="0.01"
-          value={contract.paymentAmount}
-          onChange={(event) =>
-            setContract({ ...contract, paymentAmount: number(event.target.value) })
-          }
-          required
-        />
-      </label>
-      <label>
-        Nombre d’échéances
-        <input
-          className="text-input"
-          type="number"
-          min="1"
-          step="1"
-          value={contract.paymentCount}
-          onChange={(event) =>
-            setContract({ ...contract, paymentCount: number(event.target.value) })
-          }
-          required
-        />
-      </label>
-      <label>
-        Première échéance
+        Première échéance du calendrier reconstruit
         <input
           className="text-input"
           type="date"
@@ -744,7 +778,7 @@ export function DebtContractForm({
         </NestedSection>
 
         <NestedSection
-          title="Échéancier bancaire fourni (source ACTUAL)"
+          title="Lignes bancaires confirmées"
           onAdd={() =>
             setContract({
               ...contract,
@@ -818,13 +852,18 @@ export function DebtContractForm({
         </NestedSection>
       </details>
 
+      {formError ? (
+        <p className="full" role="alert">
+          {formError}
+        </p>
+      ) : null}
       <div className="form-actions">
         <button type="button" className="button secondary" onClick={onCancel}>
           Annuler
         </button>
         <button className="button primary" disabled={busy}>
           <Save size={15} />
-          Enregistrer atomiquement
+          Enregistrer la dette
         </button>
       </div>
     </form>

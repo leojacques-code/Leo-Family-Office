@@ -32,6 +32,7 @@ import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
  * compte, ni « Importer un échéancier » sur un formulaire de saisie de dette.
  */
 export const PAGES_SERVING_PRIMARY_ACTION: readonly string[] = [
+  "debt",
   "goals",
   "scenarios",
   "business-equity",
@@ -46,7 +47,7 @@ export const PAGES_SERVING_PRIMARY_ACTION: readonly string[] = [
  * domaine solde la sienne : phase 3 pour Dette, 4 pour Patrimoine, 5 pour Placements, 6 pour
  * Immobilier, 7 pour Carrière et Fiscalité, 9 pour Décisions, 10 pour Sources et Rapports.
  */
-export const PRIMARY_ACTION_DEBT = 9;
+export const PRIMARY_ACTION_DEBT = 8;
 
 export interface PrimaryActionFinding {
   readonly page: string;

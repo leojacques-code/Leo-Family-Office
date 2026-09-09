@@ -59,7 +59,6 @@ describe("zone A : la dette d'actions primaires est mesurée, pas déclarée", (
     expect(unservedPrimaryActions().map((f) => f.page)).toEqual([
       "net-worth",
       "investments",
-      "debt",
       "real-estate",
       "career",
       "tax",
@@ -79,8 +78,11 @@ describe("zone A : la dette d'actions primaires est mesurée, pas déclarée", (
   it("le calcul de la dette réagit à la liste des pages servies", () => {
     // Le gate doit être un CLIQUET, pas une constante décorative : servir une page de plus
     // doit faire baisser le compte, et en retirer une doit le faire monter.
-    const withDebtServed = unservedPrimaryActions([...PAGES_SERVING_PRIMARY_ACTION, "debt"]);
-    expect(withDebtServed.length).toBe(PRIMARY_ACTION_DEBT - 1);
+    const withNetWorthServed = unservedPrimaryActions([
+      ...PAGES_SERVING_PRIMARY_ACTION,
+      "net-worth",
+    ]);
+    expect(withNetWorthServed.length).toBe(PRIMARY_ACTION_DEBT - 1);
     const withNoneServed = unservedPrimaryActions([]);
     expect(withNoneServed.length).toBe(PRIMARY_ACTION_DEBT + PAGES_SERVING_PRIMARY_ACTION.length);
   });
