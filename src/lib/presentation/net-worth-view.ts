@@ -1,7 +1,6 @@
 import {
   buildCanonicalAllocation,
   canonicalBalanceSheetOf,
-  canonicalMetricsOf,
   lineGroupTotal,
   monthlyCloseReadiness,
   type CanonicalAllocation,
@@ -12,7 +11,6 @@ import type {
   CanonicalBalanceSheet,
   ConvertedBalanceSheetLine,
 } from "@/lib/engine/balance-sheet";
-import type { MetricValue } from "@/lib/engine/balance-sheet-metrics";
 import { buildCloseChange, type CloseChangeResult } from "@/lib/presentation/today/flow";
 import type { DashboardState } from "@/lib/types";
 
@@ -106,8 +104,6 @@ export interface NetWorthView {
   /** Clôtures déjà persistées : une évolution en demande deux comparables. */
   readonly closeCount: number;
   readonly ownership: NetWorthOwnership;
-  readonly liquidShareOfGrossAssets: MetricValue;
-  readonly largestAccountConcentration: MetricValue;
   /** Complétude déclarée du bilan lui-même, réserves comprises. */
   readonly quality: CanonicalBalanceSheet["quality"];
   /** Aucun actif ni passif déclaré : la page ouvre son parcours d'installation. */
@@ -215,7 +211,6 @@ function partition<T extends { matches: (line: ConvertedBalanceSheetLine) => boo
  */
 export function buildNetWorthView(state: DashboardState): NetWorthView {
   const sheet = canonicalBalanceSheetOf(state);
-  const metrics = canonicalMetricsOf(state);
   const primary = sheet.contributions.filter((line) => line.isAccountingPrimary);
   const assetLines = primary.filter((line) => line.side === "ASSET");
   const liabilityLines = primary.filter((line) => line.side === "LIABILITY");
@@ -299,8 +294,6 @@ export function buildNetWorthView(state: DashboardState): NetWorthView {
         .length,
       undeclaredShareLineCount,
     },
-    liquidShareOfGrossAssets: metrics.ratios.liquidShareOfGrossAssets,
-    largestAccountConcentration: metrics.ratios.largestAccountConcentration,
     quality: sheet.quality,
     isEmpty: assetLines.length === 0 && liabilityLines.length === 0,
   };

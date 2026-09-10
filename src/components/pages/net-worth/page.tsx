@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import type { FinancialAccount } from "@/lib/types";
-import { Callout, Currency, EmptyState, Percent } from "@/components/ui";
+import { Callout, Currency, EmptyState } from "@/components/ui";
 import { canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
 import { buildNetWorthView, type NetWorthBlock } from "@/lib/presentation/net-worth-view";
 import { BalanceCanvas } from "@/components/pages/net-worth/balance-canvas";
@@ -270,25 +270,6 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
             </tbody>
           </table>
         ) : null}
-        <p className="nw-note">
-          Part liquide des actifs bruts :{" "}
-          {view.liquidShareOfGrossAssets.value === null ? (
-            <span title={issueSummary(view.liquidShareOfGrossAssets.blockers)}>
-              {NOT_COMPUTABLE}
-            </span>
-          ) : (
-            <Percent value={view.liquidShareOfGrossAssets.value} />
-          )}
-          . Concentration du plus gros compte :{" "}
-          {view.largestAccountConcentration.value === null ? (
-            <span title={issueSummary(view.largestAccountConcentration.blockers)}>
-              {NOT_COMPUTABLE}
-            </span>
-          ) : (
-            <Percent value={view.largestAccountConcentration.value} />
-          )}
-          .
-        </p>
       </details>
 
       {assetDrawer}

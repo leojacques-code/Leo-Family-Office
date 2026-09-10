@@ -1,6 +1,6 @@
 "use client";
 
-import { Currency, Percent } from "@/components/ui";
+import { Currency } from "@/components/ui";
 import { NOT_COMPUTABLE, allocationSliceLabel, issueSummary } from "@/components/pages/shared";
 import type { NetWorthView } from "@/lib/presentation/net-worth-view";
 
@@ -174,18 +174,16 @@ function OwnershipPanel({ view }: { view: NetWorthView }) {
           attribuable reste non calculable. Elle n’est jamais supposée entière.
         </p>
       ) : null}
+      {/* `immediate_cash` est un KPI DÉCLARÉ au manifeste de la page. Les ratios de part
+          liquide et de concentration, que le §10 de V10 place dans l'inspecteur Patrimoine, n'y
+          sont PAS déclarés : les rendre créerait un KPI hors registre, ce que le §38 refuse
+          sans entrée de registre portant formule, source et règle d'affichage. */}
       <p className="nw-note">
         Liquidité immédiate :{" "}
         {view.immediateCash.value === null ? (
           <span title={issueSummary(view.immediateCash.blockers)}>{NOT_COMPUTABLE}</span>
         ) : (
           <Currency value={view.immediateCash.value} />
-        )}
-        {view.liquidShareOfGrossAssets.value === null ? null : (
-          <>
-            {" "}
-            · part liquide des actifs bruts <Percent value={view.liquidShareOfGrossAssets.value} />
-          </>
         )}
         . La liquidité n’est pas le patrimoine net.
       </p>
