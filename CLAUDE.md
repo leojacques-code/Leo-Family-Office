@@ -36,9 +36,14 @@ couche amont**. Un domaine possède sa vérité, les autres la consomment.
 - `src/components/` : affichage. Aucune formule financière dans un composant. Si un
   chiffre manque, il vient d'un moteur ou il n'est pas affiché.
 
-Une seule vérité par domaine. `deriveMetrics()` (legacy) coexiste encore avec le bilan
-canonique dans `supabase-repository.ts` : c'est une dette connue, à réduire à chaque PR
-qui touche un périmètre concerné, jamais à étendre.
+Une seule vérité par domaine. La fonction que le §10.3 du plan de refonte nomme
+`deriveMetrics()` N'EXISTE PLUS : ce qui subsiste est `state.metrics`, produit par
+`composeDashboardMetrics()` dans `src/lib/data/shared.ts`, qui lit le bilan canonique champ
+par champ. Ce n'est donc plus un second CALCUL, mais une seconde SURFACE du même calcul, et
+la règle vaut toujours pour elle : un modèle de lecture prend ses agrégats du bilan
+canonique, jamais de `state.metrics`, et aucun KPI nouveau n'en est dérivé. L'ancienne
+formulation situait la dette dans `supabase-repository.ts` et y envoyait chercher une fonction
+absente : un nom de dette se relit dans le code avant d'être recopié.
 
 ## 3. Invariants financiers
 

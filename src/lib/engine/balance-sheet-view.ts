@@ -172,6 +172,31 @@ export function accountAssetLine(
 }
 
 /**
+ * Total d'un ensemble de lignes canoniques DÉJÀ converties.
+ *
+ * Une seule convention d'agrégation pour tous les regroupements d'écran : une ligne dont la
+ * valeur de reporting manque rend le total non calculable et porte SES raisons. Les deux
+ * causes remontent, comme dans l'agrégation du bilan lui-même : un taux de change absent
+ * (`fx.flags`) et un montant natif que le domaine amont déclare inconnu
+ * (`valuationBlockers`). N'en remonter qu'une dirait « non calculable » sans dire pourquoi,
+ * et une quote-part non déclarée disparaîtrait derrière un silence.
+ */
+export function lineGroupTotal(lines: ConvertedBalanceSheetLine[]): CanonicalAggregate {
+  return combine(
+    lines.map((line) => ({
+      value: line.reportingValue,
+      knownValue: line.reportingValue ?? 0,
+      status: (line.reportingValue === null ? "NOT_COMPUTABLE" : "COMPLETE") as AggregateStatus,
+      coverage: line.reportingValue === null ? 0 : 1,
+      blockers:
+        line.reportingValue === null
+          ? [...new Set([...line.fx.flags, ...(line.valuationBlockers ?? [])])]
+          : [],
+    })),
+  );
+}
+
+/**
  * Total d'ACTIF d'un groupe de comptes, en devise de reporting. Un compte à découvert n'y
  * est pas netté : il pèse au passif, comme dans `grossAssets`. Un compte dont la conversion
  * manque rend le total non calculable, il n'est jamais compté pour zéro ni comparé un pour
@@ -182,17 +207,52 @@ export function accountGroupTotal(
   accountIds: string[],
 ): CanonicalAggregate {
   const ids = new Set(accountIds);
-  return combine(
-    accountAssetLines(sheet)
-      .filter((line) => ids.has(line.entityId))
-      .map((line) => ({
-        value: line.reportingValue,
-        knownValue: line.reportingValue ?? 0,
-        status: (line.reportingValue === null ? "NOT_COMPUTABLE" : "COMPLETE") as AggregateStatus,
-        coverage: line.reportingValue === null ? 0 : 1,
-        blockers: line.reportingValue === null ? line.fx.flags : [],
-      })),
+  return lineGroupTotal(accountAssetLines(sheet).filter((line) => ids.has(line.entityId)));
+}
+
+/**
+ * Agrégats du bilan qu'une clôture mensuelle DOIT connaître pour être persistée.
+ *
+ * La liste est celle des colonnes que `lfo_create_monthly_close_v2` reçoit et que les
+ * comparaisons ultérieures relisent : sans elles, la clôture existerait sans être comparable.
+ * Elle est NOMINATIVE et vit à un seul endroit, parce que le repository l'appliquait en
+ * `throw` et que l'écran ne pouvait que la deviner — un bouton actif sur un bilan incomplet
+ * aurait provoqué une erreur au clic au lieu de dire ce qui manque.
+ */
+const MONTHLY_CLOSE_REQUIRED = [
+  "grossAssets",
+  "totalLiabilities",
+  "netWorth",
+  "financialAssets",
+  "liquidAssets",
+  "accountOverdraftLiabilities",
+  "contractualDebt",
+  "otherLiabilities",
+] as const satisfies readonly (keyof CanonicalBalanceSheet)[];
+
+export interface MonthlyCloseReadiness {
+  readonly ready: boolean;
+  /** Réserves des agrégats manquants, telles que les moteurs les ont émises. */
+  readonly blockers: readonly string[];
+  /** Agrégats non calculables, nommés. Volet technique uniquement. */
+  readonly missing: readonly string[];
+}
+
+/**
+ * Peut-on clôturer ce bilan ?
+ *
+ * `ready` se lit sur les VALEURS, jamais sur la longueur des réserves : un agrégat non
+ * calculable dont personne n'aurait rempli les réserves passerait autrement pour clôturable.
+ */
+export function monthlyCloseReadiness(sheet: CanonicalBalanceSheet): MonthlyCloseReadiness {
+  const missing = MONTHLY_CLOSE_REQUIRED.filter(
+    (key) => (sheet[key] as CanonicalAggregate).value === null,
   );
+  return {
+    ready: missing.length === 0,
+    blockers: [...new Set(missing.flatMap((key) => (sheet[key] as CanonicalAggregate).blockers))],
+    missing,
+  };
 }
 
 export function envelopeExposureOf(

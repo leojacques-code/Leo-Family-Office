@@ -1,344 +1,278 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Landmark, Plus, Save } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { FinancialAccount } from "@/lib/types";
-import {
-  Callout,
-  Currency,
-  DataBadge,
-  MetricCard,
-  Modal,
-  Percent,
-  SectionHeader,
-} from "@/components/ui";
+import { Callout, Currency, EmptyState } from "@/components/ui";
 import { canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
+import { buildNetWorthView, type NetWorthBlock } from "@/lib/presentation/net-worth-view";
+import { BalanceCanvas } from "@/components/pages/net-worth/balance-canvas";
+import { NetWorthInsights } from "@/components/pages/net-worth/insights";
+import { AssetDrawer, type AssetDraft } from "@/components/pages/net-worth/asset-drawer";
 import {
   AccountTable,
   ConversionNotice,
-  OptionalCurrency,
+  NOT_COMPUTABLE,
   type SectionProps,
+  allocationExplanation,
   assetsExplanation,
+  canonicalLineInput,
+  canonicalLineLabel,
   formatEur,
-  formatNative,
-  formatNativeOptional,
-  requiredNumberInput,
+  issueSummary,
   netWorthExplanation,
 } from "@/components/pages/shared";
 
+/**
+ * POSTE DE TRAVAIL PATRIMOINE, phase 4A.
+ *
+ * La zone C ne rend plus la composition que le §29 de V10 fait échouer — un second en-tête,
+ * une grille de quatre cartes de KPI, deux tables. Elle rend une équation spatiale :
+ * `ACTIFS − DETTES = PATRIMOINE NET`, avec les cinq familles du §21, dont l'immobilier et les
+ * sociétés détenues que l'ancienne page omettait alors que le bilan canonique les portait.
+ *
+ * LE SECOND EN-TÊTE DISPARAÎT. La zone A du poste de travail porte déjà le titre, la question,
+ * la date d'arrêté, le sélecteur Réel/Simulation et l'action primaire. Le `SectionHeader` de
+ * cette page les doublait, et son titre « Net Worth » était en anglais dans une interface dont
+ * le §11 exige qu'elle soit entièrement française.
+ *
+ * AUCUNE FORMULE FINANCIÈRE ICI. Tout vient de `buildNetWorthView`, qui compose les vérités
+ * canoniques. Ce composant sélectionne, clique et met en forme.
+ */
+
 function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
-  const [modal, setModal] = useState<"add" | "edit" | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [selected, setSelected] = useState<FinancialAccount | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    institution: "",
-    name: "",
-    accountType: "BANK" as FinancialAccount["type"],
-    balance: "",
-    currency: "EUR",
-    date: state.asOfDate,
-  });
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  // Vérité unique de l'écran : le bilan canonique et le modèle de lecture qui le groupe.
+  // Aucun solde natif n'est resommé localement, aucune conversion refaite.
+  const view = useMemo(() => buildNetWorthView(state), [state]);
+  const sheet = useMemo(() => canonicalBalanceSheetOf(state), [state]);
   const bank = state.accounts.filter((item) => item.type === "BANK" || item.type === "SAVINGS");
   const investments = state.accounts.filter((item) => item.type === "PEA" || item.type === "CTO");
-  // Vérité unique de l'écran : le bilan canonique, conversions de change incluses. Aucun
-  // solde natif n'est resommé localement.
-  const sheet = useMemo(() => canonicalBalanceSheetOf(state), [state]);
-  const debtLine = (liabilityId: string) =>
-    sheet.contributions.find((line) => line.id === `debt:${liabilityId}`) ?? null;
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    // Le solde est LU avant d'être envoyé, et un refus de lecture arrête la soumission.
-    // Le helper de saisie rendait `Number("")`, donc `0` : un solde effacé partait à zéro
-    // et écrasait la vérité du compte sans laisser aucune trace.
-    const balance = requiredNumberInput(form.balance, "Solde");
-    if (balance.error !== null) {
-      setFormError(balance.error);
-      return;
-    }
-    setFormError(null);
-    const ok = selected
-      ? await mutate({
+
+  /**
+   * Sélection d'une famille : l'inspecteur reçoit ses lignes, avec provenance et date.
+   *
+   * Le §21 demande « accès par actif à la source et au domaine propriétaire », et le §4.4 de
+   * V10 borne l'inspecteur à quatre à six faits visibles. Les lignes y vont telles que le
+   * bilan les porte : montant natif ET converti quand la devise diffère, jamais un montant
+   * étranger affiché avec un symbole de la devise de reporting.
+   */
+  function inspectBlock(block: NetWorthBlock) {
+    setSelectedBlockId(block.id);
+    setExplanation({
+      title: block.label,
+      formula:
+        block.side === "ASSET"
+          ? "Σ contributions d’actif de la famille, converties à la date de valorisation"
+          : "Σ encours de passif du groupe, convertis à la date de valorisation",
+      inputs: [
+        ...block.lines.map((line) => canonicalLineInput(state, line)),
+        {
+          label: `Total ${block.label.toLowerCase()}`,
+          value:
+            block.aggregate.value === null
+              ? `${NOT_COMPUTABLE} · ${issueSummary(block.aggregate.blockers)}`
+              : formatEur(block.aggregate.value),
+          kind: "DERIVED" as const,
+          date: view.asOfDate,
+        },
+      ],
+      note: `Domaine propriétaire : ${block.ownerDomain}. ${
+        block.share === null
+          ? "La part de cette famille n’est pas calculable tant que le total de son côté ne l’est pas."
+          : `Cette famille pèse ${Math.round(block.share * 100)} % de son côté du bilan.`
+      }${
+        block.unknownLineCount > 0
+          ? ` ${block.unknownLineCount} ligne(s) sans montant convertible : leur hauteur n’est pas mesurée, elle ne vaut pas zéro.`
+          : ""
+      }`,
+    });
+  }
+
+  function inspectLiabilitiesTotal() {
+    setSelectedBlockId("TOTAL_LIABILITIES");
+    setExplanation({
+      title: "Total des dettes",
+      formula: "Σ encours de dette observés + découverts de compte, convertis",
+      inputs: [
+        ...sheet.contributions
+          .filter((line) => line.side === "LIABILITY" && line.isAccountingPrimary)
+          .map((line) => canonicalLineInput(state, line)),
+        {
+          label: "Total",
+          value:
+            view.totalLiabilities.value === null
+              ? `${NOT_COMPUTABLE} · ${issueSummary(view.totalLiabilities.blockers)}`
+              : formatEur(view.totalLiabilities.value),
+          kind: "DERIVED" as const,
+          date: view.asOfDate,
+        },
+      ],
+      note: "La dette d’une société détenue réduit son Equity Value et n’entre jamais au passif personnel. Aucune ligne de passif immobilier n’est produite par le domaine immobilier : elle doublerait celle des dettes.",
+    });
+  }
+
+  async function submitAsset(draft: AssetDraft): Promise<boolean> {
+    // Deux mutations distinctes, comme le contrat de données les porte : une création écrit le
+    // compte, une mise à jour ajoute une observation datée au même compte.
+    return selected
+      ? mutate({
           action: "update_account",
           accountId: selected.id,
-          balance: balance.value,
-          balanceDate: form.date,
+          balance: draft.balance,
+          balanceDate: draft.balanceDate ?? view.asOfDate,
         })
-      : await mutate({
+      : mutate({
           action: "add_account",
-          institution: form.institution,
-          name: form.name,
-          accountType: form.accountType,
-          balance: balance.value,
-          currency: form.currency.toUpperCase(),
+          institution: draft.institution,
+          name: draft.name,
+          accountType: draft.accountType,
+          balance: draft.balance,
+          currency: draft.currency,
         });
-    if (ok) {
-      setModal(null);
-      setSelected(null);
-    }
   }
+
   function edit(account: FinancialAccount) {
     setSelected(account);
-    setForm({
-      institution: account.institution,
-      name: account.name,
-      accountType: account.type,
-      balance: String(account.balance),
-      currency: account.currency,
-      date: state.asOfDate,
-    });
-    setModal("edit");
+    setDrawerOpen(true);
   }
+
+  function openCreate() {
+    setSelected(null);
+    setDrawerOpen(true);
+  }
+
+  const assetDrawer = (
+    <AssetDrawer
+      account={selected}
+      busy={busy}
+      // La clé remonte le tiroir à chaque cible : sans elle, les champs d'un compte
+      // précédemment ouvert resteraient affichés pour le suivant.
+      key={selected?.id ?? "new"}
+      maxDate={view.asOfDate}
+      onClose={() => {
+        setDrawerOpen(false);
+        setSelected(null);
+      }}
+      onSubmit={submitAsset}
+      open={drawerOpen}
+      reportingCurrency={state.reportingCurrency}
+    />
+  );
+
+  if (view.isEmpty) {
+    return (
+      <>
+        <EmptyState
+          action={
+            <button className="button primary" onClick={openCreate}>
+              <Plus size={15} /> Ajouter un actif
+            </button>
+          }
+          detail="Déclarez un compte, un bien ou une dette pour obtenir votre bilan. Une absence de saisie n’est pas une absence de patrimoine."
+          title="Aucun actif ni passif déclaré"
+        />
+        {assetDrawer}
+      </>
+    );
+  }
+
   return (
     <div className="page-stack">
-      <SectionHeader
-        eyebrow="Balance sheet"
-        title="Net Worth"
-        description="Un bilan consolidé sans double comptage. Les positions expliquent les comptes d’investissement, elles ne s’y ajoutent pas."
-        actions={
-          <button
-            className="button primary"
-            onClick={() => {
-              setSelected(null);
-              setForm({
-                institution: "",
-                name: "",
-                accountType: "BANK",
-                balance: "",
-                currency: "EUR",
-                date: state.asOfDate,
-              });
-              setModal("add");
-            }}
-          >
-            <Plus size={16} />
-            Ajouter un compte
-          </button>
-        }
+      <BalanceCanvas
+        onSelectAssets={() => {
+          setSelectedBlockId("GROSS_ASSETS");
+          setExplanation(assetsExplanation(state));
+        }}
+        onSelectBlock={inspectBlock}
+        onSelectLiabilities={inspectLiabilitiesTotal}
+        onSelectNetWorth={() => {
+          setSelectedBlockId("NET_WORTH");
+          setExplanation(netWorthExplanation(state));
+        }}
+        selectedId={selectedBlockId}
+        view={view}
       />
-      <section className="metrics-grid four">
-        <MetricCard
-          label="Actifs financiers identifiés"
-          value={<Currency value={state.metrics.grossAssets} />}
-          detail="Périmètre financier seul, hors immobilier et business equity"
-          onExplain={() => setExplanation(assetsExplanation(state))}
-        />
-        <MetricCard
-          label="Dettes"
-          value={<Currency value={state.metrics.debt} />}
-          tone="negative"
-        />
-        <MetricCard
-          label="Patrimoine net identifié"
-          value={<Currency value={state.metrics.netWorth} />}
-          tone={
-            state.metrics.netWorth !== null && state.metrics.netWorth < 0 ? "negative" : "positive"
-          }
-          onExplain={() => setExplanation(netWorthExplanation(state))}
-        />
-        <MetricCard
-          label="Liquid net worth"
-          value={<Currency value={state.metrics.liquidNetWorth} />}
-          tone={
-            state.metrics.liquidNetWorth !== null && state.metrics.liquidNetWorth < 0
-              ? "negative"
-              : "positive"
-          }
-          detail={
-            <>
-              Actifs mobilisables <Currency value={state.metrics.liquidAssets} /> − dettes
-            </>
-          }
-          onExplain={() =>
-            setExplanation({
-              title: "Liquid net worth",
-              formula:
-                "Σ soldes convertis des comptes dont la liquidité n’est pas ILLIQUID − Σ dettes converties",
-              inputs: [
-                ...sheet.contributions
-                  .filter(
-                    (line) =>
-                      line.domain === "FINANCIAL_ACCOUNT" &&
-                      line.side === "ASSET" &&
-                      line.isAccountingPrimary,
-                  )
-                  .map((line) => ({
-                    label: `${state.accounts.find((account) => account.id === line.entityId)?.name ?? line.entityId} · ${line.liquidity}`,
-                    value:
-                      line.liquidity === "ILLIQUID"
-                        ? formatEur(0)
-                        : line.currency === state.reportingCurrency
-                          ? formatEur(line.reportingValue)
-                          : `${formatNativeOptional(line.nativeValue, line.currency)} → ${formatEur(line.reportingValue)}`,
-                    kind: line.provenance.kind,
-                    date: line.valuationDate,
-                  })),
-                {
-                  label: "Dettes identifiées",
-                  value: formatEur(state.metrics.debt),
-                  kind: "DERIVED" as const,
-                  date: state.asOfDate,
-                },
-              ],
-              note: "Cette grandeur répond à « que resterait-il en soldant tout avec les seuls actifs liquides ». Elle est structurellement inférieure au patrimoine net dès qu’un actif est illiquide, et n’est pas un alias de celui-ci.",
-            })
-          }
-        />
-      </section>
+
+      <NetWorthInsights
+        busy={busy}
+        onCreateClose={() => {
+          void mutate({ action: "create_monthly_close", closeDate: state.asOfDate });
+        }}
+        onInspectAllocation={() => {
+          setSelectedBlockId("ALLOCATION");
+          setExplanation(allocationExplanation(state, view.allocation));
+        }}
+        view={view}
+      />
+
       <Callout title="Périmètre identifié">
         Ce bilan inclut uniquement les actifs et dettes déclarés. Il ne prétend pas représenter un
         patrimoine économique exhaustif.
       </Callout>
-      <ConversionNotice state={state} sheet={sheet} />
-      <section className="two-column">
-        <AccountTable
-          title="Cash bancaire"
-          accounts={bank}
-          sheet={sheet}
-          state={state}
-          onEdit={edit}
-        />
-        <AccountTable
-          title="Investissements"
-          accounts={investments}
-          sheet={sheet}
-          state={state}
-          onEdit={edit}
-        />
-      </section>
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <span className="eyebrow">Passif</span>
-            <h2>Dettes identifiées</h2>
-          </div>
+
+      <ConversionNotice sheet={sheet} state={state} />
+
+      {/* §28 de V10 : les tables, formulaires et enregistrements vivent derrière « Analyse
+          détaillée ». Ils restent atteignables, ils ne sont plus la première impression. */}
+      <details className="nw-details">
+        <summary>Analyse détaillée</summary>
+        <div className="two-column">
+          <AccountTable
+            accounts={bank}
+            onEdit={edit}
+            sheet={sheet}
+            state={state}
+            title="Cash bancaire"
+          />
+          <AccountTable
+            accounts={investments}
+            onEdit={edit}
+            sheet={sheet}
+            state={state}
+            title="Investissements"
+          />
         </div>
-        {state.liabilities.map((liability) => (
-          <div className="account-row" key={liability.id}>
-            <span className="account-logo debt-logo">
-              <Landmark size={17} />
-            </span>
-            <div className="account-main">
-              <strong>{liability.name}</strong>
-              <span>
-                {liability.lender} ·{" "}
-                {liability.annualRate === 0 ? "Taux 0 %" : <Percent value={liability.annualRate} />}
-                {debtLine(liability.id) && liability.currency
-                  ? liability.currency === state.reportingCurrency
-                    ? ""
-                    : ` · ${formatNative(liability.currentBalance, liability.currency)} → ${state.reportingCurrency}`
-                  : ""}
-              </span>
-            </div>
-            <DataBadge kind={liability.provenance.kind} />
-            <strong className="account-balance negative-text">
-              −
-              <OptionalCurrency
-                value={
-                  debtLine(liability.id)?.reportingValue ??
-                  (liability.currentBalance === 0 ? 0 : null)
-                }
-              />
-            </strong>
-          </div>
-        ))}
-      </section>
-      <Modal
-        open={Boolean(modal)}
-        onClose={() => setModal(null)}
-        title={selected ? `Mettre à jour ${selected.name}` : "Ajouter un compte"}
-        subtitle="Toute nouvelle valeur conserve un historique daté"
-      >
-        <form className="form-grid" onSubmit={save}>
-          {formError ? (
-            <p className="form-error full" role="alert">
-              {formError}
-            </p>
-          ) : null}
-          {!selected ? (
-            <>
-              <label>
-                Institution
-                <input
-                  className="text-input"
-                  value={form.institution}
-                  onChange={(event) => setForm({ ...form, institution: event.target.value })}
-                  required
-                />
-              </label>
-              <label>
-                Nom du compte
-                <input
-                  className="text-input"
-                  value={form.name}
-                  onChange={(event) => setForm({ ...form, name: event.target.value })}
-                  required
-                />
-              </label>
-              <label>
-                Type
-                <select
-                  className="text-input"
-                  value={form.accountType}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      accountType: event.target.value as FinancialAccount["type"],
-                    })
-                  }
-                >
-                  <option value="BANK">Compte bancaire</option>
-                  <option value="SAVINGS">Épargne</option>
-                  <option value="PEA">PEA</option>
-                  <option value="CTO">CTO</option>
-                  <option value="OTHER">Autre</option>
-                </select>
-              </label>
-              <label>
-                Devise
-                <input
-                  className="text-input"
-                  maxLength={3}
-                  value={form.currency}
-                  onChange={(event) => setForm({ ...form, currency: event.target.value })}
-                  required
-                />
-              </label>
-            </>
-          ) : null}
-          <label>
-            Solde
-            <input
-              className="text-input"
-              type="number"
-              step="0.01"
-              value={form.balance}
-              onChange={(event) => setForm({ ...form, balance: event.target.value })}
-              required
-            />
-          </label>
-          {selected ? (
-            <label>
-              Date du solde
-              <input
-                className="text-input"
-                type="date"
-                value={form.date}
-                onChange={(event) => setForm({ ...form, date: event.target.value })}
-                required
-              />
-            </label>
-          ) : null}
-          <div className="form-actions">
-            <button type="button" className="button secondary" onClick={() => setModal(null)}>
-              Annuler
-            </button>
-            <button className="button primary" disabled={busy}>
-              <Save size={15} />
-              Enregistrer
-            </button>
-          </div>
-        </form>
-      </Modal>
+        {view.liabilities.length > 0 ? (
+          <table className="nw-table">
+            <caption>Passifs identifiés, encours convertis</caption>
+            <thead>
+              <tr>
+                <th>Ligne</th>
+                <th>Groupe</th>
+                <th>Date de valeur</th>
+                <th>Encours</th>
+              </tr>
+            </thead>
+            <tbody>
+              {view.liabilities.flatMap((block) =>
+                block.lines.map((line) => (
+                  <tr key={line.id}>
+                    <td>{canonicalLineLabel(state, line)}</td>
+                    <td>{block.label}</td>
+                    <td>{line.valuationDate}</td>
+                    <td className="negative-text">
+                      {line.reportingValue === null ? (
+                        <span title={issueSummary(line.valuationBlockers ?? line.fx.flags)}>
+                          {NOT_COMPUTABLE}
+                        </span>
+                      ) : (
+                        <>
+                          −<Currency value={line.reportingValue} />
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        ) : null}
+      </details>
+
+      {assetDrawer}
     </div>
   );
 }

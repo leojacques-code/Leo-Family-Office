@@ -9,6 +9,9 @@ import "./workstation.css";
 // découpage CSS du §10.2. La phase 2 solde la dette typographique de SON périmètre, pas celle
 // des treize autres pages.
 import "./today.css";
+// Canvas du bilan de la phase 4A : géométrie `ACTIFS − DETTES = PATRIMOINE NET`, répartition et
+// zones détourées d'un montant inconnu. Quatrième fichier du découpage CSS du §10.2.
+import "./net-worth.css";
 
 export const metadata: Metadata = {
   title: "Léo Family Office",

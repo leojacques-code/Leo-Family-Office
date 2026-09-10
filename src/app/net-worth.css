@@ -1,0 +1,370 @@
+/*
+ * Poste de travail Patrimoine : géométrie du bilan, répartition, inspecteur de famille.
+ *
+ * Quatrième fichier du découpage CSS demandé par le §10.2 du plan de refonte, après
+ * `primitives.css`, `workstation.css` et `today.css`. Comme les trois précédents, il ne touche
+ * pas à `globals.css` : la phase 4A solde la dette typographique de SON périmètre, pas celle
+ * des douze autres pages.
+ *
+ * PLANCHER TYPOGRAPHIQUE : 12 px pour tout texte fonctionnel, comme le §10.2 l'impose et comme
+ * la phase 1 l'a acté contre l'échelle plus basse du §26 de V10. Aucune déclaration de ce
+ * fichier ne descend sous 12 px.
+ *
+ * LA HAUTEUR D'UN BLOC N'EST PAS ICI. Elle est la donnée : le composant la calcule depuis le
+ * montant et la pose en style inline. Ce fichier porte la hauteur de la zone DÉTOURÉE, celle
+ * d'un montant inconnu, précisément parce qu'elle ne dépend d'aucun montant.
+ */
+
+.nw-canvas {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.nw-equation {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto minmax(180px, 0.9fr);
+  align-items: stretch;
+  gap: 12px;
+}
+
+.nw-operator {
+  align-self: center;
+  font-size: 26px;
+  font-weight: 300;
+  color: var(--text-muted);
+}
+
+.nw-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nw-column-total,
+.nw-result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  background: var(--surface-raised);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nw-column-total:hover,
+.nw-result:hover {
+  border-color: var(--border);
+}
+
+.nw-column-total:focus-visible,
+.nw-result:focus-visible,
+.nw-block:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.nw-column-heading {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.nw-column-total strong {
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nw-track {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nw-track-empty {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  border: 1px dashed var(--border);
+  border-radius: 11px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ─── Bloc de famille : la hauteur encode le montant ────────────────────────────────── */
+
+.nw-block {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  overflow: hidden;
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nw-block[data-side="ASSET"] {
+  background: var(--teal-soft);
+  border-color: color-mix(in srgb, var(--teal) 22%, transparent);
+}
+
+.nw-block[data-side="LIABILITY"] {
+  background: var(--red-soft);
+  border-color: color-mix(in srgb, var(--red) 22%, transparent);
+}
+
+/* Montant inconnu : zone DÉTOURÉE, de hauteur fixe et visiblement non mesurée. Le §22 de V10
+   veut que la donnée manquante change la géométrie, et non seulement le texte. */
+.nw-block[data-unknown="true"] {
+  height: 62px;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent,
+    transparent 6px,
+    color-mix(in srgb, var(--text-muted) 12%, transparent) 6px,
+    color-mix(in srgb, var(--text-muted) 12%, transparent) 12px
+  );
+  border-style: dashed;
+  border-color: var(--border);
+}
+
+.nw-block[aria-pressed="true"] {
+  border-color: var(--teal);
+  border-width: 2px;
+}
+
+.nw-block-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.nw-block-value {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nw-block-share,
+.nw-block-partial {
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.nw-block-unknown {
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ─── Tuile de résultat ──────────────────────────────────────────────────────────────── */
+
+.nw-result {
+  justify-content: center;
+  background: var(--surface-tint);
+  border-color: color-mix(in srgb, var(--teal) 28%, transparent);
+}
+
+.nw-result-value {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.nw-result-delta {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.nw-result-delta[data-direction="up"] {
+  color: var(--green);
+}
+
+.nw-result-delta[data-direction="down"] {
+  color: var(--red);
+}
+
+.nw-result-reserve {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.nw-geometry-note,
+.nw-residual {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.nw-residual {
+  padding: 8px 10px;
+  border: 1px solid var(--red);
+  border-radius: 9px;
+  background: var(--red-soft);
+  color: var(--text);
+}
+
+/* ─── Répartition et notes de périmètre ──────────────────────────────────────────────── */
+
+.nw-secondary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.nw-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  background: var(--surface-raised);
+}
+
+.nw-panel h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.nw-slices {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nw-slice {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.nw-slice-bar {
+  grid-column: 1 / -1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--teal);
+}
+
+.nw-slice[data-unreliable="true"] .nw-slice-bar {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--gold),
+    var(--gold) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+.nw-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.nw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ─── Tablette et mobile ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1023px) {
+  .nw-equation {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .nw-operator {
+    display: none;
+  }
+
+  .nw-result {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 699px) {
+  .nw-equation {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ─── Analyse détaillée : §28 de V10 ─────────────────────────────────────────────────── */
+
+.nw-details {
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  background: var(--surface-raised);
+}
+
+.nw-details > summary {
+  padding: 10px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.nw-details > summary:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.nw-details > *:not(summary) {
+  padding: 0 13px 13px;
+}
+
+.nw-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.nw-table caption {
+  padding-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.nw-table th,
+.nw-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  text-align: left;
+}
+
+.nw-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.nw-table td:last-child,
+.nw-table th:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
