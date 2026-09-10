@@ -172,6 +172,31 @@ export function accountAssetLine(
 }
 
 /**
+ * Total d'un ensemble de lignes canoniques DÉJÀ converties.
+ *
+ * Une seule convention d'agrégation pour tous les regroupements d'écran : une ligne dont la
+ * valeur de reporting manque rend le total non calculable et porte SES raisons. Les deux
+ * causes remontent, comme dans l'agrégation du bilan lui-même : un taux de change absent
+ * (`fx.flags`) et un montant natif que le domaine amont déclare inconnu
+ * (`valuationBlockers`). N'en remonter qu'une dirait « non calculable » sans dire pourquoi,
+ * et une quote-part non déclarée disparaîtrait derrière un silence.
+ */
+export function lineGroupTotal(lines: ConvertedBalanceSheetLine[]): CanonicalAggregate {
+  return combine(
+    lines.map((line) => ({
+      value: line.reportingValue,
+      knownValue: line.reportingValue ?? 0,
+      status: (line.reportingValue === null ? "NOT_COMPUTABLE" : "COMPLETE") as AggregateStatus,
+      coverage: line.reportingValue === null ? 0 : 1,
+      blockers:
+        line.reportingValue === null
+          ? [...new Set([...line.fx.flags, ...(line.valuationBlockers ?? [])])]
+          : [],
+    })),
+  );
+}
+
+/**
  * Total d'ACTIF d'un groupe de comptes, en devise de reporting. Un compte à découvert n'y
  * est pas netté : il pèse au passif, comme dans `grossAssets`. Un compte dont la conversion
  * manque rend le total non calculable, il n'est jamais compté pour zéro ni comparé un pour
@@ -182,17 +207,7 @@ export function accountGroupTotal(
   accountIds: string[],
 ): CanonicalAggregate {
   const ids = new Set(accountIds);
-  return combine(
-    accountAssetLines(sheet)
-      .filter((line) => ids.has(line.entityId))
-      .map((line) => ({
-        value: line.reportingValue,
-        knownValue: line.reportingValue ?? 0,
-        status: (line.reportingValue === null ? "NOT_COMPUTABLE" : "COMPLETE") as AggregateStatus,
-        coverage: line.reportingValue === null ? 0 : 1,
-        blockers: line.reportingValue === null ? line.fx.flags : [],
-      })),
-  );
+  return lineGroupTotal(accountAssetLines(sheet).filter((line) => ids.has(line.entityId)));
 }
 
 export function envelopeExposureOf(

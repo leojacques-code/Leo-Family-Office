@@ -88,7 +88,16 @@ const mutate = vi.fn(async () => true);
 
 function renderPage(state: DashboardState = stateWith()) {
   return render(
-    <NetWorthPage state={state} mutate={mutate} busy={false} setExplanation={noop} />,
+    <NetWorthPage
+      section="net-worth"
+      state={state}
+      mutate={mutate}
+      busy={false}
+      setExplanation={noop}
+      projection={null}
+      runProjection={async () => null}
+      refresh={async () => {}}
+    />,
   );
 }
 
