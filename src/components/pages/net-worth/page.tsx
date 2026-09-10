@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Save } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { FinancialAccount } from "@/lib/types";
-import { Callout, Currency, EmptyState, Modal, Percent } from "@/components/ui";
+import { Callout, Currency, EmptyState, Percent } from "@/components/ui";
 import { canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
 import { buildNetWorthView, type NetWorthBlock } from "@/lib/presentation/net-worth-view";
 import { BalanceCanvas } from "@/components/pages/net-worth/balance-canvas";
 import { NetWorthInsights } from "@/components/pages/net-worth/insights";
+import { AssetDrawer, type AssetDraft } from "@/components/pages/net-worth/asset-drawer";
 import {
   AccountTable,
   ConversionNotice,
@@ -20,7 +21,6 @@ import {
   formatEur,
   issueSummary,
   netWorthExplanation,
-  requiredNumberInput,
 } from "@/components/pages/shared";
 
 /**
@@ -41,18 +41,9 @@ import {
  */
 
 function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
-  const [modal, setModal] = useState<"add" | "edit" | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [selected, setSelected] = useState<FinancialAccount | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    institution: "",
-    name: "",
-    accountType: "BANK" as FinancialAccount["type"],
-    balance: "",
-    currency: "EUR",
-    date: state.asOfDate,
-  });
   // Vérité unique de l'écran : le bilan canonique et le modèle de lecture qui le groupe.
   // Aucun solde natif n'est resommé localement, aucune conversion refaite.
   const view = useMemo(() => buildNetWorthView(state), [state]);
@@ -123,159 +114,52 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
     });
   }
 
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    // Le solde est LU avant d'être envoyé, et un refus de lecture arrête la soumission.
-    // Le helper de saisie rendait `Number("")`, donc `0` : un solde effacé partait à zéro
-    // et écrasait la vérité du compte sans laisser aucune trace.
-    const balance = requiredNumberInput(form.balance, "Solde");
-    if (balance.error !== null) {
-      setFormError(balance.error);
-      return;
-    }
-    setFormError(null);
-    const ok = selected
-      ? await mutate({
+  async function submitAsset(draft: AssetDraft): Promise<boolean> {
+    // Deux mutations distinctes, comme le contrat de données les porte : une création écrit le
+    // compte, une mise à jour ajoute une observation datée au même compte.
+    return selected
+      ? mutate({
           action: "update_account",
           accountId: selected.id,
-          balance: balance.value,
-          balanceDate: form.date,
+          balance: draft.balance,
+          balanceDate: draft.balanceDate ?? view.asOfDate,
         })
-      : await mutate({
+      : mutate({
           action: "add_account",
-          institution: form.institution,
-          name: form.name,
-          accountType: form.accountType,
-          balance: balance.value,
-          currency: form.currency.toUpperCase(),
+          institution: draft.institution,
+          name: draft.name,
+          accountType: draft.accountType,
+          balance: draft.balance,
+          currency: draft.currency,
         });
-    if (ok) {
-      setModal(null);
-      setSelected(null);
-    }
   }
 
   function edit(account: FinancialAccount) {
     setSelected(account);
-    setForm({
-      institution: account.institution,
-      name: account.name,
-      accountType: account.type,
-      balance: String(account.balance),
-      currency: account.currency,
-      date: state.asOfDate,
-    });
-    setModal("edit");
+    setDrawerOpen(true);
   }
 
   function openCreate() {
     setSelected(null);
-    setForm({
-      institution: "",
-      name: "",
-      accountType: "BANK",
-      balance: "",
-      currency: "EUR",
-      date: state.asOfDate,
-    });
-    setModal("add");
+    setDrawerOpen(true);
   }
 
-  const accountForm = (
-    <Modal
-      onClose={() => setModal(null)}
-      open={Boolean(modal)}
-      subtitle="Toute nouvelle valeur conserve un historique daté"
-      title={selected ? `Mettre à jour ${selected.name}` : "Ajouter un compte"}
-    >
-      <form className="form-grid" onSubmit={save}>
-        {formError ? (
-          <p className="form-error full" role="alert">
-            {formError}
-          </p>
-        ) : null}
-        {!selected ? (
-          <>
-            <label>
-              Institution
-              <input
-                className="text-input"
-                onChange={(event) => setForm({ ...form, institution: event.target.value })}
-                required
-                value={form.institution}
-              />
-            </label>
-            <label>
-              Nom du compte
-              <input
-                className="text-input"
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
-                required
-                value={form.name}
-              />
-            </label>
-            <label>
-              Type
-              <select
-                className="text-input"
-                onChange={(event) =>
-                  setForm({ ...form, accountType: event.target.value as FinancialAccount["type"] })
-                }
-                value={form.accountType}
-              >
-                <option value="BANK">Compte bancaire</option>
-                <option value="SAVINGS">Épargne</option>
-                <option value="PEA">PEA</option>
-                <option value="CTO">CTO</option>
-                <option value="OTHER">Autre</option>
-              </select>
-            </label>
-            <label>
-              Devise
-              <input
-                className="text-input"
-                maxLength={3}
-                onChange={(event) => setForm({ ...form, currency: event.target.value })}
-                required
-                value={form.currency}
-              />
-            </label>
-          </>
-        ) : null}
-        <label>
-          Solde
-          <input
-            className="text-input"
-            onChange={(event) => setForm({ ...form, balance: event.target.value })}
-            required
-            step="0.01"
-            type="number"
-            value={form.balance}
-          />
-        </label>
-        {selected ? (
-          <label>
-            Date du solde
-            <input
-              className="text-input"
-              onChange={(event) => setForm({ ...form, date: event.target.value })}
-              required
-              type="date"
-              value={form.date}
-            />
-          </label>
-        ) : null}
-        <div className="form-actions">
-          <button className="button secondary" onClick={() => setModal(null)} type="button">
-            Annuler
-          </button>
-          <button className="button primary" disabled={busy}>
-            <Save size={15} />
-            Enregistrer
-          </button>
-        </div>
-      </form>
-    </Modal>
+  const assetDrawer = (
+    <AssetDrawer
+      account={selected}
+      busy={busy}
+      // La clé remonte le tiroir à chaque cible : sans elle, les champs d'un compte
+      // précédemment ouvert resteraient affichés pour le suivant.
+      key={selected?.id ?? "new"}
+      maxDate={view.asOfDate}
+      onClose={() => {
+        setDrawerOpen(false);
+        setSelected(null);
+      }}
+      onSubmit={submitAsset}
+      open={drawerOpen}
+      reportingCurrency={state.reportingCurrency}
+    />
   );
 
   if (view.isEmpty) {
@@ -284,13 +168,13 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
         <EmptyState
           action={
             <button className="button primary" onClick={openCreate}>
-              <Plus size={15} /> Ajouter un actif ou un passif
+              <Plus size={15} /> Ajouter un actif
             </button>
           }
           detail="Déclarez un compte, un bien ou une dette pour obtenir votre bilan. Une absence de saisie n’est pas une absence de patrimoine."
           title="Aucun actif ni passif déclaré"
         />
-        {accountForm}
+        {assetDrawer}
       </>
     );
   }
@@ -407,7 +291,7 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
         </p>
       </details>
 
-      {accountForm}
+      {assetDrawer}
     </div>
   );
 }
