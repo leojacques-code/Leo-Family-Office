@@ -34,16 +34,9 @@ import type { DashboardState } from "@/lib/types";
  */
 
 export type NetWorthAssetFamilyId =
-  | "LIQUID"
-  | "FINANCIAL"
-  | "REAL_ESTATE"
-  | "BUSINESS"
-  | "OTHER_ASSET";
+  "LIQUID" | "FINANCIAL" | "REAL_ESTATE" | "BUSINESS" | "OTHER_ASSET";
 
-export type NetWorthLiabilityGroupId =
-  | "CONTRACTUAL_DEBT"
-  | "ACCOUNT_OVERDRAFT"
-  | "OTHER_LIABILITY";
+export type NetWorthLiabilityGroupId = "CONTRACTUAL_DEBT" | "ACCOUNT_OVERDRAFT" | "OTHER_LIABILITY";
 
 export type NetWorthBlockId = NetWorthAssetFamilyId | NetWorthLiabilityGroupId;
 
@@ -171,14 +164,21 @@ const LIABILITY_GROUPS: readonly {
     ownerDomain: "Patrimoine",
     matches: (line) => line.category === "ACCOUNT_OVERDRAFT",
   },
-  { id: "OTHER_LIABILITY", label: "Autres passifs", ownerDomain: "Patrimoine", matches: () => true },
+  {
+    id: "OTHER_LIABILITY",
+    label: "Autres passifs",
+    ownerDomain: "Patrimoine",
+    matches: () => true,
+  },
 ];
 
 /** Familles dont la contribution au bilan porte DÉJÀ la quote-part détenue déclarée. */
 const ATTRIBUTED_FAMILIES: readonly NetWorthAssetFamilyId[] = ["REAL_ESTATE", "BUSINESS"];
 
 const ratioOf = (part: CanonicalAggregate, whole: CanonicalAggregate): number | null =>
-  part.value === null || whole.value === null || whole.value === 0 ? null : part.value / whole.value;
+  part.value === null || whole.value === null || whole.value === 0
+    ? null
+    : part.value / whole.value;
 
 function partition<T extends { matches: (line: ConvertedBalanceSheetLine) => boolean }>(
   definitions: readonly T[],

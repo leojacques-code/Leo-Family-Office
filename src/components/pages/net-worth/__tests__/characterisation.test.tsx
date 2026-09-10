@@ -4,17 +4,26 @@ import type { DashboardState } from "@/lib/types";
 import NetWorthPage from "../page";
 
 /**
- * TESTS DE CARACTÉRISATION, §36 étape 3 : « ajouter les tests de caractérisation avant de
- * modifier le comportement ».
+ * CONTRAT DE LA ZONE C DE PATRIMOINE.
  *
- * Ils ne décrivent pas la cible de la phase 4A. Ils décrivent ce que la page fait AUJOURD'HUI,
- * pour qu'une régression involontaire se distingue d'un changement voulu. Trois d'entre eux
- * sont l'énoncé même des défauts que la phase corrige : ils changeront, et le commit qui les
- * change dira pourquoi.
+ * Ce fichier était, au commit précédent, un jeu de tests de CARACTÉRISATION : il décrivait la
+ * page telle qu'elle était, pour que le remplacement du canvas se distingue d'une régression.
+ * Trois de ses assertions énonçaient les défauts que la phase 4A corrige. Elles sont
+ * RETOURNÉES ici, et c'est le but : le second en-tête doit avoir disparu, la grille générique
+ * de KPI ne doit plus être le canvas, et l'immobilier comme les sociétés détenues doivent être
+ * rendus.
+ *
+ * Les deux assertions qui décrivaient ce qui devait SURVIVRE au remplacement sont conservées à
+ * l'identique : aucune information de compte ni de dette n'est perdue, et le périmètre reste
+ * annoncé.
  */
 
 // Fixtures synthétiques. Aucune donnée personnelle.
-const provenance = { kind: "ACTUAL" as const, confidence: "HIGH" as const, effectiveDate: "2026-09-09" };
+const provenance = {
+  kind: "ACTUAL" as const,
+  confidence: "HIGH" as const,
+  effectiveDate: "2026-09-09",
+};
 
 function stateWith(overrides: Partial<DashboardState> = {}): DashboardState {
   return {
@@ -101,36 +110,38 @@ function renderPage(state: DashboardState = stateWith()) {
   );
 }
 
-describe("page Patrimoine, comportement observé avant la phase 4A", () => {
-  it("rend un second en-tête qui double la zone A du poste de travail", () => {
-    // DÉFAUT 1 du PRD : la zone A du shell porte déjà titre, question, date et action.
-    // La phase 4A retire ce `SectionHeader`.
+describe("page Patrimoine, contrat de la zone C après la phase 4A", () => {
+  it("ne rend plus aucun second en-tête, ni aucun titre anglais", () => {
+    // La zone A du shell porte déjà titre, question, date d'arrêté, mode et action primaire.
     renderPage();
-    expect(screen.getByRole("heading", { name: "Net Worth" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Net Worth" })).toBeNull();
+    expect(screen.queryByText("Balance sheet")).toBeNull();
   });
 
-  it("rend une grille générique de quatre cartes de KPI comme canvas", () => {
-    // DÉFAUT 2 du PRD : critère d'échec n° 2 et n° 6 du §29 de V10.
+  it("ne rend plus la grille générique de KPI comme canvas, mais l’équation du bilan", () => {
+    // Critères d'échec n° 2 et n° 6 du §29 de V10 : ni grille de métriques par défaut, ni
+    // visuel principal transposable tel quel à un autre domaine.
     const { container } = renderPage();
-    expect(container.querySelector(".metrics-grid.four")).not.toBeNull();
+    expect(container.querySelector(".metrics-grid")).toBeNull();
+    expect(container.querySelector(".nw-equation")).not.toBeNull();
+    expect(screen.getByRole("region", { name: "Bilan consolidé" })).toBeVisible();
   });
 
-  it("n'affiche ni l'immobilier ni les sociétés détenues, alors que le bilan les porte", () => {
-    // DÉFAUT 4 du PRD : le bilan canonique porte les contributions REAL_ESTATE et
-    // BUSINESS_EQUITY ; la page qui répond à « que possédé-je réellement » les omet.
+  it("rend le patrimoine net comme résultat de l’équation, pas comme une carte", () => {
     const { container } = renderPage();
-    const panels = [...container.querySelectorAll(".panel-header h2, .panel h2")].map(
-      (node) => node.textContent,
-    );
-    expect(panels).not.toContain("Immobilier");
-    expect(panels).not.toContain("Sociétés détenues");
+    const result = container.querySelector(".nw-result");
+    expect(result).not.toBeNull();
+    expect(result!.textContent).toContain("Patrimoine net");
   });
 
-  it("affiche les dettes identifiées et le compte de chaque famille financière", () => {
-    // COMPORTEMENT À PRÉSERVER : les deux tables et la liste de dettes existent et portent
-    // leurs libellés. La phase 4A les remplace par un canvas, elle ne perd pas l'information.
-    renderPage();
-    expect(screen.getByRole("heading", { name: "Dettes identifiées" })).toBeVisible();
+  it("ne perd aucun libellé de compte ni de dette dans le remplacement", () => {
+    // COMPORTEMENT PRÉSERVÉ : le canvas remplace les tables au premier écran, il ne supprime
+    // pas l'information. Elle vit derrière « Analyse détaillée », §28 de V10 — donc RÉELLEMENT
+    // atteignable, ce que le §29 exige au critère n° 9. Le test l'ouvre pour le prouver.
+    const { container } = renderPage();
+    const summary = screen.getByText("Analyse détaillée");
+    expect(summary).toBeVisible();
+    container.querySelector("details.nw-details")!.setAttribute("open", "");
     expect(screen.getByText("Prêt test")).toBeVisible();
     expect(screen.getByText("Compte courant")).toBeVisible();
     expect(screen.getByText("PEA")).toBeVisible();
