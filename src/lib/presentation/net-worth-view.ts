@@ -3,7 +3,9 @@ import {
   canonicalBalanceSheetOf,
   canonicalMetricsOf,
   lineGroupTotal,
+  monthlyCloseReadiness,
   type CanonicalAllocation,
+  type MonthlyCloseReadiness,
 } from "@/lib/engine/balance-sheet-view";
 import type {
   CanonicalAggregate,
@@ -94,6 +96,15 @@ export interface NetWorthView {
   readonly allocation: CanonicalAllocation;
   /** Évolution depuis la clôture comparable, vérité unique partagée avec Aujourd'hui. */
   readonly closeChange: CloseChangeResult;
+  /**
+   * Le bilan peut-il être clôturé ?
+   *
+   * Même condition que celle appliquée par le repository, lue depuis le même endroit. Sans
+   * elle, la page proposerait une clôture qui échouerait au clic sans dire ce qui manque.
+   */
+  readonly closeReadiness: MonthlyCloseReadiness;
+  /** Clôtures déjà persistées : une évolution en demande deux comparables. */
+  readonly closeCount: number;
   readonly ownership: NetWorthOwnership;
   readonly liquidShareOfGrossAssets: MetricValue;
   readonly largestAccountConcentration: MetricValue;
@@ -276,6 +287,8 @@ export function buildNetWorthView(state: DashboardState): NetWorthView {
     geometryIsPartial: [...assets, ...liabilities].some((block) => block.weight === null),
     allocation: buildCanonicalAllocation(sheet),
     closeChange: buildCloseChange(state.monthlyCloses ?? [], state.reportingCurrency),
+    closeReadiness: monthlyCloseReadiness(sheet),
+    closeCount: (state.monthlyCloses ?? []).length,
     ownership: {
       attributedFamilies: ATTRIBUTED_FAMILIES.filter((id) =>
         assets.some((block) => block.id === id),

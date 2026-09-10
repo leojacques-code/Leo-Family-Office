@@ -7,11 +7,13 @@ import { Callout, Currency, EmptyState, Modal, Percent } from "@/components/ui";
 import { canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
 import { buildNetWorthView, type NetWorthBlock } from "@/lib/presentation/net-worth-view";
 import { BalanceCanvas } from "@/components/pages/net-worth/balance-canvas";
+import { NetWorthInsights } from "@/components/pages/net-worth/insights";
 import {
   AccountTable,
   ConversionNotice,
   NOT_COMPUTABLE,
   type SectionProps,
+  allocationExplanation,
   assetsExplanation,
   canonicalLineInput,
   canonicalLineLabel,
@@ -307,6 +309,18 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
           setExplanation(netWorthExplanation(state));
         }}
         selectedId={selectedBlockId}
+        view={view}
+      />
+
+      <NetWorthInsights
+        busy={busy}
+        onCreateClose={() => {
+          void mutate({ action: "create_monthly_close", closeDate: state.asOfDate });
+        }}
+        onInspectAllocation={() => {
+          setSelectedBlockId("ALLOCATION");
+          setExplanation(allocationExplanation(state, view.allocation));
+        }}
         view={view}
       />
 

@@ -53,6 +53,7 @@ import {
   realEstateBalanceSheetContributions,
 } from "@/lib/engine/real-estate";
 import { deriveCanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
+import { monthlyCloseReadiness } from "@/lib/engine/balance-sheet-view";
 import type { CurrencyRate } from "@/lib/engine/fx";
 import {
   buildCareerAnalytics,
@@ -2725,26 +2726,20 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       }
       case "create_monthly_close": {
         const state = await getDashboardState();
-        if (
-          state.metrics.grossAssets === null ||
-          state.metrics.debt === null ||
-          state.metrics.netWorth === null
-        ) {
+        const sheet = state.balanceSheet;
+        if (!sheet) throw new Error("Clôture impossible : aucun bilan canonique disponible");
+        // La condition de clôture est DÉCLARÉE une seule fois, dans les vues du bilan
+        // canonique, et l'écran lit la même. Elle vivait ici en deux `throw` que la surface
+        // ne pouvait que deviner : un bouton actif sur un bilan incomplet
+        // provoquait une erreur au clic au lieu de dire ce qui manquait.
+        const readiness = monthlyCloseReadiness(sheet);
+        if (!readiness.ready) {
           throw new Error(
-            "Clôture impossible : le bilan canonique est incomplet (FX ou valorisation manquante)",
+            `Clôture impossible : agrégats non calculables (${readiness.missing.join(", ")})`,
           );
         }
-        const sheet = state.balanceSheet;
-        if (
-          !sheet ||
-          sheet.financialAssets.value === null ||
-          sheet.liquidAssets.value === null ||
-          sheet.accountOverdraftLiabilities.value === null ||
-          sheet.contractualDebt.value === null ||
-          sheet.otherLiabilities.value === null ||
-          sheet.totalLiabilities.value === null
-        ) {
-          throw new Error("Clôture impossible : ventilation du bilan canonique incomplète");
+        if (state.metrics.grossAssets === null || state.metrics.netWorth === null) {
+          throw new Error("Clôture impossible : agrégats de bilan absents de l’état");
         }
         const prior = state.monthlyCloses[0];
         const forecast = prior?.netWorth ?? null;

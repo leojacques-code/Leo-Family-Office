@@ -210,6 +210,51 @@ export function accountGroupTotal(
   return lineGroupTotal(accountAssetLines(sheet).filter((line) => ids.has(line.entityId)));
 }
 
+/**
+ * Agrégats du bilan qu'une clôture mensuelle DOIT connaître pour être persistée.
+ *
+ * La liste est celle des colonnes que `lfo_create_monthly_close_v2` reçoit et que les
+ * comparaisons ultérieures relisent : sans elles, la clôture existerait sans être comparable.
+ * Elle est NOMINATIVE et vit à un seul endroit, parce que le repository l'appliquait en
+ * `throw` et que l'écran ne pouvait que la deviner — un bouton actif sur un bilan incomplet
+ * aurait provoqué une erreur au clic au lieu de dire ce qui manque.
+ */
+const MONTHLY_CLOSE_REQUIRED = [
+  "grossAssets",
+  "totalLiabilities",
+  "netWorth",
+  "financialAssets",
+  "liquidAssets",
+  "accountOverdraftLiabilities",
+  "contractualDebt",
+  "otherLiabilities",
+] as const satisfies readonly (keyof CanonicalBalanceSheet)[];
+
+export interface MonthlyCloseReadiness {
+  readonly ready: boolean;
+  /** Réserves des agrégats manquants, telles que les moteurs les ont émises. */
+  readonly blockers: readonly string[];
+  /** Agrégats non calculables, nommés. Volet technique uniquement. */
+  readonly missing: readonly string[];
+}
+
+/**
+ * Peut-on clôturer ce bilan ?
+ *
+ * `ready` se lit sur les VALEURS, jamais sur la longueur des réserves : un agrégat non
+ * calculable dont personne n'aurait rempli les réserves passerait autrement pour clôturable.
+ */
+export function monthlyCloseReadiness(sheet: CanonicalBalanceSheet): MonthlyCloseReadiness {
+  const missing = MONTHLY_CLOSE_REQUIRED.filter(
+    (key) => (sheet[key] as CanonicalAggregate).value === null,
+  );
+  return {
+    ready: missing.length === 0,
+    blockers: [...new Set(missing.flatMap((key) => (sheet[key] as CanonicalAggregate).blockers))],
+    missing,
+  };
+}
+
 export function envelopeExposureOf(
   sheet: CanonicalBalanceSheet,
   accountId: string,
