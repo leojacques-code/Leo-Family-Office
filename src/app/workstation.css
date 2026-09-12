@@ -39,14 +39,14 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 14px 22px;
-  /* §2 de V10 : « top header maximum height ~88 px ». Un maximum, pas une hauteur fixe :
-     une question courte n'a pas à occuper 88 px. */
-  max-height: 88px;
+  /* La cible de 88 px ne doit pas masquer les commandes lorsque le titre ou le zoom
+     impose un retour à la ligne. La hauteur suit alors le contenu. */
   padding-bottom: 13px;
   border-bottom: 1px solid var(--border-soft);
 }
 
 .workstation-identity {
+  flex: 1 1 28rem;
   min-width: 0;
   display: flex;
   flex-direction: column;

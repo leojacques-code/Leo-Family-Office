@@ -25,15 +25,15 @@ export const GOAL_TARGET_METRICS = [
 ] as const;
 export type GoalTargetMetric = (typeof GOAL_TARGET_METRICS)[number];
 
+export const GOAL_PURPOSES = ["CAPITAL", "SAFETY_RESERVE", "OTHER"] as const;
+export type GoalPurpose = (typeof GOAL_PURPOSES)[number];
+
 export type GoalEvaluationStatus =
-  | "ACHIEVED"
-  | "ON_TRACK"
-  | "AT_RISK"
-  | "OFF_TRACK"
-  | "OVERDUE"
-  | "NOT_COMPUTABLE";
+  "ACHIEVED" | "ON_TRACK" | "AT_RISK" | "OFF_TRACK" | "OVERDUE" | "NOT_COMPUTABLE";
 
 export const GOAL_BLOCKER_CODES = [
+  "GOAL_PURPOSE_UNCONFIRMED",
+  "GOAL_RESERVE_METRIC_INCOMPATIBLE",
   "GOAL_INACTIVE",
   "METRIC_NOT_SUPPORTED",
   "METRIC_NOT_AVAILABLE_CURRENT",
@@ -74,6 +74,8 @@ export interface GoalTargetWindow {
 }
 
 export interface GoalVersionDefinition {
+  /** Absent sur les versions historiques ; jamais déduit du nom libre. */
+  purpose?: GoalPurpose;
   schemaVersion: typeof GOAL_V2_SCHEMA_VERSION;
   methodologyVersion: typeof GOAL_METHODOLOGY_VERSION;
   goalId: string;

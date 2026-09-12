@@ -116,3 +116,23 @@ describe("sections sorties de la navigation principale", () => {
     expect(screen.getByText("Analyse Beyonder")).toBeVisible();
   });
 });
+
+describe("B03 — aucune promesse d'isolation sans contexte de mutation", () => {
+  it.each([
+    "debt",
+    "cash-flow",
+    "investments",
+    "career",
+    "tax",
+    "business-equity",
+    "real-estate",
+    "goals",
+    "scenarios",
+    "decision-lab",
+  ])("%s reste dans le réel sans bascule trompeuse", (section) => {
+    const { container } = renderShell(section);
+    expect(screen.queryByRole("radiogroup", { name: "Mode d’affichage" })).toBeNull();
+    expect(screen.queryByText("Simulation isolée")).toBeNull();
+    expect(container.querySelector(".workstation")).toHaveAttribute("data-reality-mode", "REAL");
+  });
+});

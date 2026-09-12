@@ -1,4 +1,5 @@
 import "server-only";
+import { reportReadFailure } from "@/lib/data/read-failure";
 import { mapDecisionCases } from "@/lib/data/decision-snapshots";
 
 import type { PostgrestError } from "@supabase/supabase-js";
@@ -130,7 +131,12 @@ import {
 type Row = Record<string, unknown>;
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
-  if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
+  if (result.error) {
+    if (context.startsWith("lecture ") || /JWT issued at future/i.test(result.error.message)) {
+      throw reportReadFailure(result.error, context);
+    }
+    throw new Error(`Supabase ${context} : ${result.error.message}`);
+  }
   if (result.data === null) throw new Error(`Supabase ${context} : réponse vide`);
   return result.data;
 }

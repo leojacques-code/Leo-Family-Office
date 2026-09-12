@@ -10,6 +10,7 @@ import {
   GOAL_CONSTRAINT_STRENGTHS,
   GOAL_TARGET_METRICS,
   type GoalBlocker,
+  type GoalPurpose,
   type GoalConstraintStrength,
   type GoalEvaluationStatus,
   type GoalTargetMetric,
@@ -29,6 +30,7 @@ import type {
 } from "@/lib/engine/scenario-contracts";
 
 type GoalForm = {
+  purpose: GoalPurpose | "";
   name: string;
   description: string;
   metric: GoalTargetMetric;
@@ -41,6 +43,7 @@ type GoalForm = {
 };
 
 const EMPTY_FORM: GoalForm = {
+  purpose: "",
   name: "",
   description: "",
   metric: "NET_WORTH",
@@ -76,6 +79,7 @@ function operatorLabel(operator: GoalTargetOperator) {
 function formFromGoal(goal: Goal): GoalForm {
   const definition = goal.definition;
   return {
+    purpose: definition?.purpose ?? "",
     name: definition?.name ?? goal.name,
     description: definition?.description ?? goal.description ?? "",
     metric: definition?.target.metric ?? "NET_WORTH",
@@ -167,7 +171,7 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
    * ce que l'action déclenche. Écrire les deux au même endroit permettrait à un écran de
    * proposer une action que son contrat ne déclare pas.
    */
-  useRegisterPrimaryAction(() => setCreating(true));
+  useRegisterPrimaryAction(openCreate);
   const [editing, setEditing] = useState<Goal | null>(null);
   const [form, setForm] = useState<GoalForm>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
@@ -180,12 +184,14 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
   );
 
   function openCreate() {
+    setFormError(null);
     setEditing(null);
     setForm(EMPTY_FORM);
     setCreating(true);
   }
 
   function openEdit(goal: Goal) {
+    setFormError(null);
     setCreating(false);
     setEditing(goal);
     setForm(formFromGoal(goal));
@@ -212,12 +218,20 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
   function definitionFromForm(
     goalId: string,
   ): { definition: GoalVersionDefinition; error: null } | { definition: null; error: string } {
+    if (!form.purpose) return { definition: null, error: "Choisissez le type d’objectif." };
+    if (form.purpose === "SAFETY_RESERVE" && form.metric !== "IMMEDIATE_CASH") {
+      return {
+        definition: null,
+        error: "La réserve doit être mesurée avec la trésorerie immédiate.",
+      };
+    }
     const priority = requiredNumberInput(form.priority, "Priorité");
     if (priority.error !== null) return { definition: null, error: priority.error };
     const targetValue = requiredNumberInput(form.targetValue, "Cible");
     if (targetValue.error !== null) return { definition: null, error: targetValue.error };
     return {
       definition: createGoalVersion({
+        purpose: form.purpose,
         goalId,
         name: form.name,
         description: form.description,
@@ -252,7 +266,7 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
         ...definition,
         version: editing.version ?? editing.definition?.version ?? 1,
         createdAt: editing.definition?.createdAt ?? definition.createdAt,
-        legacyCompatibility: editing.definition?.legacyCompatibility ?? false,
+        legacyCompatibility: false,
       };
     }
     const ok = editing
@@ -382,6 +396,11 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
                   {STATUS_LABELS[current.status]}
                 </span>
                 <h2>{definition.name}</h2>
+                {definition.purpose === "SAFETY_RESERVE" ? (
+                  <p className="muted-copy">
+                    Trésorerie renseignée avant affectation : sa disponibilité reste à confirmer.
+                  </p>
+                ) : null}
                 {definition.description ? (
                   <p className="muted-copy">{definition.description}</p>
                 ) : null}
@@ -522,6 +541,35 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
             </p>
           ) : null}
           <label className="full">
+            Type d’objectif
+            <select
+              required
+              value={form.purpose}
+              onChange={(event) => {
+                const purpose = event.target.value as GoalPurpose | "";
+                setForm({
+                  ...form,
+                  purpose,
+                  ...(purpose === "SAFETY_RESERVE"
+                    ? { metric: "IMMEDIATE_CASH", operator: "AT_LEAST", entityId: "" }
+                    : {}),
+                });
+              }}
+            >
+              <option value="">Choisir le type</option>
+              <option value="SAFETY_RESERVE">Réserve de sécurité</option>
+              <option value="CAPITAL">Objectif patrimonial</option>
+              <option value="OTHER">Autre objectif mesurable</option>
+            </select>
+          </label>
+          {form.purpose === "SAFETY_RESERVE" ? (
+            <p className="muted-copy full">
+              La réserve compare la cible à la trésorerie immédiate renseignée. Vérifiez sa
+              disponibilité et les sommes déjà engagées ; les affectations par objectif seront
+              ajoutées dans la phase dédiée.
+            </p>
+          ) : null}
+          <label className="full">
             Nom
             <input
               required
@@ -539,12 +587,15 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
             />
           </label>
           <label>
-            Métrique fermée
+            Mesurer avec
             <select
               value={form.metric}
               onChange={(event) => setMetric(event.target.value as GoalTargetMetric)}
             >
-              {GOAL_TARGET_METRICS.map((metric) => (
+              {(form.purpose === "SAFETY_RESERVE"
+                ? (["IMMEDIATE_CASH"] as const)
+                : GOAL_TARGET_METRICS
+              ).map((metric) => (
                 <option key={metric} value={metric}>
                   {GOAL_METRIC_REGISTRY[metric].label}
                 </option>
@@ -559,7 +610,10 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
                 setForm({ ...form, operator: event.target.value as GoalTargetOperator })
               }
             >
-              {metricDefinition.allowedOperators.map((operator) => (
+              {(form.purpose === "SAFETY_RESERVE"
+                ? (["AT_LEAST"] as const)
+                : metricDefinition.allowedOperators
+              ).map((operator) => (
                 <option key={operator} value={operator}>
                   {operatorLabel(operator)}
                 </option>

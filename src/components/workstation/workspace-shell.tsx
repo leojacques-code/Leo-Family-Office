@@ -38,8 +38,8 @@ export interface WorkspaceShellProps {
   fallbackTitle: string;
   /** Date financière et sa fraîcheur, déjà formatées. Zone A, §17. */
   dateLabel: ReactNode;
-  mode: RealityMode;
-  onModeChange: (mode: RealityMode) => void;
+  mode?: RealityMode;
+  onModeChange?: (mode: RealityMode) => void;
   /** Zone B. Rendue seulement si le manifeste déclare la zone et que le rail a des sources. */
   sourceRail?: ReactNode;
   /** Zone C : le contenu du domaine. */
@@ -56,7 +56,7 @@ export function WorkspaceShell({
   manifest,
   fallbackTitle,
   dateLabel,
-  mode,
+  mode = "REAL",
   onModeChange,
   sourceRail,
   children,
@@ -93,7 +93,9 @@ export function WorkspaceShell({
         </div>
         <div className="workstation-controls">
           <span className="workstation-date">{dateLabel}</span>
-          <RealityModeSwitch onChange={onModeChange} supported={supportedModes} value={mode} />
+          {onModeChange ? (
+            <RealityModeSwitch onChange={onModeChange} supported={supportedModes} value={mode} />
+          ) : null}
           {headerTools}
           {primaryAction}
         </div>

@@ -36,7 +36,6 @@ import { type Explanation } from "@/components/ui";
 import { SectionContent } from "@/components/pages";
 import { formatDate } from "@/components/pages/shared";
 import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
-import type { RealityMode } from "@/lib/presentation/registry/contracts";
 import { WorkspaceShell } from "@/components/workstation/workspace-shell";
 import { Inspector, type InspectorFact } from "@/components/workstation/inspector";
 import { SourceRail, type RailSource } from "@/components/workstation/source-rail";
@@ -110,14 +109,7 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [explanation, setExplanation] = useState<Explanation | null>(null);
   const [projection, setProjection] = useState<ProjectionEnvelope | null>(null);
-  /**
-   * Mode d'affichage, §6.4 du plan de refonte.
-   *
-   * Il vit dans le SHELL et non dans une page : le plan le veut « global et persistant », de
-   * sorte que passer d'un domaine à l'autre ne fasse pas oublier qu'on regardait une
-   * simulation.
-   */
-  const [mode, setMode] = useState<RealityMode>("REAL");
+  // B03 : aucun mode global tant que les commandes ne portent pas de contexte isolé.
   /**
    * Source sélectionnée dans le rail, ET la section où elle l'a été.
    *
@@ -514,8 +506,6 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
               ) : undefined
             }
             manifest={manifest}
-            mode={mode}
-            onModeChange={setMode}
             primaryAction={
               // Le libellé vient du MANIFESTE, jamais du code de la page : le §17 autorise
               // une action primaire au plus, et le §16 interdit à un agent de choisir son

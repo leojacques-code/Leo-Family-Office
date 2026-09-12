@@ -88,8 +88,8 @@ const scenarioDefinitionSchema = z
     }
   });
 const goalDefinitionSchema = z.custom<GoalVersionDefinition>(
-  isGoalVersionDefinition,
-  "Définition Goals V2 invalide",
+  (value) => isGoalVersionDefinition(value) && value.purpose !== undefined,
+  "Choisissez le type d’objectif et une métrique compatible",
 );
 const decisionCaseVersionSchema = z.custom<DecisionCaseVersion>(
   isDecisionCaseVersion,
