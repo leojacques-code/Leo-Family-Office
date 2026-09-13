@@ -2,6 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { Landmark, Plus, Save } from "lucide-react";
+import { MoneyInput, numberErrorMessage } from "@/components/primitives/money-input";
+import { DateInput } from "@/components/primitives/date-input";
+import { isRealCalendarDate, type NumberDraft } from "@/lib/presentation/input-parse";
 import type { FinancialAccount } from "@/lib/types";
 import {
   Callout,
@@ -22,7 +25,6 @@ import {
   formatEur,
   formatNative,
   formatNativeOptional,
-  requiredNumberInput,
   netWorthExplanation,
 } from "@/components/pages/shared";
 
@@ -34,9 +36,9 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
     institution: "",
     name: "",
     accountType: "BANK" as FinancialAccount["type"],
-    balance: "",
+    balance: { state: "EMPTY", value: null } as NumberDraft,
     currency: "EUR",
-    date: state.asOfDate,
+    date: "",
   });
   const bank = state.accounts.filter((item) => item.type === "BANK" || item.type === "SAVINGS");
   const investments = state.accounts.filter((item) => item.type === "PEA" || item.type === "CTO");
@@ -47,12 +49,15 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
     sheet.contributions.find((line) => line.id === `debt:${liabilityId}`) ?? null;
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    // Le solde est LU avant d'être envoyé, et un refus de lecture arrête la soumission.
-    // Le helper de saisie rendait `Number("")`, donc `0` : un solde effacé partait à zéro
-    // et écrasait la vérité du compte sans laisser aucune trace.
-    const balance = requiredNumberInput(form.balance, "Solde");
-    if (balance.error !== null) {
-      setFormError(balance.error);
+    const balance = form.balance;
+    if (balance.state !== "VALID") {
+      setFormError(
+        balance.state === "INVALID" ? numberErrorMessage(balance.reason) : "Indiquez le solde.",
+      );
+      return;
+    }
+    if (!isRealCalendarDate(form.date)) {
+      setFormError("Indiquez la date du solde figurant sur votre relevé.");
       return;
     }
     setFormError(null);
@@ -70,6 +75,7 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
           accountType: form.accountType,
           balance: balance.value,
           currency: form.currency.toUpperCase(),
+          balanceDate: form.date,
         });
     if (ok) {
       setModal(null);
@@ -77,14 +83,15 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
     }
   }
   function edit(account: FinancialAccount) {
+    setFormError(null);
     setSelected(account);
     setForm({
       institution: account.institution,
       name: account.name,
       accountType: account.type,
-      balance: String(account.balance),
+      balance: { state: "VALID", value: account.balance },
       currency: account.currency,
-      date: state.asOfDate,
+      date: account.balanceDate,
     });
     setModal("edit");
   }
@@ -98,14 +105,15 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
           <button
             className="button primary"
             onClick={() => {
+              setFormError(null);
               setSelected(null);
               setForm({
                 institution: "",
                 name: "",
                 accountType: "BANK",
-                balance: "",
+                balance: { state: "EMPTY", value: null } as NumberDraft,
                 currency: "EUR",
-                date: state.asOfDate,
+                date: "",
               });
               setModal("add");
             }}
@@ -305,29 +313,25 @@ function NetWorthPage({ state, mutate, busy, setExplanation }: SectionProps) {
               </label>
             </>
           ) : null}
-          <label>
-            Solde
-            <input
-              className="text-input"
-              type="number"
-              step="0.01"
-              value={form.balance}
-              onChange={(event) => setForm({ ...form, balance: event.target.value })}
-              required
-            />
-          </label>
-          {selected ? (
-            <label>
-              Date du solde
-              <input
-                className="text-input"
-                type="date"
-                value={form.date}
-                onChange={(event) => setForm({ ...form, date: event.target.value })}
-                required
-              />
-            </label>
-          ) : null}
+          <MoneyInput
+            key={`${modal}-${selected?.id ?? "new"}`}
+            id="account-balance"
+            label="Solde"
+            currency={form.currency.toUpperCase()}
+            value={form.balance.value}
+            onChange={(balance) => setForm({ ...form, balance })}
+            required
+          />
+          <DateInput
+            id="account-balance-date"
+            label="Date du solde"
+            hint="Date de l’observation sur votre relevé."
+            value={form.date || null}
+            onChange={(date) =>
+              setForm({ ...form, date: date.state === "VALID" ? date.value : "" })
+            }
+            required
+          />
           <div className="form-actions">
             <button type="button" className="button secondary" onClick={() => setModal(null)}>
               Annuler

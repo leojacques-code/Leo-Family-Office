@@ -44,3 +44,19 @@ Recette le 12 septembre : première lecture après longue interruption a renvoy�
 ## Étape suivante obligatoire
 
 Finir les preuves du lot courant, relire les derniers ajustements, figer le SHA et la note de limites avant fusion. Puis suivre les étapes 3, 4, 5 du programme (achèvement ciblé phases 1/2, reprise PR50, reprise PR51), puis identité 11A avant toute donnée personnelle. Ne pas déclarer les fixtures des cent situations exécutées. Ne jamais exécuter de test d'écriture en production.
+
+## Achèvement ciblé champs et sources — 13 septembre (B07/B08)
+
+Baseline : commit de confiance `63820c1ce29b3a9c48c0971204daeff2d9fe8a15` conservé localement. Le dépôt GitHub a été confirmé public et appartenant au compte connecté `leojacques-code` le 13 septembre. Le push reste suspendu après refus du contrôle automatique ; une demande précise de publication du correctif a été présentée au propriétaire. Aucune fusion ni publication en production effectuée.
+
+Conserver/réutiliser : `MoneyInput`, `DateInput`, parseurs discriminés, RPC atomique `lfo_add_account`, historique des observations et registre des sources. Étendre : DTO de création avec `balanceDate` explicite et validation calendaire en création/correction. Remplacer : montant HTML numérique et date du jour silencieusement imposée à la création. Une requête ancienne sans date est refusée (400), jamais complétée par une date inventée ; client et serveur doivent être publiés ensemble.
+
+B07 : création de compte avec montant/date vides, devise visible, virgule et espaces acceptés ; vide/invalide bloquent, zéro explicite accepté. L'édition reprend la date enregistrée. B08 : « Données présentes » n'annonce ni pièce détenue ni fraîcheur vérifiée. « Document présent » exige une ligne du catalogue documentaire ; aucune liaison pièce/objet n'est inférée depuis une catégorie ou un agrégat. Les liens documentaires par objet, leur contrôle et leur couverture restent à construire dans le socle documentaire.
+
+Vérifications : `npm run check` réussi, **2 161 tests / 127 fichiers**, lint et build/TypeScript. Relecture indépendante : 30 tests ciblés sur 4 fichiers exécutés avec succès ; une date d'explication financière effacée accidentellement a été restaurée, correction relue. Aucun autre défaut matériel trouvé dans ce périmètre.
+
+Recette locale, même base jetable : saisie navigateur au clavier du compte fictif « Compte daté B07 », solde `1 794,41`, date `2026-08-31`. Création puis rechargement réussis. Édition : date historique reprise, correction explicite à zéro puis nouveau rechargement affichant zéro. Lecture SQL confirme deux observations à la même date, `1794.410000` puis `0.000000`, source Saisie manuelle, dates de création distinctes ; aucune observation écrasée. Le rail affiche « Données présentes ». Captures des formulaires bureau 1440×900 et mobile 390×844 ; boîte mobile 342 px dans un viewport de 390 px sans débordement. L'automatisation `fill` sur le champ date natif n'a pas rempli la valeur ; la saisie segmentée au clavier a été vérifiée. Le clic automatisé sur le calendrier n'est pas une preuve acquise ; la recette calendrier reste à achever.
+
+F04 reste ouvert : un refus JWT_FUTURE transitoire a de nouveau été reçu au premier chargement local après interruption nocturne ; lecture ultérieure réussie. Ni expiration ni décalage précis d'horloge n'ont été démontrés comme cause. Aucune conclusion de résolution en production.
+
+Suite obligatoire : B09, puis reprise PR50 (B10) et PR51 (B11), avant identité personnelle. B07 est prouvé sur le parcours compte de cette tranche, pas sur tous les formulaires historiques ; les champs de dette de PR50 sont repris à l'étape suivante. B57 global et les cent situations restent ouverts.

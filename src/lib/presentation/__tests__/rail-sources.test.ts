@@ -150,9 +150,34 @@ describe("railSourcesFor — pertinence déclarée, état lu dans les faits", ()
     });
     for (const manifest of Object.values(PAGE_REGISTRY)) {
       for (const source of railSourcesFor(manifest, rich)) {
-        expect(["ACTIVE", "ABSENTE"]).toContain(source.status);
+        expect(["ACTIVE", "DOCUMENT_AVAILABLE", "ABSENTE"]).toContain(source.status);
       }
     }
+  });
+
+  it("ne déduit aucun acte détenu d'un bien et ne rattache pas un document sans lien", () => {
+    const state = stateWith({
+      realEstateAssets: [{}] as DashboardState["realEstateAssets"],
+      documents: [{ uploadedAt: "2026-09-01", category: "Acte" }] as DashboardState["documents"],
+    });
+    const assetSource = railSourcesFor(PAGE_REGISTRY["real-estate"], state).find(
+      (source) => source.category === "ACTE",
+    );
+    expect(assetSource?.status).toBe("ACTIVE");
+    const documentManifest = {
+      ...PAGE_REGISTRY.debt,
+      sources: [
+        {
+          id: "docs",
+          name: "Documents",
+          category: "DOCUMENT",
+          evidence: "DOCUMENTS",
+          planRef: "B08",
+        },
+      ],
+    } as PageManifest;
+    expect(railSourcesFor(documentManifest, state)[0]?.status).toBe("DOCUMENT_AVAILABLE");
+    expect(railSourcesFor(documentManifest, empty)[0]?.status).toBe("ABSENTE");
   });
 
   it("reprend le nom et la catégorie du manifeste sans les réécrire", () => {

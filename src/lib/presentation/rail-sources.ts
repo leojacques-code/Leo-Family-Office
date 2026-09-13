@@ -24,7 +24,7 @@ import type { DashboardState } from "@/lib/types";
  */
 
 /** Ce que le rail sait rendre. Repris de `SourceStatus` du composant, sans le dupliquer. */
-export type RailSourceStatus = "ACTIVE" | "ABSENTE";
+export type RailSourceStatus = "ACTIVE" | "DOCUMENT_AVAILABLE" | "ABSENTE";
 
 export interface DerivedRailSource {
   readonly id: string;
@@ -212,7 +212,15 @@ export function railSourcesFor(
       id: declaration.id,
       category: declaration.category,
       name: declaration.name,
-      status: count > 0 ? "ACTIVE" : "ABSENTE",
+      // Un fait ou un tableau saisi ne prouve ni la détention d'une pièce ni sa fraîcheur.
+      // Seul le catalogue documentaire prouve ici la présence d'un document ; aucune
+      // liaison document/objet n'est inférée depuis un libellé ou une catégorie.
+      status:
+        count === 0
+          ? "ABSENTE"
+          : declaration.evidence === "DOCUMENTS"
+            ? "DOCUMENT_AVAILABLE"
+            : "ACTIVE",
       latestDate,
     };
   });

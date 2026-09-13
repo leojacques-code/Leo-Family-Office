@@ -2621,7 +2621,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             p_account_type: mutation.accountType,
             p_balance: finiteNumber(mutation.balance, "add_account.balance"),
             p_currency: mutation.currency,
-            p_as_of_date: operationalToday(),
+            p_as_of_date: mutation.balanceDate,
           }),
           "création atomique de compte",
         );

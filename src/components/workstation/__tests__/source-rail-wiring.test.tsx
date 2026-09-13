@@ -93,7 +93,7 @@ describe("zone B branchée sur le shell", () => {
     expect(rail.textContent).not.toContain("Non calculable");
   });
 
-  it("annonce « À jour » et la date du fait le plus récent quand la source existe", () => {
+  it("annonce la présence des données sans certifier une pièce ni sa fraîcheur", () => {
     renderShell("debt", {
       liabilities: [
         {
@@ -103,7 +103,9 @@ describe("zone B branchée sur le shell", () => {
       ] as unknown as DashboardState["liabilities"],
     });
     const rail = screen.getByRole("complementary", { name: "Sources du domaine" });
-    expect(rail.textContent).toContain("À jour");
+    expect(rail.textContent).toContain("Données présentes");
+    expect(rail.textContent).not.toContain("À jour");
+    expect(rail.textContent).not.toContain("Document présent");
     // Mois abrégé : le §3 de V10 borne l'indication à quatre mots.
     //
     // La date attendue était « nov. 2031 », la dernière ÉCHÉANCE du prêt. C'est son horizon,

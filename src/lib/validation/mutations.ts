@@ -1186,7 +1186,7 @@ export const mutationSchema = z.discriminatedUnion("action", [
     action: z.literal("update_account"),
     accountId: z.string().min(1),
     balance: finite,
-    balanceDate: date,
+    balanceDate: realDate,
   }),
   z.object({
     action: z.literal("add_account"),
@@ -1194,6 +1194,7 @@ export const mutationSchema = z.discriminatedUnion("action", [
     name: z.string().min(1).max(120),
     accountType: z.enum(["BANK", "PEA", "CTO", "SAVINGS", "OTHER"]),
     balance: finite,
+    balanceDate: realDate,
     currency: z.string().length(3),
   }),
   z.object({

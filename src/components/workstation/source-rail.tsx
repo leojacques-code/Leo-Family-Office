@@ -87,10 +87,11 @@ const CATEGORY_ICONS: Readonly<Record<SourceCategory, LucideIcon>> = {
  * `ABSENTE` n'est pas une erreur : c'est une pièce qu'il n'a pas encore fournie, et le rail
  * lui propose de le faire.
  */
-export type SourceStatus = "ACTIVE" | "A_RENOUVELER" | "ABSENTE";
+export type SourceStatus = "ACTIVE" | "DOCUMENT_AVAILABLE" | "A_RENOUVELER" | "ABSENTE";
 
 const STATUS_HINTS: Readonly<Record<SourceStatus, string>> = {
-  ACTIVE: "À jour",
+  ACTIVE: "Données présentes",
+  DOCUMENT_AVAILABLE: "Document présent",
   A_RENOUVELER: "À actualiser",
   ABSENTE: "À fournir",
 };

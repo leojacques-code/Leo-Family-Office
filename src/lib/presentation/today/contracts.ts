@@ -277,7 +277,7 @@ export interface RailSourceView {
   readonly id: string;
   readonly category: SourceCategory;
   readonly name: string;
-  readonly status: "ACTIVE" | "ABSENTE";
+  readonly status: "ACTIVE" | "DOCUMENT_AVAILABLE" | "ABSENTE";
   readonly hint: string | null;
 }
 
