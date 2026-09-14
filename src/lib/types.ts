@@ -186,6 +186,8 @@ export interface ProvidedScheduleEntry {
 }
 
 export interface Liability {
+  /** Notes du contrat, distinctes de la provenance du dernier encours observé. */
+  contractNotes?: string | null;
   id: string;
   name: string;
   lender: string;

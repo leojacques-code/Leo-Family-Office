@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { render, screen } from "@testing-library/react";
 import DebtPage from "../page";
+import { PrimaryActionProvider } from "@/components/workstation/primary-action";
 import { buildDemoState } from "@/lib/data/read-models/today-demo";
 vi.mock("recharts", () => ({
   ResponsiveContainer: () => null,
@@ -54,4 +55,21 @@ it("interdit les ouvertures pendant la reprise et utilise ensuite le nouvel enco
   rerender(<DebtPage {...props} state={updated} busy={false} />);
   await userEvent.click(screen.getByRole("button", { name: "Nouvel encours" }));
   expect(screen.getByRole("spinbutton", { name: "Encours" })).toHaveValue(11000);
+});
+
+it("retire aussi l’import primaire pendant une reprise de lecture", () => {
+  const onChange = vi.fn();
+  const state = buildDemoState("2026-09-13");
+  const page = (busy: boolean) => (
+    <PrimaryActionProvider onChange={onChange}>
+      <DebtPage state={state} busy={busy} mutate={vi.fn()} setExplanation={vi.fn()} />
+    </PrimaryActionProvider>
+  );
+  const { rerender } = render(page(false));
+  expect(onChange).toHaveBeenLastCalledWith({ run: expect.any(Function) });
+  rerender(page(true));
+  expect(onChange).toHaveBeenLastCalledWith(null);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  rerender(page(false));
+  expect(onChange).toHaveBeenLastCalledWith({ run: expect.any(Function) });
 });

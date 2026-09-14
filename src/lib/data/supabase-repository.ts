@@ -431,6 +431,7 @@ function mapDebtFacts(
         ),
         firstPaymentDate: str(row.first_payment_date),
         maturityDate: str(row.maturity_date),
+        contractNotes: optional(row.notes) ?? null,
         provenance: observation ? provenance(observation) : provenance(row),
       };
     });
