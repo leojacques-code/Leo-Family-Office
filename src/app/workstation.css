@@ -227,11 +227,12 @@
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  column-gap: 8px;
+  row-gap: 3px;
   min-height: 48px;
-  padding: 0 11px;
+  padding: 8px 11px;
   border: 1px solid var(--border-soft);
   border-radius: 10px;
   background: var(--surface);
@@ -251,6 +252,7 @@
 }
 
 .source-tile {
+  grid-row: 1 / span 2;
   /* §4.2 de V10 : « 32-36 px icon tile ». */
   display: grid;
   place-items: center;
@@ -287,9 +289,10 @@
 }
 
 .source-status {
+  grid-column: 2;
   font-size: 12px;
   font-weight: 600;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .source-row[data-status="ACTIVE"] .source-status {

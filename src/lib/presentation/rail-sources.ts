@@ -87,7 +87,7 @@ function maxDate(values: readonly (string | null | undefined)[]): string | null 
  */
 function readEvidence(
   evidence: SourceEvidence,
-  state: DashboardState,
+  state: Partial<DashboardState>,
 ): { count: number; latestDate: string | null } {
   switch (evidence) {
     case "BANK_ACCOUNTS":
@@ -202,12 +202,16 @@ function readEvidence(
  */
 export function railSourcesFor(
   manifest: PageManifest | null,
-  state: DashboardState,
+  state: Partial<DashboardState>,
+  evidenceSummaries: Partial<
+    Record<SourceEvidence, { count: number; latestDate: string | null }>
+  > = {},
 ): DerivedRailSource[] {
   if (!manifest) return [];
   if (!manifest.zones.includes("SOURCE_RAIL")) return [];
   return listOf(manifest.sources).map((declaration) => {
-    const { count, latestDate } = readEvidence(declaration.evidence, state);
+    const { count, latestDate } =
+      evidenceSummaries[declaration.evidence] ?? readEvidence(declaration.evidence, state);
     return {
       id: declaration.id,
       category: declaration.category,

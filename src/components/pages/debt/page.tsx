@@ -38,6 +38,7 @@ import {
   formatEur,
 } from "@/components/pages/shared";
 import type { DebtContractInput } from "@/lib/data/contracts";
+import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import type { Liability } from "@/lib/types";
 import { DebtContractForm } from "@/components/pages/debt/debt-contract-form";
 
@@ -63,7 +64,14 @@ function interestFormula(loan: Liability): string {
   return `Intérêt = solde × taux annuel × ${period}/12`;
 }
 
-function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
+type DebtPageProps = Pick<SectionProps, "mutate" | "busy" | "setExplanation"> & {
+  state: { cashObservationPresent?: boolean } & Pick<
+    DebtReadModel,
+    "asOfDate" | "liabilities" | "scenarios" | "metrics" | "reportingCurrency"
+  >;
+};
+
+function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const [selectedId, setSelectedId] = useState(state.liabilities[0]?.id ?? "");
   const [investmentReturn, setInvestmentReturn] = useState(5.5);
   const [contractEditor, setContractEditor] = useState<"new" | "edit" | null>(null);
@@ -76,17 +84,22 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
   );
   const scenario =
     state.scenarios.find((item) => item.name === "Central") ?? state.scenarios[0] ?? null;
-  const comparison = loan
-    ? compareDebtVsInvest({
-        availableCash: state.metrics.bankCash ?? 0,
-        debtBalance: loan.currentBalance,
-        debtRate: loan.annualRate,
-        investmentReturn: investmentReturn / 100,
-        volatility: scenario?.annualVolatility ?? 0,
-        inflation: scenario?.annualInflation ?? 0,
-        years: 5,
-      })
-    : null;
+  const comparison =
+    loan &&
+    state.cashObservationPresent !== false &&
+    state.metrics.bankCash !== null &&
+    scenario &&
+    loan.currency === state.reportingCurrency
+      ? compareDebtVsInvest({
+          availableCash: state.metrics.bankCash,
+          debtBalance: loan.currentBalance,
+          debtRate: loan.annualRate,
+          investmentReturn: investmentReturn / 100,
+          volatility: scenario.annualVolatility,
+          inflation: scenario.annualInflation,
+          years: 5,
+        })
+      : null;
 
   const header = (
     <SectionHeader
@@ -97,11 +110,16 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
         <>
           {loan ? (
             <>
-              <button className="button secondary" onClick={() => setContractEditor("edit")}>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => setContractEditor("edit")}
+              >
                 <Edit3 size={15} /> Modifier le contrat
               </button>
               <button
                 className="button secondary"
+                disabled={busy}
                 onClick={() => {
                   setBalance({
                     value: String(loan.currentBalance),
@@ -115,7 +133,11 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
               </button>
             </>
           ) : null}
-          <button className="button primary" onClick={() => setContractEditor("new")}>
+          <button
+            className="button primary"
+            disabled={busy}
+            onClick={() => setContractEditor("new")}
+          >
             <Plus size={15} /> Nouvelle dette
           </button>
         </>
@@ -163,7 +185,11 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
           title="Aucune dette enregistrée"
           detail="Le service de dette mensuel vaut 0 € et aucun échéancier n’est projeté tant qu’aucun passif n’est saisi."
           action={
-            <button className="button primary" onClick={() => setContractEditor("new")}>
+            <button
+              className="button primary"
+              disabled={busy}
+              onClick={() => setContractEditor("new")}
+            >
               <Plus size={15} /> Enregistrer une dette
             </button>
           }
@@ -494,6 +520,15 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
           ))}
         </div>
       </section>
+      {!comparison ? (
+        <Callout title="Comparaison à compléter">
+          {state.cashObservationPresent === false || state.metrics.bankCash === null
+            ? "Renseignez une observation de cash et ses éventuels taux de change avant de comparer remboursement et placement."
+            : !scenario
+              ? "Renseignez les hypothèses du scénario avant de comparer remboursement et placement."
+              : "La comparaison attend une dette dans la devise de reporting. Les montants de devises différentes ne sont pas comparés directement."}
+        </Callout>
+      ) : null}
       {comparison ? (
         <section className="panel decision-preview">
           <div className="panel-header">

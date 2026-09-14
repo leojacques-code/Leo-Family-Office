@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import type { DashboardState, DocumentRecord } from "@/lib/types";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type { DomainDeclaration } from "@/lib/presentation/today/contracts";
@@ -25,6 +26,8 @@ export interface DomainDeclarationInput {
 export interface FamilyOfficeRepository {
   readonly adapter: "supabase";
   getDashboardState(): Promise<DashboardState>;
+  getDebtReadModel(): Promise<DebtReadModel>;
+  executeMutation(mutation: Mutation): Promise<void>;
   mutateState(mutation: Mutation): Promise<DashboardState>;
   storeDocument(upload: DocumentUpload): Promise<DocumentRecord>;
   saveSimulation(run: SimulationRun): Promise<string>;

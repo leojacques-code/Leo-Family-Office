@@ -10,6 +10,14 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   const { section } = await params;
   if (!isRoutedSection(section)) notFound();
   const repository = await getRepository();
+  if (section === "debt") {
+    return (
+      <AppShell
+        section={section}
+        source={{ kind: "DEBT", model: await repository.getDebtReadModel() }}
+      />
+    );
+  }
   return (
     <AppShell
       section={section}
