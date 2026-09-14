@@ -204,7 +204,7 @@ export const PAGE_REGISTRY = manifests([
         planRef: "§21 canvas : « bilan visuel actifs / passifs »",
       },
     ],
-    primaryAction: "Ajouter un actif ou un passif",
+    primaryAction: "Ajouter un compte",
     essentialKpis: [
       "net_worth",
       "gross_assets",

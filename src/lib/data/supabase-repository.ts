@@ -57,6 +57,7 @@ import {
   realEstateBalanceSheetContributions,
 } from "@/lib/engine/real-estate";
 import { deriveCanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
+import { monthlyCloseReadiness } from "@/lib/engine/balance-sheet-view";
 import type { CurrencyRate } from "@/lib/engine/fx";
 import {
   buildCareerAnalytics,
@@ -692,7 +693,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     };
   }
 
-  async function getDashboardState(): Promise<DashboardState> {
+  async function getDashboardState(forCurrentClose = false): Promise<DashboardState> {
     // UNE seule lecture d'horloge pour toute la construction de l'état. Deux appels
     // encadrant minuit produiraient une fenêtre de ledger et une date d'arrêté
     // incohérentes entre elles, un soir sur mille et sans rien signaler.
@@ -1347,7 +1348,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
      * cette date reposent donc sur la même lecture d'horloge.
      */
     const dates = buildFinancialDateContext({
-      closeDates: monthlyCloses.map((close) => close.closeDate),
+      closeDates: forCurrentClose ? [] : monthlyCloses.map((close) => close.closeDate),
       now,
     });
 
@@ -2045,6 +2046,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     );
     const dashboardState: DashboardState = {
       asOfDate: dates.asOfDate,
+      dates,
       reportingCurrency,
       ledgerCoverageStart: coverage.start,
       ledgerCoverageSource: coverage.source,
@@ -2909,27 +2911,27 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         break;
       }
       case "create_monthly_close": {
-        const state = await getDashboardState();
-        if (
-          state.metrics.grossAssets === null ||
-          state.metrics.debt === null ||
-          state.metrics.netWorth === null
-        ) {
+        // Les observations courantes ne permettent pas de reconstruire un arrêté historique.
+        const state = await getDashboardState(true);
+        if (mutation.closeDate !== state.dates?.today) {
           throw new Error(
-            "Clôture impossible : le bilan canonique est incomplet (FX ou valorisation manquante)",
+            "Clôture impossible : choisissez le jour opérationnel courant ; la reconstruction historique n’est pas disponible.",
           );
         }
         const sheet = state.balanceSheet;
-        if (
-          !sheet ||
-          sheet.financialAssets.value === null ||
-          sheet.liquidAssets.value === null ||
-          sheet.accountOverdraftLiabilities.value === null ||
-          sheet.contractualDebt.value === null ||
-          sheet.otherLiabilities.value === null ||
-          sheet.totalLiabilities.value === null
-        ) {
-          throw new Error("Clôture impossible : ventilation du bilan canonique incomplète");
+        if (!sheet) throw new Error("Clôture impossible : aucun bilan canonique disponible");
+        // La condition de clôture est DÉCLARÉE une seule fois, dans les vues du bilan
+        // canonique, et l'écran lit la même. Elle vivait ici en deux `throw` que la surface
+        // ne pouvait que deviner : un bouton actif sur un bilan incomplet
+        // provoquait une erreur au clic au lieu de dire ce qui manquait.
+        const readiness = monthlyCloseReadiness(sheet);
+        if (!readiness.ready) {
+          throw new Error(
+            `Clôture impossible : agrégats non calculables (${readiness.missing.join(", ")})`,
+          );
+        }
+        if (state.metrics.grossAssets === null || state.metrics.netWorth === null) {
+          throw new Error("Clôture impossible : agrégats de bilan absents de l’état");
         }
         const prior = state.monthlyCloses[0];
         const forecast = prior?.netWorth ?? null;

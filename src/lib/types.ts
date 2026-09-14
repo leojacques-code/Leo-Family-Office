@@ -1,3 +1,5 @@
+import type { FinancialDateContext } from "@/lib/financial-date";
+
 export type DataKind =
   "ACTUAL" | "USER_ASSUMPTION" | "MODEL_ASSUMPTION" | "EXTERNAL_DATA" | "DERIVED" | "MISSING";
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
@@ -819,6 +821,8 @@ export interface RealEstateFinancingLink {
 
 export interface DashboardState {
   asOfDate: string;
+  /** Contexte serveur ; absent seulement des anciennes fixtures. */
+  dates?: FinancialDateContext;
   reportingCurrency: string;
   /**
    * Date à partir de laquelle l'ensemble du ledger actuellement considéré par LFO est

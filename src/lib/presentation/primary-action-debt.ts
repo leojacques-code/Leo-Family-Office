@@ -33,6 +33,7 @@ import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
  */
 export const PAGES_SERVING_PRIMARY_ACTION: readonly string[] = [
   "debt",
+  "net-worth",
   "goals",
   "scenarios",
   "business-equity",
@@ -47,7 +48,7 @@ export const PAGES_SERVING_PRIMARY_ACTION: readonly string[] = [
  * domaine solde la sienne : phase 3 pour Dette, 4 pour Patrimoine, 5 pour Placements, 6 pour
  * Immobilier, 7 pour Carrière et Fiscalité, 9 pour Décisions, 10 pour Sources et Rapports.
  */
-export const PRIMARY_ACTION_DEBT = 8;
+export const PRIMARY_ACTION_DEBT = 7;
 
 export interface PrimaryActionFinding {
   readonly page: string;
