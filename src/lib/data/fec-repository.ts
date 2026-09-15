@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -31,12 +32,7 @@ import { MAX_FEC_FILE_BYTES, MAX_RETAINED_FEC_FILE_BYTES } from "@/lib/validatio
 import type { ImportFileInput } from "@/lib/data/import-repository";
 import { LEDGER_PAGE_SIZE, pagesFor, readAllPages } from "@/lib/data/pagination";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
-import {
-  DOCUMENTS_BUCKET,
-  IMPORT_STAGING_BUCKET,
-  ownerId,
-  supabaseAdmin,
-} from "@/lib/data/supabase-client";
+import { DOCUMENTS_BUCKET, IMPORT_STAGING_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
 
 type Row = Record<string, unknown>;
 
@@ -169,9 +165,8 @@ export interface FecRepository {
   getSessionLines(sessionId: string, limit?: number): Promise<FecPreviewLine[]>;
 }
 
-export function createFecRepository(): FecRepository {
+export function createFecRepository(user: string): FecRepository {
   const db = supabaseAdmin();
-  const user = ownerId();
 
   async function businessOf(businessId: string): Promise<{ id: string; name: string }> {
     const rows = unwrap(
@@ -877,9 +872,7 @@ export function createFecRepository(): FecRepository {
   return { adapter: "supabase", issueUploadTicket, analyze, commit, discard, getSessionLines };
 }
 
-let cached: FecRepository | undefined;
-
-export function getFecRepository(): FecRepository {
-  if (!cached) cached = createFecRepository();
-  return cached;
+export async function getFecRepository(): Promise<FecRepository> {
+  const actor = await requireActor();
+  return createFecRepository(actor.userId);
 }

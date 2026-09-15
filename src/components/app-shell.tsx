@@ -234,7 +234,16 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
   }
 
   async function logout() {
-    await fetch("/api/auth", { method: "DELETE" });
+    try {
+      const response = await fetch("/api/auth", { method: "DELETE" });
+      if (!response.ok) {
+        setError("Déconnexion non confirmée. Réessayez.");
+        return;
+      }
+    } catch {
+      setError("Déconnexion non confirmée. Réessayez.");
+      return;
+    }
     router.replace("/login");
     router.refresh();
   }

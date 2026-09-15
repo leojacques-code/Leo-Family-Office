@@ -6,7 +6,7 @@ import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
 import { mapDecisionCases } from "@/lib/data/decision-snapshots";
 
 import type { PostgrestError } from "@supabase/supabase-js";
-import { DOCUMENTS_BUCKET, ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { DOCUMENTS_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
 import {
   ACCOUNT_TYPE_ORDER,
   ALERT_SEVERITY_ORDER,
@@ -484,9 +484,8 @@ function mapCurrencyFacts(currencyRateRows: Row[]) {
   return currencyRates;
 }
 
-export function createSupabaseRepository(): FamilyOfficeRepository {
+export function createSupabaseRepository(user: string): FamilyOfficeRepository {
   const db = supabaseAdmin();
-  const user = ownerId();
   const mine = (table: string) => db.from(table).select("*").eq("user_id", user);
   const optionalMine = async (table: string) => {
     const result = await mine(table);

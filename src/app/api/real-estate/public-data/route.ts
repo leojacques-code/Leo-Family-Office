@@ -43,7 +43,7 @@ export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const params = new URL(request.url).searchParams;
-    const repository = getPublicDataRepository();
+    const repository = await getPublicDataRepository();
 
     if (params.get("sources") === "1") {
       return NextResponse.json(
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const repository = getPublicDataRepository();
+    const repository = await getPublicDataRepository();
     const command = parsed.data;
 
     switch (command.action) {

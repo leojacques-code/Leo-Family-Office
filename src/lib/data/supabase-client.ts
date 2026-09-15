@@ -42,12 +42,3 @@ export function supabaseAdmin(): SupabaseClient {
   });
   return client;
 }
-
-/** UUID de l'utilisateur auth propriétaire des données (FK references auth.users(id)). */
-export function ownerId(): string {
-  const value = required("OWNER_USER_ID");
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
-    throw new Error("OWNER_USER_ID doit être l'UUID d'un utilisateur Supabase Auth.");
-  }
-  return value;
-}

@@ -110,15 +110,15 @@ beforeEach(() => {
 describe("repository Decision Lab rechargeable", () => {
   it("sauvegarde puis recharge une nouvelle instance du repository, sans cache client", async () => {
     const { definition, evaluation } = decisionFixture();
-    await createSupabaseRepository().mutateState({ action: "create_decision_case_v2", definition });
-    await createSupabaseRepository().mutateState({
+    await createSupabaseRepository(mocks.user).mutateState({ action: "create_decision_case_v2", definition });
+    await createSupabaseRepository(mocks.user).mutateState({
       action: "save_decision_run_v2",
       caseId: definition.caseId,
       caseVersion: 1,
       run: evaluation.run,
       result: evaluation,
     });
-    const state = await createSupabaseRepository().getDashboardState();
+    const state = await createSupabaseRepository(mocks.user).getDashboardState();
     expect(state.decisionCases).toHaveLength(1);
     expect(state.decisionCases![0]).toMatchObject({
       definition,
@@ -129,7 +129,7 @@ describe("repository Decision Lab rechargeable", () => {
     for (const table of ["decision_cases", "decision_case_versions", "decision_runs"])
       expect(queries).toContainEqual({ table, field: "user_id", value: "owner" });
     mocks.user = "other";
-    expect((await createSupabaseRepository().getDashboardState()).decisionCases).toEqual([]);
+    expect((await createSupabaseRepository(mocks.user).getDashboardState()).decisionCases).toEqual([]);
   });
   it("rejette les associations inter-utilisateurs même si une lecture privilégiée renvoie des lignes étrangères", () => {
     const { definition, evaluation } = decisionFixture();
@@ -231,7 +231,7 @@ describe("repository Decision Lab rechargeable", () => {
         created_at: "2026-08-01T00:00:00Z",
       },
     ];
-    expect((await createSupabaseRepository().getDashboardState()).monthlyCloses[0]).toMatchObject({
+    expect((await createSupabaseRepository(mocks.user).getDashboardState()).monthlyCloses[0]).toMatchObject({
       version: 3,
       reportingCurrency: "USD",
       completenessStatus: "PARTIAL",
@@ -262,6 +262,6 @@ it("conserve les déclarations après la première page PostgREST", async () => 
     revision: 1,
     note: null,
   });
-  const declarations = await createSupabaseRepository().getDomainDeclarations();
+  const declarations = await createSupabaseRepository(mocks.user).getDomainDeclarations();
   expect(declarations.find((row) => row.domain === "DETTE")?.applicability).toBe("DECLARED_NONE");
 });

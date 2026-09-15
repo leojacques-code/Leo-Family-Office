@@ -48,7 +48,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Session non précisée" }, { status: 400 });
     }
     return NextResponse.json(
-      { lines: await getFecRepository().getSessionLines(sessionId) },
+      { lines: await (await getFecRepository()).getSessionLines(sessionId) },
       { headers: API_HEADERS },
     );
   } catch (error) {
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      const ticket = await getFecRepository().issueUploadTicket(parsed.data);
+      const ticket = await (await getFecRepository()).issueUploadTicket(parsed.data);
       return NextResponse.json(ticket, { status: 201 });
     }
 
@@ -89,7 +89,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const preview = await getFecRepository().analyze(parsed.data);
+    const preview = await (await getFecRepository()).analyze(parsed.data);
     return NextResponse.json(preview, { status: 201 });
   } catch (error) {
     return failure(error, "Analyse de FEC impossible");
@@ -116,7 +116,7 @@ export async function PATCH(request: Request) {
         { status: 400 },
       );
     }
-    const repository = getFecRepository();
+    const repository = await getFecRepository();
     if (parsed.data.action === "commit") {
       return NextResponse.json(await repository.commit(parsed.data.sessionId));
     }

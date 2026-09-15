@@ -46,7 +46,7 @@ export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const params = new URL(request.url).searchParams;
-    const repository = getPortfolioImportRepository();
+    const repository = await getPortfolioImportRepository();
 
     const sessionId = params.get("session");
     if (sessionId) {
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const repository = getPortfolioImportRepository();
+    const repository = await getPortfolioImportRepository();
     const command = parsed.data;
 
     switch (command.action) {

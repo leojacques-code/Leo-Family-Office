@@ -96,7 +96,7 @@ beforeEach(() => {
 describe("B09 — lecture des seules dépendances des dettes", () => {
   it("ne lit aucun domaine étranger, ne sérialise aucun état global, ne fabrique pas de cash", async () => {
     install();
-    const model = await createSupabaseRepository().getDebtReadModel();
+    const model = await createSupabaseRepository("owner").getDebtReadModel();
     expect(model.metrics.bankCash).toBe(0); // Somme canonique du périmètre identifié vide.
     expect(model.cashObservationPresent).toBe(false); // Ne prouve pas un cash déclaré nul.
     expect(model).not.toHaveProperty("accounts");
@@ -118,7 +118,7 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
         { ...observation, id: "last", balance: "0", created_at: "2026-09-02T00:00:00Z" },
       ],
     });
-    const model = await createSupabaseRepository().getDebtReadModel();
+    const model = await createSupabaseRepository("owner").getDebtReadModel();
     expect(model.metrics.bankCash).toBe(0);
     expect(queries.filter((q) => q.table === "account_balances").flatMap((q) => q.ranges)).toEqual([
       [0, 999],
@@ -131,7 +131,7 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
       account_balances: [observation],
     };
     install(rows);
-    expect((await createSupabaseRepository().getDebtReadModel()).metrics.bankCash).toBeNull();
+    expect((await createSupabaseRepository("owner").getDebtReadModel()).metrics.bankCash).toBeNull();
     install({
       ...rows,
       currency_rates: [
@@ -145,7 +145,7 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
         },
       ],
     });
-    expect((await createSupabaseRepository().getDebtReadModel()).metrics.bankCash).toBeCloseTo(
+    expect((await createSupabaseRepository("owner").getDebtReadModel()).metrics.bankCash).toBeCloseTo(
       1614.969,
       6,
     );
@@ -153,7 +153,7 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
   it("échoue explicitement si une dépendance manque, sans rendre de résultat partiel", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     install({}, "loan_schedules");
-    await expect(createSupabaseRepository().getDebtReadModel()).rejects.toThrow(
+    await expect(createSupabaseRepository("owner").getDebtReadModel()).rejects.toThrow(
       "momentanément indisponibles",
     );
     expect(JSON.stringify(log.mock.calls)).not.toContain("SECRET");
@@ -161,7 +161,7 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
   });
   it("conserve la preuve de transactions sans charger les montants du ledger", async () => {
     install({ transactions: [{ transaction_date: "2026-08-30" }] });
-    const model = await createSupabaseRepository().getDebtReadModel();
+    const model = await createSupabaseRepository("owner").getDebtReadModel();
     expect(model.railSources.find((source) => source.category === "BANQUE")).toMatchObject({
       status: "ACTIVE",
       latestDate: "2026-08-30",
@@ -173,7 +173,7 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
     vi.setSystemTime(new Date("2026-09-13T12:00:00Z"));
     try {
       install({ monthly_closes: [{ close_date: "2026-12-31" }, { close_date: "2026-08-31" }] });
-      expect((await createSupabaseRepository().getDebtReadModel()).asOfDate).toBe("2026-08-31");
+      expect((await createSupabaseRepository("owner").getDebtReadModel()).asOfDate).toBe("2026-08-31");
     } finally {
       vi.useRealTimers();
     }
@@ -186,27 +186,27 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
       ],
       account_balances: [observation, { id: "bad", account_id: "pea", balance: "invalid" }],
     });
-    expect((await createSupabaseRepository().getDebtReadModel()).metrics.bankCash).toBe(1794.41);
+    expect((await createSupabaseRepository("owner").getDebtReadModel()).metrics.bankCash).toBe(1794.41);
   });
   it("un OTHER immédiat ne prouve pas du cash bancaire, un découvert bancaire est une observation", async () => {
     install({
       financial_accounts: [{ ...account, account_type: "OTHER" }],
       account_balances: [observation],
     });
-    expect((await createSupabaseRepository().getDebtReadModel()).cashObservationPresent).toBe(
+    expect((await createSupabaseRepository("owner").getDebtReadModel()).cashObservationPresent).toBe(
       false,
     );
     install({
       financial_accounts: [account],
       account_balances: [{ ...observation, balance: -50 }],
     });
-    const model = await createSupabaseRepository().getDebtReadModel();
+    const model = await createSupabaseRepository("owner").getDebtReadModel();
     expect(model.cashObservationPresent).toBe(true);
     expect(model.metrics.bankCash).toBe(0);
   });
   it("acquitte la mutation sans déclencher getDashboardState", async () => {
     mocks.rpc.mockResolvedValue({ data: true, error: null });
-    await createSupabaseRepository().executeMutation({
+    await createSupabaseRepository("owner").executeMutation({
       action: "archive_debt",
       liabilityId: "loan",
     });

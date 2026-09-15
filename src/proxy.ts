@@ -1,4 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { usesLocalFixtureAuth } from "@/lib/auth-config";
+import { createSessionClient } from "@/lib/session-client";
+import { verifySessionActor } from "@/lib/verified-session";
 
 const COOKIE_NAME = "lfo_session";
 
@@ -57,23 +60,47 @@ export async function proxy(request: NextRequest) {
   // code d'accès, et une réponse mise en cache serait rejouable.
   if (isPublic) return withApiCacheControl(NextResponse.next(), pathname);
 
-  const secret =
-    process.env.SESSION_SECRET ??
-    (process.env.NODE_ENV === "production" ? null : "development-only-session-secret-change-me");
-  const token = request.cookies.get(COOKIE_NAME)?.value;
-  const authenticated = secret ? token === (await expectedToken(secret)) : false;
+  let response = NextResponse.next({ request });
+  // Conserver aussi les cookies renouvelés/effacés sur une redirection ou un refus.
+  function finish(target: NextResponse) {
+    for (const cookie of response.cookies.getAll()) target.cookies.set(cookie);
+    return withApiCacheControl(target, pathname);
+  }
+  let authenticated = false;
+  if (usesLocalFixtureAuth()) {
+    const secret = process.env.SESSION_SECRET ?? "development-only-session-secret-change-me";
+    const token = request.cookies.get(COOKIE_NAME)?.value;
+    authenticated = token === (await expectedToken(secret));
+  } else {
+    try {
+      const client = createSessionClient({
+        getAll: () => request.cookies.getAll(),
+        setAll: (values) => {
+          for (const { name, value } of values) request.cookies.set(name, value);
+          response = NextResponse.next({ request });
+          for (const { name, value, options } of values) response.cookies.set(name, value, options);
+        },
+      });
+      authenticated = (await verifySessionActor(client)) !== null;
+    } catch {
+      if (pathname.startsWith("/api/"))
+        return finish(
+          NextResponse.json(
+            { error: "Vérification de session momentanément indisponible" },
+            { status: 503 },
+          ),
+        );
+    }
+  }
   if (!authenticated) {
     if (pathname.startsWith("/api/")) {
-      return withApiCacheControl(
-        NextResponse.json({ error: "Non authentifié" }, { status: 401 }),
-        pathname,
-      );
+      return finish(NextResponse.json({ error: "Non authentifié" }, { status: 401 }));
     }
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(loginUrl);
+    return finish(NextResponse.redirect(loginUrl));
   }
-  return withApiCacheControl(NextResponse.next(), pathname);
+  return withApiCacheControl(response, pathname);
 }
 
 export const config = {

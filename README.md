@@ -12,11 +12,13 @@ Supabase est l’unique couche de persistance dans tous les environnements :
 - `FamilyOfficeRepository` conserve la séparation application/persistance ;
 - les moteurs financiers restent des fonctions TypeScript pures. Aucune formule n’est exécutée dans PostgreSQL.
 
-L’authentification applicative reste temporairement fondée sur `SESSION_SECRET` et `LOCAL_ACCESS_CODE`. `OWNER_USER_ID` et le client Supabase serveur sont conservés ; ce sprint ne branche pas Supabase Auth.
+La connexion personnelle utilise Supabase Auth côté serveur : identité vérifiée par `getUser()`, puis contrôle SQL de la session, de sa révocation et de son échéance. Chaque requête construit ses repositories avec cet acteur. La création de compte initialise uniquement un profil vide ; aucune donnée financière de démonstration n’est copiée.
+
+La bascule B12 reste **à valider sur une recette Supabase Auth réelle** avant publication : deux comptes, cookies, renouvellement, révocation et isolation B13. Le harnais PostgreSQL natif vérifie le SQL, sans simuler le fournisseur Auth.
 
 ## Démarrage local
 
-Prérequis : Node.js 22+ et un projet Supabase de développement, ou Supabase CLI en local. Le développement ne doit jamais pointer par défaut vers la production.
+Prérequis : Node.js 24.x et un projet Supabase de développement, ou Supabase CLI en local. Le développement ne doit jamais pointer par défaut vers la production.
 
 ```bash
 npm ci
@@ -26,29 +28,28 @@ cp .env.example .env.local
 Renseigner dans `.env.local` :
 
 ```text
-SESSION_SECRET=...
-LOCAL_ACCESS_CODE=...
 SUPABASE_URL=...
+SUPABASE_PUBLISHABLE_KEY=...
 SUPABASE_SECRET_KEY=...
 SUPABASE_DB_URL=...
-OWNER_USER_ID=...
 SUPABASE_DOCUMENTS_BUCKET=family-office-documents
 ```
 
 `SUPABASE_SECRET_KEY` et `SUPABASE_DB_URL` sont strictement serveur et ne doivent jamais être préfixées `NEXT_PUBLIC_`. La seconde n'est utilisée que par la vérification PostgreSQL read-only.
 
-Appliquer et vérifier le schéma sur le projet de développement, puis amorcer une base vide une seule fois :
+Appliquer et vérifier le schéma sur le projet de développement (dont `20260914191901_verified_personal_session.sql`), configurer le fournisseur e-mail Auth et ses URL de confirmation, puis lancer :
 
 ```bash
 supabase migration list
 supabase db push --dry-run
 supabase db push
 npm run db:verify
-npm run seed:supabase
 npm run dev
 ```
 
-Le seed refuse toute cible déjà amorcée. Il n’existe aucun mode forcé et aucune suppression automatique.
+Créer ensuite un compte depuis `/login`, confirmer l’adresse si le fournisseur le demande, puis se connecter. L’espace personnel doit rester vierge.
+
+Pour les seules données fictives du harnais PostgreSQL natif, `LFO_AUTH_MODE=local-fixture` active le code local avec `OWNER_USER_ID`, `SESSION_SECRET` et `LOCAL_ACCESS_CODE`. Ce mode exige une URL Supabase HTTP loopback et est refusé en production. Le script historique `seed:supabase` est réservé à une base fictive dédiée ; il ne fait pas partie de la création personnelle.
 
 ## Environnements
 
@@ -176,14 +177,14 @@ modifier aucune donnée ni règle métier.
 
 ## Sécurité
 
-- session HttpOnly, `SameSite=Strict`, `Secure` en production ;
+- session Auth HttpOnly, `SameSite=Lax`, `Secure` en production ;
 - validation Zod des mutations ;
 - secret Supabase confiné aux modules serveur ;
 - bucket documentaire privé ;
 - RLS activé sur les tables exposées et aucun accès table pour `anon` ;
 - fonctions RPC runtime réservées au rôle serveur.
 
-Le client serveur utilise actuellement la secret key et contourne donc RLS. La frontière effective reste la session applicative ; Supabase Auth est une évolution séparée.
+Le client de données serveur utilise la secret key et contourne donc RLS : chaque lecture et commande doit être bornée par l’acteur Auth vérifié. Les RPC restent réservées à `service_role`. La validation B13 doit couvrir aussi les références vers les objets d’un autre utilisateur et le stockage privé.
 
 ## Documentation
 

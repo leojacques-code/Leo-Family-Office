@@ -1,4 +1,5 @@
 import "server-only";
+import { requireActor } from "@/lib/auth";
 
 import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import type { DashboardState, DocumentRecord } from "@/lib/types";
@@ -53,14 +54,8 @@ export interface FamilyOfficeRepository {
   declareDomainApplicability(input: DomainDeclarationInput): Promise<boolean>;
 }
 
-let cached: Promise<FamilyOfficeRepository> | undefined;
-
-async function load(): Promise<FamilyOfficeRepository> {
+export async function getRepository(): Promise<FamilyOfficeRepository> {
+  const actor = await requireActor();
   const { createSupabaseRepository } = await import("@/lib/data/supabase-repository");
-  return createSupabaseRepository();
-}
-
-export function getRepository(): Promise<FamilyOfficeRepository> {
-  if (!cached) cached = load();
-  return cached;
+  return createSupabaseRepository(actor.userId);
 }

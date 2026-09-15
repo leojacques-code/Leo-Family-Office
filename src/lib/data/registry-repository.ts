@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -41,7 +42,7 @@ import type {
   RegistrySearchResponse,
 } from "@/lib/data/registry-contracts";
 import { nullableFiniteNumber } from "@/lib/data/row-validation";
-import { ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { supabaseAdmin } from "@/lib/data/supabase-client";
 
 /**
  * ACQUISITION DU REGISTRE — PERSISTANCE
@@ -158,7 +159,7 @@ export interface RegistryRepository {
 }
 
 class SupabaseRegistryRepository implements RegistryRepository {
-  private readonly user = ownerId();
+  constructor(private readonly user: string) {}
 
   private client() {
     return supabaseAdmin();
@@ -807,11 +808,9 @@ class SupabaseRegistryRepository implements RegistryRepository {
   }
 }
 
-let repository: RegistryRepository | undefined;
-
-export function getRegistryRepository(): RegistryRepository {
-  repository ??= new SupabaseRegistryRepository();
-  return repository;
+export async function getRegistryRepository(): Promise<RegistryRepository> {
+  const actor = await requireActor();
+  return new SupabaseRegistryRepository(actor.userId);
 }
 
 function isEnrichableField(value: unknown): value is EnrichableField {

@@ -7,12 +7,10 @@ Supabase est la persistance unique en développement, preview et production. Uti
 Créer `.env.local` à partir de `.env.example` :
 
 ```text
-SESSION_SECRET=
-LOCAL_ACCESS_CODE=
 SUPABASE_URL=
+SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SECRET_KEY=
 SUPABASE_DB_URL=
-OWNER_USER_ID=
 SUPABASE_DOCUMENTS_BUCKET=family-office-documents
 ```
 
@@ -24,9 +22,15 @@ Environnements recommandés :
 - Preview : projet ou branche Supabase dédiée si disponible ;
 - Production : projet de production isolé.
 
-## 2. Utilisateur propriétaire
+## 2. Session personnelle — B12 à valider en recette
 
-Les tables référencent `auth.users(id)`. Créer l’utilisateur propriétaire dans Supabase Auth et renseigner son UUID dans `OWNER_USER_ID`. L’application continue néanmoins d’utiliser `LOCAL_ACCESS_CODE` pour l’accès : cette exigence de FK ne constitue pas une migration Supabase Auth.
+Configurer le fournisseur e-mail Supabase Auth et les URL de confirmation du projet de recette. `/login` propose connexion et création de compte. Après confirmation d’adresse si nécessaire, l’identité est validée par `getUser()` et par `public.lfo_verify_session`. La migration `20260914191901_verified_personal_session.sql` est indispensable avant de lancer cette version. Elle lit les sessions révoquées/expirées et les utilisateurs suspendus/supprimés via une fonction privée réservée au serveur.
+
+`SUPABASE_PUBLISHABLE_KEY` sert au client Auth serveur ; `SUPABASE_SECRET_KEY` reste dans le client de données privilégié. Aucun profil ni identifiant utilisateur envoyé par le navigateur ne choisit le propriétaire : les repositories sont reconstruits avec l’acteur vérifié de la requête. Une inscription ne crée qu’un profil vide, sans seed financier.
+
+Avant publication, vérifier sur un environnement Supabase Auth distinct : comptes A/B, espace vierge, premier compte et rechargement, absence de lecture/écriture croisée, Storage privé, renouvellement des cookies et révocation. Les doubles SQL locaux ne prouvent pas ces parcours. B12/B13/B14 restent ouverts jusqu’à ces preuves.
+
+Le code d’accès historique et `OWNER_USER_ID` ne sont disponibles qu’avec `LFO_AUTH_MODE=local-fixture`, une URL HTTP loopback et un environnement hors production. Ce mode sert exclusivement aux fixtures locales.
 
 ## 3. Migrations
 
@@ -41,8 +45,7 @@ supabase db push --dry-run
 supabase db push
 ```
 
-Ordre attendu : celui du tri alphabétique de `supabase/migrations/`, soit à ce jour les
-25 fichiers du dossier. La liste canonique vit dans le dépôt et dans
+Ordre attendu : celui du tri alphabétique de `supabase/migrations/`. La liste canonique vit dans le dépôt et dans
 `canonicalMigrations` du verifier ; ne pas la dupliquer ici pour éviter une troisième
 vérité qui se périme.
 

@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -34,12 +35,7 @@ import type {
   DocumentUploadTicket,
 } from "@/lib/data/document-contracts";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
-import {
-  DOCUMENTS_BUCKET,
-  IMPORT_STAGING_BUCKET,
-  ownerId,
-  supabaseAdmin,
-} from "@/lib/data/supabase-client";
+import { DOCUMENTS_BUCKET, IMPORT_STAGING_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
 import {
   MAX_DOCUMENT_FILE_BYTES,
   MAX_RETAINED_DOCUMENT_FILE_BYTES,
@@ -179,7 +175,7 @@ export interface DocumentRepository {
 }
 
 class SupabaseDocumentRepository implements DocumentRepository {
-  private readonly user = ownerId();
+  constructor(private readonly user: string) {}
 
   private client() {
     return supabaseAdmin();
@@ -780,11 +776,9 @@ class SupabaseDocumentRepository implements DocumentRepository {
   }
 }
 
-let repository: DocumentRepository | undefined;
-
-export function getDocumentRepository(): DocumentRepository {
-  repository ??= new SupabaseDocumentRepository();
-  return repository;
+export async function getDocumentRepository(): Promise<DocumentRepository> {
+  const actor = await requireActor();
+  return new SupabaseDocumentRepository(actor.userId);
 }
 
 /** Réexporté pour les tests : la liste des ancres est un contrat, pas un détail. */

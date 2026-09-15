@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -37,7 +38,7 @@ import type {
 } from "@/lib/data/public-data-contracts";
 import { LEDGER_PAGE_SIZE, readAllPages, pagesFor } from "@/lib/data/pagination";
 import { nullableFiniteNumber } from "@/lib/data/row-validation";
-import { ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { supabaseAdmin } from "@/lib/data/supabase-client";
 
 type Row = Record<string, unknown>;
 
@@ -236,9 +237,8 @@ export interface PublicDataRepository {
   getPropertyView(propertyId: string): Promise<PropertyPublicDataView>;
 }
 
-function createPublicDataRepository(): PublicDataRepository {
+function createPublicDataRepository(user: string): PublicDataRepository {
   const db = supabaseAdmin();
-  const user = ownerId();
 
   /** Enregistre l'adaptateur en base et rend son identifiant. Aucun secret n'y entre. */
   async function ensureSource(descriptor: AdapterDescriptor): Promise<string> {
@@ -856,9 +856,7 @@ function createPublicDataRepository(): PublicDataRepository {
   return { adapter: "supabase", listSources, fetchAndStage, decide, promote, getPropertyView };
 }
 
-let cached: PublicDataRepository | undefined;
-
-export function getPublicDataRepository(): PublicDataRepository {
-  if (!cached) cached = createPublicDataRepository();
-  return cached;
+export async function getPublicDataRepository(): Promise<PublicDataRepository> {
+  const actor = await requireActor();
+  return createPublicDataRepository(actor.userId);
 }

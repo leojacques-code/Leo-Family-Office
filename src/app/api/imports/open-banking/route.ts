@@ -35,7 +35,7 @@ export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const runId = new URL(request.url).searchParams.get("run");
-    const repository = getOpenBankingRepository();
+    const repository = await getOpenBankingRepository();
     if (runId) {
       return NextResponse.json(
         { preview: await repository.preview(runId) },
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const repository = getOpenBankingRepository();
+    const repository = await getOpenBankingRepository();
     const command = parsed.data;
 
     switch (command.action) {

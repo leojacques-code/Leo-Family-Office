@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn() }));
 vi.mock("@/lib/data/supabase-client", () => ({
@@ -21,7 +22,7 @@ describe("B06 — consulter les connexions", () => {
   }
   it("rend les adaptateurs non configurés sans RPC, même sur un compte vierge", async () => {
     const q = query([]);
-    const result = await getRegistryRepository().describeConnections();
+    const result = await (await getRegistryRepository()).describeConnections();
     expect(result.length).toBeGreaterThan(0);
     expect(
       result.every((item) => item.status === "NOT_CONFIGURED" && item.lastCheckedAt === null),
@@ -41,7 +42,7 @@ describe("B06 — consulter les connexions", () => {
       },
     ]);
     expect(
-      (await getRegistryRepository().describeConnections()).find(
+      (await (await getRegistryRepository()).describeConnections()).find(
         (item) => item.provider === "FIXTURE",
       ),
     ).toMatchObject({
@@ -52,3 +53,7 @@ describe("B06 — consulter les connexions", () => {
     expect(mock.rpc).not.toHaveBeenCalled();
   });
 });
+
+vi.mock("@/lib/auth", () => ({ requireActor: vi.fn() }));
+
+vi.mocked(requireActor).mockResolvedValue({userId: "11111111-1111-4111-8111-111111111111"});

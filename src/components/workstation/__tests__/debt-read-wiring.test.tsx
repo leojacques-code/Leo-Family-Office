@@ -4,9 +4,8 @@ import userEvent from "@testing-library/user-event";
 import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import type { Mutation } from "@/lib/data/contracts";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }),
-}));
+const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("@/components/pages", () => ({ SectionContent: () => <p>Etat global interdit</p> }));
 vi.mock("@/components/pages/debt/page", () => ({
   default: ({
@@ -40,7 +39,10 @@ const model = {
   readAt: "initiale",
   railSources: [],
 } as unknown as DebtReadModel;
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+});
 describe("Dettes : routes et acquittement ciblés", () => {
   it("rafraîchit exclusivement le modèle du domaine", async () => {
     const fetcher = vi
@@ -68,4 +70,26 @@ describe("Dettes : routes et acquittement ciblés", () => {
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual(["/api/debt", "/api/debt"]);
     expect(fetcher.mock.calls.filter((call) => call[1]?.method === "POST")).toHaveLength(1);
   });
+});
+
+describe("Déconnexion vérifiée", () => {
+  it.each(["serveur", "réseau"])(
+    "conserve l'écran après une panne %s et permet de réessayer",
+    async (failure) => {
+      const fetcher = vi.fn();
+      if (failure === "serveur") fetcher.mockResolvedValueOnce(new Response("{}", { status: 503 }));
+      else fetcher.mockRejectedValueOnce(new Error("offline"));
+      fetcher.mockResolvedValueOnce(new Response('{"ok":true}'));
+      vi.stubGlobal("fetch", fetcher);
+      render(<AppShell section="debt" source={{ kind: "DEBT", model }} />);
+      await userEvent.click(screen.getByRole("button", { name: "Déconnexion" }));
+      expect(screen.getByRole("alert")).toHaveTextContent("Déconnexion non confirmée");
+      expect(router.replace).not.toHaveBeenCalled();
+      expect(router.refresh).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole("button", { name: "Déconnexion" }));
+      expect(router.replace).toHaveBeenCalledWith("/login");
+      expect(router.refresh).toHaveBeenCalledTimes(1);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    },
+  );
 });

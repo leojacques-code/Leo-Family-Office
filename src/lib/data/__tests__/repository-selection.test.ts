@@ -1,19 +1,22 @@
-import { describe, expect, it, vi } from "vitest";
-
-const fakeRepository = { adapter: "supabase" as const };
-const createSupabaseRepository = vi.fn(() => fakeRepository);
-
-vi.mock("@/lib/data/supabase-repository", () => ({ createSupabaseRepository }));
-
-describe("repository Supabase-only", () => {
-  it("ignore toute ancienne sélection d'adapter et conserve le cache", async () => {
-    const legacyAdapterVariable = ["DATA", "ADAPTER"].join("_");
-    process.env[legacyAdapterVariable] = "local";
-    const { getRepository } = await import("@/lib/data/repository");
-    expect(await getRepository()).toBe(fakeRepository);
-    process.env[legacyAdapterVariable] = "anything";
-    expect(await getRepository()).toBe(fakeRepository);
-    expect(createSupabaseRepository).toHaveBeenCalledTimes(1);
-    delete process.env[legacyAdapterVariable];
+import { afterEach, describe, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({
+  actor: vi.fn(),
+  create: vi.fn((userId: string) => ({ adapter: "supabase" as const, userId })),
+}));
+vi.mock("@/lib/auth", () => ({ requireActor: mocks.actor }));
+vi.mock("@/lib/data/supabase-repository", () => ({ createSupabaseRepository: mocks.create }));
+import { getRepository } from "../repository";
+afterEach(() => vi.clearAllMocks());
+describe("repository Supabase de l’acteur courant", () => {
+  it("ne conserve pas le repository d’un utilisateur pour la requête suivante", async () => {
+    mocks.actor.mockResolvedValueOnce({ userId: "a" }).mockResolvedValueOnce({ userId: "b" });
+    expect(await getRepository()).toEqual({ adapter: "supabase", userId: "a" });
+    expect(await getRepository()).toEqual({ adapter: "supabase", userId: "b" });
+    expect(mocks.create).toHaveBeenCalledTimes(2);
+  });
+  it("ne construit pas de repository si la session est absente", async () => {
+    mocks.actor.mockRejectedValue(new Error("UNAUTHORIZED"));
+    await expect(getRepository()).rejects.toThrow("UNAUTHORIZED");
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 });

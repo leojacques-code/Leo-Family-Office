@@ -47,7 +47,16 @@ create schema if not exists auth;
 create table if not exists auth.users (
   id uuid primary key default gen_random_uuid(),
   email text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  banned_until timestamptz,
+  deleted_at timestamptz
+);
+
+-- Colonnes lues par verified_personal_session ; aucun service Auth n'est simulé.
+create table if not exists auth.sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  not_after timestamptz
 );
 
 -- En production auth.uid() lit le JWT de la requête. En local, la valeur reste nulle :
