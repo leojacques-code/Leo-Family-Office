@@ -12,6 +12,7 @@ import "./today.css";
 // Canvas du bilan de la phase 4A : géométrie `ACTIFS − DETTES = PATRIMOINE NET`, répartition et
 // zones détourées d'un montant inconnu. Quatrième fichier du découpage CSS du §10.2.
 import "./net-worth.css";
+import "./personal-setup.css";
 
 export const metadata: Metadata = {
   title: "Léo Family Office",

@@ -47,7 +47,7 @@ npm run db:verify
 npm run dev
 ```
 
-Créer ensuite un compte depuis `/login`, confirmer l’adresse si le fournisseur le demande, puis se connecter. L’espace personnel doit rester vierge.
+Créer ensuite un compte depuis `/login`, confirmer l’adresse si le fournisseur le demande, puis se connecter. `/setup` permet de nommer l’espace et de choisir une première intention facultative. Les choix sont repris via « Mon espace » ; une intention propose une page sans modifier les faits. L’espace personnel doit rester vierge. La migration `20260915180426_personal_first_intent.sql` est requise pour cet accueil.
 
 Pour les seules données fictives du harnais PostgreSQL natif, `LFO_AUTH_MODE=local-fixture` active le code local avec `OWNER_USER_ID`, `SESSION_SECRET` et `LOCAL_ACCESS_CODE`. Ce mode exige une URL Supabase HTTP loopback et est refusé en production. Le script historique `seed:supabase` est réservé à une base fictive dédiée ; il ne fait pas partie de la création personnelle.
 

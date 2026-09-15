@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { setupEntryFor } from "@/lib/personal-setup-navigation";
 import { ArrowRight, LockKeyhole } from "lucide-react";
 
 export function LoginForm({ localFixture = false }: { localFixture?: boolean }) {
@@ -32,9 +33,7 @@ export function LoginForm({ localFixture = false }: { localFixture?: boolean }) 
         return;
       }
       const next = new URLSearchParams(window.location.search).get("next");
-      const target =
-        next && next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : "/";
-      window.location.assign(target);
+      window.location.assign(setupEntryFor(next));
     } catch {
       setError("Connexion momentanément indisponible. Réessayez.");
     } finally {

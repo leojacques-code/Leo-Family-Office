@@ -1,3 +1,4 @@
+import { isSameOrigin } from "@/lib/same-origin";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { SESSION_COOKIE, sessionSecret, sessionToken, verifyAccessCode } from "@/lib/auth";
@@ -13,13 +14,9 @@ const loginSchema = z
     intent: z.enum(["sign-in", "sign-up"]).default("sign-in"),
   })
   .strict();
-function originAllowed(request: Request) {
-  const origin = request.headers.get("origin");
-  return !origin || origin === new URL(request.url).origin;
-}
 
 export async function POST(request: Request) {
-  if (!originAllowed(request))
+  if (!isSameOrigin(request))
     return NextResponse.json({ error: "Origine refusée" }, { status: 403 });
   const body = await request.json().catch(() => null);
   if (usesLocalFixtureAuth()) {
@@ -86,7 +83,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!originAllowed(request))
+  if (!isSameOrigin(request))
     return NextResponse.json({ error: "Origine refusée" }, { status: 403 });
   if (!usesLocalFixtureAuth()) {
     try {

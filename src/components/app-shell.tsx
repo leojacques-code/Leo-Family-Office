@@ -437,6 +437,9 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
               <small>Lecture financière</small>
             </span>
           </div>
+          <Link className="logout-button" href="/setup?edit=1">
+            Mon espace
+          </Link>
           <button className="logout-button" onClick={logout}>
             <LogOut size={16} />
             Déconnexion

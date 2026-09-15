@@ -1,0 +1,50 @@
+.personal-setup-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 64px 24px;
+}
+.personal-setup-page h1 {
+  margin: 12px 0;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+.personal-setup-page header p {
+  line-height: 1.6;
+}
+.personal-setup-card {
+  margin-top: 28px;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+}
+.personal-setup-card form {
+  display: grid;
+  gap: 20px;
+}
+.personal-setup-card .field-label {
+  display: grid;
+  gap: 8px;
+}
+.personal-setup-hint {
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-soft);
+}
+.personal-setup-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+.personal-setup-actions a {
+  white-space: normal;
+  text-align: center;
+}
+@media (max-width: 480px) {
+  .personal-setup-page {
+    padding: 32px 16px;
+  }
+  .personal-setup-card {
+    padding: 20px;
+  }
+}

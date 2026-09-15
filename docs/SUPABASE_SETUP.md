@@ -26,6 +26,8 @@ Environnements recommandés :
 
 Configurer le fournisseur e-mail Supabase Auth et les URL de confirmation du projet de recette. `/login` propose connexion et création de compte. Après confirmation d’adresse si nécessaire, l’identité est validée par `getUser()` et par `public.lfo_verify_session`. La migration `20260914191901_verified_personal_session.sql` est indispensable avant de lancer cette version. Elle lit les sessions révoquées/expirées et les utilisateurs suspendus/supprimés via une fonction privée réservée au serveur.
 
+La migration `20260915180426_personal_first_intent.sql` ajoute la préférence d’accueil facultative. Après connexion, `/setup` présente le nom d’espace et la première intention. Un espace déjà configuré rejoint sa destination demandée ; `/setup?edit=1` reste accessible depuis Mon espace. Une erreur de lecture ne recrée pas un profil et une sauvegarde ne touche ni la devise ni les faits financiers.
+
 `SUPABASE_PUBLISHABLE_KEY` sert au client Auth serveur ; `SUPABASE_SECRET_KEY` reste dans le client de données privilégié. Aucun profil ni identifiant utilisateur envoyé par le navigateur ne choisit le propriétaire : les repositories sont reconstruits avec l’acteur vérifié de la requête. Une inscription ne crée qu’un profil vide, sans seed financier.
 
 Avant publication, vérifier sur un environnement Supabase Auth distinct : comptes A/B, espace vierge, premier compte et rechargement, absence de lecture/écriture croisée, Storage privé, renouvellement des cookies et révocation. Les doubles SQL locaux ne prouvent pas ces parcours. B12/B13/B14 restent ouverts jusqu’à ces preuves.
