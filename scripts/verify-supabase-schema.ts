@@ -57,6 +57,7 @@ const canonicalMigrations = [
   "20260905090000",
   "20260909190841",
   "20260914191901",
+  "20260915064740",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -2543,6 +2544,28 @@ try {
     if (!rpc.service_role_execute)
       failures.push(`RPC non exécutable par service_role : ${rpc.name}`);
   }
+
+  // Toute FK simple entre tables par propriétaire doit être couverte par une FK avec user_id.
+  // Détecte les oublis historiques et les futurs liens ajoutés sans isolation.
+  const unscopedReferences = await client.query<{ name: string }>(`
+    select con.conname as name from pg_constraint con
+    join pg_namespace ns on ns.oid = con.connamespace
+    where ns.nspname = 'public' and con.contype = 'f' and cardinality(con.conkey) = 1
+      and exists(select 1 from pg_attribute a where a.attrelid = con.conrelid and a.attname = 'user_id' and not a.attisdropped)
+      and exists(select 1 from pg_attribute a where a.attrelid = con.confrelid and a.attname = 'user_id' and not a.attisdropped)
+      and not exists (
+        select 1 from pg_constraint scoped
+        where scoped.contype = 'f' and scoped.conrelid = con.conrelid and scoped.confrelid = con.confrelid
+          and con.conkey <@ scoped.conkey
+          and exists (
+            select 1 from unnest(scoped.conkey, scoped.confkey) pair(child_key, parent_key)
+            join pg_attribute ca on ca.attrelid = scoped.conrelid and ca.attnum = pair.child_key
+            join pg_attribute pa on pa.attrelid = scoped.confrelid and pa.attnum = pair.parent_key
+            where ca.attname = 'user_id' and pa.attname = 'user_id'
+          )
+      )`);
+  for (const reference of unscopedReferences.rows)
+    failures.push(`Référence sans isolation du propriétaire : ${reference.name}`);
 
   // Le seul lecteur Auth privilégié est privé et réservé au serveur.
   const sessionReader = await client.query<{
