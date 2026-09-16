@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import type { PostgrestError } from "@supabase/supabase-js";
@@ -31,7 +32,7 @@ import type {
 } from "@/lib/data/open-banking-contracts";
 import { readAllPages } from "@/lib/data/pagination";
 import { nullableFiniteNumber } from "@/lib/data/row-validation";
-import { ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { supabaseAdmin } from "@/lib/data/supabase-client";
 
 type Row = Record<string, unknown>;
 
@@ -99,7 +100,7 @@ export function resolveProvider(adapterId: string, scenario: SandboxScenario): B
 
 export class OpenBankingRepository {
   private readonly client = supabaseAdmin();
-  private readonly userId = ownerId();
+  constructor(private readonly userId: string) {}
 
   /** Vue complète : fournisseurs, consentements, comptes, exécutions, soldes, observations. */
   async overview(): Promise<OpenBankingOverview> {
@@ -1044,9 +1045,7 @@ export class OpenBankingRepository {
   }
 }
 
-let repository: OpenBankingRepository | undefined;
-
-export function getOpenBankingRepository(): OpenBankingRepository {
-  if (!repository) repository = new OpenBankingRepository();
-  return repository;
+export async function getOpenBankingRepository(): Promise<OpenBankingRepository> {
+  const actor = await requireActor();
+  return new OpenBankingRepository(actor.userId);
 }

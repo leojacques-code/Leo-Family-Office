@@ -56,10 +56,13 @@ const canonicalMigrations = [
   "20260904093000",
   "20260905090000",
   "20260909190841",
+  "20260914191901",
+  "20260915064740",
+  "20260915180426",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
-  profiles: ["user_id", "ledger_coverage_start", "ledger_coverage_source"],
+  profiles: ["first_intent", "user_id", "ledger_coverage_start", "ledger_coverage_source"],
   scenarios: [
     "id",
     "scenario_status",
@@ -1513,6 +1516,7 @@ const requiredTriggerFunctions = [
 ] as const;
 
 const requiredConstraints = [
+  "profiles_first_intent_ck",
   // ── Corrections d'observations de position ─────────────────────────────────────────
   // Les cinq contrôles qui empêchent la piste d'audit de mentir : un motif vide, un auteur
   // vide, un avant ou un après qui ne serait pas un objet, et une correction ne nommant
@@ -2007,6 +2011,7 @@ const requiredConstraints = [
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
+  lfo_verify_session: "p_user_id uuid, p_session_id uuid",
   lfo_declare_domain_applicability: "p_user_id uuid, p_payload jsonb",
   lfo_add_account:
     "p_user_id uuid, p_institution text, p_name text, p_account_type text, p_balance numeric, p_currency text, p_as_of_date date",
@@ -2162,6 +2167,7 @@ const requiredRpcs: Record<string, string> = {
  * l'information utile à l'appelant, davantage que l'identifiant de la ligne créée.
  */
 const declaredReturnTypeRpcs: Record<string, string> = {
+  lfo_verify_session: "boolean",
   // Rend `null` quand la déclaration courante est déjà celle-là : rendre un identifiant
   // fabriqué laisserait croire à une écriture qui n'a pas eu lieu.
   lfo_declare_domain_applicability: "uuid",
@@ -2539,6 +2545,65 @@ try {
     if (rpc.authenticated_execute) failures.push(`RPC exécutable par authenticated : ${rpc.name}`);
     if (!rpc.service_role_execute)
       failures.push(`RPC non exécutable par service_role : ${rpc.name}`);
+  }
+
+  // Toute FK simple entre tables par propriétaire doit être couverte par une FK avec user_id.
+  // Détecte les oublis historiques et les futurs liens ajoutés sans isolation.
+  const unscopedReferences = await client.query<{ name: string }>(`
+    select con.conname as name from pg_constraint con
+    join pg_namespace ns on ns.oid = con.connamespace
+    where ns.nspname = 'public' and con.contype = 'f' and cardinality(con.conkey) = 1
+      and exists(select 1 from pg_attribute a where a.attrelid = con.conrelid and a.attname = 'user_id' and not a.attisdropped)
+      and exists(select 1 from pg_attribute a where a.attrelid = con.confrelid and a.attname = 'user_id' and not a.attisdropped)
+      and not exists (
+        select 1 from pg_constraint scoped
+        where scoped.contype = 'f' and scoped.conrelid = con.conrelid and scoped.confrelid = con.confrelid
+          and con.conkey <@ scoped.conkey
+          and exists (
+            select 1 from unnest(scoped.conkey, scoped.confkey) pair(child_key, parent_key)
+            join pg_attribute ca on ca.attrelid = scoped.conrelid and ca.attnum = pair.child_key
+            join pg_attribute pa on pa.attrelid = scoped.confrelid and pa.attnum = pair.parent_key
+            where ca.attname = 'user_id' and pa.attname = 'user_id'
+          )
+      )`);
+  for (const reference of unscopedReferences.rows)
+    failures.push(`Référence sans isolation du propriétaire : ${reference.name}`);
+
+  // Le seul lecteur Auth privilégié est privé et réservé au serveur.
+  const sessionReader = await client.query<{
+    security_definer: boolean;
+    settings: string[] | null;
+    result_type: string;
+    arguments: string;
+    anon_execute: boolean;
+    authenticated_execute: boolean;
+    service_role_execute: boolean;
+    anon_usage: boolean;
+    authenticated_usage: boolean;
+  }>(`select p.prosecdef as security_definer, p.proconfig as settings,
+      pg_get_function_result(p.oid) as result_type,
+      pg_get_function_identity_arguments(p.oid) as arguments,
+      has_function_privilege('anon', p.oid, 'execute') as anon_execute,
+      has_function_privilege('authenticated', p.oid, 'execute') as authenticated_execute,
+      has_function_privilege('service_role', p.oid, 'execute') as service_role_execute,
+      has_schema_privilege('anon', n.oid, 'usage') as anon_usage,
+      has_schema_privilege('authenticated', n.oid, 'usage') as authenticated_usage
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'lfo_private' and p.proname = 'verify_session'`);
+  const sessionGuard = sessionReader.rows[0];
+  if (
+    sessionReader.rows.length !== 1 ||
+    !sessionGuard?.security_definer ||
+    sessionGuard.result_type !== "boolean" ||
+    sessionGuard.arguments !== "p_user_id uuid, p_session_id uuid" ||
+    !sessionGuard.settings?.includes('search_path=""') ||
+    sessionGuard.anon_execute ||
+    sessionGuard.authenticated_execute ||
+    !sessionGuard.service_role_execute ||
+    sessionGuard.anon_usage ||
+    sessionGuard.authenticated_usage
+  ) {
+    failures.push("Lecteur privé de révocation Auth absent ou privilèges/signature non conformes");
   }
 
   // ── Garde-fous SECURITY DEFINER ──────────────────────────────────────────────────────

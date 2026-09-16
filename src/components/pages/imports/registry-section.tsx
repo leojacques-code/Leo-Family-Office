@@ -53,6 +53,7 @@ const SKIP_EXPLANATIONS: Record<RegistryFieldSkip["reason"], string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   ACTIVE: "Connectée",
+  NOT_CONFIGURED: "Non configuré",
   CREDENTIALS_MISSING: "Identifiant absent",
   RATE_LIMITED: "Quota atteint",
   REAUTH_REQUIRED: "Ré-autorisation requise",

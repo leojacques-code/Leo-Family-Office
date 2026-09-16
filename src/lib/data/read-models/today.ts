@@ -90,7 +90,7 @@ function domainFacts(state: DashboardState) {
         })),
       },
       state,
-    ).some((source) => source.status === "ACTIVE"),
+    ).some((source) => source.status !== "ABSENTE"),
   }));
 }
 

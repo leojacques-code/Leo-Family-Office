@@ -48,7 +48,7 @@ export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const params = new URL(request.url).searchParams;
-    const repository = getDocumentRepository();
+    const repository = await getDocumentRepository();
 
     const runId = params.get("run");
     if (runId) {
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
     await requireAuthenticated();
     const wantsTicket = new URL(request.url).searchParams.get("ticket") === "1";
     const body = await request.json().catch(() => null);
-    const repository = getDocumentRepository();
+    const repository = await getDocumentRepository();
 
     if (wantsTicket) {
       const parsed = documentTicketSchema.safeParse(body);
@@ -117,7 +117,7 @@ export async function PATCH(request: Request) {
         { status: 400 },
       );
     }
-    const repository = getDocumentRepository();
+    const repository = await getDocumentRepository();
     const command = parsed.data;
 
     switch (command.action) {

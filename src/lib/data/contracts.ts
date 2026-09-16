@@ -590,6 +590,7 @@ export type Mutation =
       name: string;
       accountType: FinancialAccount["type"];
       balance: number;
+      balanceDate: string;
       currency: string;
     }
   | {

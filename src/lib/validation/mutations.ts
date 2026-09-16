@@ -88,8 +88,8 @@ const scenarioDefinitionSchema = z
     }
   });
 const goalDefinitionSchema = z.custom<GoalVersionDefinition>(
-  isGoalVersionDefinition,
-  "Définition Goals V2 invalide",
+  (value) => isGoalVersionDefinition(value) && value.purpose !== undefined,
+  "Choisissez le type d’objectif et une métrique compatible",
 );
 const decisionCaseVersionSchema = z.custom<DecisionCaseVersion>(
   isDecisionCaseVersion,
@@ -1186,7 +1186,7 @@ export const mutationSchema = z.discriminatedUnion("action", [
     action: z.literal("update_account"),
     accountId: z.string().min(1),
     balance: finite,
-    balanceDate: date,
+    balanceDate: realDate,
   }),
   z.object({
     action: z.literal("add_account"),
@@ -1194,6 +1194,7 @@ export const mutationSchema = z.discriminatedUnion("action", [
     name: z.string().min(1).max(120),
     accountType: z.enum(["BANK", "PEA", "CTO", "SAVINGS", "OTHER"]),
     balance: finite,
+    balanceDate: realDate,
     currency: z.string().length(3),
   }),
   z.object({

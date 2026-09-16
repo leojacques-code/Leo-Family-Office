@@ -39,14 +39,14 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 14px 22px;
-  /* §2 de V10 : « top header maximum height ~88 px ». Un maximum, pas une hauteur fixe :
-     une question courte n'a pas à occuper 88 px. */
-  max-height: 88px;
+  /* La cible de 88 px ne doit pas masquer les commandes lorsque le titre ou le zoom
+     impose un retour à la ligne. La hauteur suit alors le contenu. */
   padding-bottom: 13px;
   border-bottom: 1px solid var(--border-soft);
 }
 
 .workstation-identity {
+  flex: 1 1 28rem;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -227,11 +227,12 @@
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  column-gap: 8px;
+  row-gap: 3px;
   min-height: 48px;
-  padding: 0 11px;
+  padding: 8px 11px;
   border: 1px solid var(--border-soft);
   border-radius: 10px;
   background: var(--surface);
@@ -251,6 +252,7 @@
 }
 
 .source-tile {
+  grid-row: 1 / span 2;
   /* §4.2 de V10 : « 32-36 px icon tile ». */
   display: grid;
   place-items: center;
@@ -287,9 +289,10 @@
 }
 
 .source-status {
+  grid-column: 2;
   font-size: 12px;
   font-weight: 600;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .source-row[data-status="ACTIVE"] .source-status {

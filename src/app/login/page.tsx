@@ -1,3 +1,4 @@
+import { usesLocalFixtureAuth } from "@/lib/auth-config";
 import Link from "next/link";
 import { LoginForm } from "@/components/login-form";
 
@@ -38,7 +39,7 @@ export default function LoginPage() {
         </Link>
       </section>
       <section className="login-form-wrap">
-        <LoginForm />
+        <LoginForm localFixture={usesLocalFixtureAuth()} />
       </section>
     </main>
   );

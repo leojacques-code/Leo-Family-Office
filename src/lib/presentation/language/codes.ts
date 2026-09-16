@@ -329,6 +329,11 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
   // ─── Business Equity : détention, holding, capital ──────────────────────────────────
 
   // ─── Objectifs ──────────────────────────────────────────────────────────────────────
+  GOAL_PURPOSE_UNCONFIRMED: { label: "Type d’objectif et métrique à confirmer", state: A },
+  GOAL_RESERVE_METRIC_INCOMPATIBLE: {
+    label: "Une réserve exige une métrique de trésorerie",
+    state: A,
+  },
   GOAL_INACTIVE: { label: "Objectif inactif", state: N },
   METRIC_NOT_SUPPORTED: { label: "Indicateur non pris en charge", state: A },
   METRIC_NOT_AVAILABLE_CURRENT: { label: "Indicateur indisponible aujourd’hui", state: A },

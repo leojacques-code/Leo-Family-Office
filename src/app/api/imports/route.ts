@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const sessionId = new URL(request.url).searchParams.get("session");
-    const repository = getImportRepository();
+    const repository = await getImportRepository();
     if (sessionId) {
       return NextResponse.json(
         { rows: await repository.getSessionRows(sessionId) },
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const repository = getImportRepository();
+    const repository = await getImportRepository();
     const preview = await repository.analyze(parsed.data, {
       name: file.name,
       // Les navigateurs annoncent un CSV sous plusieurs types. Le contenu a été découpé
@@ -139,7 +139,7 @@ export async function PATCH(request: Request) {
         { status: 400 },
       );
     }
-    const repository = getImportRepository();
+    const repository = await getImportRepository();
     if (parsed.data.action === "commit") {
       return NextResponse.json(
         await repository.commit(parsed.data.sessionId, parsed.data.includeRecordIds, file),

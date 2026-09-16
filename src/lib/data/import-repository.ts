@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -29,7 +30,7 @@ import type {
 } from "@/lib/data/import-contracts";
 import { readAllPages } from "@/lib/data/pagination";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
-import { DOCUMENTS_BUCKET, ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { DOCUMENTS_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
 
 type Row = Record<string, unknown>;
 
@@ -128,9 +129,8 @@ export interface ImportFileInput {
   bytes: Uint8Array;
 }
 
-export function createImportRepository(): ImportRepository {
+export function createImportRepository(user: string): ImportRepository {
   const db = supabaseAdmin();
-  const user = ownerId();
 
   /** Comptes du propriétaire : sert à valider la cible et à nommer la source. */
   async function accountOf(
@@ -730,9 +730,7 @@ export function createImportRepository(): ImportRepository {
   return { adapter: "supabase", analyze, commit, discard, listSessions, getSessionRows };
 }
 
-let cached: ImportRepository | undefined;
-
-export function getImportRepository(): ImportRepository {
-  if (!cached) cached = createImportRepository();
-  return cached;
+export async function getImportRepository(): Promise<ImportRepository> {
+  const actor = await requireActor();
+  return createImportRepository(actor.userId);
 }

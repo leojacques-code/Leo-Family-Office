@@ -24,7 +24,7 @@ import type { DashboardState } from "@/lib/types";
  */
 
 /** Ce que le rail sait rendre. Repris de `SourceStatus` du composant, sans le dupliquer. */
-export type RailSourceStatus = "ACTIVE" | "ABSENTE";
+export type RailSourceStatus = "ACTIVE" | "DOCUMENT_AVAILABLE" | "ABSENTE";
 
 export interface DerivedRailSource {
   readonly id: string;
@@ -87,7 +87,7 @@ function maxDate(values: readonly (string | null | undefined)[]): string | null 
  */
 function readEvidence(
   evidence: SourceEvidence,
-  state: DashboardState,
+  state: Partial<DashboardState>,
 ): { count: number; latestDate: string | null } {
   switch (evidence) {
     case "BANK_ACCOUNTS":
@@ -202,17 +202,29 @@ function readEvidence(
  */
 export function railSourcesFor(
   manifest: PageManifest | null,
-  state: DashboardState,
+  state: Partial<DashboardState>,
+  evidenceSummaries: Partial<
+    Record<SourceEvidence, { count: number; latestDate: string | null }>
+  > = {},
 ): DerivedRailSource[] {
   if (!manifest) return [];
   if (!manifest.zones.includes("SOURCE_RAIL")) return [];
   return listOf(manifest.sources).map((declaration) => {
-    const { count, latestDate } = readEvidence(declaration.evidence, state);
+    const { count, latestDate } =
+      evidenceSummaries[declaration.evidence] ?? readEvidence(declaration.evidence, state);
     return {
       id: declaration.id,
       category: declaration.category,
       name: declaration.name,
-      status: count > 0 ? "ACTIVE" : "ABSENTE",
+      // Un fait ou un tableau saisi ne prouve ni la détention d'une pièce ni sa fraîcheur.
+      // Seul le catalogue documentaire prouve ici la présence d'un document ; aucune
+      // liaison document/objet n'est inférée depuis un libellé ou une catégorie.
+      status:
+        count === 0
+          ? "ABSENTE"
+          : declaration.evidence === "DOCUMENTS"
+            ? "DOCUMENT_AVAILABLE"
+            : "ACTIVE",
       latestDate,
     };
   });

@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -33,7 +34,7 @@ import type {
 import { changedObservedFields } from "@/lib/data/observed-amounts";
 import { LEDGER_PAGE_SIZE, pagesFor, readAllPages } from "@/lib/data/pagination";
 import { nullableFiniteNumber } from "@/lib/data/row-validation";
-import { IMPORT_STAGING_BUCKET, ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { IMPORT_STAGING_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
 
 type Row = Record<string, unknown>;
 
@@ -84,9 +85,8 @@ export interface PortfolioImportRepository {
   listSessions(accountId?: string): Promise<PortfolioSessionSummary[]>;
 }
 
-function createPortfolioImportRepository(): PortfolioImportRepository {
+function createPortfolioImportRepository(user: string): PortfolioImportRepository {
   const db = supabaseAdmin();
-  const user = ownerId();
 
   /**
    * Billet de dépôt. Le chemin est CALCULÉ par la RPC à partir du propriétaire et de
@@ -707,8 +707,7 @@ function createPortfolioImportRepository(): PortfolioImportRepository {
           // en texte : les reformater ici fabriquerait un conflit, ou en masquerait un.
           //
           // AUCUNE clé d'acteur n'est transmise. La RPC pose `actor_user_id` depuis
-          // `p_user_id`, c'est-à-dire depuis `ownerId()` — l'UUID Supabase Auth lu de
-          // l'environnement SERVEUR, derrière une session authentifiée. L'identité ne
+          // `p_user_id`, c'est-à-dire depuis l’acteur de la session personnelle vérifiée côté serveur. L'identité ne
           // traverse donc jamais le navigateur, et la base REFUSE toute clé d'acteur
           // présente dans la charge.
           corrections: input.corrections.map((decision) => ({
@@ -1104,11 +1103,9 @@ function createPortfolioImportRepository(): PortfolioImportRepository {
   };
 }
 
-let cached: PortfolioImportRepository | undefined;
-
-export function getPortfolioImportRepository(): PortfolioImportRepository {
-  if (!cached) cached = createPortfolioImportRepository();
-  return cached;
+export async function getPortfolioImportRepository(): Promise<PortfolioImportRepository> {
+  const actor = await requireActor();
+  return createPortfolioImportRepository(actor.userId);
 }
 
 export { MAX_PORTFOLIO_ROWS, detectFormat, instrumentSourceKey };
