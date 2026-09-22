@@ -3,8 +3,8 @@
 Cette branche contient le code et les preuves de la consolidation locale jusqu’à la correction des devises du parcours Dettes, dépendance de B14. Le commit GitHub est un instantané distinct ; les archives ci-dessous préservent les identifiants originaux.
 
 - Branche de travail originale : `codex/lfo-consolidation-20260911`
-- Dernier commit original : `94bb175f5a8ee3da516773bd689823d16d6001ef`
-- Arbre exact du code original : `ba42b98b771b43c2037e13e9a0182c63585d2f9e`
+- Dernier commit original : `f96a4eef4d3f8f23a436768517a6913cd71a7b9d`
+- Arbre exact du code original : `904632a134dc876d58aae7d2f1a11f54e0c9ca3e`
 - Base conservée dans l'archive complète du 15 septembre : `b55509230940da170f5257fb1282e2673cc56f17`
 
 ## Archives conservées
@@ -12,7 +12,7 @@ Cette branche contient le code et les preuves de la consolidation locale jusqu�
 1. `LFO_historique_2026-09-15.bundle` : historique complet jusqu'à la base, SHA-256 `56880f1b45f5b003dbd60026d2ad935f7d7f79cb6b2c0aa1e964bb87a5c9b9bc`.
 2. `LFO_contexte_2026-09-22.bundle` : complément contenant le nouveau commit et ses objets, SHA-256 `28df955828c7b69a64e0b67f869a41bc20fd0f3792ef0ab350a74fca4daefc2c`. Cette archive incrémentale s'applique après restauration de la première.
 
-3. `LFO_devises_dettes_2026-09-22.bundle` : complément Dettes après le commit `c345fa679764b94e403ee769b9a6c1809d9af23c`, SHA-256 `96949f6f1207f197d1a3e7645b7b8a265f6d2ff59f9580f5d8274b3f920c0e5f`.
+3. `LFO_devises_dettes_2026-09-22.bundle` : complément Dettes après le commit `c345fa679764b94e403ee769b9a6c1809d9af23c`, SHA-256 `7ccd1a3757cf73cc28a4a92d4c3450a02d6363e9bc355187593aec17569c2c1a`.
 
 Les trois archives réunies permettent de restaurer tous les commits du chantier local, y compris les fusions locales des PR 50 et 51. Aucun ancien dossier local n'est nécessaire.
 
@@ -48,3 +48,5 @@ Validation : 48 tests ciblés dans 5 fichiers, revue indépendante favorable, li
 La base de recette est locale et son authentification est fictive. Aucune migration de production ni aucun déploiement Vercel n'a été effectué pour cette tranche. La branche Supabase payante n'a pas été créée. Les fichiers d'environnement privés et les données de production ne sont pas inclus.
 
 Dernière tranche : les Dettes utilisent leur devise native dans les montants, messages, formulaire, aperçu CSV et graphique. Devise inconnue explicitée ; création actuellement EUR conformément à la RPC. 12 tests d’affichage avec moteurs simulés, revue indépendante, lint, TypeScript, build et recette bureau/mobile réussis. Aucune formule modifiée ni validation de calcul relancée. Les autres consommateurs restent à reprendre avant ouverture du choix global de devise. Voir `LFO_devises_dettes_recette.json` et REPRISE.md.
+
+Le complément Dettes contient également le correctif de stabilisation du graphique et ses captures finales.

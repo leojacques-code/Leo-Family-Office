@@ -420,7 +420,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                 <CartesianGrid vertical={false} stroke="var(--border-soft)" />
                 <XAxis dataKey="date" axisLine={false} tickLine={false} />
                 <YAxis
-                  width="auto"
+                  width={88}
                   tickFormatter={(value: number) => formatCurrency(value, currency, true)}
                   axisLine={false}
                   tickLine={false}
@@ -431,6 +431,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                   }
                 />
                 <Area
+                  isAnimationActive={false}
                   name="Solde restant"
                   dataKey="balance"
                   stroke="#ab5a4e"

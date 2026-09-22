@@ -18,5 +18,6 @@
   "scope": "Contrôle des libellés et du rendu uniquement ; aucun résultat financier validé",
   "fixtureCleanup": {
     "liabilitiesRemaining": 0
-  }
+  },
+  "chart": "Tracé complet bureau/mobile inspecté après stabilisation ; animation d’entrée désactivée, axe 88 px."
 }
