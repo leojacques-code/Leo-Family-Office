@@ -1,3 +1,4 @@
+import { formatCurrency } from "@/lib/presentation/currency";
 import { MONTHS_PER_PERIOD } from "@/lib/types";
 import type {
   DataKind,
@@ -51,7 +52,6 @@ import type {
 
 const DAY = 86_400_000;
 const CENT = 0.005;
-const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const DATE_FR = new Intl.DateTimeFormat("fr-FR", {
   day: "numeric",
   month: "long",
@@ -537,7 +537,7 @@ function amortise(input: AmortiseInput): AmortiseResult {
   ) {
     flags.push({
       code: "INSURANCE_TREATMENT_UNKNOWN",
-      detail: `Assurance de ${EUR.format(insurance)} par échéance déclarée sans préciser si la mensualité ${EUR.format(liability.monthlyPayment)} la contient. Supposée en sus : si elle était incluse, l'amortissement serait plus lent et le coût du crédit plus élevé.`,
+      detail: `Assurance de ${formatCurrency(insurance, liability.currency ?? null)} par échéance déclarée sans préciser si la mensualité ${formatCurrency(liability.monthlyPayment, liability.currency ?? null)} la contient. Supposée en sus : si elle était incluse, l'amortissement serait plus lent et le coût du crédit plus élevé.`,
     });
     assumed = true;
   }
@@ -673,7 +673,7 @@ function amortise(input: AmortiseInput): AmortiseResult {
       if (capitalised > CENT && !negativeAmortisationFlagged) {
         flags.push({
           code: "NEGATIVE_AMORTISATION",
-          detail: `À la ${paymentNumber}e échéance, le paiement amortissant ${EUR.format(payment)} ne couvre pas l'intérêt ${EUR.format(accrued)} : l'encours augmente au lieu de diminuer.`,
+          detail: `À la ${paymentNumber}e échéance, le paiement amortissant ${formatCurrency(payment, liability.currency ?? null)} ne couvre pas l'intérêt ${formatCurrency(accrued, liability.currency ?? null)} : l'encours augmente au lieu de diminuer.`,
         });
         negativeAmortisationFlagged = true;
       }
@@ -1052,7 +1052,7 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
   if (Math.abs(difference) > 0.01) {
     flags.push({
       code: "BALANCE_MISMATCH",
-      detail: `Encours observé ${EUR.format(liability.currentBalance)} contre ${EUR.format(contractualBalanceAtAsOf)} attendus après ${elapsed} échéance${elapsed > 1 ? "s" : ""}. L'encours observé fait foi pour la projection.`,
+      detail: `Encours observé ${formatCurrency(liability.currentBalance, liability.currency ?? null)} contre ${formatCurrency(contractualBalanceAtAsOf, liability.currency ?? null)} attendus après ${elapsed} échéance${elapsed > 1 ? "s" : ""}. L'encours observé fait foi pour la projection.`,
     });
   }
 
@@ -1061,7 +1061,7 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
   if (forwardResidual > 0.01) {
     flags.push({
       code: "RECONCILIATION_REQUIRED",
-      detail: `Les ${remaining} échéances restantes ne soldent pas l'encours observé : ${EUR.format(forwardResidual)} subsisteraient à la dernière échéance annoncée.`,
+      detail: `Les ${remaining} échéances restantes ne soldent pas l'encours observé : ${formatCurrency(forwardResidual, liability.currency ?? null)} subsisteraient à la dernière échéance annoncée.`,
     });
   }
 
@@ -1083,7 +1083,7 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
     impliedChargePerPayment = amortising - theoretical;
     flags.push({
       code: "PAYMENT_EXCEEDS_AMORTISATION",
-      detail: `Mensualité déclarée ${EUR.format(liability.monthlyPayment)} contre ${EUR.format(theoretical)} nécessaires pour amortir ${EUR.format(liability.principal)} sur ${Math.trunc(liability.paymentCount)} échéances à ${(liability.annualRate * 100).toFixed(2)} %. Écart de ${EUR.format(impliedChargePerPayment)} par échéance, soit ${EUR.format(contractualGap)} au total : profil d'une assurance ou de frais non déclarés, à confirmer auprès du prêteur.`,
+      detail: `Mensualité déclarée ${formatCurrency(liability.monthlyPayment, liability.currency ?? null)} contre ${formatCurrency(theoretical, liability.currency ?? null)} nécessaires pour amortir ${formatCurrency(liability.principal, liability.currency ?? null)} sur ${Math.trunc(liability.paymentCount)} échéances à ${(liability.annualRate * 100).toFixed(2)} %. Écart de ${formatCurrency(impliedChargePerPayment, liability.currency ?? null)} par échéance, soit ${formatCurrency(contractualGap, liability.currency ?? null)} au total : profil d'une assurance ou de frais non déclarés, à confirmer auprès du prêteur.`,
     });
   }
 

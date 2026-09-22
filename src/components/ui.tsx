@@ -1,22 +1,11 @@
 "use client";
 
+import { formatCurrency } from "@/lib/presentation/currency";
 import { useEffect } from "react";
 import { AlertTriangle, Check, CircleHelp, Info, X } from "lucide-react";
 import type { DataKind } from "@/lib/types";
 import { DATA_KIND_LABELS } from "@/lib/presentation/language";
 
-const eur = new Intl.NumberFormat("fr-FR", {
-  style: "currency",
-  currency: "EUR",
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 2,
-});
-const compactEur = new Intl.NumberFormat("fr-FR", {
-  style: "currency",
-  currency: "EUR",
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
 const percent = new Intl.NumberFormat("fr-FR", {
   style: "percent",
   minimumFractionDigits: 1,
@@ -27,13 +16,16 @@ export function Currency({
   value,
   compact = false,
   sign = false,
+  currency = "EUR",
 }: {
   value: number | null;
   compact?: boolean;
   sign?: boolean;
+  /** Défaut historique pour les écrans non migrés. Une devise native absente passe null. */
+  currency?: string | null;
 }) {
   if (value === null) return <span className="warning-text">Non calculable</span>;
-  const formatted = (compact ? compactEur : eur).format(Math.abs(value));
+  const formatted = formatCurrency(Math.abs(value), currency, compact);
   return (
     <>
       {value < 0 ? "−" : sign && value > 0 ? "+" : ""}
