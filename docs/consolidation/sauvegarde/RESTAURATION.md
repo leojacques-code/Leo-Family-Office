@@ -1,42 +1,43 @@
-# Sauvegarde LFO du 16 septembre 2026
+# Sauvegarde LFO — mise à jour du 22 septembre 2026
 
-Cette branche conserve le code, les migrations, les documents de reprise et les cinq preuves visuelles après l'étape B14 partielle (nom de l'espace personnel et première intention). Elle contient également l'historique Git local complet, dans une archive Git autonome.
+Cette branche contient le code et les preuves de la consolidation locale jusqu'au contexte personnel B14 partiel. Le commit GitHub est un instantané distinct ; les archives ci-dessous préservent les identifiants originaux.
 
-## Identifiants à préserver
+- Branche de travail originale : `codex/lfo-consolidation-20260911`
+- Dernier commit original : `c345fa679764b94e403ee769b9a6c1809d9af23c`
+- Arbre exact du code original : `47ad5fe838e5f3608d9f27b4bc1a57a696617889`
+- Base conservée dans l'archive complète du 15 septembre : `b55509230940da170f5257fb1282e2673cc56f17`
 
-- Branche locale d'origine : `codex/lfo-consolidation-20260911`
-- Dernier commit local : `b55509230940da170f5257fb1282e2673cc56f17`
-- Arbre exact du code local : `d2a24fab5bf7006591a8e49fdad42a501a80bda0`
-- Base main lors de la consolidation : `bd1782cae6b5f7141c3cc2765bd30c6a11a325fe`
-- Archive : `LFO_historique_2026-09-15.bundle`
-- SHA-256 de l'archive : `56880f1b45f5b003dbd60026d2ad935f7d7f79cb6b2c0aa1e964bb87a5c9b9bc`
+## Archives conservées
 
-Le commit de cette branche est un instantané publié par le connecteur GitHub. Il a son propre identifiant. L'archive préserve les identifiants des commits d'origine et le graphe des fusions locales des PR 50 et 51. Le code de l'instantané correspond exactement à l'arbre local ci-dessus ; seuls ce document et l'archive ont été ajoutés pour la sauvegarde.
+1. `LFO_historique_2026-09-15.bundle` : historique complet jusqu'à la base, SHA-256 `56880f1b45f5b003dbd60026d2ad935f7d7f79cb6b2c0aa1e964bb87a5c9b9bc`.
+2. `LFO_contexte_2026-09-22.bundle` : complément contenant le nouveau commit et ses objets, SHA-256 `28df955828c7b69a64e0b67f869a41bc20fd0f3792ef0ab350a74fca4daefc2c`. Cette archive incrémentale s'applique après restauration de la première.
 
-## Restaurer le chantier et son historique
+Les deux archives réunies permettent de restaurer tous les commits du chantier local, y compris les fusions locales des PR 50 et 51. Aucun ancien dossier local n'est nécessaire.
 
-Après clonage de cette branche de sauvegarde, depuis la racine du dépôt :
+## Restaurer
+
+Depuis la racine d'un clone de cette branche GitHub :
 
 ```sh
-shasum -a 256 docs/consolidation/sauvegarde/LFO_historique_2026-09-15.bundle
+shasum -a 256 docs/consolidation/sauvegarde/*.bundle
 git bundle verify docs/consolidation/sauvegarde/LFO_historique_2026-09-15.bundle
 git clone --branch codex/lfo-consolidation-20260911 docs/consolidation/sauvegarde/LFO_historique_2026-09-15.bundle ../LFO-restaure
+git -C ../LFO-restaure bundle verify "$(pwd)/docs/consolidation/sauvegarde/LFO_contexte_2026-09-22.bundle"
+git -C ../LFO-restaure fetch "$(pwd)/docs/consolidation/sauvegarde/LFO_contexte_2026-09-22.bundle" refs/heads/codex/lfo-consolidation-20260911
+git -C ../LFO-restaure merge --ff-only FETCH_HEAD
 git -C ../LFO-restaure rev-parse HEAD
 git -C ../LFO-restaure rev-parse 'HEAD^{tree}'
+git -C ../LFO-restaure fsck --full
 ```
 
-Les deux dernières commandes doivent rendre le commit et l'arbre exacts indiqués ci-dessus. L'archive contient un historique complet : aucun ancien dépôt local n'est requis.
+Les identifiants obtenus doivent correspondre au dernier commit et à l'arbre ci-dessus. Le code de cette branche de sauvegarde est identique à cet arbre, à l'exception du répertoire `docs/consolidation/sauvegarde` qui contient ces archives et ce guide.
 
-## État de la reprise
+## État du chantier
 
-Lire `docs/consolidation/REPRISE.md` pour le détail, les preuves et les limites.
+Lire `docs/consolidation/REPRISE.md` et `docs/consolidation/preuves/LFO_contexte_recette.json`.
 
-- B12 : sessions personnelles vérifiées et parcours d'authentification implémentés ; recette avec le véritable fournisseur Supabase Auth et deux utilisateurs encore à réaliser.
-- B13 : isolation de 24 références entre propriétaires, migration et 25 contrôles de sécurité vérifiés en base locale.
-- B14 partiel : accueil avec nom de l'espace et première intention optionnelle ; persistance, retour à l'édition, redirections et contrôle d'origine vérifiés localement.
-- Validation de la dernière étape : 41 tests ciblés dans 8 fichiers, lint, vérification TypeScript et build ; parcours navigateur bureau et mobile, lecture SQL de la persistance. La recette utilise une authentification locale de test.
-- Les nouveaux contrôles des calculs financiers restent reportés conformément à la demande de l'utilisateur.
-- Le contexte complet de B14 et les étapes suivantes ne sont pas terminés. Aucune migration de production ni aucun déploiement Vercel n'a été effectué pour cette sauvegarde.
-- Les fichiers d'environnement privés et les données réelles de production ne font pas partie de cette sauvegarde. Reconfigurer les secrets localement à partir de `.env.example` si nécessaire.
+Le pays de résidence déclaré et la date de contexte sont enregistrables, facultatifs et repris après rechargement ; ils ne modifient ni les dates des faits ni la fiscalité. Le profil affiché remplace les mentions fixes France/LC. La devise existante est lue et préservée ; son changement reste indisponible tant que les consommateurs à formatage EUR fixe ne sont pas repris.
 
-La branche payante de recette Supabase n'a pas été créée : sa facturation attend une confirmation explicite.
+Validation : 48 tests ciblés dans 5 fichiers, revue indépendante favorable, lint, TypeScript, build, schéma SQL local (49 migrations), recette navigateur avec relecture SQL et captures bureau/mobile. Le contexte complet B14, les premiers faits minimaux restants et la recette Supabase Auth réelle avec deux utilisateurs ne sont pas déclarés terminés. Les nouveaux contrôles des calculs financiers restent reportés à la demande de l'utilisateur.
+
+La base de recette est locale et son authentification est fictive. Aucune migration de production ni aucun déploiement Vercel n'a été effectué pour cette tranche. La branche Supabase payante n'a pas été créée. Les fichiers d'environnement privés et les données de production ne sont pas inclus.
