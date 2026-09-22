@@ -30,13 +30,8 @@ import {
   Percent,
   SectionHeader,
 } from "@/components/ui";
-import {
-  type SectionProps,
-  OptionalCurrency,
-  chartCurrency,
-  formatDate,
-  formatEur,
-} from "@/components/pages/shared";
+import { type SectionProps, OptionalCurrency, formatDate } from "@/components/pages/shared";
+import { formatCurrency } from "@/lib/presentation/currency";
 import type { DebtContractInput } from "@/lib/data/contracts";
 import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import type { Liability } from "@/lib/types";
@@ -202,6 +197,9 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
     );
   }
 
+  const currency = loan.currency ?? null;
+  const formatLoanAmount = (value: number | null) =>
+    value === null ? "Non calculable" : formatCurrency(value, currency);
   const { contractual, forward } = timeline;
   const currentDebtService = monthlyDebtServiceAt([loan], state.asOfDate);
   const monthWindow = monthBounds(state.asOfDate);
@@ -238,20 +236,20 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
       <section className="metrics-grid four">
         <MetricCard
           label="Capital restant dû"
-          value={<Currency value={loan.currentBalance} />}
+          value={<Currency currency={currency} value={loan.currentBalance} />}
           detail={`${loan.name} · ${loan.lender}`}
         />
         <MetricCard label="Taux" value={<Percent value={loan.annualRate} />} tone="positive" />
         <MetricCard
           label="Service de dette du mois"
-          value={<Currency value={currentDebtService} />}
+          value={<Currency currency={currency} value={currentDebtService} />}
           tone={currentDebtService > 0 ? "warning" : "neutral"}
           detail={
             currentDebtService === 0
               ? upcoming
                 ? `Aucune échéance exigible ce mois · prochaine le ${formatDate(upcoming.entry.dueDate)}`
                 : "Aucune échéance exigible ce mois"
-              : `Paiement ${FREQUENCY_LABELS[loan.paymentFrequency]} annoncé ${formatEur(loan.monthlyPayment)}`
+              : `Paiement ${FREQUENCY_LABELS[loan.paymentFrequency]} annoncé ${formatLoanAmount(loan.monthlyPayment)}`
           }
           onExplain={() =>
             setExplanation({
@@ -282,14 +280,14 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                   date: state.asOfDate,
                 },
               ],
-              note: `Avant la première échéance et après la dernière, aucune ligne n’est exigible : le service de dette vaut 0 sans cas particulier. Décomposition du mois : ${formatEur(monthBreakdown.principal)} de capital, ${formatEur(monthBreakdown.interest)} d’intérêts, ${formatEur(monthBreakdown.insurance)} d’assurance, ${formatEur(monthBreakdown.fees)} de frais. Seuls ${formatEur(monthBreakdown.economicCost)} appauvrissent : le capital remboursé éteint un passif, il ne détruit pas de patrimoine.`,
+              note: `Avant la première échéance et après la dernière, aucune ligne n’est exigible : le service de dette vaut 0 sans cas particulier. Décomposition du mois : ${formatLoanAmount(monthBreakdown.principal)} de capital, ${formatLoanAmount(monthBreakdown.interest)} d’intérêts, ${formatLoanAmount(monthBreakdown.insurance)} d’assurance, ${formatLoanAmount(monthBreakdown.fees)} de frais. Seuls ${formatLoanAmount(monthBreakdown.economicCost)} appauvrissent : le capital remboursé éteint un passif, il ne détruit pas de patrimoine.`,
             })
           }
         />
         {loan.amortisationProfile === "AMORTIZING" ? (
           <MetricCard
             label="Écart du paiement contractuel"
-            value={<Currency value={timeline.contractualGap} />}
+            value={<Currency currency={currency} value={timeline.contractualGap} />}
             tone={Math.abs(timeline.contractualGap) > 0.01 ? "warning" : "neutral"}
             onExplain={() =>
               setExplanation({
@@ -298,7 +296,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                 inputs: [
                   {
                     label: "Paiement par échéance",
-                    value: formatEur(loan.monthlyPayment),
+                    value: formatLoanAmount(loan.monthlyPayment),
                     kind: loan.provenance.kind,
                     date: loan.provenance.effectiveDate ?? state.asOfDate,
                     source: loan.provenance.source,
@@ -311,12 +309,12 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                   },
                   {
                     label: "Capital",
-                    value: formatEur(loan.principal),
+                    value: formatLoanAmount(loan.principal),
                     kind: loan.provenance.kind,
                     source: loan.provenance.source,
                   },
                 ],
-                note: `${formatEur(contractualTotal)} − ${formatEur(loan.principal)} = ${formatEur(timeline.contractualGap)}. Aucune explication n’est supposée.`,
+                note: `${formatLoanAmount(contractualTotal)} − ${formatLoanAmount(loan.principal)} = ${formatLoanAmount(timeline.contractualGap)}. Aucune explication n’est supposée.`,
               })
             }
           />
@@ -365,7 +363,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                   inputs: [
                     {
                       label: `Encours observé au ${formatDate(state.asOfDate)}`,
-                      value: formatEur(loan.currentBalance),
+                      value: formatLoanAmount(loan.currentBalance),
                       kind: loan.provenance.kind,
                       source: loan.provenance.source,
                     },
@@ -376,7 +374,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                     },
                     {
                       label: "Paiement contractuel par échéance",
-                      value: formatEur(loan.monthlyPayment),
+                      value: formatLoanAmount(loan.monthlyPayment),
                       kind: loan.provenance.kind,
                     },
                     {
@@ -392,7 +390,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                     },
                     {
                       label: "Intérêts restant à payer",
-                      value: formatEur(forward.totalInterest),
+                      value: formatLoanAmount(forward.totalInterest),
                       kind: "DERIVED",
                     },
                   ],
@@ -400,7 +398,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                 })
               }
             >
-              Explain calculation
+              Comprendre l’échéancier
             </button>
           </div>
           <div className="medium-chart">
@@ -421,9 +419,23 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                 </defs>
                 <CartesianGrid vertical={false} stroke="var(--border-soft)" />
                 <XAxis dataKey="date" axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={chartCurrency} axisLine={false} tickLine={false} />
-                <Tooltip />
-                <Area dataKey="balance" stroke="#ab5a4e" fill="url(#debtArea)" />
+                <YAxis
+                  width="auto"
+                  tickFormatter={(value: number) => formatCurrency(value, currency, true)}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  formatter={(value) =>
+                    typeof value === "number" ? formatLoanAmount(value) : "Non calculable"
+                  }
+                />
+                <Area
+                  name="Solde restant"
+                  dataKey="balance"
+                  stroke="#ab5a4e"
+                  fill="url(#debtArea)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -462,13 +474,13 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             <div>
               <dt>Intérêts du contrat, durée complète</dt>
               <dd>
-                <Currency value={contractual.totalInterest} />
+                <Currency currency={currency} value={contractual.totalInterest} />
               </dd>
             </div>
             <div>
               <dt>Intérêts restant à payer</dt>
               <dd>
-                <Currency value={forward.totalInterest} />
+                <Currency currency={currency} value={forward.totalInterest} />
               </dd>
             </div>
           </dl>
@@ -508,16 +520,17 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             >
               <span>{formatDate(entry.dueDate)}</span>
               <strong>
-                n° {entry.paymentNumber} · <Currency value={entry.totalCashOut} />
+                n° {entry.paymentNumber} ·{" "}
+                <Currency currency={currency} value={entry.totalCashOut} />
               </strong>
               <span>
-                <Currency value={entry.interest} />
+                <Currency currency={currency} value={entry.interest} />
               </span>
               <span>
-                <Currency value={entry.principal} />
+                <Currency currency={currency} value={entry.principal} />
               </span>
               <strong>
-                <Currency value={entry.closingBalance} />
+                <Currency currency={currency} value={entry.closingBalance} />
               </strong>
             </div>
           ))}
@@ -561,10 +574,10 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           <div className="comparison-cards">
             <div>
               <span>
-                Rembourser <Currency value={comparison.capital} />
+                Rembourser <Currency currency={currency} value={comparison.capital} />
               </span>
               <strong>
-                <OptionalCurrency value={comparison.repay.interestAvoided} />
+                <OptionalCurrency currency={currency} value={comparison.repay.interestAvoided} />
               </strong>
               <small>
                 {comparison.repay.interestAvoided === null
@@ -574,10 +587,10 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             </div>
             <div>
               <span>
-                Investir <Currency value={comparison.capital} />
+                Investir <Currency currency={currency} value={comparison.capital} />
               </span>
               <strong>
-                <Currency value={comparison.invest.expectedGain} sign />
+                <Currency currency={currency} value={comparison.invest.expectedGain} sign />
               </strong>
               <small>Gain espéré non garanti, dette conservée</small>
             </div>
@@ -590,7 +603,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           ) : null}
           <Callout title="Lecture">
             Le capital arbitrable est borné par le cash bancaire réellement disponible (
-            <Currency value={state.metrics.bankCash} />
+            <Currency currency={state.reportingCurrency} value={state.metrics.bankCash} />
             ), pas par le montant de la dette. Les deux colonnes sont des grandeurs objectives :
             aucune option n’est recommandée ici.
           </Callout>
@@ -601,7 +614,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
         open={balanceEditor}
         onClose={() => setBalanceEditor(false)}
         title={`Nouvel encours observé · ${loan.name}`}
-        subtitle="Cette observation n’altère aucun terme contractuel."
+        subtitle={`Montant en ${currency ?? "devise non renseignée"}. Cette observation n’altère aucun terme contractuel.`}
       >
         <form className="form-grid" onSubmit={recordBalance}>
           <label>

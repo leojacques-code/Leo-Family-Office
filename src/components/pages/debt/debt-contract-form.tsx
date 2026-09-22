@@ -116,6 +116,9 @@ export function DebtContractForm({
   onSave: (contract: DebtContractInput) => Promise<boolean>;
   onCancel: () => void;
 }) {
+  // La RPC de création omet currency : le schéma persiste EUR. L’édition conserve la devise native.
+  const currency = loan ? (loan.currency ?? null) : "EUR";
+  const currencyLabel = currency ?? "devise non renseignée";
   const [contract, setContract] = useState<DebtContractInput>(() =>
     loan ? fromLiability(loan) : blankContract(asOfDate),
   );
@@ -165,7 +168,14 @@ export function DebtContractForm({
 
   return (
     <form className="form-grid debt-contract-form" onSubmit={submit}>
+      <p className="full">
+        Tous les montants de ce contrat et de son échéancier sont en {currencyLabel}.
+        {!loan && reportingCurrency !== "EUR"
+          ? " La création est actuellement limitée à EUR, indépendamment de votre devise de lecture."
+          : ""}
+      </p>
       <ScheduleImport
+        currency={currency}
         disabled={busy}
         onConfirm={(rows, source) =>
           setContract((current) => ({
@@ -196,7 +206,7 @@ export function DebtContractForm({
       <MoneyInput
         id="debt-principal"
         label="Capital initial emprunté (hors assurance et frais futurs)"
-        currency={loan?.currency ?? reportingCurrency}
+        currency={currencyLabel}
         value={requiredValues.principal}
         onChange={(draft) =>
           setRequiredValue("principal", draft.state === "VALID" ? draft.value : null)
@@ -207,7 +217,7 @@ export function DebtContractForm({
         <MoneyInput
           id="debt-initial-balance"
           label="Encours observé initial"
-          currency={reportingCurrency}
+          currency={currencyLabel}
           value={requiredValues.initialBalance}
           onChange={(draft) =>
             setRequiredValue("initialBalance", draft.state === "VALID" ? draft.value : null)
@@ -240,7 +250,7 @@ export function DebtContractForm({
       <MoneyInput
         id="debt-payment"
         label="Paiement par échéance"
-        currency={loan?.currency ?? reportingCurrency}
+        currency={currencyLabel}
         value={requiredValues.paymentAmount}
         onChange={(draft) =>
           setRequiredValue("paymentAmount", draft.state === "VALID" ? draft.value : null)

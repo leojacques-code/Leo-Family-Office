@@ -4,7 +4,7 @@ import { ScheduleImport } from "../schedule-import";
 import { SCHEDULE_HEADER } from "@/lib/acquisition/debt-schedule";
 it("vérifie et prévisualise sans écrire, puis exige la confirmation", () => {
   const confirm = vi.fn();
-  render(<ScheduleImport disabled={false} onConfirm={confirm} />);
+  render(<ScheduleImport currency="EUR" disabled={false} onConfirm={confirm} />);
   fireEvent.change(screen.getByLabelText("Document de référence"), {
     target: { value: "CIC — ligne décembre" },
   });
@@ -14,7 +14,7 @@ it("vérifie et prévisualise sans écrire, puis exige la confirmation", () => {
   fireEvent.click(screen.getByRole("button", { name: "Vérifier les lignes" }));
   expect(confirm).not.toHaveBeenCalled();
   expect(screen.getByRole("table")).toBeVisible();
-  expect(screen.getByText("284,72")).toBeVisible();
+  expect(screen.getByText(/284,72.*€/)).toBeVisible();
   expect(screen.getByText(/Premier remboursement de capital : 2026-12-05/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Utiliser ces lignes dans le formulaire" }));
   expect(confirm).toHaveBeenCalledOnce();
@@ -22,7 +22,7 @@ it("vérifie et prévisualise sans écrire, puis exige la confirmation", () => {
 });
 
 it("nomme le coût de l’extrait sans qualifier de futures des lignes historiques", () => {
-  render(<ScheduleImport disabled={false} onConfirm={vi.fn()} />);
+  render(<ScheduleImport currency="EUR" disabled={false} onConfirm={vi.fn()} />);
   fireEvent.change(screen.getByLabelText("Lignes de l’échéancier"), {
     target: { value: `${SCHEDULE_HEADER}\n2020-01-01;100;10;2;1;0;90;13` },
   });

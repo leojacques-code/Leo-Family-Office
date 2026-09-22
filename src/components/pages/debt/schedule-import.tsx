@@ -1,4 +1,5 @@
 "use client";
+import { formatCurrency } from "@/lib/presentation/currency";
 import { useState } from "react";
 import {
   parseDebtSchedule,
@@ -11,9 +12,11 @@ import type { DebtContractInput } from "@/lib/data/contracts";
 export function ScheduleImport({
   onConfirm,
   disabled,
+  currency,
 }: {
   onConfirm: (rows: DebtContractInput["providedSchedule"], source: string) => void;
   disabled: boolean;
+  currency: string | null;
 }) {
   const [text, setText] = useState("");
   const [source, setSource] = useState("");
@@ -21,12 +24,7 @@ export function ScheduleImport({
   const [fileError, setFileError] = useState<string | null>(null);
   const summary = preview && !preview.errors.length ? summarizeDebtSchedule(preview.rows) : null;
   const formatAmount = (value: number | null) =>
-    value === null
-      ? "Non fourni"
-      : value.toLocaleString("fr-FR", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        });
+    value === null ? "Non fourni" : formatCurrency(value, currency);
   return (
     <section className="full" aria-label="Importer un échéancier">
       <h3>Commencer par l’échéancier bancaire</h3>
@@ -137,11 +135,13 @@ export function ScheduleImport({
           <p>
             Coût ventilé : {formatAmount(summary.totalInterest)} d’intérêts,{" "}
             {formatAmount(summary.totalInsurance)} d’assurance et {formatAmount(summary.totalFees)}{" "}
-            de frais. Devise du contrat à confirmer.
+            de frais. Montants en {currency ?? "devise non renseignée"}, sans conversion.
           </p>
           <div style={{ overflowX: "auto", maxHeight: 280 }}>
             <table>
-              <caption>Lignes reconnues — montants dans la devise du contrat</caption>
+              <caption>
+                Lignes reconnues — montants en {currency ?? "devise non renseignée"}
+              </caption>
               <thead>
                 <tr>
                   {[
@@ -169,9 +169,7 @@ export function ScheduleImport({
                       row.fees,
                       row.closingBalance,
                     ].map((value, index) => (
-                      <td key={index}>
-                        {value.toLocaleString("fr-FR", { minimumFractionDigits: 2 })}
-                      </td>
+                      <td key={index}>{formatAmount(value)}</td>
                     ))}
                   </tr>
                 ))}

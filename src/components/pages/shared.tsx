@@ -122,13 +122,15 @@ export function OptionalCurrency({
   value,
   sign = false,
   fallback = NOT_COMPUTABLE,
+  currency = "EUR",
 }: {
   value: number | null;
   sign?: boolean;
   fallback?: string;
+  currency?: string | null;
 }) {
   if (value === null) return <span className="warning-text">{fallback}</span>;
-  return <Currency value={value} sign={sign} />;
+  return <Currency value={value} sign={sign} currency={currency} />;
 }
 
 const nativeFormatter = (currency: string) =>
