@@ -36,6 +36,7 @@ type GoalForm = {
   metric: GoalTargetMetric;
   operator: GoalTargetOperator;
   targetValue: string;
+  currency: string | null;
   targetDate: string;
   priority: string;
   constraintStrength: GoalConstraintStrength;
@@ -49,6 +50,7 @@ const EMPTY_FORM: GoalForm = {
   metric: "NET_WORTH",
   operator: "AT_LEAST",
   targetValue: "",
+  currency: null,
   targetDate: "",
   priority: "1",
   constraintStrength: "SOFT",
@@ -85,6 +87,7 @@ function formFromGoal(goal: Goal): GoalForm {
     metric: definition?.target.metric ?? "NET_WORTH",
     operator: definition?.target.operator ?? "AT_LEAST",
     targetValue: String(definition?.target.value ?? goal.targetAmount),
+    currency: definition?.target.currency ?? null,
     targetDate: definition?.targetDate ?? goal.targetDate ?? "",
     priority: String(definition?.priority ?? goal.priority),
     constraintStrength: definition?.constraintStrength ?? goal.constraintStrength ?? "SOFT",
@@ -186,7 +189,7 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
   function openCreate() {
     setFormError(null);
     setEditing(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM, currency: state.reportingCurrency });
     setCreating(true);
   }
 
@@ -218,6 +221,13 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
   function definitionFromForm(
     goalId: string,
   ): { definition: GoalVersionDefinition; error: null } | { definition: null; error: string } {
+    if (!form.currency) {
+      return {
+        definition: null,
+        error:
+          "La devise de cette cible n’est pas déclarée. Impossible d’enregistrer une nouvelle version sans devise ; le brouillon est conservé.",
+      };
+    }
     if (!form.purpose) return { definition: null, error: "Choisissez le type d’objectif." };
     if (form.purpose === "SAFETY_RESERVE" && form.metric !== "IMMEDIATE_CASH") {
       return {
@@ -241,7 +251,7 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
           metric: form.metric,
           operator: form.operator,
           value: targetValue.value,
-          currency: state.reportingCurrency,
+          currency: form.currency,
           entityId: form.entityId || null,
         },
         targetDate: form.targetDate || null,
@@ -405,7 +415,7 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
                   <p className="muted-copy">{definition.description}</p>
                 ) : null}
                 <div className="goal-big">
-                  <Currency value={definition.target.value} />
+                  <Currency value={definition.target.value} currency={definition.target.currency} />
                   <span> · {operatorLabel(definition.target.operator)}</span>
                 </div>
                 <div className="scenario-stats">
@@ -416,13 +426,19 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
                   <div>
                     <span>Valeur courante</span>
                     <strong>
-                      <Currency value={current.observation.value} />
+                      <Currency
+                        value={current.observation.value}
+                        currency={current.observation.currency}
+                      />
                     </strong>
                   </div>
                   <div>
                     <span>Écart courant</span>
                     <strong>
-                      <Currency value={current.gap?.shortfall ?? null} />
+                      <Currency
+                        value={current.gap?.shortfall ?? null}
+                        currency={current.observation.currency}
+                      />
                     </strong>
                   </div>
                   <div>
@@ -436,7 +452,10 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
                   <div>
                     <span>Valeur à l’échéance</span>
                     <strong>
-                      <Currency value={projected?.projectedValueAtTargetDate ?? null} />
+                      <Currency
+                        value={projected?.projectedValueAtTargetDate ?? null}
+                        currency={projected?.observation?.currency ?? null}
+                      />
                     </strong>
                   </div>
                   <div>
@@ -621,7 +640,7 @@ export function GoalsPage({ state, mutate, busy }: SectionProps) {
             </select>
           </label>
           <label>
-            Cible ({state.reportingCurrency})
+            Cible ({form.currency ?? "devise non déclarée"})
             <input
               required
               type="number"

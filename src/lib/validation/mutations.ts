@@ -87,10 +87,15 @@ const scenarioDefinitionSchema = z
       });
     }
   });
-const goalDefinitionSchema = z.custom<GoalVersionDefinition>(
-  (value) => isGoalVersionDefinition(value) && value.purpose !== undefined,
-  "Choisissez le type d’objectif et une métrique compatible",
-);
+const goalDefinitionSchema = z
+  .custom<GoalVersionDefinition>(
+    (value) => isGoalVersionDefinition(value) && value.purpose !== undefined,
+    "Choisissez le type d’objectif et une métrique compatible",
+  )
+  .refine((definition) => typeof definition?.target?.currency === "string", {
+    message: "La devise de la cible doit être déclarée avant l’enregistrement",
+    path: ["target", "currency"],
+  });
 const decisionCaseVersionSchema = z.custom<DecisionCaseVersion>(
   isDecisionCaseVersion,
   "Définition Decision Lab V2 invalide",
