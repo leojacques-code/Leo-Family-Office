@@ -1,3 +1,4 @@
+import { getPersonalSetupRepository } from "@/lib/data/personal-setup-repository";
 import { AppShell } from "@/components/app-shell";
 import { DEFAULT_SECTION } from "@/lib/navigation";
 import { getTodayReadModel } from "@/lib/data/read-models/today";
@@ -18,10 +19,15 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export default async function TodayRoute() {
+  const [model, personalSetup] = await Promise.all([
+    getTodayReadModel(),
+    getPersonalSetupRepository().then((repository) => repository.read()),
+  ]);
   return (
     <AppShell
       section={DEFAULT_SECTION}
-      source={{ kind: "TODAY", model: await getTodayReadModel() }}
+      personalSetup={personalSetup}
+      source={{ kind: "TODAY", model }}
     />
   );
 }

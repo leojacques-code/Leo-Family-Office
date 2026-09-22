@@ -1,6 +1,7 @@
+import { operationalToday } from "@/lib/financial-date";
 import { isSameOrigin } from "@/lib/same-origin";
 import { API_HEADERS } from "@/lib/http";
-import { personalSetupSchema } from "@/lib/personal-setup";
+import { personalSetupInputSchema } from "@/lib/personal-setup";
 import { getPersonalSetupRepository } from "@/lib/data/personal-setup-repository";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -20,10 +21,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "Origine refusée" }, { status: 403, headers: API_HEADERS });
   try {
     const repository = await getPersonalSetupRepository();
-    const parsed = personalSetupSchema.safeParse(await request.json().catch(() => null));
-    if (!parsed.success)
+    const parsed = personalSetupInputSchema.safeParse(await request.json().catch(() => null));
+    if (
+      !parsed.success ||
+      (parsed.data.contextDate !== null && parsed.data.contextDate > operationalToday())
+    )
       return Response.json(
-        { error: "Vérifiez le nom de l’espace et votre choix." },
+        { error: "Vérifiez vos choix et la date de référence (aujourd’hui ou avant)." },
         { status: 400, headers: API_HEADERS },
       );
     return Response.json(await repository.save(parsed.data), { headers: API_HEADERS });

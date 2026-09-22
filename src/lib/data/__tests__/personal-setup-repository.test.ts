@@ -19,11 +19,23 @@ beforeEach(() => {
   mocks.eq.mockReturnValue({ maybeSingle: mocks.read });
   mocks.upsert.mockReturnValue({ select: mocks.select });
   mocks.read.mockResolvedValue({
-    data: { display_name: "A", first_intent: "PROJECT" },
+    data: {
+      display_name: "A",
+      first_intent: "PROJECT",
+      reporting_currency: "CHF",
+      residence_country: "Suisse",
+      context_date: "2026-09-01",
+    },
     error: null,
   });
   mocks.single.mockResolvedValue({
-    data: { display_name: "A", first_intent: "PROJECT" },
+    data: {
+      display_name: "A",
+      first_intent: "PROJECT",
+      reporting_currency: "CHF",
+      residence_country: "Suisse",
+      context_date: "2026-09-01",
+    },
     error: null,
   });
 });
@@ -32,16 +44,32 @@ describe("Préférences bornées par acteur", () => {
     await (await getPersonalSetupRepository()).read();
     mocks.actor.mockResolvedValue({ userId: "B" });
     await (await getPersonalSetupRepository()).read();
+    expect(mocks.select).toHaveBeenCalledWith(
+      "display_name,first_intent,reporting_currency,residence_country,context_date",
+    );
     expect(mocks.eq.mock.calls).toEqual([
       ["user_id", "A"],
       ["user_id", "B"],
     ]);
   });
-  it("ne modifie que les deux préférences dans le profil courant", async () => {
-    await (await getPersonalSetupRepository()).save({ displayName: "A", firstIntent: "PROJECT" });
+  it("préserve la devise et borne les champs écrits au profil courant", async () => {
+    await (
+      await getPersonalSetupRepository()
+    ).save({
+      displayName: "A",
+      firstIntent: "PROJECT",
+      residenceCountry: "Suisse",
+      contextDate: "2026-09-01",
+    });
     expect(mocks.from.mock.calls).toEqual([["profiles"]]);
     expect(mocks.upsert).toHaveBeenCalledWith(
-      { user_id: "A", display_name: "A", first_intent: "PROJECT" },
+      {
+        user_id: "A",
+        display_name: "A",
+        first_intent: "PROJECT",
+        residence_country: "Suisse",
+        context_date: "2026-09-01",
+      },
       { onConflict: "user_id" },
     );
   });
@@ -50,6 +78,15 @@ describe("Préférences bornées par acteur", () => {
     await expect((await getPersonalSetupRepository()).read()).rejects.toThrow(
       "PERSONAL_SETUP_READ_FAILED",
     );
+    expect(mocks.upsert).not.toHaveBeenCalled();
+  });
+  it("ne déclare aucune devise enregistrée si le profil est absent", async () => {
+    mocks.read.mockResolvedValue({ data: null, error: null });
+    expect(await (await getPersonalSetupRepository()).read()).toMatchObject({
+      reportingCurrency: null,
+      residenceCountry: null,
+      contextDate: null,
+    });
     expect(mocks.upsert).not.toHaveBeenCalled();
   });
 });

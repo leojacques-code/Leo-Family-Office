@@ -59,10 +59,19 @@ const canonicalMigrations = [
   "20260914191901",
   "20260915064740",
   "20260915180426",
+  "20260917071520",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
-  profiles: ["first_intent", "user_id", "ledger_coverage_start", "ledger_coverage_source"],
+  profiles: [
+    "residence_country",
+    "context_date",
+    "reporting_currency",
+    "first_intent",
+    "user_id",
+    "ledger_coverage_start",
+    "ledger_coverage_source",
+  ],
   scenarios: [
     "id",
     "scenario_status",
@@ -1517,6 +1526,8 @@ const requiredTriggerFunctions = [
 
 const requiredConstraints = [
   "profiles_first_intent_ck",
+  "profiles_residence_country_ck",
+  "profiles_context_date_ck",
   // ── Corrections d'observations de position ─────────────────────────────────────────
   // Les cinq contrôles qui empêchent la piste d'audit de mentir : un motif vide, un auteur
   // vide, un avant ou un après qui ne serait pas un objet, et une correction ne nommant

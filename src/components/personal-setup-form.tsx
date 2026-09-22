@@ -1,19 +1,23 @@
 "use client";
+/* eslint-disable @next/next/no-html-link-for-pages -- Le départ après sauvegarde recharge le profil serveur sans masquer l’acquittement par un refresh de /setup. */
 import { useState, type FormEvent } from "react";
-import Link from "next/link";
+import { DateInput } from "@/components/primitives/date-input";
 import {
   FIRST_INTENTS,
   INTENT_ACTIONS,
   personalSetupSchema,
+  personalSetupInputSchema,
   type PersonalSetup,
 } from "@/lib/personal-setup";
 
 export function PersonalSetupForm({
   initial,
   returnTo = "/",
+  today,
 }: {
   initial: PersonalSetup;
   returnTo?: string;
+  today: string;
 }) {
   const [draft, setDraft] = useState(initial);
   const [saved, setSaved] = useState(initial);
@@ -30,7 +34,14 @@ export function PersonalSetupForm({
       const response = await fetch("/api/profile/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
+        body: JSON.stringify(
+          personalSetupInputSchema.parse({
+            displayName: draft.displayName,
+            firstIntent: draft.firstIntent,
+            residenceCountry: draft.residenceCountry,
+            contextDate: draft.contextDate,
+          }),
+        ),
       });
       if (!response.ok) throw new Error("SAVE_FAILED");
       const persisted = personalSetupSchema.parse(await response.json());
@@ -60,6 +71,44 @@ export function PersonalSetupForm({
             }}
           />
         </label>
+        <fieldset className="personal-context">
+          <legend>Votre contexte</legend>
+          <p className="personal-setup-hint">
+            Devise de lecture actuelle :{" "}
+            <strong>{saved.reportingCurrency ?? "Non renseignée"}</strong>. Le changement de devise
+            n’est pas encore disponible.
+          </p>
+          <label className="field-label">
+            Pays de résidence déclaré (facultatif)
+            <input
+              className="text-input"
+              autoComplete="country-name"
+              value={draft.residenceCountry ?? ""}
+              maxLength={80}
+              disabled={pending}
+              onChange={(event) => {
+                setDraft({ ...draft, residenceCountry: event.target.value || null });
+                setNotice("");
+              }}
+            />
+          </label>
+          <DateInput
+            id="personal-context-date"
+            label="Date de référence du contexte (facultative)"
+            value={draft.contextDate}
+            max={today}
+            disabled={pending}
+            onChange={(date) => {
+              setDraft({ ...draft, contextDate: date.value });
+              setNotice("");
+            }}
+            hint="Date à laquelle ce contexte correspond. Elle ne modifie pas les dates de vos comptes ou de votre patrimoine."
+          />
+          <p className="personal-setup-hint">
+            Vous pouvez compléter ces informations plus tard. Le pays déclaré ne détermine pas votre
+            résidence fiscale et n’active aucune règle fiscale automatiquement.
+          </p>
+        </fieldset>
         <label className="field-label">
           Par quoi souhaitez-vous commencer ?
           <select
@@ -103,18 +152,18 @@ export function PersonalSetupForm({
       </form>
       <nav aria-label="Commencer" className="personal-setup-actions">
         {nextAction ? (
-          <Link className="button secondary" href={nextAction.href}>
+          <a className="button secondary" href={nextAction.href}>
             {nextAction.action}
-          </Link>
+          </a>
         ) : null}
         {returnTo !== "/" ? (
-          <Link className="button secondary" href={returnTo}>
+          <a className="button secondary" href={returnTo}>
             Continuer vers ma page
-          </Link>
+          </a>
         ) : null}
-        <Link className="button tertiary" href="/">
+        <a className="button tertiary" href="/">
           Revenir à Aujourd’hui
-        </Link>
+        </a>
       </nav>
       <p className="personal-setup-hint">
         Enregistrez vos modifications avant de quitter cette page.

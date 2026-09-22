@@ -95,7 +95,15 @@ export type AppShellSource =
   | { readonly kind: "TODAY"; readonly model: TodayReadModel }
   | { readonly kind: "SECTION"; readonly state: DashboardState };
 
-export function AppShell({ source, section }: { source: AppShellSource; section: string }) {
+export function AppShell({
+  source,
+  section,
+  personalSetup,
+}: {
+  source: AppShellSource;
+  section: string;
+  personalSetup?: import("@/lib/personal-setup").PersonalSetup;
+}) {
   const router = useRouter();
   // L'état global n'existe que pour les sections qui en dépendent encore. `null` sur
   // Aujourd'hui n'est pas un cas dégradé : c'est le contrat.
@@ -347,10 +355,22 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
           onClick={() => setProfileOpen((open) => !open)}
           type="button"
         >
-          <span className="avatar">LC</span>
+          <span className="avatar" aria-hidden="true">
+            LF
+          </span>
           <span>
-            <strong>Patrimoine personnel</strong>
-            <small>EUR · France</small>
+            <strong>{personalSetup?.displayName ?? "Mon espace"}</strong>
+            <small>{personalSetup?.reportingCurrency ?? "Devise non renseignée"}</small>
+            <small>
+              {personalSetup?.residenceCountry
+                ? `Résidence déclarée : ${personalSetup.residenceCountry}`
+                : "Résidence non renseignée"}
+            </small>
+            {personalSetup?.contextDate ? (
+              <small>Contexte au {personalSetup.contextDate.split("-").reverse().join("/")}</small>
+            ) : (
+              <small>Date du contexte non renseignée</small>
+            )}
           </span>
           <ChevronDown size={14} />
         </button>
