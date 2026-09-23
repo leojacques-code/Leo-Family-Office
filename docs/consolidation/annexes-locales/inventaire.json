@@ -342,7 +342,7 @@
     ".env.local et secrets",
     "node_modules, .next, caches et binaires installés",
     "pgdata : base de recette, pas de sauvegarde de données personnelles",
-    "journaux techniques éphémères",
+    "journaux runtime actifs postgres.log et recipe-reads.log ; journaux statiques conservés dans inventaire-journaux.json",
     "manifestes/base64 de transport GitHub et archives Git déjà sauvegardées",
     "changelogs fournisseurs téléchargés et documents source fournis (empreintes dans REPRISE.md)"
   ],
