@@ -1,0 +1,26 @@
+.tablePanel {
+  overflow-x: auto;
+}
+
+.tablePanel table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.tablePanel th,
+.tablePanel td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.tablePanel td:not(:first-child) {
+  white-space: nowrap;
+}
+
+.tablePanel small {
+  display: block;
+  margin-top: 4px;
+}
