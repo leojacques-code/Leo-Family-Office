@@ -117,7 +117,12 @@ const decisionEvaluationSchema = z.custom<DecisionEvaluation>(
       value &&
       typeof value === "object" &&
       ["READY", "PARTIAL", "NOT_COMPUTABLE"].includes((value as DecisionEvaluation).completeness) &&
-      Array.isArray((value as DecisionEvaluation).options),
+      Array.isArray((value as DecisionEvaluation).options) &&
+      z
+        .string()
+        .regex(/^[A-Z]{3}$/)
+        .nullish()
+        .safeParse((value as DecisionEvaluation).reportingCurrency).success,
     ),
   "Résultat Decision Lab V2 invalide",
 );
