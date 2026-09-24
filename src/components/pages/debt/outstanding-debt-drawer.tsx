@@ -20,6 +20,13 @@ import type { OutstandingDebt } from "@/lib/types";
  * future. Une correction AJOUTE une observation datée : l'historique n'est pas réécrit.
  */
 
+/**
+ * Codes ISO 4217 proposés. Une liste FERMÉE plutôt qu'un texte libre : une faute de frappe
+ * (« EUT ») rendrait le patrimoine non calculable faute de taux, sans aucune voie de
+ * correction de la devise après coup. La devise de lecture est toujours proposée.
+ */
+const CURRENCIES = ["EUR", "USD", "CHF", "GBP", "CAD", "JPY", "AUD", "SEK", "NOK", "DKK"];
+
 export interface OutstandingDebtDraft {
   name: string;
   lender: string | null;
@@ -139,13 +146,18 @@ export function OutstandingDebtDrawer({
             </label>
             <label>
               Devise
-              <input
+              <select
                 className="text-input"
-                maxLength={3}
                 onChange={(event) => setCurrency(event.target.value)}
                 required
                 value={currency}
-              />
+              >
+                {[...new Set([defaultCurrency, ...CURRENCIES])].map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                  </option>
+                ))}
+              </select>
             </label>
           </>
         )}
@@ -179,6 +191,13 @@ export function OutstandingDebtDrawer({
             value={notes}
           />
         </label>
+        {debt ? null : (
+          <p className="full outstanding-debt-note">
+            Si vous décrivez plus tard le contrat de cette dette, corrigez cet encours à zéro : le
+            passage d’un encours seul à un contrat n’est pas encore disponible, et deux saisies
+            compteraient la même dette deux fois.
+          </p>
+        )}
         {error ? (
           <p className="form-error full" role="alert">
             {error}

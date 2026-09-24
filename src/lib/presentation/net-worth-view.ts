@@ -36,7 +36,8 @@ import type { DashboardState } from "@/lib/types";
 export type NetWorthAssetFamilyId =
   "LIQUID" | "FINANCIAL" | "REAL_ESTATE" | "BUSINESS" | "OTHER_ASSET";
 
-export type NetWorthLiabilityGroupId = "CONTRACTUAL_DEBT" | "ACCOUNT_OVERDRAFT" | "OTHER_LIABILITY";
+export type NetWorthLiabilityGroupId =
+  "CONTRACTUAL_DEBT" | "OUTSTANDING_DEBT" | "ACCOUNT_OVERDRAFT" | "OTHER_LIABILITY";
 
 export type NetWorthBlockId = NetWorthAssetFamilyId | NetWorthLiabilityGroupId;
 
@@ -164,6 +165,13 @@ const LIABILITY_GROUPS: readonly {
     label: "Dettes contractuelles",
     ownerDomain: "Dette",
     matches: (line) => line.category === "CONTRACTUAL_DEBT",
+  },
+  {
+    // Dette connue par son seul encours : du domaine Dette, jamais rangée parmi les contrats.
+    id: "OUTSTANDING_DEBT",
+    label: "Dettes sans contrat détaillé",
+    ownerDomain: "Dette",
+    matches: (line) => line.category === "OUTSTANDING_DEBT",
   },
   {
     id: "ACCOUNT_OVERDRAFT",

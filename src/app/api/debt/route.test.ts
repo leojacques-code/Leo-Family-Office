@@ -77,8 +77,22 @@ describe("frontière HTTP Dettes", () => {
       { ...command, currency: "eur" },
       { ...command, observedAt: "2026-02-30" },
       { ...command, name: "  " },
+      // Un encours daté dans le futur deviendrait l'encours courant : refusé par le serveur.
+      { ...command, observedAt: "2099-01-01" },
+      { ...command, balance: 100_000_000_000_000 },
     ])
       expect((await post(invalid)).status).toBe(400);
+    expect(mocks.write).not.toHaveBeenCalled();
+  });
+  it("refuse aussi une nouvelle observation d'encours datée dans le futur", async () => {
+    const future = {
+      action: "record_debt_balance",
+      liabilityId: "11111111-1111-4111-8111-111111111111",
+      balance: 10,
+      observedAt: "2099-01-01",
+      notes: null,
+    };
+    expect((await post(future)).status).toBe(400);
     expect(mocks.write).not.toHaveBeenCalled();
   });
 });

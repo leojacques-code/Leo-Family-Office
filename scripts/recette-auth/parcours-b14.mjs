@@ -164,6 +164,12 @@ try {
     "Patrimoine affiche le passif et le patrimoine net négatif",
     /1\s500,5\s€/.test(netWorthText) && /[−-]\s?1\s500,5\s€/.test(netWorthText),
   );
+  check(
+    "D9",
+    "Patrimoine range la dette dans « Dettes sans contrat détaillé », pas parmi les contrats",
+    netWorthText.includes("Dettes sans contrat détaillé") &&
+      !netWorthText.includes("Dettes contractuelles"),
+  );
   await page.screenshot({ path: `${OUT}/03_patrimoine_apres_dette_bureau.png` });
   const today = await (await page.request.get(`${APP}/api/today`)).json();
   const debtDomain = (today.domains ?? []).find((item) => item.domain === "DETTE");
@@ -256,6 +262,13 @@ try {
     "Flux sans opération : « Non observé », jamais « 0 € »",
     tilesBefore.includes("Non observé") && !/Revenus observés\s*0\s€/.test(tilesBefore),
     { tuiles: tilesBefore.slice(0, 140) },
+  );
+  const fluxText = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  check(
+    "R0",
+    "prévision Flux : service de dette et point bas « Non calculable » avec la raison",
+    fluxText.includes("Une dette sans échéancier : ses sorties sont inconnues") &&
+      !/Service de dette prévu\s*0\s€/.test(fluxText),
   );
   await page.screenshot({ path: `${OUT}/05_flux_vierge_bureau.png` });
   await page.getByRole("button", { name: "Revenu net" }).click();

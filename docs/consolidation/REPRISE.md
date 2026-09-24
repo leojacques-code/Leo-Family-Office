@@ -253,3 +253,7 @@ Limite de rechargement : le snapshot est conservé et relu par le repository/API
 Nettoyage : base jetable supprimée (zéro base restante de ce nom), processus dédiés arrêtés, serveur habituel rétabli sur lfo_auth_gate.
 
 Preuves : LFO_devises_decisions_* dans docs/consolidation/preuves. Auth reste une fixture locale. B14 demeure partiel ; Auth/Storage A/B réels attendent toujours un environnement de recette autorisé. Aucune ressource payante, modification Supabase distante ni publication Vercel. Suite : devise du contrat Scénarios/Monte-Carlo, Immobilier et autres consommateurs, puis commandes de création avant choix global de devise et premier fait minimal.
+
+## Reprise par Claude, 24 septembre 2026
+
+Voir `docs/consolidation/PASSATION_2026-09-24.md` : cause du 503 d'Auth (clé publiable absente de Vercel, preview branchée sur la production), recette Supabase auto-hébergée locale (Auth A/B 35/35), premiers faits B14 livrés (dette par son seul encours, premier revenu net observé ; 23/23), deux migrations additives `20260924081000` et `20260924091000`, décisions en attente (recette hébergée, variables Vercel de preview, correction des transactions observées, Flux multidevise). Aucune écriture en production, `main` et la branche de sauvegarde inchangées.

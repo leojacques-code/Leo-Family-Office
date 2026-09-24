@@ -37,6 +37,7 @@ describe("revenu net observé par /api/state", () => {
       { ...income, receivedOn: "2026-02-30" },
       { ...income, accountId: "pas-un-uuid" },
       { ...income, label: " " },
+      { ...income, receivedOn: "2099-01-01" },
     ])
       expect((await post(invalid)).status).toBe(400);
     expect(mocks.mutate).not.toHaveBeenCalled();

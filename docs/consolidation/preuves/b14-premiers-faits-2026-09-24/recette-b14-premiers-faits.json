@@ -1,7 +1,7 @@
 {
-  "date": "2026-09-24T08:30:11.372Z",
+  "date": "2026-09-24T08:40:37.186Z",
   "app": "http://localhost:3120",
-  "utilisateur": "recette-b14-1790238599813@lfo.invalid",
+  "utilisateur": "recette-b14-1790239225767@lfo.invalid",
   "environnement": "pile Supabase auto-hébergée locale ; build de production",
   "checks": [
     {
@@ -53,6 +53,11 @@
     {
       "id": "D7",
       "label": "Patrimoine affiche le passif et le patrimoine net négatif",
+      "ok": true
+    },
+    {
+      "id": "D9",
+      "label": "Patrimoine range la dette dans « Dettes sans contrat détaillé », pas parmi les contrats",
       "ok": true
     },
     {
@@ -114,6 +119,11 @@
       "label": "Flux sans opération : « Non observé », jamais « 0 € »",
       "ok": true,
       "tuiles": "Revenus observés Non observé Mois en cours · aucune opération saisie Dépenses de consommation Non observé Hors transferts, investissements e"
+    },
+    {
+      "id": "R0",
+      "label": "prévision Flux : service de dette et point bas « Non calculable » avec la raison",
+      "ok": true
     },
     {
       "id": "R2",

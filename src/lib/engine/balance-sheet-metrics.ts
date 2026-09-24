@@ -251,7 +251,10 @@ export function deriveCanonicalBalanceSheetMetrics(input: {
     ratios: {
       debtToAssets: ratio(sheet.totalLiabilities, sheet.grossAssets, true),
       netWorthRatio: ratio(sheet.netWorth, sheet.grossAssets),
-      contractualDebtToAssets: ratio(sheet.contractualDebt, sheet.grossAssets, true),
+      // Même règle que pour les objectifs : le seul encours contractuel n'est pas toute la dette.
+      contractualDebtToAssets: unscheduledDebt
+        ? partialDebt()
+        : ratio(sheet.contractualDebt, sheet.grossAssets, true),
       liabilitiesToNetWorth:
         sheet.netWorth.value !== null && sheet.netWorth.value > 0
           ? ratio(sheet.totalLiabilities, sheet.netWorth, true)

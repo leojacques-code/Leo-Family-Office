@@ -109,6 +109,22 @@ try {
   await refuse({ ...valid, amount: undefined }, "Montant absent accepté", "texte");
   for (const amount of ["0", "0.000000", "-5", "1e3", "NaN", "abc"])
     await refuse({ ...valid, amount }, `Montant « ${amount} » accepté`, "Montant net invalide");
+  await refuse(
+    { ...valid, amount: "100000000000000" },
+    "Montant hors précision accepté",
+    "Montant net invalide",
+  );
+  await refuse({ ...valid, label: 42 }, "Libellé numérique accepté", "sont des textes");
+  await refuse(
+    { ...valid, notes: "x".repeat(501) },
+    "Note trop longue tronquée",
+    "refusée plutôt que tronquée",
+  );
+  await refuse(
+    { ...valid, received_on: "2026-02-30" },
+    "Date inexistante acceptée",
+    "inexistante au calendrier",
+  );
   await refuse({ ...valid, received_on: undefined }, "Date absente acceptée", "Date de versement");
   await refuse({ ...valid, label: "  " }, "Libellé vide accepté", "Libellé du revenu requis");
   await refuse({ ...valid, account_id: undefined }, "Compte absent accepté", "Compte crédité");

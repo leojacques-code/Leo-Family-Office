@@ -163,9 +163,18 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **45 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
-45 appliquées, 107 tables publiques). La dernière est la déclaration d'applicabilité de
-domaine, ajoutée par la phase 2 de productisation ; les onze précédentes sont les cinq
+Le DÉPÔT porte **51 migrations** sur la branche de consolidation (gate local du 24 septembre
+2026 : 51 appliquées depuis zéro, 107 tables publiques, 441 contraintes, 118 RPC). Les six
+dernières ne sont PAS en production :
+
+- `20260914191901_verified_personal_session` : `lfo_verify_session` (B12) ;
+- `20260915064740_personal_reference_isolation` : références composites par propriétaire (B13) ;
+- `20260915180426_personal_first_intent` et `20260917071520_personal_context` : accueil (B14) ;
+- `20260924081000_debt_outstanding_only` : dette connue par son seul encours (B14) ;
+- `20260924091000_net_income_observation` : premier revenu net observé (B14).
+
+Les 45 précédentes s'arrêtent à la déclaration d'applicabilité de domaine, ajoutée par la
+phase 2 de productisation ; les onze qui la précèdent sont les cinq
 verticales d'acquisition, leur réconciliation et les deux tours de correction des findings de
 revue :
 
@@ -203,7 +212,8 @@ dit l'état réel, et le contenu de référence s'extrait de
 `supabase_migrations.schema_migrations`.
 
 La production porte **45 migrations**, contrôlées par le connecteur Supabase le 9 septembre
-2026 après le merge de #48. La dernière est `20260909190841_user_domain_declarations`,
+2026 après le merge de #48 (dernier relevé connu ; aucun connecteur Supabase dans la session
+du 24 septembre, donc aucun contrôle plus récent). La dernière est `20260909190841_user_domain_declarations`,
 appliquée depuis le SQL de la phase 2. La plateforme a attribué son identifiant ; le fichier
 local a été renommé sans changer le SQL ni réécrire l’historique distant. Les onze migrations
 précédentes étaient déjà appliquées avant cette réparation. Les anciens chiffres de 33 sont

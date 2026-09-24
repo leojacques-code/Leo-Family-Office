@@ -119,6 +119,15 @@ begin
     end if;
   end loop;
 
+  -- Les textes doivent être des chaînes JSON : `{"name": 123}` n'est pas un nom.
+  if coalesce(jsonb_typeof(p_payload -> 'name'), 'absent') <> 'string'
+     or coalesce(jsonb_typeof(p_payload -> 'lender'), 'null') not in ('string', 'null')
+     or coalesce(jsonb_typeof(p_payload -> 'notes'), 'null') not in ('string', 'null') then
+    raise exception 'Nom, créancier et note sont des textes';
+  end if;
+  if char_length(coalesce(p_payload ->> 'notes', '')) > 500 then
+    raise exception 'Note trop longue (500 caractères au plus) : refusée plutôt que tronquée';
+  end if;
   v_name := nullif(btrim(p_payload ->> 'name'), '');
   if v_name is null or char_length(v_name) > 160 then
     raise exception 'Nom de dette requis (160 caractères au plus)';
@@ -135,7 +144,8 @@ begin
     raise exception 'Encours attendu en texte';
   end if;
   v_balance_text := p_payload ->> 'balance';
-  if v_balance_text is null or v_balance_text !~ '^[0-9]{1,18}(\.[0-9]{1,6})?$' then
+  -- 14 chiffres entiers : la précision réelle de `numeric(20,6)`, sans débordement brut.
+  if v_balance_text is null or v_balance_text !~ '^[0-9]{1,14}(\.[0-9]{1,6})?$' then
     raise exception 'Encours invalide';
   end if;
   v_balance := v_balance_text::numeric;
@@ -149,7 +159,11 @@ begin
      or (p_payload ->> 'observed_at') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
     raise exception 'Date d''observation requise';
   end if;
-  v_observed_at := (p_payload ->> 'observed_at')::date;
+  begin
+    v_observed_at := (p_payload ->> 'observed_at')::date;
+  exception when others then
+    raise exception 'Date d''observation inexistante au calendrier';
+  end;
 
   insert into public.liabilities (
     id, user_id, name, lender, current_balance, currency, terms_status,
@@ -162,7 +176,7 @@ begin
     null, null, null, null, null,
     null, null, null, null, null,
     null, null, null,
-    'ACTUAL', 'HIGH', 'Saisie encours seul', left(nullif(btrim(p_payload ->> 'notes'), ''), 500), false
+    'ACTUAL', 'HIGH', 'Saisie encours seul', nullif(btrim(p_payload ->> 'notes'), ''), false
   );
 
   insert into public.liability_balance_observations (

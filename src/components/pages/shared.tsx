@@ -512,6 +512,9 @@ export function liquidityExplanation(state: DashboardState): Explanation {
 }
 export function cashFlowExplanation(state: DashboardState): Explanation {
   const upcoming = nextDebtEvent(state.liabilities, state.asOfDate);
+  // Une dette connue par son seul encours n'a pas d'échéance connue : le service affiché ne
+  // couvre alors que les contrats, et « aucune échéance » serait faux.
+  const unscheduled = (state.outstandingDebts ?? []).filter((debt) => debt.currentBalance > 0);
   return {
     title: "Cash flow mensuel connu",
     formula:
@@ -530,13 +533,17 @@ export function cashFlowExplanation(state: DashboardState): Explanation {
         date: state.asOfDate,
       },
       {
-        label: "Service de dette exigible",
-        value: formatEur(state.metrics.monthlyDebtService),
+        label: unscheduled.length
+          ? "Service de dette exigible (contrats seulement)"
+          : "Service de dette exigible",
+        value: unscheduled.length
+          ? `Partiel : ${formatEur(state.metrics.monthlyDebtService)} hors ${unscheduled.length} dette(s) sans échéancier`
+          : formatEur(state.metrics.monthlyDebtService),
         kind: "DERIVED",
         date: state.asOfDate,
       },
     ],
-    note: `${upcoming ? `Prochaine échéance le ${formatDate(upcoming.entry.dueDate)} pour ${formatEur(upcoming.entry.totalCashOut)}. ` : "Aucune échéance de dette à venir. "}La majorité des dépenses n’est pas encore renseignée : ce cash flow est une borne haute, avant impôt sur le revenu.`,
+    note: `${upcoming ? `Prochaine échéance connue le ${formatDate(upcoming.entry.dueDate)} pour ${formatEur(upcoming.entry.totalCashOut)}. ` : unscheduled.length ? "Aucune échéance contractuelle connue ; les dettes sans échéancier ont des sorties inconnues. " : "Aucune échéance de dette à venir. "}La majorité des dépenses n’est pas encore renseignée : ce cash flow est une borne haute, avant impôt sur le revenu.`,
   };
 }
 

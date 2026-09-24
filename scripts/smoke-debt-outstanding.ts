@@ -132,6 +132,22 @@ try {
   await refuse({ ...valid, balance: 1000 }, "Montant numérique JSON accepté", "texte");
   for (const balance of ["NaN", "1e3", "-5", "", "1 000", "1,5"])
     await refuse({ ...valid, balance }, `Encours « ${balance} » accepté`, "Encours invalide");
+  await refuse(
+    { ...valid, balance: "100000000000000" },
+    "Encours hors précision accepté",
+    "Encours invalide",
+  );
+  await refuse({ ...valid, name: 123 }, "Nom numérique accepté", "sont des textes");
+  await refuse(
+    { ...valid, notes: "x".repeat(501) },
+    "Note trop longue tronquée",
+    "refusée plutôt que tronquée",
+  );
+  await refuse(
+    { ...valid, observed_at: "2026-02-30" },
+    "Date inexistante acceptée",
+    "inexistante au calendrier",
+  );
   await refuse({ ...valid, currency: "eur" }, "Devise en minuscules acceptée", "Devise");
   await refuse({ ...valid, currency: undefined }, "Devise absente acceptée", "Devise");
   await refuse({ ...valid, observed_at: undefined }, "Date absente acceptée", "Date d'observation");

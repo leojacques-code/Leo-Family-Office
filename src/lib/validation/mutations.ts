@@ -1187,7 +1187,9 @@ export const mutationSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("record_debt_balance"),
     liabilityId: z.uuid(),
-    observedAt: realDate,
+    // Un encours observé dans le futur deviendrait l'encours COURANT et changerait la lecture
+    // présente : refusé côté serveur, pas seulement par le formulaire.
+    observedAt: businessDate,
     balance: finite.nonnegative(),
     notes: z.string().trim().max(500).nullable(),
   }),
@@ -1199,9 +1201,10 @@ export const mutationSchema = z.discriminatedUnion("action", [
       action: z.literal("record_outstanding_debt"),
       name: z.string().trim().min(1).max(160),
       lender: z.string().trim().min(1).max(160).nullable(),
-      balance: finite.nonnegative().max(1e15),
+      // Précision de la colonne : numeric(20,6), soit 14 chiffres entiers.
+      balance: finite.nonnegative().max(99_999_999_999_999),
       currency: z.string().regex(/^[A-Z]{3}$/, "Devise ISO à trois lettres"),
-      observedAt: realDate,
+      observedAt: businessDate,
       notes: z.string().trim().max(500).nullable(),
     })
     .strict(),
@@ -1226,8 +1229,8 @@ export const mutationSchema = z.discriminatedUnion("action", [
     .object({
       action: z.literal("record_net_income"),
       accountId: z.uuid(),
-      receivedOn: realDate,
-      amount: finite.positive().max(1e15),
+      receivedOn: businessDate,
+      amount: finite.positive().max(99_999_999_999_999),
       label: z.string().trim().min(1).max(180),
       notes: z.string().trim().max(500).nullable(),
     })

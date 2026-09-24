@@ -64,7 +64,8 @@ begin
   v_amount_text := p_payload ->> 'amount';
   -- Deux gardes successives : SQL ne garantit pas l'ordre d'évaluation d'un OR, et le cast
   -- d'un texte non numérique lèverait une erreur au mauvais message.
-  if v_amount_text is null or v_amount_text !~ '^[0-9]{1,18}(\.[0-9]{1,6})?$' then
+  -- 14 chiffres entiers : la précision réelle de `numeric(20,6)`.
+  if v_amount_text is null or v_amount_text !~ '^[0-9]{1,14}(\.[0-9]{1,6})?$' then
     raise exception 'Montant net invalide';
   end if;
   if v_amount_text::numeric <= 0 then
@@ -75,8 +76,19 @@ begin
      or (p_payload ->> 'received_on') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
     raise exception 'Date de versement requise';
   end if;
-  v_date := (p_payload ->> 'received_on')::date;
+  begin
+    v_date := (p_payload ->> 'received_on')::date;
+  exception when others then
+    raise exception 'Date de versement inexistante au calendrier';
+  end;
 
+  if coalesce(jsonb_typeof(p_payload -> 'label'), 'absent') <> 'string'
+     or coalesce(jsonb_typeof(p_payload -> 'notes'), 'null') not in ('string', 'null') then
+    raise exception 'Libellé et note sont des textes';
+  end if;
+  if char_length(coalesce(p_payload ->> 'notes', '')) > 500 then
+    raise exception 'Note trop longue (500 caractères au plus) : refusée plutôt que tronquée';
+  end if;
   v_label := nullif(btrim(p_payload ->> 'label'), '');
   if v_label is null or char_length(v_label) > 180 then
     raise exception 'Libellé du revenu requis (180 caractères au plus)';
@@ -88,7 +100,7 @@ begin
   ) values (
     p_user_id, v_account_id, null, v_date, v_label, v_amount_text::numeric, v_currency,
     'ACTUAL', 'HIGH', 'Saisie revenu net observé',
-    left(nullif(btrim(p_payload ->> 'notes'), ''), 500), true, 'INCOME'
+    nullif(btrim(p_payload ->> 'notes'), ''), true, 'INCOME'
   ) returning id into v_transaction_id;
 
   return v_transaction_id;

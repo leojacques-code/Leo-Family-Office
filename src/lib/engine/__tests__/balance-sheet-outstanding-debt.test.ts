@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { buildCanonicalBalanceSheet, OUTSTANDING_DEBT_CATEGORY } from "@/lib/engine/balance-sheet";
 import { deriveCanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
 import { buildOpeningBalanceSheet } from "@/lib/engine/monthly-financial-model";
+import { resolveCurrentGoalMetric } from "@/lib/engine/goal-metrics";
+import { translateCode } from "@/lib/presentation/language/codes";
 import { UNDECLARED_LOAN_TERMS } from "@/lib/engine/debt";
 import type {
   DashboardState,
@@ -148,5 +150,42 @@ describe("dette connue par son seul encours au bilan canonique", () => {
     expect(opening.loanBalance).toBe(1200);
     expect(opening.otherLiabilityBalance).toBe(1000);
     expect(opening.flags).toContain("LIABILITY_PROJECTION_TERMS_MISSING");
+  });
+  it("rend partiel un objectif « dette contractuelle » tant qu'une dette encours seul existe", () => {
+    const target = {
+      metric: "CONTRACTUAL_DEBT" as const,
+      operator: "AT_MOST" as const,
+      value: 0,
+      currency: "EUR",
+      entityId: null,
+    };
+    const context = (outstandingDebts: OutstandingDebt[]) => ({
+      balanceSheet: build({ accounts: [cash], outstandingDebts }),
+      reportingCurrency: "EUR",
+      asOfDate: "2026-09-24",
+    });
+    // Sans dette encours seul : 0 € de dette contractuelle, mesure complète.
+    expect(resolveCurrentGoalMetric(target, context([]))).toMatchObject({
+      value: 0,
+      status: "COMPLETE",
+    });
+    // Avec 1 000 € connus par leur seul encours : l'objectif ne peut pas paraître atteint.
+    const partial = resolveCurrentGoalMetric(target, context([outstanding(1000)]));
+    expect(partial.value).toBeNull();
+    expect(partial.status).not.toBe("COMPLETE");
+    const metrics = deriveCanonicalBalanceSheetMetrics({
+      balanceSheet: build({ accounts: [cash], outstandingDebts: [outstanding(1000)] }),
+      liabilities: [],
+      expenses: [],
+      positions: [],
+    });
+    expect(metrics.ratios.contractualDebtToAssets).toMatchObject({
+      value: null,
+      status: "PARTIAL",
+    });
+  });
+
+  it("nomme sa réserve en français : aucune « erreur système » dans Aujourd'hui", () => {
+    expect(translateCode("DEBT_TERMS_UNDECLARED")?.label).toBe("Termes de la dette non déclarés");
   });
 });

@@ -62,13 +62,21 @@ describe("Dettes : somme due connue par son seul encours", () => {
     const dialog = screen.getByRole("dialog");
     // La correction reprend l'encours et la date enregistrés : aucune valeur vide ni inventée.
     expect(within(dialog).getByLabelText(/Encours restant dû/)).toHaveValue("1000");
+    // Un montant ET une date modifiés : la correction est une observation nouvelle et datée.
+    fireEvent.change(within(dialog).getByLabelText(/Encours restant dû/), {
+      target: { value: "950,25" },
+    });
+    fireEvent.blur(within(dialog).getByLabelText(/Encours restant dû/));
+    fireEvent.change(within(dialog).getByLabelText(/Date de l’encours/), {
+      target: { value: "2026-09-24" },
+    });
     fireEvent.submit(dialog.querySelector("form")!);
     await vi.waitFor(() => expect(mutate).toHaveBeenCalled());
     expect(mutate).toHaveBeenCalledWith({
       action: "record_debt_balance",
       liabilityId: "family-loan",
-      observedAt: "2026-09-20",
-      balance: 1000,
+      observedAt: "2026-09-24",
+      balance: 950.25,
       notes: null,
     });
   });

@@ -1,7 +1,7 @@
 {
-  "date": "2026-09-24T08:00:46.659Z",
+  "date": "2026-09-24T08:42:45.530Z",
   "app": "http://localhost:3120",
-  "migrations": 49,
+  "migrations": 51,
   "environnement": "pile Supabase auto-hébergée locale (GoTrue v2.196.0, PostgREST v14.17, Storage v1.74.0, Kong 3.9.3, PostgreSQL 16)",
   "nonProuve": [
     "projet Supabase hébergé",
@@ -9,8 +9,8 @@
     "envoi réel de mails"
   ],
   "utilisateurs": {
-    "A": "recette-a-1790236718808@lfo.invalid",
-    "B": "recette-b-1790236718808@lfo.invalid"
+    "A": "recette-a-1790239237547@lfo.invalid",
+    "B": "recette-b-1790239237547@lfo.invalid"
   },
   "checks": [
     {

@@ -308,8 +308,8 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
     expect(model.outstandingDebts[0]).not.toHaveProperty("monthlyPayment");
     // L'encours déclaré est présent ; le contrat l'est aussi (ligne legacy), mais par SA preuve.
     const rail = Object.fromEntries(model.railSources.map((source) => [source.id, source.status]));
-    expect(rail.outstanding).not.toBe("ABSENTE");
-    expect(rail.contract).not.toBe("ABSENTE");
+    expect(rail.outstanding).toBe("ACTIVE");
+    expect(rail.contract).toBe("ACTIVE");
   });
   it("ne présente pas un encours déclaré comme un contrat détenu", async () => {
     install({
@@ -332,7 +332,7 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
     const model = await createSupabaseRepository("owner").getDebtReadModel();
     const rail = Object.fromEntries(model.railSources.map((source) => [source.id, source.status]));
     expect(rail.contract).toBe("ABSENTE");
-    expect(rail.outstanding).not.toBe("ABSENTE");
+    expect(rail.outstanding).toBe("ACTIVE");
     // Sans observation datée, aucune date n'est fabriquée.
     expect(model.outstandingDebts[0]).not.toHaveProperty("balanceDate");
   });

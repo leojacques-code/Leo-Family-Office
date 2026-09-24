@@ -113,6 +113,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const index = useMemo(() => categoryIndex(state.expenseCategories), [state.expenseCategories]);
   const month = monthPeriod(state.asOfDate);
   const NOT_OBSERVED = <span className="metric-unknown">Non observé</span>;
+  const NOT_COMPUTABLE = <span className="metric-unknown">Non calculable</span>;
   const observed = useMemo(
     () =>
       computeObservedCashFlow(state.transactions, state.expenseCategories, month.start, month.end),
@@ -159,6 +160,16 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
     [state.asOfDate, horizon, state.metrics.bankCash, state.recurringRules, state.liabilities],
   );
   const runway = cashRunwayDays(forecast);
+  // La prévision ne connaît que les échéances des CONTRATS et part du cash observé. Avec une
+  // dette connue par son seul encours, ses sorties manquent ; sans cash observé, le départ
+  // vaudrait 0 par repli. Dans les deux cas les montants ne sont pas affichés comme complets.
+  const unscheduledDebt = (state.outstandingDebts ?? []).some((debt) => debt.currentBalance > 0);
+  const forecastReserve =
+    state.metrics.bankCash === null
+      ? "Trésorerie de départ inconnue"
+      : unscheduledDebt
+        ? "Une dette sans échéancier : ses sorties sont inconnues"
+        : null;
   const budgetLines = useMemo(
     () =>
       compareBudgets(
@@ -497,29 +508,45 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           <div>
             <span>Trésorerie projetée</span>
             <strong>
-              <Currency value={forecast.forecastEndingCash} />
+              {forecastReserve ? NOT_COMPUTABLE : <Currency value={forecast.forecastEndingCash} />}
             </strong>
             <small>
-              Départ <Currency value={forecast.openingCash} /> · net{" "}
-              <Currency value={forecast.forecastNetCashFlow} sign />
+              {forecastReserve ?? (
+                <>
+                  Départ <Currency value={forecast.openingCash} /> · net{" "}
+                  <Currency value={forecast.forecastNetCashFlow} sign />
+                </>
+              )}
             </small>
           </div>
           <div>
             <span>Point bas</span>
             <strong>
-              <Currency value={forecast.minimumProjectedCash} />
+              {forecastReserve ? (
+                NOT_COMPUTABLE
+              ) : (
+                <Currency value={forecast.minimumProjectedCash} />
+              )}
             </strong>
             <small>
-              Le {formatDate(forecast.minimumProjectedCashDate)}
-              {runway !== null ? ` · trésorerie négative dans ${runway} jours` : ""}
+              {forecastReserve ?? (
+                <>
+                  Le {formatDate(forecast.minimumProjectedCashDate)}
+                  {runway !== null ? ` · trésorerie négative dans ${runway} jours` : ""}
+                </>
+              )}
             </small>
           </div>
           <div>
             <span>Service de dette prévu</span>
             <strong>
-              <Currency value={forecast.forecastDebtService} />
+              {unscheduledDebt ? NOT_COMPUTABLE : <Currency value={forecast.forecastDebtService} />}
             </strong>
-            <small>Échéancier du Debt Engine, aucun second calcul</small>
+            <small>
+              {unscheduledDebt
+                ? "Une dette sans échéancier : ses sorties sont inconnues"
+                : "Échéancier du Debt Engine, aucun second calcul"}
+            </small>
           </div>
         </div>
         <p className="muted-copy">
