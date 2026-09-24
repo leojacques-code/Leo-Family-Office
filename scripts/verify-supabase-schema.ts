@@ -62,9 +62,20 @@ const canonicalMigrations = [
   "20260917071520",
   "20260924081000",
   "20260924091000",
+  "20260924120000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
+  transaction_corrections: [
+    "transaction_id",
+    "actor_user_id",
+    "executed_by",
+    "reason",
+    "before_values",
+    "after_values",
+    "changed_fields",
+    "decided_at",
+  ],
   profiles: [
     "residence_country",
     "context_date",
@@ -1113,6 +1124,7 @@ const userOwnedTables = [
   "positions",
   "position_snapshots",
   "position_snapshot_corrections",
+  "transaction_corrections",
   "liabilities",
   "loan_schedules",
   "income_sources",
@@ -1507,6 +1519,7 @@ const requiredTriggers = [
   "bank_observed_transactions_frozen",
   "position_snapshot_corrections_immutable",
   "user_domain_declarations_immutable",
+  "transaction_corrections_immutable",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1525,9 +1538,16 @@ const requiredTriggerFunctions = [
   "bank_sync_raw_page_immutable",
   "bank_observed_transaction_frozen",
   "user_domain_declaration_immutable",
+  "transaction_correction_immutable",
 ] as const;
 
 const requiredConstraints = [
+  // Correction de revenu net saisi : la piste ne perd ni l'ancienne valeur, ni son auteur.
+  "transaction_corrections_transaction_fk",
+  "transaction_corrections_owner_fk",
+  "transaction_corrections_actor_is_owner_ck",
+  "transaction_corrections_reason_ck",
+  "transaction_corrections_changed_ck",
   "profiles_first_intent_ck",
   "profiles_residence_country_ck",
   "profiles_context_date_ck",
@@ -2030,6 +2050,7 @@ const requiredRpcs: Record<string, string> = {
   lfo_verify_session: "p_user_id uuid, p_session_id uuid",
   lfo_record_outstanding_debt: "p_user_id uuid, p_payload jsonb",
   lfo_record_net_income: "p_user_id uuid, p_payload jsonb",
+  lfo_correct_net_income: "p_user_id uuid, p_payload jsonb",
   lfo_declare_domain_applicability: "p_user_id uuid, p_payload jsonb",
   lfo_add_account:
     "p_user_id uuid, p_institution text, p_name text, p_account_type text, p_balance numeric, p_currency text, p_as_of_date date",
@@ -2293,6 +2314,8 @@ const readOnlyAuditTables = [
   // Une déclaration d'applicabilité est append-only : un client capable de la réécrire
   // pourrait faire disparaître le jour où un domaine a cessé d'être « non concerné ».
   "user_domain_declarations",
+  // Une correction de revenu saisi est la seule trace de la valeur remplacée.
+  "transaction_corrections",
 ] as const;
 
 const storagePolicies = [
