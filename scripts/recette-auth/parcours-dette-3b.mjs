@@ -101,15 +101,46 @@ try {
       /1\s500,50\s€/.test(modalText),
     { extrait: modalText.slice(0, 200) },
   );
+  // B16 : le mode de remboursement vient d'abord, et aucun fait inconnu n'est prérempli.
+  check(
+    "B1",
+    "formulaire adaptatif : mode à choisir, aucune date ni convention préremplie",
+    (await modal.getByLabel("Mode de remboursement").inputValue()) === "" &&
+      (await modal.getByLabel(/Taux annuel/).count()) === 0,
+  );
+  await modal.getByLabel("Mode de remboursement").selectOption("AMORTIZING");
+  check(
+    "B2",
+    "après choix du mode : première échéance, maturité, durée et convention vides",
+    (await modal.getByLabel("Première échéance").inputValue()) === "" &&
+      (await modal.getByLabel("Maturité contractuelle").inputValue()) === "" &&
+      (await modal.getByLabel(/Nombre d’échéances/).inputValue()) === "" &&
+      (await modal.getByLabel("Convention d’intérêt").inputValue()) === "",
+  );
   await modal.getByLabel("Prêteur").fill("Famille");
   await modal.getByLabel(/Capital initial emprunté/).fill("2 000");
   await modal.getByLabel(/Taux annuel/).fill("1");
+  await modal.getByLabel("Type de taux").selectOption("FIXED");
+  await modal.getByLabel("Périodicité des échéances").selectOption("MONTHLY");
+  await modal.getByLabel("Convention d’intérêt").selectOption("PROPORTIONAL");
+  await modal.getByLabel("Première échéance").fill("2026-02-05");
+  // Contrat MINIMAL : la seule mensualité, sans durée ni maturité.
   await modal.getByLabel(/Paiement par échéance/).fill("100");
-  await modal.getByLabel(/Nombre d’échéances/).fill("21");
-  await modal.getByLabel("Première échéance du calendrier reconstruit").fill("2026-02-05");
-  await modal.getByLabel("Maturité contractuelle").fill("2027-10-05");
+  await modal.getByLabel(/Paiement par échéance/).blur();
+  const synthesis = (
+    await modal.getByRole("region", { name: "Synthèse du contrat" }).innerText()
+  ).replace(/\s+/g, " ");
+  check(
+    "B3",
+    "synthèse avant enregistrement : durée déduite de la mensualité, assurance et frais inconnus",
+    synthesis.includes("durée déduite de la mensualité") &&
+      synthesis.includes("maturité déduite de la durée") &&
+      synthesis.includes("Inconnue") &&
+      synthesis.includes("hors assurance et frais récurrents"),
+    { synthese: synthesis.slice(0, 400) },
+  );
   await page.screenshot({ path: `${OUT}/01_decrire_contrat_bureau.png` });
-  await modal.getByRole("button", { name: "Enregistrer la dette" }).click();
+  await modal.getByRole("button", { name: "Enregistrer le contrat" }).click();
   await page.waitForTimeout(1000);
   await page.reload();
   await page.waitForLoadState("networkidle");
@@ -121,10 +152,17 @@ try {
       debtText.includes("Prêt familial"),
     { extrait: debtText.slice(0, 200) },
   );
+  check(
+    "B4",
+    "page Dettes : la dernière échéance et la durée sont présentées comme calculées",
+    debtText.includes("Dernière échéance calculée") && debtText.includes("durée"),
+    { extrait: debtText.slice(0, 300) },
+  );
   await page.screenshot({ path: `${OUT}/02_dette_contractuelle_bureau.png` });
 
   const after = await one(
     `select id::text as id, terms_status, current_balance::text as balance, currency,
+            payment_count::text as payment_count, maturity_date::text as maturity_date,
             (select count(*) from public.liabilities where user_id = $1)::text as debts,
             (select count(*) from public.liability_balance_observations o
               where o.liability_id = l.id)::text as observations,
@@ -135,14 +173,16 @@ try {
   );
   check(
     "P4",
-    "base : même ligne passée à CONTRACT, une seule dette, encours et historique intacts, décision tracée",
+    "base : même ligne passée à CONTRACT, une seule dette, encours et historique intacts, décision tracée, durée et maturité non persistées",
     after.id === before.id &&
       after.terms_status === "CONTRACT" &&
       after.debts === "1" &&
       Number(after.balance) === 1500.5 &&
       after.currency === "EUR" &&
       after.observations === "1" &&
-      after.transitions === "1",
+      after.transitions === "1" &&
+      after.payment_count === null &&
+      after.maturity_date === null,
     after,
   );
   const state = await (await page.request.get(`${APP}/api/state`)).json();
@@ -177,6 +217,66 @@ try {
     "P8",
     "Flux : plus de « dette sans échéancier », la prévision lit le contrat",
     !fluxText.includes("Une dette sans échéancier : ses sorties sont inconnues"),
+  );
+
+  // ---------- Embranchement : in fine connu par sa seule maturité ----------
+  await page.goto(`${APP}/debt`);
+  await page.getByRole("button", { name: "Nouvelle dette" }).click();
+  const bullet = page.getByRole("dialog");
+  await bullet.getByLabel("Mode de remboursement").selectOption("BULLET");
+  check(
+    "B5",
+    "in fine : aucune mensualité demandée (l'échéance est l'intérêt calculé)",
+    (await bullet.getByLabel(/Paiement par échéance/).count()) === 0,
+  );
+  await bullet.getByLabel("Nom de la dette").fill("Prêt in fine");
+  await bullet.getByLabel("Prêteur").fill("Banque");
+  await bullet.getByLabel(/Capital initial emprunté/).fill("10 000");
+  await bullet.getByLabel(/Encours observé initial/).fill("10 000");
+  await bullet.getByLabel("Date de l’encours initial").fill("2026-09-01");
+  await bullet.getByLabel(/Taux annuel/).fill("2");
+  await bullet.getByLabel("Type de taux").selectOption("FIXED");
+  await bullet.getByLabel("Périodicité des échéances").selectOption("ANNUAL");
+  await bullet.getByLabel("Convention d’intérêt").selectOption("PROPORTIONAL");
+  await bullet.getByLabel("Première échéance").fill("2027-09-01");
+  await bullet.getByLabel("Maturité contractuelle").fill("2029-09-01");
+  const bulletSynthesis = (
+    await bullet.getByRole("region", { name: "Synthèse du contrat" }).innerText()
+  ).replace(/\s+/g, " ");
+  check(
+    "B6",
+    "synthèse in fine : trois échéances, un seul amortissement de capital, à la maturité",
+    bulletSynthesis.includes("3, dont 1 amortissant du capital") &&
+      /Premier remboursement de capital ?1 septembre 2029/.test(bulletSynthesis) &&
+      bulletSynthesis.includes("durée déduite de la maturité"),
+    { synthese: bulletSynthesis.slice(0, 400) },
+  );
+  await page.screenshot({ path: `${OUT}/04_in_fine_synthese_bureau.png` });
+  await bullet.getByRole("button", { name: "Ajouter cette dette" }).click();
+  await page.waitForTimeout(1000);
+  const bulletRow = await one(
+    `select terms_status, amortisation_profile, payment_count::text as payment_count,
+            maturity_date::text as maturity_date, monthly_payment::text as monthly_payment
+       from public.liabilities where user_id = $1 and name = 'Prêt in fine'`,
+    [user.id],
+  );
+  check(
+    "B7",
+    "base : in fine CONTRACT, maturité déclarée, durée et mensualité non persistées",
+    bulletRow?.terms_status === "CONTRACT" &&
+      bulletRow?.amortisation_profile === "BULLET" &&
+      bulletRow?.maturity_date === "2029-09-01" &&
+      bulletRow?.payment_count === null &&
+      bulletRow?.monthly_payment === null,
+    bulletRow ?? {},
+  );
+  const stateTwo = await (await page.request.get(`${APP}/api/state`)).json();
+  check(
+    "B8",
+    "bilan : deux dettes contractuelles comptées une fois chacune (1 500,50 + 10 000)",
+    stateTwo.balanceSheet.contractualDebt.value === 11500.5 &&
+      stateTwo.balanceSheet.totalLiabilities.value === 11500.5,
+    { contractuel: stateTwo.balanceSheet.contractualDebt.value },
   );
 
   // ---------- Mobile ----------

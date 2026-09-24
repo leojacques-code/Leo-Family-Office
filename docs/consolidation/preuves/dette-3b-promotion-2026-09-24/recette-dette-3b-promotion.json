@@ -1,7 +1,7 @@
 {
-  "date": "2026-09-24T13:15:17.422Z",
+  "date": "2026-09-24T14:58:45.896Z",
   "app": "http://localhost:3120",
-  "utilisateur": "recette-3b-1790255706486@lfo.invalid",
+  "utilisateur": "recette-3b-1790261911653@lfo.invalid",
   "environnement": "pile Supabase auto-hébergée locale ; build de production",
   "checks": [
     {
@@ -13,7 +13,23 @@
       "id": "P2",
       "label": "le formulaire garde la dette (nom), ne redemande pas l'encours et dit que l'historique reste",
       "ok": true,
-      "extrait": "Décrire le contrat de Prêt familial La même dette devient contractuelle : l’encours observé et son historique sont conservés. Tous les montants de ce contrat et de son échéancier sont en EUR. Commence"
+      "extrait": "Décrire le contrat de Prêt familial La même dette devient contractuelle : l’encours observé et son historique sont conservés. Tous les montants de ce contrat et de son échéancier sont en EUR. Mode de "
+    },
+    {
+      "id": "B1",
+      "label": "formulaire adaptatif : mode à choisir, aucune date ni convention préremplie",
+      "ok": true
+    },
+    {
+      "id": "B2",
+      "label": "après choix du mode : première échéance, maturité, durée et convention vides",
+      "ok": true
+    },
+    {
+      "id": "B3",
+      "label": "synthèse avant enregistrement : durée déduite de la mensualité, assurance et frais inconnus",
+      "ok": true,
+      "synthese": "Synthèse avant enregistrement Capital d’origine 2 000 € Encours observé 1 500,50 € au 20 septembre 2026 Prochaine sortie 100 € le 5 octobre 2026 Premier remboursement de capital 5 octobre 2026 Dernière échéance 5 octobre 2027 (maturité déduite de la durée) Prélèvements à venir 13, dont 13 amortissant du capital (durée déduite de la mensualité) Capital futur remboursé 1 290,18 € Intérêts futurs 9,8"
     },
     {
       "id": "P3",
@@ -22,12 +38,20 @@
       "extrait": "PASSIF Dettes Échéanciers datés, coût du crédit et arbitrage remboursement vs investissement. Modifier le contrat Nouvel encours Encours seul Nouvelle dette Capital restant dû 1 500,50 € Prêt familial"
     },
     {
-      "id": "1ca210ba-2244-4756-a436-9f7f95d1cf80",
-      "label": "base : même ligne passée à CONTRACT, une seule dette, encours et historique intacts, décision tracée",
+      "id": "B4",
+      "label": "page Dettes : la dernière échéance et la durée sont présentées comme calculées",
+      "ok": true,
+      "extrait": "PASSIF Dettes Échéanciers datés, coût du crédit et arbitrage remboursement vs investissement. Modifier le contrat Nouvel encours Encours seul Nouvelle dette Capital restant dû 1 500,50 € Prêt familial · Famille Taux 1,0 % Service de dette du mois 100 € Paiement mensuelle annoncé 100 € Profil contrac"
+    },
+    {
+      "id": "f940a61a-d852-4d6a-be3b-acd31e2af8c2",
+      "label": "base : même ligne passée à CONTRACT, une seule dette, encours et historique intacts, décision tracée, durée et maturité non persistées",
       "ok": true,
       "terms_status": "CONTRACT",
       "balance": "1500.500000",
       "currency": "EUR",
+      "payment_count": null,
+      "maturity_date": null,
       "debts": "1",
       "observations": "1",
       "transitions": "1"
@@ -54,6 +78,33 @@
       "id": "P8",
       "label": "Flux : plus de « dette sans échéancier », la prévision lit le contrat",
       "ok": true
+    },
+    {
+      "id": "B5",
+      "label": "in fine : aucune mensualité demandée (l'échéance est l'intérêt calculé)",
+      "ok": true
+    },
+    {
+      "id": "B6",
+      "label": "synthèse in fine : trois échéances, un seul amortissement de capital, à la maturité",
+      "ok": true,
+      "synthese": "Synthèse avant enregistrement Capital d’origine 10 000 € Encours observé 10 000 € au 1 septembre 2026 Prochaine sortie 200 € le 1 septembre 2027 Premier remboursement de capital 1 septembre 2029 Dernière échéance 1 septembre 2029 (maturité déclarée) Prélèvements à venir 3, dont 1 amortissant du capital (durée déduite de la maturité) Capital futur remboursé 10 000 € Intérêts futurs 600 € Assurance "
+    },
+    {
+      "id": "B7",
+      "label": "base : in fine CONTRACT, maturité déclarée, durée et mensualité non persistées",
+      "ok": true,
+      "terms_status": "CONTRACT",
+      "amortisation_profile": "BULLET",
+      "payment_count": null,
+      "maturity_date": "2029-09-01",
+      "monthly_payment": null
+    },
+    {
+      "id": "B8",
+      "label": "bilan : deux dettes contractuelles comptées une fois chacune (1 500,50 + 10 000)",
+      "ok": true,
+      "contractuel": 11500.5
     },
     {
       "id": "M1",

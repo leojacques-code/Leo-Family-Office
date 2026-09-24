@@ -1,7 +1,7 @@
 {
-  "date": "2026-09-24T13:15:06.052Z",
+  "date": "2026-09-24T14:58:31.215Z",
   "app": "http://localhost:3120",
-  "utilisateur": "recette-b14-1790255681205@lfo.invalid",
+  "utilisateur": "recette-b14-1790261886253@lfo.invalid",
   "environnement": "pile Supabase auto-hébergée locale ; build de production",
   "checks": [
     {
@@ -195,7 +195,7 @@
       "label": "piste : avant, après, motif, champ modifié, acteur = propriétaire, rôle constaté",
       "ok": true,
       "piste": {
-        "actor_user_id": "83cacc6a-65a5-4055-ad63-bbb31adf652c",
+        "actor_user_id": "63710c42-8f25-4fba-b01a-1b6779c1895f",
         "executed_by": "service_role",
         "reason": "Montant saisi avant retenue à la source",
         "before_values": {
@@ -205,7 +205,7 @@
         },
         "after_values": {
           "label": "Salaire septembre",
-          "amount": "2405.35",
+          "amount": "2405.350000",
           "transaction_date": "2026-09-23"
         },
         "changed_fields": [

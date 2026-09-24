@@ -3565,9 +3565,11 @@ dd {
 }
 .debt-synthesis dt {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 .debt-synthesis dd {
   margin: 2px 0 0;
+  font-size: 14px;
   font-weight: 600;
+  color: var(--text);
 }
