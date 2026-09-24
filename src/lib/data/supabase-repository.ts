@@ -21,7 +21,7 @@ import {
 } from "@/lib/data/shared";
 import { buildFinancialDateContext, currentTaxYear, operationalToday } from "@/lib/financial-date";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
-import { debtCashOut, monthBounds } from "@/lib/engine/debt";
+import { debtCashOut, monthBounds, resolveContractTerms } from "@/lib/engine/debt";
 import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
 import {
   BUSINESS_AMOUNT_SCOPES,
@@ -424,7 +424,7 @@ function mapDebtFacts(
     .filter((row) => !isOutstandingOnly(row))
     .map((row) => {
       const observation = latestLiabilityObservations.get(str(row.id));
-      return {
+      const mapped: Liability = {
         ...readLoanTerms(row, {
           schedules: loanScheduleRows,
           earlyRepayments: earlyRepaymentRows,
@@ -454,19 +454,27 @@ function mapDebtFacts(
         // bilan, ce qui est SA décision et non un fait inventé par la couche de données).
         ...(observation ? { balanceDate: str(observation.observed_at) } : {}),
         annualRate: finiteNumber(row.annual_rate, `liabilities[id=${str(row.id)}].annual_rate`),
-        monthlyPayment: finiteNumber(
-          row.monthly_payment,
-          `liabilities[id=${str(row.id)}].monthly_payment`,
-        ),
-        paymentCount: finiteNumber(
-          row.payment_count,
-          `liabilities[id=${str(row.id)}].payment_count`,
-        ),
+        // Termes RÉSOLUS ci-dessous par le Debt Engine : aucune valeur n'est lue ici.
+        monthlyPayment: 0,
+        paymentCount: 0,
         firstPaymentDate: str(row.first_payment_date),
-        maturityDate: str(row.maturity_date),
+        maturityDate: "",
         contractNotes: optional(row.notes) ?? null,
         provenance: observation ? provenance(observation) : provenance(row),
       };
+      // B16 : mensualité, durée et maturité sont DÉCLARÉES ou non (NULL). Le Debt Engine
+      // déduit les termes manquants et nomme leur provenance ; rien de déduit n'est persisté.
+      return resolveContractTerms(mapped, {
+        monthlyPayment: nullableFiniteNumber(
+          row.monthly_payment,
+          `liabilities[id=${str(row.id)}].monthly_payment`,
+        ),
+        paymentCount: nullableFiniteNumber(
+          row.payment_count,
+          `liabilities[id=${str(row.id)}].payment_count`,
+        ),
+        maturityDate: row.maturity_date ? str(row.maturity_date) : null,
+      });
     });
 
   return { liabilities, outstandingDebts };

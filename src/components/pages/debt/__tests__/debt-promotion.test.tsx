@@ -45,6 +45,19 @@ describe("B16 : décrire le contrat d'une dette connue par son seul encours", ()
 
   it("envoie la même ligne avec la décision explicite, sans encours initial", async () => {
     const onSave = renderForm();
+    fireEvent.change(screen.getByLabelText("Mode de remboursement"), {
+      target: { value: "AMORTIZING" },
+    });
+    fireEvent.change(screen.getByLabelText("Type de taux"), { target: { value: "FIXED" } });
+    fireEvent.change(screen.getByLabelText("Périodicité des échéances"), {
+      target: { value: "MONTHLY" },
+    });
+    fireEvent.change(screen.getByLabelText("Convention d’intérêt"), {
+      target: { value: "PROPORTIONAL" },
+    });
+    fireEvent.change(screen.getByLabelText("Première échéance"), {
+      target: { value: "2026-02-05" },
+    });
     fireEvent.change(screen.getByLabelText("Prêteur"), { target: { value: "Famille" } });
     fill(/Capital initial emprunté/, "2000");
     fill(/Taux annuel/, "1");

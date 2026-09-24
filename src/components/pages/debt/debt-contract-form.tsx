@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { ScheduleImport } from "./schedule-import";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { MoneyInput } from "@/components/primitives/money-input";
@@ -9,28 +9,69 @@ import { PercentInput } from "@/components/primitives/percent-input";
 
 import type { DebtContractInput } from "@/lib/data/contracts";
 import { formatCurrency } from "@/lib/presentation/currency";
+import { draftSynthesis } from "@/lib/presentation/debt/contract-draft";
 import { formatDate } from "@/components/pages/shared";
 import type { Liability, OutstandingDebt } from "@/lib/types";
 
-function nextYear(date: string): string {
-  const parsed = new Date(`${date}T00:00:00Z`);
-  parsed.setUTCFullYear(parsed.getUTCFullYear() + 1);
-  return parsed.toISOString().slice(0, 10);
-}
+/**
+ * CONTRAT DE DETTE ADAPTATIF (B16, document 04 §3).
+ *
+ * Le formulaire commence par le MODE DE REMBOURSEMENT, puis ne révèle que les champs que ce
+ * mode exige. Aucun fait inconnu n'est prérempli : ni date d'échéance, ni maturité
+ * « aujourd'hui + un an », ni nombre d'échéances, ni convention. Pour un prêt amortissable,
+ * il suffit de connaître la mensualité OU la durée OU la maturité : le Debt Engine déduit le
+ * reste et la synthèse dit ce qui est déduit. Une synthèse (étape F) précède l'enregistrement.
+ */
 
-function blankContract(asOfDate: string): DebtContractInput {
+type Mode = "" | DebtContractInput["amortisationProfile"];
+type Structure = {
+  mode: Mode;
+  paymentFrequency: "" | DebtContractInput["paymentFrequency"];
+  interestConvention: "" | DebtContractInput["interestConvention"];
+  rateType: "" | DebtContractInput["rateType"];
+};
+
+const MODES: Array<{ value: Exclude<Mode, "">; label: string; hint: string }> = [
+  {
+    value: "AMORTIZING",
+    label: "Amortissable à échéance constante",
+    hint: "Taux, convention, fréquence, première échéance ; mensualité ou durée ou maturité.",
+  },
+  {
+    value: "INTEREST_ONLY",
+    label: "Intérêts seuls puis capital final",
+    hint: "Seuls les intérêts sont servis ; le capital est dû à la fin.",
+  },
+  {
+    value: "BULLET",
+    label: "In fine",
+    hint: "Intérêts à chaque échéance, tout le capital à la dernière.",
+  },
+  {
+    value: "BALLOON",
+    label: "Ballon",
+    hint: "Amortissement partiel puis un solde final important.",
+  },
+];
+
+/** Structures que le moteur ne calcule pas encore : enregistrables autrement, jamais converties. */
+const UNSUPPORTED =
+  "Amortissement constant, taux indexé avec reset, ligne renouvelable, découvert et échéances modulables ne sont pas encore calculés : enregistrez l’encours seul, ou fournissez l’échéancier de la banque.";
+
+function blankContract(): DebtContractInput {
   return {
     liabilityId: null,
     name: "",
     lender: "",
-    principal: 0,
-    initialBalance: 0,
-    balanceDate: asOfDate,
-    annualRate: 0,
-    paymentAmount: 0,
-    paymentCount: 12,
-    firstPaymentDate: asOfDate,
-    maturityDate: nextYear(asOfDate),
+    principal: Number.NaN,
+    initialBalance: null,
+    balanceDate: null,
+    annualRate: Number.NaN,
+    paymentAmount: null,
+    paymentCount: null,
+    firstPaymentDate: "",
+    maturityDate: null,
+    // Remplacés par la structure CHOISIE avant tout enregistrement (voir `submit`).
     amortisationProfile: "AMORTIZING",
     balloonAmount: null,
     paymentFrequency: "MONTHLY",
@@ -50,7 +91,16 @@ function blankContract(asOfDate: string): DebtContractInput {
   };
 }
 
+/**
+ * Réédition : les termes DÉCLARÉS, jamais ceux que le moteur a déduits. Réenregistrer une
+ * durée déduite la ferait passer pour une clause du contrat.
+ */
 function fromLiability(loan: Liability): DebtContractInput {
+  const declared = loan.declaredTerms ?? {
+    monthlyPayment: loan.monthlyPayment > 0 ? loan.monthlyPayment : null,
+    paymentCount: loan.paymentCount > 0 ? loan.paymentCount : null,
+    maturityDate: loan.maturityDate || null,
+  };
   return {
     liabilityId: loan.id,
     name: loan.name,
@@ -59,10 +109,10 @@ function fromLiability(loan: Liability): DebtContractInput {
     initialBalance: null,
     balanceDate: null,
     annualRate: loan.annualRate,
-    paymentAmount: loan.monthlyPayment,
-    paymentCount: loan.paymentCount,
+    paymentAmount: declared.monthlyPayment,
+    paymentCount: declared.paymentCount,
     firstPaymentDate: loan.firstPaymentDate,
-    maturityDate: loan.maturityDate,
+    maturityDate: declared.maturityDate,
     amortisationProfile: loan.amortisationProfile,
     balloonAmount: loan.balloonAmount,
     paymentFrequency: loan.paymentFrequency,
@@ -108,17 +158,24 @@ const nullableNumber = (value: string) => (value === "" ? null : number(value));
  * (aucune seconde dette) ; son encours observé et son historique ne sont pas redemandés, ils
  * restent l'observé que le Debt Engine confronte au contrat.
  */
-function fromOutstanding(debt: OutstandingDebt, asOfDate: string): DebtContractInput {
+function fromOutstanding(debt: OutstandingDebt): DebtContractInput {
   return {
-    ...blankContract(asOfDate),
+    ...blankContract(),
     liabilityId: debt.id,
     promoteOutstanding: true,
     name: debt.name,
     lender: debt.lender ?? "",
-    initialBalance: null,
-    balanceDate: null,
   };
 }
+
+/** Accordé au féminin : il qualifie la durée ou la maturité. */
+const RESOLUTION_LABELS: Record<string, string> = {
+  DECLARED: "déclarée",
+  DERIVED_FROM_MATURITY: "déduite de la maturité",
+  DERIVED_FROM_PAYMENT: "déduite de la mensualité",
+  DERIVED_FROM_COUNT: "déduite de la durée",
+  UNRESOLVED: "non calculable",
+};
 
 export function DebtContractForm({
   loan,
@@ -145,54 +202,131 @@ export function DebtContractForm({
   const existing = loan !== null || promoteFrom !== null;
   const currencyLabel = currency ?? "devise non renseignée";
   const [contract, setContract] = useState<DebtContractInput>(() =>
-    loan
-      ? fromLiability(loan)
-      : promoteFrom
-        ? fromOutstanding(promoteFrom, asOfDate)
-        : blankContract(asOfDate),
+    loan ? fromLiability(loan) : promoteFrom ? fromOutstanding(promoteFrom) : blankContract(),
   );
+  const [structure, setStructure] = useState<Structure>(() => ({
+    mode: loan ? loan.amortisationProfile : "",
+    paymentFrequency: loan ? loan.paymentFrequency : "",
+    interestConvention: loan ? loan.interestConvention : "",
+    rateType: loan ? loan.rateType : "",
+  }));
   const [requiredValues, setRequiredValues] = useState(() => ({
     principal: loan?.principal ?? null,
-    initialBalance: loan ? null : null,
+    initialBalance: null as number | null,
     annualRate: loan?.annualRate ?? null,
-    paymentAmount: loan?.monthlyPayment ?? null,
-    paymentCount: loan?.paymentCount ?? null,
   }));
   const [formError, setFormError] = useState<string | null>(null);
+  const mode = structure.mode;
+  const structureComplete =
+    mode !== "" &&
+    structure.paymentFrequency !== "" &&
+    structure.interestConvention !== "" &&
+    structure.rateType !== "";
 
   function setRequiredValue(key: keyof typeof requiredValues, value: number | null) {
     setRequiredValues((current) => ({ ...current, [key]: value }));
     if (value !== null) setContract((current) => ({ ...current, [key]: value }));
   }
 
+  /** Le contrat tel qu'il serait enregistré, structure CHOISIE comprise ; `null` si incomplète. */
+  const candidate = useMemo<DebtContractInput | null>(() => {
+    if (!structureComplete) return null;
+    return {
+      ...contract,
+      amortisationProfile: mode as DebtContractInput["amortisationProfile"],
+      paymentFrequency: structure.paymentFrequency as DebtContractInput["paymentFrequency"],
+      interestConvention: structure.interestConvention as DebtContractInput["interestConvention"],
+      rateType: structure.rateType as DebtContractInput["rateType"],
+      principal: requiredValues.principal ?? Number.NaN,
+      annualRate: requiredValues.annualRate ?? Number.NaN,
+      initialBalance: existing ? null : requiredValues.initialBalance,
+      // Un in fine ou des intérêts seuls n'ont pas de mensualité déclarée : l'échéance est
+      // l'intérêt de la période, que le moteur calcule.
+      paymentAmount: mode === "INTEREST_ONLY" || mode === "BULLET" ? null : contract.paymentAmount,
+      balloonAmount: mode === "BALLOON" ? contract.balloonAmount : null,
+    };
+  }, [contract, structure, mode, structureComplete, requiredValues, existing]);
+
+  const synthesis = useMemo(
+    () =>
+      candidate
+        ? draftSynthesis(
+            candidate,
+            {
+              id: loan?.id ?? promoteFrom?.id ?? "draft",
+              currency,
+              observedBalance: loan
+                ? loan.currentBalance
+                : promoteFrom
+                  ? promoteFrom.currentBalance
+                  : requiredValues.initialBalance,
+              observedBalanceDate: loan
+                ? (loan.balanceDate ?? null)
+                : promoteFrom
+                  ? (promoteFrom.balanceDate ?? null)
+                  : contract.balanceDate,
+            },
+            asOfDate,
+          )
+        : null,
+    [
+      candidate,
+      loan,
+      promoteFrom,
+      currency,
+      requiredValues.initialBalance,
+      contract.balanceDate,
+      asOfDate,
+    ],
+  );
+
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const missing =
+    if (!structureComplete || !candidate) {
+      setFormError(
+        "Choisissez le mode de remboursement, la périodicité, la convention d’intérêt et le type de taux.",
+      );
+      return;
+    }
+    if (
       requiredValues.principal === null ||
       requiredValues.annualRate === null ||
-      requiredValues.paymentAmount === null ||
-      requiredValues.paymentCount === null ||
-      !Number.isInteger(requiredValues.paymentCount) ||
-      requiredValues.paymentCount < 1 ||
-      (!existing && requiredValues.initialBalance === null);
-    if (missing) {
+      !contract.firstPaymentDate ||
+      (!existing && (requiredValues.initialBalance === null || !contract.balanceDate))
+    ) {
       setFormError(
-        "Complétez les montants, le taux et le nombre d’échéances avant l’enregistrement.",
+        existing
+          ? "Complétez le capital emprunté, le taux et la première échéance."
+          : "Complétez le capital emprunté, l’encours initial et sa date, le taux et la première échéance.",
+      );
+      return;
+    }
+    const fixesTerm =
+      candidate.paymentCount !== null ||
+      candidate.maturityDate !== null ||
+      (mode === "AMORTIZING" && candidate.paymentAmount !== null);
+    if (!fixesTerm) {
+      setFormError(
+        mode === "AMORTIZING"
+          ? "Indiquez ce que vous connaissez : la mensualité, le nombre d’échéances ou la maturité."
+          : "Indiquez le nombre d’échéances ou la maturité.",
+      );
+      return;
+    }
+    if (mode === "BALLOON" && candidate.balloonAmount === null) {
+      setFormError("Le solde final du ballon est requis pour ce mode.");
+      return;
+    }
+    if (synthesis?.resolution?.blocker) {
+      setFormError(
+        synthesis.resolution.blocker === "MATURITY_NOT_ON_SCHEDULE"
+          ? "La maturité ne tombe sur aucune échéance du calendrier : vérifiez la première échéance, la périodicité ou la maturité."
+          : "Cette mensualité ne rembourse pas le capital au taux indiqué : la durée n’est pas calculable.",
       );
       return;
     }
     setFormError(null);
-    if (
-      await onSave({
-        ...contract,
-        principal: requiredValues.principal!,
-        initialBalance: existing ? null : requiredValues.initialBalance,
-        annualRate: requiredValues.annualRate!,
-        paymentAmount: requiredValues.paymentAmount!,
-        paymentCount: requiredValues.paymentCount!,
-      })
-    )
-      onCancel();
+    if (await onSave(candidate)) onCancel();
   }
 
   return (
@@ -203,6 +337,27 @@ export function DebtContractForm({
           ? " La création est actuellement limitée à EUR, indépendamment de votre devise de lecture."
           : ""}
       </p>
+      <div className="full">
+        <label htmlFor="debt-mode">Mode de remboursement</label>
+        <select
+          aria-describedby="debt-mode-hint"
+          className="text-input"
+          id="debt-mode"
+          onChange={(event) => setStructure({ ...structure, mode: event.target.value as Mode })}
+          required
+          value={mode}
+        >
+          <option value="">Choisir le mode du contrat</option>
+          {MODES.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+        <small id="debt-mode-hint">
+          {mode ? MODES.find((item) => item.value === mode)?.hint : UNSUPPORTED}
+        </small>
+      </div>
       <ScheduleImport
         currency={currency}
         disabled={busy}
@@ -268,97 +423,59 @@ export function DebtContractForm({
           <input
             className="text-input"
             type="date"
+            max={asOfDate}
             value={contract.balanceDate ?? ""}
-            onChange={(event) => setContract({ ...contract, balanceDate: event.target.value })}
+            onChange={(event) =>
+              setContract({ ...contract, balanceDate: event.target.value || null })
+            }
             required
           />
         </label>
       ) : null}
-      <PercentInput
-        id="debt-annual-rate"
-        label="Taux annuel"
-        rateNature="NOMINAL"
-        value={requiredValues.annualRate}
-        onChange={(draft) =>
-          setRequiredValue("annualRate", draft.state === "VALID" ? draft.value : null)
-        }
-        required
-      />
-      <MoneyInput
-        id="debt-payment"
-        label="Paiement par échéance"
-        currency={currencyLabel}
-        value={requiredValues.paymentAmount}
-        onChange={(draft) =>
-          setRequiredValue("paymentAmount", draft.state === "VALID" ? draft.value : null)
-        }
-        required
-      />
-      <OptionalNumberInput
-        id="debt-payment-count"
-        label="Nombre d’échéances du contrat hors lignes fournies"
-        unit="échéances"
-        value={requiredValues.paymentCount}
-        onChange={(draft) =>
-          setRequiredValue("paymentCount", draft.state === "VALID" ? draft.value : null)
-        }
-        required
-      />
-      <label>
-        Première échéance du calendrier reconstruit
-        <input
-          className="text-input"
-          type="date"
-          value={contract.firstPaymentDate}
-          onChange={(event) => setContract({ ...contract, firstPaymentDate: event.target.value })}
-          required
-        />
-      </label>
-      <label>
-        Maturité contractuelle
-        <input
-          className="text-input"
-          type="date"
-          value={contract.maturityDate}
-          onChange={(event) => setContract({ ...contract, maturityDate: event.target.value })}
-          required
-        />
-      </label>
-
-      <details className="debt-advanced full">
-        <summary>Conditions avancées et événements</summary>
-        <div className="form-grid">
+      {mode ? (
+        <>
+          <PercentInput
+            id="debt-annual-rate"
+            label="Taux annuel nominal"
+            rateNature="NOMINAL"
+            value={requiredValues.annualRate}
+            onChange={(draft) =>
+              setRequiredValue("annualRate", draft.state === "VALID" ? draft.value : null)
+            }
+            required
+          />
           <label>
-            Profil d’amortissement
+            Type de taux
             <select
               className="text-input"
-              value={contract.amortisationProfile}
+              value={structure.rateType}
               onChange={(event) =>
-                setContract({
-                  ...contract,
-                  amortisationProfile: event.target
-                    .value as DebtContractInput["amortisationProfile"],
+                setStructure({
+                  ...structure,
+                  rateType: event.target.value as Structure["rateType"],
                 })
               }
+              required
             >
-              <option value="AMORTIZING">Amortissable</option>
-              <option value="INTEREST_ONLY">Intérêts seuls</option>
-              <option value="BULLET">In fine</option>
-              <option value="BALLOON">Balloon</option>
+              <option value="">Choisir</option>
+              <option value="FIXED">Fixe</option>
+              <option value="VARIABLE">Révisable</option>
             </select>
           </label>
           <label>
-            Périodicité
+            Périodicité des échéances
             <select
               className="text-input"
-              value={contract.paymentFrequency}
+              value={structure.paymentFrequency}
               onChange={(event) =>
-                setContract({
-                  ...contract,
-                  paymentFrequency: event.target.value as DebtContractInput["paymentFrequency"],
+                setStructure({
+                  ...structure,
+                  paymentFrequency: event.target.value as Structure["paymentFrequency"],
                 })
               }
+              required
             >
+              <option value="">Choisir</option>
               <option value="MONTHLY">Mensuelle</option>
               <option value="QUARTERLY">Trimestrielle</option>
               <option value="SEMIANNUAL">Semestrielle</option>
@@ -369,47 +486,207 @@ export function DebtContractForm({
             Convention d’intérêt
             <select
               className="text-input"
-              value={contract.interestConvention}
+              value={structure.interestConvention}
               onChange={(event) =>
-                setContract({
-                  ...contract,
-                  interestConvention: event.target.value as DebtContractInput["interestConvention"],
+                setStructure({
+                  ...structure,
+                  interestConvention: event.target.value as Structure["interestConvention"],
                 })
               }
+              required
             >
+              <option value="">Choisir</option>
               <option value="PROPORTIONAL">Proportionnelle à la période</option>
               <option value="ACTUAL_365">Jours réels / 365</option>
             </select>
           </label>
           <label>
-            Type de taux
-            <select
+            Première échéance
+            <input
               className="text-input"
-              value={contract.rateType}
+              type="date"
+              value={contract.firstPaymentDate}
               onChange={(event) =>
-                setContract({ ...contract, rateType: event.target.value as "FIXED" | "VARIABLE" })
+                setContract({ ...contract, firstPaymentDate: event.target.value })
               }
-            >
-              <option value="FIXED">Fixe</option>
-              <option value="VARIABLE">Révisable</option>
-            </select>
+              required
+            />
           </label>
-          {contract.amortisationProfile === "BALLOON" ? (
+          <fieldset className="full debt-terms">
+            <legend>
+              {mode === "AMORTIZING"
+                ? "Ce que vous connaissez : au moins la mensualité, le nombre d’échéances ou la maturité"
+                : "Durée : le nombre d’échéances ou la maturité"}
+            </legend>
+            {mode === "AMORTIZING" || mode === "BALLOON" ? (
+              <MoneyInput
+                id="debt-payment"
+                label="Paiement par échéance (facultatif si la durée est connue)"
+                currency={currencyLabel}
+                value={contract.paymentAmount}
+                onChange={(draft) =>
+                  setContract({
+                    ...contract,
+                    paymentAmount: draft.state === "VALID" ? draft.value : null,
+                  })
+                }
+              />
+            ) : null}
+            <OptionalNumberInput
+              id="debt-payment-count"
+              label="Nombre d’échéances"
+              unit="échéances"
+              value={contract.paymentCount}
+              onChange={(draft) =>
+                setContract({
+                  ...contract,
+                  paymentCount: draft.state === "VALID" ? draft.value : null,
+                })
+              }
+            />
             <label>
-              Solde balloon
+              Maturité contractuelle
               <input
                 className="text-input"
-                type="number"
-                min="0"
-                step="0.01"
-                value={contract.balloonAmount ?? ""}
+                type="date"
+                value={contract.maturityDate ?? ""}
                 onChange={(event) =>
-                  setContract({ ...contract, balloonAmount: nullableNumber(event.target.value) })
+                  setContract({ ...contract, maturityDate: event.target.value || null })
+                }
+              />
+            </label>
+            {mode === "BALLOON" ? (
+              <MoneyInput
+                id="debt-balloon"
+                label="Solde final du ballon"
+                currency={currencyLabel}
+                value={contract.balloonAmount}
+                onChange={(draft) =>
+                  setContract({
+                    ...contract,
+                    balloonAmount: draft.state === "VALID" ? draft.value : null,
+                  })
                 }
                 required
               />
-            </label>
+            ) : null}
+          </fieldset>
+        </>
+      ) : null}
+
+      {synthesis ? (
+        <section aria-label="Synthèse du contrat" className="full debt-synthesis">
+          <strong>Synthèse avant enregistrement</strong>
+          {synthesis.resolution?.blocker ? (
+            <p className="form-error" role="status">
+              Échéancier non calculable avec ces termes :{" "}
+              {synthesis.resolution.blocker === "MATURITY_NOT_ON_SCHEDULE"
+                ? "la maturité ne tombe sur aucune échéance."
+                : synthesis.resolution.blocker === "PAYMENT_DOES_NOT_AMORTISE"
+                  ? "la mensualité ne rembourse pas le capital."
+                  : "il manque la mensualité, la durée ou la maturité."}
+            </p>
+          ) : (
+            <dl>
+              <div>
+                <dt>Capital d’origine</dt>
+                <dd>{formatCurrency(synthesis.principal, currency)}</dd>
+              </div>
+              <div>
+                <dt>Encours observé</dt>
+                <dd>
+                  {formatCurrency(synthesis.observedBalance, currency)}
+                  {synthesis.observedBalanceDate
+                    ? ` au ${formatDate(synthesis.observedBalanceDate)}`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>Prochaine sortie</dt>
+                <dd>
+                  {synthesis.nextCashOut
+                    ? `${formatCurrency(synthesis.nextCashOut.amount, currency)} le ${formatDate(synthesis.nextCashOut.date)}`
+                    : "Aucune à venir"}
+                </dd>
+              </div>
+              <div>
+                <dt>Premier remboursement de capital</dt>
+                <dd>
+                  {synthesis.firstPrincipalDate
+                    ? formatDate(synthesis.firstPrincipalDate)
+                    : "Aucun à venir"}
+                </dd>
+              </div>
+              <div>
+                <dt>Dernière échéance</dt>
+                <dd>
+                  {synthesis.lastDueDate ? formatDate(synthesis.lastDueDate) : "Non calculable"}
+                  {synthesis.resolution
+                    ? ` (maturité ${RESOLUTION_LABELS[synthesis.resolution.maturityDate]})`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>Prélèvements à venir</dt>
+                <dd>
+                  {synthesis.paymentCount}, dont {synthesis.amortisingPaymentCount} amortissant du
+                  capital
+                  {synthesis.resolution
+                    ? ` (durée ${RESOLUTION_LABELS[synthesis.resolution.paymentCount]})`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>Capital futur remboursé</dt>
+                <dd>{formatCurrency(synthesis.futurePrincipal, currency)}</dd>
+              </div>
+              <div>
+                <dt>Intérêts futurs</dt>
+                <dd>{formatCurrency(synthesis.futureInterest, currency)}</dd>
+              </div>
+              <div>
+                <dt>Assurance future</dt>
+                <dd>
+                  {synthesis.futureInsurance === null
+                    ? "Inconnue"
+                    : formatCurrency(synthesis.futureInsurance, currency)}
+                </dd>
+              </div>
+              <div>
+                <dt>Frais futurs</dt>
+                <dd>
+                  {synthesis.futureFees === null
+                    ? "Inconnus"
+                    : formatCurrency(synthesis.futureFees, currency)}
+                </dd>
+              </div>
+              <div>
+                <dt>Total des sorties futures</dt>
+                <dd>
+                  {synthesis.futureCashOut.value === null
+                    ? "Non calculable"
+                    : `${formatCurrency(synthesis.futureCashOut.value, currency)}${
+                        synthesis.futureCashOut.complete
+                          ? ""
+                          : ` connus, hors ${synthesis.unknowns.join(" et ")}`
+                      }`}
+                </dd>
+              </div>
+            </dl>
+          )}
+          {synthesis.flags.length ? (
+            <ul className="muted-copy">
+              {synthesis.flags.map((flag, index) => (
+                <li key={`${flag.code}-${index}`}>{flag.detail}</li>
+              ))}
+            </ul>
           ) : null}
+        </section>
+      ) : null}
+
+      <details className="debt-advanced full">
+        <summary>Conditions avancées et événements</summary>
+        <div className="form-grid">
           <label>
             Assurance par échéance (vide = inconnue)
             <input
@@ -613,7 +890,11 @@ export function DebtContractForm({
               ...contract,
               paymentSchedule: [
                 ...contract.paymentSchedule,
-                { effectiveFrom: asOfDate, amount: contract.paymentAmount, kind: "CONTRACTUAL" },
+                {
+                  effectiveFrom: contract.firstPaymentDate || asOfDate,
+                  amount: contract.paymentAmount ?? 0,
+                  kind: "CONTRACTUAL",
+                },
               ],
             })
           }
@@ -910,7 +1191,11 @@ export function DebtContractForm({
         </button>
         <button className="button primary" disabled={busy}>
           <Save size={15} />
-          Enregistrer la dette
+          {promoteFrom
+            ? "Enregistrer le contrat"
+            : existing
+              ? "Enregistrer le contrat"
+              : "Ajouter cette dette"}
         </button>
       </div>
     </form>

@@ -45,6 +45,8 @@ vi.mock("@/lib/engine/debt", () => ({
   }),
   nextDebtEvent: () => null,
 }));
+// La synthèse du formulaire appelle le vrai moteur, remplacé ici par un double partiel.
+vi.mock("@/lib/presentation/debt/contract-draft", () => ({ draftSynthesis: () => null }));
 vi.mock("@/lib/engine/decision", () => ({
   compareDebtVsInvest: vi.fn(() => ({
     capital: 50,

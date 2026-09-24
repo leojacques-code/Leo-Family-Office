@@ -207,7 +207,40 @@ export interface OutstandingDebt {
   provenance: Provenance;
 }
 
+/**
+ * Termes du contrat tels que DÉCLARÉS (document 04, étape C : « montant ou durée selon la
+ * donnée connue »). `null` = non déclaré, jamais zéro. Les champs de `Liability` portent les
+ * valeurs RÉSOLUES par le Debt Engine ; ceux-ci sont ce qu'un formulaire réédite.
+ */
+export interface DeclaredDebtTerms {
+  monthlyPayment: number | null;
+  paymentCount: number | null;
+  maturityDate: string | null;
+}
+
+/** Provenance d'un terme résolu. `UNRESOLVED` : non déductible, l'échéancier est MISSING. */
+export type DebtTermResolution =
+  | "DECLARED"
+  | "DERIVED_FROM_MATURITY"
+  | "DERIVED_FROM_PAYMENT"
+  | "DERIVED_FROM_COUNT"
+  | "UNRESOLVED";
+
+export interface DebtTermsResolution {
+  monthlyPayment: DebtTermResolution;
+  paymentCount: DebtTermResolution;
+  maturityDate: DebtTermResolution;
+  /** Raison d'une résolution impossible, en code fermé. */
+  blocker: "TERMS_INSUFFICIENT" | "MATURITY_NOT_ON_SCHEDULE" | "PAYMENT_DOES_NOT_AMORTISE" | null;
+}
+
 export interface Liability {
+  /**
+   * Termes déclarés et provenance de leur résolution. Absents = tous les termes déclarés
+   * (données antérieures au contrat adaptatif, fixtures, prêts synthétiques).
+   */
+  declaredTerms?: DeclaredDebtTerms;
+  termsResolution?: DebtTermsResolution;
   /** Notes du contrat, distinctes de la provenance du dernier encours observé. */
   contractNotes?: string | null;
   id: string;

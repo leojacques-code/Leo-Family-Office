@@ -1,6 +1,9 @@
 import { formatCurrency } from "@/lib/presentation/currency";
 import { MONTHS_PER_PERIOD } from "@/lib/types";
 import type {
+  DebtTermResolution,
+  DebtTermsResolution,
+  DeclaredDebtTerms,
   DataKind,
   EarlyRepayment,
   InterestConvention,
@@ -117,7 +120,9 @@ export type LoanFlagCode =
   | "PROVIDED_SCHEDULE_USED"
   | "VARIABLE_RATE_UNPROJECTABLE"
   | "RATE_ASSUMPTION_APPLIED"
-  | "BALLOON_AMOUNT_MISSING";
+  | "BALLOON_AMOUNT_MISSING"
+  | "TERMS_DERIVED"
+  | "TERMS_UNRESOLVED";
 
 export interface LoanScheduleFlag {
   code: LoanFlagCode;
@@ -424,6 +429,141 @@ function deferralOf(liability: Liability): {
   const months = Math.max(0, Math.trunc(declared.months));
   if (months === 0) return { kind: "NONE", months: 0 };
   return { kind: declared.kind, months };
+}
+
+// ─── Contrat adaptatif : résolution des termes (B16) ──────────────────────────────────
+
+/** Plafond de la recherche d'une durée : cent ans d'échéances mensuelles. */
+const MAX_DERIVED_PAYMENTS = 1200;
+
+/**
+ * Résout les termes d'un contrat dont la mensualité, la durée ou la maturité ne sont pas
+ * toutes déclarées (document 04, étape C).
+ *
+ *   * durée déclarée : retenue telle quelle ;
+ *   * sinon maturité déclarée : la durée est le rang de l'échéance qui tombe à cette date ;
+ *     une maturité hors du calendrier des échéances n'est PAS arrondie, elle bloque ;
+ *   * sinon, pour un prêt amortissable, mensualité déclarée : la durée est celle que CE
+ *     MOTEUR met à rembourser le capital avec cette mensualité. Aucune seconde formule : la
+ *     boucle d'amortissement, qui ajuste la dernière échéance, est le seul producteur. Une
+ *     mensualité qui ne rembourse pas le capital dans le plafond bloque ;
+ *   * la maturité non déclarée est la date de la dernière échéance résolue ;
+ *   * la mensualité non déclarée reste celle que le moteur dérive du contrat.
+ *
+ * Un contrat non résoluble garde une durée de 0 : son échéancier est MISSING, et les métriques
+ * disent « non projetable », jamais zéro. Fonction pure.
+ */
+export function resolveContractTerms(liability: Liability, declared: DeclaredDebtTerms): Liability {
+  const payment =
+    declared.monthlyPayment !== null && declared.monthlyPayment > 0
+      ? declared.monthlyPayment
+      : null;
+  const base: Liability = {
+    ...liability,
+    monthlyPayment: payment ?? 0,
+    paymentCount: declared.paymentCount ?? 0,
+    maturityDate: declared.maturityDate ?? "",
+    declaredTerms: { ...declared, monthlyPayment: payment },
+  };
+  const profile = base.amortisationProfile ?? "AMORTIZING";
+  const unresolved = (blocker: NonNullable<DebtTermsResolution["blocker"]>): Liability => ({
+    ...base,
+    paymentCount: 0,
+    termsResolution: {
+      monthlyPayment: payment !== null ? "DECLARED" : "UNRESOLVED",
+      paymentCount: "UNRESOLVED",
+      maturityDate: declared.maturityDate !== null ? "DECLARED" : "UNRESOLVED",
+      blocker,
+    },
+  });
+  if (parseIsoDate(base.firstPaymentDate) === null) return unresolved("TERMS_INSUFFICIENT");
+
+  let count: number;
+  let countResolution: DebtTermResolution;
+  if (declared.paymentCount !== null && declared.paymentCount >= 1) {
+    count = Math.trunc(declared.paymentCount);
+    countResolution = "DECLARED";
+  } else if (declared.maturityDate !== null) {
+    let found = 0;
+    for (let rank = 1; rank <= MAX_DERIVED_PAYMENTS; rank += 1) {
+      const due = dueDateOf(base, rank);
+      if (due === declared.maturityDate) {
+        found = rank;
+        break;
+      }
+      if (due > declared.maturityDate) break;
+    }
+    if (found === 0) return unresolved("MATURITY_NOT_ON_SCHEDULE");
+    count = found;
+    countResolution = "DERIVED_FROM_MATURITY";
+  } else if (payment !== null && profile === "AMORTIZING" && base.principal > 0) {
+    const probe = amortise({
+      liability: { ...base, paymentCount: MAX_DERIVED_PAYMENTS },
+      openingBalance: base.principal,
+      firstPaymentNumber: 1,
+      paymentsToProduce: MAX_DERIVED_PAYMENTS,
+      events: [],
+    });
+    const payments = probe.entries.filter((row) => row.entryKind === "PAYMENT");
+    const last = payments.at(-1);
+    if (!last || last.closingBalance > CENT || payments.length >= MAX_DERIVED_PAYMENTS)
+      return unresolved("PAYMENT_DOES_NOT_AMORTISE");
+    count = payments.length;
+    countResolution = "DERIVED_FROM_PAYMENT";
+  } else {
+    return unresolved("TERMS_INSUFFICIENT");
+  }
+
+  const resolved: Liability = { ...base, paymentCount: count };
+  return {
+    ...resolved,
+    maturityDate: declared.maturityDate ?? dueDateOf(resolved, count),
+    termsResolution: {
+      monthlyPayment: payment !== null ? "DECLARED" : "DERIVED_FROM_COUNT",
+      paymentCount: countResolution,
+      maturityDate: declared.maturityDate !== null ? "DECLARED" : "DERIVED_FROM_COUNT",
+      blocker: null,
+    },
+  };
+}
+
+/**
+ * Raison pour laquelle des termes DÉCLARÉS ne permettent aucun échéancier, ou `null`.
+ * Sert à refuser un contrat avant écriture : la base contrôle la forme, jamais la finance.
+ */
+export function contractTermsBlocker(input: {
+  principal: number;
+  annualRate: number;
+  amortisationProfile: Liability["amortisationProfile"];
+  balloonAmount: number | null;
+  paymentFrequency: Liability["paymentFrequency"];
+  interestConvention: Liability["interestConvention"];
+  firstPaymentDate: string;
+  monthlyInsurance: number | null;
+  paymentIncludesInsurance: boolean | null;
+  declared: DeclaredDebtTerms;
+}): DebtTermsResolution["blocker"] {
+  const draft: Liability = {
+    ...UNDECLARED_LOAN_TERMS,
+    id: "draft",
+    name: "",
+    lender: "",
+    principal: input.principal,
+    currentBalance: input.principal,
+    annualRate: input.annualRate,
+    monthlyPayment: 0,
+    paymentCount: 0,
+    firstPaymentDate: input.firstPaymentDate,
+    maturityDate: "",
+    amortisationProfile: input.amortisationProfile,
+    balloonAmount: input.balloonAmount,
+    paymentFrequency: input.paymentFrequency,
+    interestConvention: input.interestConvention,
+    monthlyInsurance: input.monthlyInsurance,
+    paymentIncludesInsurance: input.paymentIncludesInsurance,
+    provenance: { kind: "USER_ASSUMPTION", confidence: "HIGH" },
+  };
+  return resolveContractTerms(draft, input.declared).termsResolution?.blocker ?? null;
 }
 
 // ─── Cœur d'amortissement ─────────────────────────────────────────────────────────────
@@ -989,6 +1129,40 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
         "Première échéance non datée : aucune échéance ne peut être positionnée dans le temps.",
     });
   }
+  // Contrat adaptatif : un terme déduit n'est pas un terme déclaré, et un contrat non
+  // résoluble le dit au lieu de produire un échéancier vide lu comme « rien à payer ».
+  const resolution = liability.termsResolution;
+  if (resolution?.blocker) {
+    flags.push({
+      code: "TERMS_UNRESOLVED",
+      detail:
+        resolution.blocker === "MATURITY_NOT_ON_SCHEDULE"
+          ? "La maturité déclarée ne tombe sur aucune échéance du calendrier : la durée n'est pas déductible, aucune n'est supposée."
+          : resolution.blocker === "PAYMENT_DOES_NOT_AMORTISE"
+            ? "La mensualité déclarée ne rembourse pas le capital : la durée n'est pas déductible, aucune n'est supposée."
+            : "Ni durée, ni maturité, ni mensualité exploitable : l'échéancier n'est pas calculable.",
+    });
+  } else if (resolution) {
+    const derived = [
+      resolution.paymentCount === "DERIVED_FROM_PAYMENT"
+        ? "la durée, déduite de la mensualité"
+        : null,
+      resolution.paymentCount === "DERIVED_FROM_MATURITY"
+        ? "la durée, déduite de la maturité"
+        : null,
+      resolution.maturityDate === "DERIVED_FROM_COUNT"
+        ? "la maturité, date de la dernière échéance"
+        : null,
+      resolution.monthlyPayment === "DERIVED_FROM_COUNT"
+        ? "la mensualité, dérivée du capital, du taux et de la durée"
+        : null,
+    ].filter((item): item is string => item !== null);
+    if (derived.length > 0)
+      flags.push({
+        code: "TERMS_DERIVED",
+        detail: `Termes non déclarés, calculés par le moteur : ${derived.join(" ; ")}.`,
+      });
+  }
   if (hasProvidedSchedule(liability)) {
     flags.push({
       code: "PROVIDED_SCHEDULE_USED",
@@ -1112,6 +1286,88 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
     contractualGap,
     impliedChargePerPayment,
     flags: merged,
+  };
+}
+
+// ─── Synthèse d'un contrat (document 04, étape F) ────────────────────────────────────
+
+/** Un total qui porte un terme inconnu n'est pas complet : il le dit, il ne vaut pas zéro. */
+export interface PartialTotal {
+  /** Somme des composants connus. `null` quand aucun composant n'est connu. */
+  value: number | null;
+  complete: boolean;
+}
+
+/**
+ * Ce que la synthèse d'un contrat doit afficher séparément avant validation : principal
+ * d'origine, encours observé, prochaine sortie, premier remboursement de capital, dernière
+ * échéance, nombres de prélèvements et d'amortissements, capital futur, intérêts, assurance,
+ * frais, total des sorties, et ce qui reste inconnu. AUCUN chiffre n'est calculé ailleurs :
+ * tout vient de l'échéancier forward du moteur.
+ */
+export interface ContractSynthesis {
+  kind: DataKind;
+  resolution: DebtTermsResolution | null;
+  principal: number;
+  observedBalance: number;
+  observedBalanceDate: string | null;
+  nextCashOut: { date: string; amount: number } | null;
+  firstPrincipalDate: string | null;
+  lastDueDate: string | null;
+  paymentCount: number;
+  amortisingPaymentCount: number;
+  futurePrincipal: number;
+  futureInterest: number;
+  /** `null` : assurance non renseignée ; 0 seulement si DÉCLARÉE nulle. */
+  futureInsurance: number | null;
+  /** `null` : frais récurrents non renseignés et aucun frais ponctuel déclaré. */
+  futureFees: number | null;
+  futureCashOut: PartialTotal;
+  unknowns: string[];
+  flags: LoanScheduleFlag[];
+}
+
+export function summariseContract(liability: Liability, asOfDate: string): ContractSynthesis {
+  const timeline = buildLoanTimeline(liability, asOfDate);
+  const rows = timeline.forward.entries;
+  const payments = rows.filter((row) => row.entryKind === "PAYMENT");
+  const sum = (pick: (row: LoanScheduleEntry) => number) =>
+    rows.reduce((total, row) => total + pick(row), 0);
+  const insuranceKnown = liability.monthlyInsurance !== null;
+  const feesKnown = liability.recurringFees !== null;
+  const futurePrincipal = sum((row) => row.principal);
+  const futureInterest = sum((row) => row.interest);
+  const futureInsurance = insuranceKnown ? sum((row) => row.insurance) : null;
+  const futureFees =
+    feesKnown || liability.oneOffCharges.length > 0 ? sum((row) => row.fees) : null;
+  const unknowns = [
+    ...(insuranceKnown ? [] : ["assurance"]),
+    ...(feesKnown ? [] : ["frais récurrents"]),
+    ...(timeline.forward.kind === "MISSING" ? ["échéancier"] : []),
+  ];
+  const next = rows.find((row) => row.totalCashOut > 0);
+  const firstPrincipal = rows.find((row) => row.principal > 0);
+  return {
+    kind: timeline.forward.kind,
+    resolution: liability.termsResolution ?? null,
+    principal: liability.principal,
+    observedBalance: liability.currentBalance,
+    observedBalanceDate: liability.balanceDate ?? null,
+    nextCashOut: next ? { date: next.dueDate, amount: next.totalCashOut } : null,
+    firstPrincipalDate: firstPrincipal?.dueDate ?? null,
+    lastDueDate: timeline.forward.lastDueDate,
+    paymentCount: payments.length,
+    amortisingPaymentCount: payments.filter((row) => row.principal > 0).length,
+    futurePrincipal,
+    futureInterest,
+    futureInsurance,
+    futureFees,
+    futureCashOut: {
+      value: timeline.forward.kind === "MISSING" ? null : sum((row) => row.totalCashOut),
+      complete: unknowns.length === 0,
+    },
+    unknowns,
+    flags: timeline.flags,
   };
 }
 

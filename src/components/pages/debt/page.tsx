@@ -334,7 +334,15 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
     monthWindow.end,
   );
   const upcoming = nextDebtEvent([loan], state.asOfDate);
-  const contractualTotal = loan.monthlyPayment * loan.paymentCount;
+  // B16 : l'écart « paiement × durée − capital » n'a de sens que si paiement ET durée sont
+  // DÉCLARÉS. Un terme déduit par le moteur boucle par construction : l'écart serait un
+  // artefact du calcul, présenté comme une anomalie du contrat.
+  const termsDeclared =
+    !loan.termsResolution ||
+    (loan.termsResolution.monthlyPayment === "DECLARED" &&
+      loan.termsResolution.paymentCount === "DECLARED");
+  const paymentDeclared =
+    !loan.termsResolution || loan.termsResolution.monthlyPayment === "DECLARED";
   // Un échéancier bancaire utilisé est une bonne nouvelle, pas une anomalie : le mélanger
   // aux écarts de réconciliation ferait passer une information pour un problème.
   const providedNotice = timeline.flags.find((flag) => flag.code === "PROVIDED_SCHEDULE_USED");
@@ -374,7 +382,9 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
               ? upcoming
                 ? `Aucune échéance exigible ce mois · prochaine le ${formatDate(upcoming.entry.dueDate)}`
                 : "Aucune échéance exigible ce mois"
-              : `Paiement ${FREQUENCY_LABELS[loan.paymentFrequency]} annoncé ${formatLoanAmount(loan.monthlyPayment)}`
+              : paymentDeclared
+                ? `Paiement ${FREQUENCY_LABELS[loan.paymentFrequency]} annoncé ${formatLoanAmount(loan.monthlyPayment)}`
+                : `Paiement ${FREQUENCY_LABELS[loan.paymentFrequency]} non déclaré, dérivé par le moteur`
           }
           onExplain={() =>
             setExplanation({
@@ -409,7 +419,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             })
           }
         />
-        {loan.amortisationProfile === "AMORTIZING" ? (
+        {loan.amortisationProfile === "AMORTIZING" && termsDeclared ? (
           <MetricCard
             label="Écart du paiement contractuel"
             value={<Currency currency={currency} value={timeline.contractualGap} />}
@@ -439,7 +449,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                     source: loan.provenance.source,
                   },
                 ],
-                note: `${formatLoanAmount(contractualTotal)} − ${formatLoanAmount(loan.principal)} = ${formatLoanAmount(timeline.contractualGap)}. Aucune explication n’est supposée.`,
+                note: `Écart calculé par le moteur : ${formatLoanAmount(timeline.contractualGap)}. Aucune explication n’est supposée.`,
               })
             }
           />
@@ -447,7 +457,11 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           <MetricCard
             label="Profil contractuel"
             value={PROFILE_LABELS[loan.amortisationProfile]}
-            detail={`${loan.paymentCount} échéances · fréquence ${FREQUENCY_LABELS[loan.paymentFrequency]}`}
+            detail={`${loan.paymentCount} échéances${
+              loan.termsResolution && loan.termsResolution.paymentCount !== "DECLARED"
+                ? " (durée calculée, non déclarée)"
+                : ""
+            } · fréquence ${FREQUENCY_LABELS[loan.paymentFrequency]}`}
           />
         )}
       </section>
@@ -580,8 +594,12 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
               <dd>{formatDate(loan.firstPaymentDate)}</dd>
             </div>
             <div>
-              <dt>Dernière échéance annoncée</dt>
-              <dd>{formatDate(loan.maturityDate)}</dd>
+              <dt>
+                {loan.termsResolution && loan.termsResolution.maturityDate !== "DECLARED"
+                  ? "Dernière échéance calculée"
+                  : "Dernière échéance annoncée"}
+              </dt>
+              <dd>{loan.maturityDate ? formatDate(loan.maturityDate) : "Non calculable"}</dd>
             </div>
             <div>
               <dt>Dernière échéance dérivée</dt>

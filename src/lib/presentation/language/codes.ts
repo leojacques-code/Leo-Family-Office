@@ -118,6 +118,8 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
   },
   INSURANCE_TREATMENT_UNKNOWN: { label: "Traitement de l’assurance emprunteur inconnu", state: A },
   MATURITY_MISMATCH: { label: "Maturité incohérente avec l’échéancier", state: C },
+  TERMS_DERIVED: { label: "Termes du contrat calculés, non déclarés", state: "AVAILABLE" },
+  TERMS_UNRESOLVED: { label: "Échéancier non calculable avec les termes déclarés", state: P },
   NEGATIVE_AMORTISATION: { label: "Amortissement négatif : l’encours augmente", state: C },
   PAYMENT_EXCEEDS_AMORTISATION: { label: "Échéance supérieure à l’amortissement", state: C },
   PROVIDED_SCHEDULE_USED: { label: "Échéancier fourni par la banque", state: "AVAILABLE" },

@@ -1,3 +1,4 @@
+import { contractTermsBlocker } from "@/lib/engine/debt";
 import { z } from "zod";
 
 import {
@@ -140,10 +141,12 @@ const debtContractSchema = z
     initialBalance: nullableMoney,
     balanceDate: realDate.nullable(),
     annualRate: finite.min(0).max(10),
-    paymentAmount: finite.nonnegative(),
-    paymentCount: z.number().int().positive().max(1200),
+    // Document 04, étape C : « montant OU durée selon la donnée connue ». `null` = non
+    // déclaré ; un paiement à zéro n'est pas un paiement. Le Debt Engine déduit le reste.
+    paymentAmount: finite.positive().nullable(),
+    paymentCount: z.number().int().positive().max(1200).nullable(),
     firstPaymentDate: realDate,
-    maturityDate: realDate,
+    maturityDate: realDate.nullable(),
     amortisationProfile: z.enum(["AMORTIZING", "INTEREST_ONLY", "BULLET", "BALLOON"]),
     balloonAmount: nullableMoney,
     paymentFrequency: z.enum(["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL"]),
@@ -235,7 +238,50 @@ const debtContractSchema = z
         path: ["balloonAmount"],
       });
     }
-    if (contract.maturityDate < contract.firstPaymentDate) {
+    const fixesTerm =
+      contract.paymentCount !== null ||
+      contract.maturityDate !== null ||
+      (contract.amortisationProfile === "AMORTIZING" && contract.paymentAmount !== null);
+    if (!fixesTerm) {
+      context.addIssue({
+        code: "custom",
+        message:
+          contract.amortisationProfile === "AMORTIZING"
+            ? "Indiquez la mensualité, le nombre d’échéances ou la maturité"
+            : "Indiquez le nombre d’échéances ou la maturité",
+        path: ["paymentCount"],
+      });
+    } else if (contract.providedSchedule.length === 0) {
+      const blocker = contractTermsBlocker({
+        principal: contract.principal,
+        annualRate: contract.annualRate,
+        amortisationProfile: contract.amortisationProfile,
+        balloonAmount: contract.balloonAmount,
+        paymentFrequency: contract.paymentFrequency,
+        interestConvention: contract.interestConvention,
+        firstPaymentDate: contract.firstPaymentDate,
+        monthlyInsurance: contract.insuranceAmount,
+        paymentIncludesInsurance: contract.paymentIncludesInsurance,
+        declared: {
+          monthlyPayment: contract.paymentAmount,
+          paymentCount: contract.paymentCount,
+          maturityDate: contract.maturityDate,
+        },
+      });
+      if (blocker === "MATURITY_NOT_ON_SCHEDULE")
+        context.addIssue({
+          code: "custom",
+          message: "La maturité ne tombe sur aucune échéance du calendrier déclaré",
+          path: ["maturityDate"],
+        });
+      if (blocker === "PAYMENT_DOES_NOT_AMORTISE")
+        context.addIssue({
+          code: "custom",
+          message: "Cette mensualité ne rembourse pas le capital : la durée n’est pas calculable",
+          path: ["paymentAmount"],
+        });
+    }
+    if (contract.maturityDate !== null && contract.maturityDate < contract.firstPaymentDate) {
       context.addIssue({
         code: "custom",
         message: "La maturité doit être postérieure à la première échéance",

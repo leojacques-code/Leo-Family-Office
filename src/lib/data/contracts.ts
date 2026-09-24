@@ -60,10 +60,11 @@ export interface DebtContractInput {
   initialBalance: number | null;
   balanceDate: string | null;
   annualRate: number;
-  paymentAmount: number;
-  paymentCount: number;
+  /** `null` = non déclaré (document 04 : montant OU durée selon la donnée connue). */
+  paymentAmount: number | null;
+  paymentCount: number | null;
   firstPaymentDate: string;
-  maturityDate: string;
+  maturityDate: string | null;
   amortisationProfile: AmortisationProfile;
   balloonAmount: number | null;
   paymentFrequency: PaymentFrequency;

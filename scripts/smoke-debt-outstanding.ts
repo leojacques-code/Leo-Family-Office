@@ -169,7 +169,7 @@ try {
     "update public.liabilities set annual_rate = 0.03 where id = $1",
     [liabilityId],
     "Terme isolé accepté sur une dette encours seul",
-    "liabilities_terms_completeness_ck",
+    "liabilities_terms_completeness_v2_ck",
   );
   await rejects(
     `insert into public.liabilities (user_id, name, lender, current_balance, currency,
@@ -177,7 +177,7 @@ try {
      values ($1, 'Contrat sans termes', 'Banque', 10, 'EUR', 'ACTUAL', 'HIGH', 'CONTRACT')`,
     [userId],
     "Contrat sans termes accepté",
-    "liabilities_terms_completeness_ck",
+    "liabilities_terms_completeness_v2_ck",
   );
   await rejects(
     "update public.liabilities set terms_status = 'OTHER' where id = $1",
