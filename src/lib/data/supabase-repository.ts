@@ -2798,6 +2798,22 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
         );
         break;
       }
+      case "record_net_income": {
+        unwrap(
+          await db.rpc("lfo_record_net_income", {
+            p_user_id: user,
+            p_payload: {
+              account_id: mutation.accountId,
+              received_on: mutation.receivedOn,
+              amount: decimalText(mutation.amount),
+              label: mutation.label,
+              notes: mutation.notes,
+            },
+          }),
+          "enregistrement du revenu net observé",
+        );
+        break;
+      }
       case "record_outstanding_debt": {
         unwrap(
           await db.rpc("lfo_record_outstanding_debt", {

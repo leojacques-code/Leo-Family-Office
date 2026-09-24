@@ -244,6 +244,83 @@ try {
     { netWorth: after.balanceSheet.netWorth.value },
   );
 
+  // ---------- Premier revenu net observé ----------
+  await page.goto(`${APP}/cash-flow`);
+  await page.waitForLoadState("networkidle");
+  const tilesBefore = (await page.locator(".metrics-grid").first().innerText()).replace(
+    /\s+/g,
+    " ",
+  );
+  check(
+    "R1",
+    "Flux sans opération : « Non observé », jamais « 0 € »",
+    tilesBefore.includes("Non observé") && !/Revenus observés\s*0\s€/.test(tilesBefore),
+    { tuiles: tilesBefore.slice(0, 140) },
+  );
+  await page.screenshot({ path: `${OUT}/05_flux_vierge_bureau.png` });
+  await page.getByRole("button", { name: "Revenu net" }).click();
+  const incomeDrawer = page.getByRole("dialog");
+  await incomeDrawer.getByLabel("Libellé").fill("Salaire septembre");
+  await incomeDrawer.getByLabel(/Montant net versé/).fill("2 450,35");
+  await incomeDrawer.getByLabel(/Date de versement/).fill("2026-09-23");
+  await page.screenshot({ path: `${OUT}/06_revenu_net_saisie_bureau.png` });
+  await incomeDrawer.getByRole("button", { name: "Enregistrer le revenu" }).click();
+  await page.waitForTimeout(800);
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  const tilesAfter = (await page.locator(".metrics-grid").first().innerText()).replace(/\s+/g, " ");
+  check("R2", "après rechargement : revenus observés 2 450,35 €", /2\s450,35\s€/.test(tilesAfter), {
+    tuiles: tilesAfter.slice(0, 140),
+  });
+  await page.screenshot({ path: `${OUT}/07_flux_apres_revenu_bureau.png` });
+  const tx = await sql.query(
+    `select amount::text, currency, category_id, kind_override, data_kind, transaction_date::text
+       from public.transactions where user_id = $1`,
+    [user.id],
+  );
+  const balances = await one(
+    `select count(*)::text as count from public.account_balances b
+       join public.financial_accounts a on a.id = b.account_id where a.user_id = $1`,
+    [user.id],
+  );
+  check(
+    "R3",
+    "persistance : une transaction ACTUAL INCOME en EUR, sans catégorie ni solde dérivé",
+    tx.rows.length === 1 &&
+      Number(tx.rows[0].amount) === 2450.35 &&
+      tx.rows[0].currency === "EUR" &&
+      tx.rows[0].category_id === null &&
+      tx.rows[0].kind_override === "INCOME" &&
+      balances.count === "1",
+    { transaction: tx.rows[0], soldes: balances.count },
+  );
+  const afterIncome = await (await page.request.get(`${APP}/api/state`)).json();
+  check(
+    "R4",
+    "aucun double comptage : le patrimoine net reste 1 600 €",
+    afterIncome.balanceSheet.netWorth.value === 1600,
+    { netWorth: afterIncome.balanceSheet.netWorth.value },
+  );
+  const todayAfter = await (await page.request.get(`${APP}/api/today`)).json();
+  const monthFlow = todayAfter.monthFlow;
+  check(
+    "R5",
+    "Aujourd'hui : le flux du mois porte ce revenu observé",
+    JSON.stringify(monthFlow ?? {}).includes("2450.35"),
+    { monthFlow },
+  );
+  check(
+    "R6",
+    "aucun brut, impôt ni rôle de carrière fabriqué",
+    Number(
+      (await one("select count(*) from public.career_roles where user_id = $1", [user.id])).count,
+    ) === 0 &&
+      Number(
+        (await one("select count(*) from public.tax_income_items where user_id = $1", [user.id]))
+          .count,
+      ) === 0,
+  );
+
   // ---------- Mobile ----------
   const mobile = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -259,6 +336,13 @@ try {
     .getByRole("region", { name: "Encours déclarés sans contrat" })
     .scrollIntoViewIfNeeded();
   await mpage.screenshot({ path: `${OUT}/04_dette_encours_mobile.png` });
+  await mpage.goto(`${APP}/cash-flow`);
+  await mpage.waitForLoadState("networkidle");
+  await mpage.screenshot({ path: `${OUT}/08_flux_revenu_mobile.png` });
+  const scrollFlux = await mpage.evaluate(() => document.documentElement.scrollWidth);
+  check("M2", "Flux sur mobile sans débordement horizontal", scrollFlux <= 390, {
+    scrollWidth: scrollFlux,
+  });
   check("M1", "Dettes sur mobile sans débordement horizontal", scroll <= 390, {
     scrollWidth: scroll,
   });
@@ -267,7 +351,7 @@ try {
 } finally {
   await browser.close();
   writeFileSync(
-    `${OUT}/recette-b14-dette.json`,
+    `${OUT}/recette-b14-premiers-faits.json`,
     JSON.stringify(
       {
         date: new Date().toISOString(),

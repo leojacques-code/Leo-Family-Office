@@ -1,7 +1,7 @@
 {
-  "date": "2026-09-24T08:22:54.296Z",
+  "date": "2026-09-24T08:30:11.372Z",
   "app": "http://localhost:3120",
-  "utilisateur": "recette-b14-1790238167994@lfo.invalid",
+  "utilisateur": "recette-b14-1790238599813@lfo.invalid",
   "environnement": "pile Supabase auto-hébergée locale ; build de production",
   "checks": [
     {
@@ -108,6 +108,65 @@
       "label": "compte de 3 000 € ajouté : patrimoine net 1 600 €",
       "ok": true,
       "netWorth": 1600
+    },
+    {
+      "id": "R1",
+      "label": "Flux sans opération : « Non observé », jamais « 0 € »",
+      "ok": true,
+      "tuiles": "Revenus observés Non observé Mois en cours · aucune opération saisie Dépenses de consommation Non observé Hors transferts, investissements e"
+    },
+    {
+      "id": "R2",
+      "label": "après rechargement : revenus observés 2 450,35 €",
+      "ok": true,
+      "tuiles": "Revenus observés 2 450,35 € Mois en cours · Incomplet Dépenses de consommation 0 € Hors transferts, investissements et service de dette Surp"
+    },
+    {
+      "id": "R3",
+      "label": "persistance : une transaction ACTUAL INCOME en EUR, sans catégorie ni solde dérivé",
+      "ok": true,
+      "transaction": {
+        "amount": "2450.350000",
+        "currency": "EUR",
+        "category_id": null,
+        "kind_override": "INCOME",
+        "data_kind": "ACTUAL",
+        "transaction_date": "2026-09-23"
+      },
+      "soldes": "1"
+    },
+    {
+      "id": "R4",
+      "label": "aucun double comptage : le patrimoine net reste 1 600 €",
+      "ok": true,
+      "netWorth": 1600
+    },
+    {
+      "id": "R5",
+      "label": "Aujourd'hui : le flux du mois porte ce revenu observé",
+      "ok": true,
+      "monthFlow": {
+        "periodStart": "2026-09-01",
+        "periodEnd": "2026-09-30",
+        "partial": true,
+        "income": 2450.35,
+        "essentialExpenses": 0,
+        "debtService": 0,
+        "freeCashFlow": 2450.35,
+        "unclassifiedFlows": 0,
+        "reserve": "Le mois n’est pas intégralement couvert par l’historique déclaré : le solde porte sur ce qui est connu."
+      }
+    },
+    {
+      "id": "R6",
+      "label": "aucun brut, impôt ni rôle de carrière fabriqué",
+      "ok": true
+    },
+    {
+      "id": "M2",
+      "label": "Flux sur mobile sans débordement horizontal",
+      "ok": true,
+      "scrollWidth": 390
     },
     {
       "id": "M1",

@@ -584,6 +584,14 @@ export type Mutation =
     }
   | { action: "archive_debt"; liabilityId: string }
   | {
+      action: "record_net_income";
+      accountId: string;
+      receivedOn: string;
+      amount: number;
+      label: string;
+      notes: string | null;
+    }
+  | {
       action: "record_outstanding_debt";
       name: string;
       lender: string | null;

@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
-import { Repeat } from "lucide-react";
+import { Banknote, Repeat } from "lucide-react";
+import { NetIncomeDrawer } from "@/components/pages/cash-flow/net-income-drawer";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   Callout,
@@ -67,7 +68,7 @@ const COVERAGE_SOURCE_LABELS: Record<LedgerCoverageSource, string> = {
 };
 
 function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
-  const [modal, setModal] = useState<"transaction" | "rule" | "category" | null>(null);
+  const [modal, setModal] = useState<"transaction" | "rule" | "category" | "income" | null>(null);
   /**
    * Action primaire de la zone A, §17 du plan de refonte.
    *
@@ -111,11 +112,13 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
 
   const index = useMemo(() => categoryIndex(state.expenseCategories), [state.expenseCategories]);
   const month = monthPeriod(state.asOfDate);
+  const NOT_OBSERVED = <span className="metric-unknown">Non observé</span>;
   const observed = useMemo(
     () =>
       computeObservedCashFlow(state.transactions, state.expenseCategories, month.start, month.end),
     [state.transactions, state.expenseCategories, month.start, month.end],
   );
+  const nothingObserved = observed.transactionCount === 0;
   // Moyenne sur les trois derniers mois RÉVOLUS : le mois en cours en est exclu.
   const t3 = completeMonthsPeriod(state.asOfDate, 3);
   const observedT3M = useMemo(
@@ -292,37 +295,70 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         title="Flux de trésorerie"
         description="Ce que chaque euro signifie réellement : revenu, consommation, impôt, service de dette, allocation de capital ou simple déplacement entre poches."
         actions={
-          <button className="button secondary" onClick={() => setModal("rule")}>
-            <Repeat size={15} />
-            Règle récurrente
-          </button>
+          <>
+            <button className="button secondary" onClick={() => setModal("income")}>
+              <Banknote size={15} />
+              Revenu net
+            </button>
+            <button className="button secondary" onClick={() => setModal("rule")}>
+              <Repeat size={15} />
+              Règle récurrente
+            </button>
+          </>
         }
       />
+      {/*
+       * Aucune opération au ledger pour le mois : les sommes du moteur valent 0 par
+       * construction, mais rien n'a été OBSERVÉ. Afficher « 0 € » affirmerait un mois sans
+       * revenu ni dépense ; la tuile dit donc « Non observé », comme l'historique voisin.
+       */}
       <section className="metrics-grid four">
         <MetricCard
           label="Revenus observés"
-          value={<Currency value={observed.income} />}
-          detail={`Mois en cours · ${QUALITY_LABELS[observed.dataQuality.status]}`}
+          value={nothingObserved ? NOT_OBSERVED : <Currency value={observed.income} />}
+          detail={
+            nothingObserved
+              ? "Mois en cours · aucune opération saisie"
+              : `Mois en cours · ${QUALITY_LABELS[observed.dataQuality.status]}`
+          }
         />
         <MetricCard
           label="Dépenses de consommation"
-          value={<Currency value={observed.consumerExpenses} />}
+          value={nothingObserved ? NOT_OBSERVED : <Currency value={observed.consumerExpenses} />}
           detail="Hors transferts, investissements et service de dette"
         />
         <MetricCard
           label="Surplus avant service de dette"
-          value={<Currency value={observed.operatingCashFlowBeforeDebt} sign />}
-          tone={observed.operatingCashFlowBeforeDebt >= 0 ? "positive" : "negative"}
+          value={
+            nothingObserved ? (
+              NOT_OBSERVED
+            ) : (
+              <Currency value={observed.operatingCashFlowBeforeDebt} sign />
+            )
+          }
+          tone={
+            nothingObserved
+              ? undefined
+              : observed.operatingCashFlowBeforeDebt >= 0
+                ? "positive"
+                : "negative"
+          }
           onExplain={() => setExplanation(cashFlowExplanation(state))}
         />
         <MetricCard
           label="Surplus après service de dette"
-          value={<Currency value={observed.cashFlowAfterDebt} sign />}
-          tone={observed.cashFlowAfterDebt >= 0 ? "positive" : "negative"}
+          value={
+            nothingObserved ? NOT_OBSERVED : <Currency value={observed.cashFlowAfterDebt} sign />
+          }
+          tone={
+            nothingObserved ? undefined : observed.cashFlowAfterDebt >= 0 ? "positive" : "negative"
+          }
           detail={
-            <>
-              Service de dette payé <Currency value={observed.debtServicePaid} />
-            </>
+            nothingObserved ? undefined : (
+              <>
+                Service de dette payé <Currency value={observed.debtServicePaid} />
+              </>
+            )
           }
         />
       </section>
@@ -904,6 +940,17 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           immédiatement les dépenses de consommation sans modifier aucun solde.
         </p>
       </section>
+      {modal === "income" ? (
+        <NetIncomeDrawer
+          open
+          accounts={state.accounts}
+          reportingCurrency={state.reportingCurrency}
+          maxDate={state.dates?.today}
+          busy={busy}
+          onClose={() => setModal(null)}
+          onSubmit={(draft) => mutate({ action: "record_net_income", ...draft })}
+        />
+      ) : null}
       <Modal
         open={modal === "transaction"}
         onClose={() => setModal(null)}

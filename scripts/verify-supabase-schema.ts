@@ -61,6 +61,7 @@ const canonicalMigrations = [
   "20260915180426",
   "20260917071520",
   "20260924081000",
+  "20260924091000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -2028,6 +2029,7 @@ const requiredConstraints = [
 const requiredRpcs: Record<string, string> = {
   lfo_verify_session: "p_user_id uuid, p_session_id uuid",
   lfo_record_outstanding_debt: "p_user_id uuid, p_payload jsonb",
+  lfo_record_net_income: "p_user_id uuid, p_payload jsonb",
   lfo_declare_domain_applicability: "p_user_id uuid, p_payload jsonb",
   lfo_add_account:
     "p_user_id uuid, p_institution text, p_name text, p_account_type text, p_balance numeric, p_currency text, p_as_of_date date",

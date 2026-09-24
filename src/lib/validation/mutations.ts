@@ -1220,6 +1220,18 @@ export const mutationSchema = z.discriminatedUnion("action", [
     balanceDate: realDate,
     currency: z.string().length(3),
   }),
+  // Premier revenu net OBSERVÉ : aucune catégorie, aucune devise reçue (celle du compte fait
+  // foi, lue en base), aucun solde dérivé. Stricte : clé d'acteur ou devise glissée = refus.
+  z
+    .object({
+      action: z.literal("record_net_income"),
+      accountId: z.uuid(),
+      receivedOn: realDate,
+      amount: finite.positive().max(1e15),
+      label: z.string().trim().min(1).max(180),
+      notes: z.string().trim().max(500).nullable(),
+    })
+    .strict(),
   z.object({
     action: z.literal("add_transaction"),
     accountId: z.string().min(1),

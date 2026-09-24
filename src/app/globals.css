@@ -3521,3 +3521,9 @@ dd {
     justify-self: start;
   }
 }
+/* Grandeur non observée : texte, jamais un zéro typographié comme un montant. */
+.metric-unknown {
+  color: var(--text-muted);
+  font-size: 0.72em;
+  font-weight: 600;
+}
