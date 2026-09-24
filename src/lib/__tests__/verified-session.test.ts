@@ -10,16 +10,14 @@ function client(userId = A, claims: unknown = { sub: userId, session_id: S }) {
   const getUser = vi
     .fn()
     .mockResolvedValue({ data: { user: { id: userId, is_anonymous: false } }, error: null });
-  const getSession = vi
-    .fn()
-    .mockResolvedValue({
-      data: {
-        session: {
-          access_token: `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`,
-        },
+  const getSession = vi.fn().mockResolvedValue({
+    data: {
+      session: {
+        access_token: `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`,
       },
-      error: null,
-    });
+    },
+    error: null,
+  });
   return { auth: { getUser, getSession } };
 }
 beforeEach(() => {
@@ -63,6 +61,12 @@ describe("acteur personnel vérifié", () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: "provider detail" } });
     await expect(verifySessionActor(client() as unknown as SupabaseClient)).rejects.toThrow(
       "AUTH_SESSION_CHECK_FAILED",
+    );
+  });
+  it("nomme l'absence de la RPC de session sans la confondre avec une révocation", async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: "PGRST202", message: "detail" } });
+    await expect(verifySessionActor(client() as unknown as SupabaseClient)).rejects.toThrow(
+      "AUTH_SESSION_CHECK_MISSING",
     );
   });
 });

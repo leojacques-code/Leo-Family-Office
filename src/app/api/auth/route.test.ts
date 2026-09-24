@@ -7,12 +7,11 @@ const mocks = vi.hoisted(() => ({
   actor: vi.fn(),
   from: vi.fn(),
   upsert: vi.fn(),
+  client: vi.fn(),
 }));
 vi.mock("@/lib/auth-config", () => ({ usesLocalFixtureAuth: mocks.fixture }));
 vi.mock("@/lib/session-client", () => ({
-  serverSessionClient: async () => ({
-    auth: { signInWithPassword: mocks.signIn, signUp: mocks.signUp, signOut: mocks.signOut },
-  }),
+  serverSessionClient: () => mocks.client(),
 }));
 vi.mock("@/lib/verified-session", () => ({ verifySessionActor: mocks.actor }));
 vi.mock("@/lib/data/supabase-client", () => ({ supabaseAdmin: () => ({ from: mocks.from }) }));
@@ -29,6 +28,9 @@ const post = (data: unknown, origin = "http://localhost") =>
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.fixture.mockReturnValue(false);
+  mocks.client.mockResolvedValue({
+    auth: { signInWithPassword: mocks.signIn, signUp: mocks.signUp, signOut: mocks.signOut },
+  });
   mocks.signIn.mockResolvedValue({ data: { session: {} }, error: null });
   mocks.signUp.mockResolvedValue({ data: { session: null }, error: null });
   mocks.signOut.mockResolvedValue({ error: null });
@@ -97,5 +99,41 @@ describe("Authentification personnelle HTTP", () => {
     expect((await DELETE(request())).status).toBe(503);
     expect((await DELETE(request())).status).toBe(200);
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+  it("journalise la cause d'un 503 sans jamais publier ni journaliser le message", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    // Cause observée sur la preview du 23 septembre : clé publiable absente de l'environnement.
+    mocks.client.mockRejectedValueOnce(new Error("AUTH_NOT_CONFIGURED"));
+    const missingKey = await post(body);
+    expect(missingKey.status).toBe(503);
+    expect(mocks.signIn).not.toHaveBeenCalled();
+    mocks.actor.mockRejectedValueOnce(new Error("AUTH_SESSION_CHECK_MISSING"));
+    expect((await post(body)).status).toBe(503);
+    mocks.signIn.mockRejectedValueOnce(new Error("fetch failed https://secret.invalid?token=abc"));
+    const unreachable = await post(body);
+    expect(await unreachable.text()).not.toContain("secret.invalid");
+    expect(log.mock.calls.map(([, detail]) => (detail as { code: string }).code)).toEqual([
+      "AUTH_NOT_CONFIGURED",
+      "AUTH_SESSION_CHECK_MISSING",
+      "AUTH_PROVIDER_UNAVAILABLE",
+    ]);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret.invalid");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("recipe@example.invalid");
+    log.mockRestore();
+  });
+  it("fait revenir le lien de confirmation sur ce site, et seulement si l'origine est déclarée", async () => {
+    await post({ ...body, intent: "sign-up" });
+    expect(mocks.signUp).toHaveBeenCalledWith({
+      ...body,
+      options: { emailRedirectTo: "http://localhost/auth/confirm" },
+    });
+    mocks.signUp.mockClear();
+    await POST(
+      new Request("http://localhost/api/auth", {
+        method: "POST",
+        body: JSON.stringify({ ...body, intent: "sign-up" }),
+      }),
+    );
+    expect(mocks.signUp).toHaveBeenCalledWith({ ...body, options: {} });
   });
 });

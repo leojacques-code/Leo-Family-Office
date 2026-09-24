@@ -5,7 +5,8 @@ import { SESSION_COOKIE, sessionSecret, sessionToken, verifyAccessCode } from "@
 import { usesLocalFixtureAuth } from "@/lib/auth-config";
 import { serverSessionClient } from "@/lib/session-client";
 import { verifySessionActor } from "@/lib/verified-session";
-import { supabaseAdmin } from "@/lib/data/supabase-client";
+import { initializePersonalProfile } from "@/lib/personal-profile";
+import { reportAuthFailure } from "@/lib/auth-failure";
 
 const loginSchema = z
   .object({
@@ -14,6 +15,17 @@ const loginSchema = z
     intent: z.enum(["sign-in", "sign-up"]).default("sign-in"),
   })
   .strict();
+
+/**
+ * Le lien de confirmation revient sur CE site, à la route qui échange le code. L'origine n'est
+ * reprise que lorsque le navigateur l'a déclarée et qu'isSameOrigin l'a déjà comparée au Host ;
+ * sans elle, Auth retombe sur la Site URL du projet. Auth n'honore de toute façon que les
+ * adresses de sa liste d'autorisation : ce n'est pas une redirection ouverte.
+ */
+function confirmationOptions(request: Request): { emailRedirectTo?: string } {
+  const origin = request.headers.get("origin");
+  return origin ? { emailRedirectTo: new URL("/auth/confirm", origin).toString() } : {};
+}
 
 export async function POST(request: Request) {
   if (!isSameOrigin(request))
@@ -42,9 +54,9 @@ export async function POST(request: Request) {
       { error: "Renseignez votre adresse e-mail et votre mot de passe." },
       { status: 400 },
     );
+  const { email, password, intent } = parsed.data;
   try {
     const client = await serverSessionClient();
-    const { email, password, intent } = parsed.data;
     if (intent === "sign-up" && password.length < 12)
       return NextResponse.json(
         { error: "Choisissez un mot de passe d’au moins 12 caractères." },
@@ -52,7 +64,7 @@ export async function POST(request: Request) {
       );
     const result =
       intent === "sign-up"
-        ? await client.auth.signUp({ email, password })
+        ? await client.auth.signUp({ email, password, options: confirmationOptions(request) })
         : await client.auth.signInWithPassword({ email, password });
     if (result.error)
       return NextResponse.json(
@@ -65,16 +77,10 @@ export async function POST(request: Request) {
     if (!result.data.session) return NextResponse.json({ ok: true, confirmationRequired: true });
     const actor = await verifySessionActor(client);
     if (!actor) return NextResponse.json({ error: "Session non valide." }, { status: 401 });
-    // Un seul profil vide. Aucune donnée du compte de démonstration ni seed financier.
-    const { error } = await supabaseAdmin()
-      .from("profiles")
-      .upsert(
-        { user_id: actor.userId, display_name: "Espace personnel", reporting_currency: "EUR" },
-        { onConflict: "user_id", ignoreDuplicates: true },
-      );
-    if (error) throw new Error("PROFILE_INITIALIZATION_FAILED");
+    await initializePersonalProfile(actor.userId);
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (error) {
+    reportAuthFailure(error, intent);
     return NextResponse.json(
       { error: "Connexion momentanément indisponible. Réessayez." },
       { status: 503 },
@@ -89,7 +95,8 @@ export async function DELETE(request: Request) {
     try {
       const { error } = await (await serverSessionClient()).auth.signOut({ scope: "local" });
       if (error) throw error;
-    } catch {
+    } catch (error) {
+      reportAuthFailure(error, "sign-out");
       return NextResponse.json({ error: "Déconnexion non confirmée. Réessayez." }, { status: 503 });
     }
   }

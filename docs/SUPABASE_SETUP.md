@@ -32,6 +32,21 @@ La migration `20260915180426_personal_first_intent.sql` ajoute la préférence d
 
 Avant publication, vérifier sur un environnement Supabase Auth distinct : comptes A/B, espace vierge, premier compte et rechargement, absence de lecture/écriture croisée, Storage privé, renouvellement des cookies et révocation. Les doubles SQL locaux ne prouvent pas ces parcours. B12/B13/B14 restent ouverts jusqu’à ces preuves.
 
+### Prérequis de déploiement établis le 24 septembre 2026
+
+Le 503 de `POST /api/auth` constaté sur la preview `dpl_2AFAmcjBbiTXkhHJJnHDk7RxYhTH` (commit `0e730f7`) a une cause déterministe : `SUPABASE_PUBLISHABLE_KEY` n’existait sur Vercel ni en production ni en preview (constat par la liste des noms de variables, aucune valeur lue). `supabaseAuthConfiguration()` levait `AUTH_NOT_CONFIGURED` avant tout appel réseau. Le journal serveur nomme désormais cette cause (`lfo.auth.failure`, code fermé, jamais le message du fournisseur).
+
+Une seconde cause était masquée par la première : toutes les variables Vercel ciblent ensemble `production` et `preview`, donc la preview parle à la base de production, qui n’a pas `lfo_verify_session`. Ajouter la seule clé ferait passer la connexion Auth puis échouer la vérification de session (`AUTH_SESSION_CHECK_MISSING`), et une inscription depuis la preview créerait de vrais comptes dans l’Auth de production. Correction attendue, par ordre :
+
+1. un projet ou une branche Supabase de recette, avec les 49 migrations appliquées ;
+2. des variables Vercel limitées à `preview` pointant cette recette : `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, toutes sur le MÊME projet ; les variables actuelles restent réservées à `production` ;
+3. dans Auth (recette puis production) : Site URL du déploiement et, dans la liste de redirections, `https://<hôte>/auth/confirm` (un motif pour les previews Vercel si nécessaire) ;
+4. avant toute fusion vers `main` : appliquer les quatre migrations manquantes en production, ajouter `SUPABASE_PUBLISHABLE_KEY` en production, et vérifier que le propriétaire des données existantes peut se connecter avec le compte Auth dont l’identifiant est `OWNER_USER_ID`, sans quoi il arrivera sur un espace vide.
+
+Le lien de confirmation revient sur `/auth/confirm`, qui échange le code (PKCE) ou le `token_hash`, vérifie la session puis crée le seul profil vide. Sans cette route, l’adresse était confirmée mais l’utilisateur arrivait sans explication sur la Site URL du projet.
+
+`scripts/recette-auth/` reproduit ce parcours contre les serveurs Supabase officiels auto-hébergés sur 127.0.0.1 ; voir son README pour ce que cette recette prouve et ne prouve pas.
+
 Le code d’accès historique et `OWNER_USER_ID` ne sont disponibles qu’avec `LFO_AUTH_MODE=local-fixture`, une URL HTTP loopback et un environnement hors production. Ce mode sert exclusivement aux fixtures locales.
 
 ## 3. Migrations

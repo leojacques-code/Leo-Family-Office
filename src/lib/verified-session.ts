@@ -34,6 +34,12 @@ export async function verifySessionActor(client: SupabaseClient): Promise<Sessio
     p_user_id: userId,
     p_session_id: claims.session_id,
   });
-  if (error) throw new Error("AUTH_SESSION_CHECK_FAILED");
+  // PGRST202 : la fonction n'existe pas dans le schéma exposé, typiquement une base à laquelle
+  // la migration 20260914191901 n'a pas été appliquée. Un code distinct, pas un refus : la
+  // session n'est ni prouvée valide ni prouvée révoquée.
+  if (error)
+    throw new Error(
+      error.code === "PGRST202" ? "AUTH_SESSION_CHECK_MISSING" : "AUTH_SESSION_CHECK_FAILED",
+    );
   return data === true ? { userId, sessionId: claims.session_id } : null;
 }

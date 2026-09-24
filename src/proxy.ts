@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { usesLocalFixtureAuth } from "@/lib/auth-config";
 import { createSessionClient } from "@/lib/session-client";
 import { verifySessionActor } from "@/lib/verified-session";
+import { reportAuthFailure } from "@/lib/auth-failure";
 
 const COOKIE_NAME = "lfo_session";
 
@@ -52,6 +53,8 @@ export async function proxy(request: NextRequest) {
     // données n'importe ni le dépôt ni le client Supabase. Voir `today-demo.ts`.
     pathname === "/demo" ||
     pathname.startsWith("/api/auth") ||
+    // Retour du lien de confirmation : il OUVRE la session, il ne peut donc pas l'exiger.
+    pathname === "/auth/confirm" ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico" ||
     pathname === "/icon.svg" ||
@@ -82,7 +85,8 @@ export async function proxy(request: NextRequest) {
         },
       });
       authenticated = (await verifySessionActor(client)) !== null;
-    } catch {
+    } catch (error) {
+      reportAuthFailure(error, "session");
       if (pathname.startsWith("/api/"))
         return finish(
           NextResponse.json(

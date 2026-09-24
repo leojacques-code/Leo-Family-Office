@@ -3,13 +3,20 @@ import { useState } from "react";
 import { setupEntryFor } from "@/lib/personal-setup-navigation";
 import { ArrowRight, LockKeyhole } from "lucide-react";
 
-export function LoginForm({ localFixture = false }: { localFixture?: boolean }) {
+export function LoginForm({
+  localFixture = false,
+  notice = null,
+}: {
+  localFixture?: boolean;
+  /** Issue d'un lien de confirmation, fixée par le serveur depuis une liste fermée. */
+  notice?: string | null;
+}) {
   const [code, setCode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [intent, setIntent] = useState<"sign-in" | "sign-up">("sign-in");
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(notice ?? "");
   const [pending, setPending] = useState(false);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
