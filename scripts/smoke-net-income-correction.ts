@@ -179,11 +179,7 @@ try {
   const current = { amount: "2405.35", received_on: "2026-09-24", label: "Salaire de septembre" };
   const base = { ...valid, expected: current };
   await refuse({ ...base, user_id: otherUser }, "Clé d'acteur acceptée", "Clé refusée");
-  await refuse(
-    { ...base, actor_user_id: userId },
-    "Acteur déclaratif accepté",
-    "Clé refusée",
-  );
+  await refuse({ ...base, actor_user_id: userId }, "Acteur déclaratif accepté", "Clé refusée");
   await refuse(
     { ...base, expected: { amount: "2405.35", received_on: "2026-09-24" } },
     "État attendu incomplet accepté",
