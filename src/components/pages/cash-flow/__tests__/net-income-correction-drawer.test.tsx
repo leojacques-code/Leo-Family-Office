@@ -56,12 +56,25 @@ describe("Correction d'un revenu net saisi", () => {
     setReason(dialog, "Montant saisi avant retenue à la source");
     save(dialog);
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(onSubmit).toHaveBeenCalledWith({
-      transactionId: "t1",
-      reason: "Montant saisi avant retenue à la source",
-      expected: { amount: 2450.35, receivedOn: "2026-09-23", label: "Salaire septembre" },
-      corrected: { amount: 2405.35 },
-    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      {
+        transactionId: "t1",
+        reason: "Montant saisi avant retenue à la source",
+        expected: { amount: "2450.350000", receivedOn: "2026-09-23", label: "Salaire septembre" },
+        corrected: { amount: 2405.35 },
+      },
+      expect.any(Function),
+    );
+  });
+
+  it("renvoie l'état attendu en TEXTE tel que lu en base, sans passer par un flottant", async () => {
+    const big = { ...income, amount: 12345678901.123456, amountText: "12345678901.123456" };
+    const { dialog, onSubmit, onClose } = setup(big);
+    setAmount(dialog, "100");
+    setReason(dialog, "Montant saisi en double");
+    save(dialog);
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0]![0].expected.amount).toBe("12345678901.123456");
   });
 
   it("refuse une correction sans changement, sans motif ou vidée, sans rien envoyer", () => {
@@ -113,13 +126,19 @@ describe("Correction d'un revenu net saisi", () => {
     expect(dialog).toHaveTextContent("Retenue à la source");
   });
 
-  it("garde le tiroir ouvert et le dit quand l'écriture est refusée", async () => {
-    const { dialog, onClose } = setup(income, null, vi.fn().mockResolvedValue(false));
+  it("garde le tiroir ouvert et y affiche la raison du refus rédigée par le serveur", async () => {
+    const refuse = vi.fn(async (_draft: unknown, onError: (message: string) => void) => {
+      onError("Ce revenu a changé depuis son affichage : rechargez la page avant de le corriger.");
+      return false;
+    });
+    const { dialog, onClose } = setup(income, null, refuse);
     setAmount(dialog, "2 405,35");
     setReason(dialog, "Motif");
     save(dialog);
     await vi.waitFor(() =>
-      expect(within(dialog).getByRole("alert")).toHaveTextContent("n’a pas été enregistrée"),
+      expect(dialog.querySelector(".form-error")).toHaveTextContent(
+        "n’a pas été enregistrée : Ce revenu a changé depuis son affichage",
+      ),
     );
     expect(onClose).not.toHaveBeenCalled();
   });

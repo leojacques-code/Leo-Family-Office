@@ -379,6 +379,8 @@ export interface Transaction {
   categoryName: string;
   /** Montant signé : négatif pour une sortie. Le signe ne détermine jamais la nature. */
   amount: number;
+  /** Le même montant en TEXTE, tel que la base l'a écrit : l'état attendu d'une correction. */
+  amountText?: string;
   currency: string;
   /**
    * Nature imposée à cette transaction seule, prioritaire sur celle de sa catégorie.

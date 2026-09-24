@@ -1239,6 +1239,12 @@ const userOwnedTables = [
 ] as const;
 
 const requiredIndexes = [
+  // Lecture de la piste d'une transaction, par propriétaire, et index de clé étrangère.
+  "transaction_corrections_transaction_idx",
+  "transaction_corrections_user_idx",
+  "transaction_corrections_actor_idx",
+  "liability_terms_transitions_liability_idx",
+  "liability_terms_transitions_actor_idx",
   // Lecture de la déclaration COURANTE d'un domaine : la plus récente par domaine.
   "user_domain_declarations_current_idx",
   // Un rang par domaine : sans elle, deux écritures concurrentes partageraient un rang et
@@ -1556,11 +1562,16 @@ const requiredTriggerFunctions = [
 const requiredConstraints = [
   // Passage encours seul → contrat : la trace ne perd ni la dette, ni son auteur.
   "liability_terms_transitions_liability_fk",
+  "liability_terms_transitions_owner_fk",
+  "liability_terms_transitions_actor_fk",
   "liability_terms_transitions_actor_is_owner_ck",
   "liability_terms_transitions_direction_ck",
   // Correction de revenu net saisi : la piste ne perd ni l'ancienne valeur, ni son auteur.
   "transaction_corrections_transaction_fk",
   "transaction_corrections_owner_fk",
+  "transaction_corrections_actor_fk",
+  "transaction_corrections_before_ck",
+  "transaction_corrections_after_ck",
   "transaction_corrections_actor_is_owner_ck",
   "transaction_corrections_reason_ck",
   "transaction_corrections_changed_ck",

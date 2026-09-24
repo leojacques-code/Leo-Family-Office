@@ -250,6 +250,25 @@ try {
     "Seul un revenu net saisi",
   );
 
+  // Une RECETTE importée (autre source) de nature INCOME ne se corrige pas ici : sa
+  // correction passe par sa chaîne d'acquisition, sans quoi sa provenance serait rompue.
+  const imported = await client.query<{ id: string }>(
+    `insert into public.transactions (user_id, account_id, transaction_date, label, amount, currency,
+                                      data_kind, confidence, source, kind_override)
+     values ($1, $2, '2026-09-21', 'Virement reçu', 300, 'EUR', 'ACTUAL', 'HIGH', 'Import relevé', 'INCOME')
+     returning id::text as id`,
+    [userId, accountId],
+  );
+  await refuse(
+    {
+      ...base,
+      transaction_id: imported.rows[0]!.id,
+      expected: { amount: "300", received_on: "2026-09-21", label: "Virement reçu" },
+    },
+    "Recette importée corrigée comme une saisie",
+    "Seul un revenu net saisi",
+  );
+
   await client.query("reset role");
   await rejects(
     "update public.transaction_corrections set reason = 'réécrit' where transaction_id = $1",
@@ -270,15 +289,29 @@ try {
     "transaction_corrections_transaction_fk",
   );
 
-  await client.query("set local role authenticated");
-  await client.query("select set_config('request.jwt.claims', $1, true)", [
-    JSON.stringify({ sub: otherUser, role: "authenticated" }),
-  ]);
-  const visible = await client.query<{ count: string }>(
-    "select count(*)::text as count from public.transaction_corrections where transaction_id = $1",
-    [incomeId],
-  );
-  assert(visible.rows[0]!.count === "0", "Piste d'un autre propriétaire visible");
+  // Les DEUX réglages : `auth.uid()` du shim local lit `request.jwt.claim.sub`, celui de la
+  // plateforme `request.jwt.claims`. Sans le premier, `auth.uid()` vaut NULL et toute
+  // assertion d'invisibilité serait vraie par construction.
+  const actAs = async (subject: string) => {
+    await client.query("reset role");
+    await client.query(
+      "select set_config('request.jwt.claim.sub', $1, true), set_config('request.jwt.claims', $2, true)",
+      [subject, JSON.stringify({ sub: subject, role: "authenticated" })],
+    );
+    await client.query("set local role authenticated");
+  };
+  const trailCount = async () =>
+    (
+      await client.query<{ count: string }>(
+        "select count(*)::text as count from public.transaction_corrections where transaction_id = $1",
+        [incomeId],
+      )
+    ).rows[0]!.count;
+  // Contrôle POSITIF d'abord : le propriétaire voit sa piste. Sans lui, un zéro ne prouve rien.
+  await actAs(userId);
+  assert((await trailCount()) === "2", "Le propriétaire ne voit pas sa propre piste");
+  await actAs(otherUser);
+  assert((await trailCount()) === "0", "Piste d'un autre propriétaire visible");
   await rejects(
     correct,
     [otherUser, JSON.stringify(base)],

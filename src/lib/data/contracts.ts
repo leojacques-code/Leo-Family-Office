@@ -590,7 +590,8 @@ export type Mutation =
       transactionId: string;
       reason: string;
       /** État AFFICHÉ au moment de la décision : un état périmé fait échouer la correction. */
-      expected: { amount: number; receivedOn: string; label: string };
+      /** Montant en TEXTE décimal, tel que lu en base : jamais un flottant réécrit. */
+      expected: { amount: string; receivedOn: string; label: string };
       corrected: { amount?: number; receivedOn?: string; label?: string };
     }
   | {

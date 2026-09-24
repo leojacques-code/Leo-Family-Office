@@ -117,8 +117,42 @@ export interface DataQuality {
    * sommes faute de conversion. Toute grandeur qui en dépend est incomplète.
    */
   foreignCurrencyTransactionCount: number;
+  /**
+   * Natures des opérations exclues pour devise. Un garde-fou se pose au niveau où
+   * l'information manque : une dépense en CHF rend la consommation incalculable, pas le
+   * revenu en euros du même mois.
+   */
+  foreignCurrencyKinds: CashFlowKind[];
   /** Devises rencontrées dans la période, triées. Plus d'une = agrégats non homogènes. */
   currencies: string[];
+}
+
+/** Natures dont dépend chaque agrégat observé. */
+export const AGGREGATE_DEPENDENCIES = {
+  income: ["INCOME"],
+  consumerExpenses: ["EXPENSE"],
+  operatingCashFlowBeforeDebt: ["INCOME", "EXPENSE", "TAX"],
+  cashFlowAfterDebt: ["INCOME", "EXPENSE", "TAX", "DEBT_SERVICE"],
+  debtServicePaid: ["DEBT_SERVICE"],
+  observedSavingsRate: ["INCOME", "SAVING", "INVESTMENT"],
+  observedInvestmentRate: ["INCOME", "INVESTMENT"],
+} as const satisfies Record<string, readonly CashFlowKind[]>;
+
+/**
+ * Vrai si l'agrégat dépend d'une opération exclue faute de conversion, ou si la période
+ * mélange des devises sans devise de lecture déclarée : il n'a alors pas de valeur.
+ */
+export function aggregateBlocked(
+  quality: Pick<
+    DataQuality,
+    "foreignCurrencyKinds" | "foreignCurrencyTransactionCount" | "currencies"
+  >,
+  aggregate: keyof typeof AGGREGATE_DEPENDENCIES,
+  reportingCurrencyDeclared = true,
+): boolean {
+  if (!reportingCurrencyDeclared && quality.currencies.length > 1) return true;
+  const kinds = quality.foreignCurrencyKinds as readonly CashFlowKind[];
+  return AGGREGATE_DEPENDENCIES[aggregate].some((kind) => kinds.includes(kind as CashFlowKind));
 }
 
 export interface ObservedCashFlow {
@@ -282,6 +316,25 @@ export function computeObservedCashFlow(
   const foreignCurrencyTransactionCount = periodTransactions.length - inPeriod.length;
   const mixedCurrencies = reportingCurrency === undefined && currencies.length > 1;
   const currencyIncomplete = foreignCurrencyTransactionCount > 0 || mixedCurrencies;
+  const foreignTransactions =
+    reportingCurrency === undefined
+      ? []
+      : periodTransactions.filter((item) => item.currency !== reportingCurrency);
+  const foreignCurrencyKinds = [
+    ...new Set(foreignTransactions.map((item) => effectiveCashFlowKind(item, index))),
+  ].sort();
+  // Un transfert dont une jambe est exclue pour devise ne peut pas s'annuler : il n'est pas
+  // « non rapproché », il est non convertible, et c'est déjà dit.
+  const foreignTransferGroups = new Set(
+    foreignTransactions
+      .map((item) => item.transferGroupId)
+      .filter((group): group is string => group !== null),
+  );
+  const blocked = (aggregate: keyof typeof AGGREGATE_DEPENDENCIES) =>
+    mixedCurrencies ||
+    AGGREGATE_DEPENDENCIES[aggregate].some((kind) =>
+      (foreignCurrencyKinds as CashFlowKind[]).includes(kind),
+    );
 
   let income = 0;
   let consumerExpenses = 0;
@@ -361,7 +414,8 @@ export function computeObservedCashFlow(
     }
   }
 
-  for (const [, net] of transferGroups) {
+  for (const [group, net] of transferGroups) {
+    if (foreignTransferGroups.has(group)) continue;
     // Un groupe dont les deux jambes ne s'annulent pas est un rapprochement incomplet.
     if (Math.abs(net) > 0.01) unmatchedTransferCount += 1;
   }
@@ -436,8 +490,10 @@ export function computeObservedCashFlow(
     observedSavings,
     // Sans revenu encaissé observé, aucun taux n'est calculable. Aucun proxy. Un taux
     // calculé sur des totaux amputés d'une devise ne serait pas un taux : il reste inconnu.
-    observedSavingsRate: income > 0 && !currencyIncomplete ? observedSavings / income : null,
-    observedInvestmentRate: income > 0 && !currencyIncomplete ? investmentFlows / income : null,
+    observedSavingsRate:
+      income > 0 && !blocked("observedSavingsRate") ? observedSavings / income : null,
+    observedInvestmentRate:
+      income > 0 && !blocked("observedInvestmentRate") ? investmentFlows / income : null,
     breakdown,
     dataQuality: {
       status,
@@ -445,13 +501,14 @@ export function computeObservedCashFlow(
       unclassifiedTransactionCount,
       unmatchedTransferCount,
       foreignCurrencyTransactionCount,
+      foreignCurrencyKinds,
       currencies,
     },
     coverage,
     // Une moyenne mensuelle n'a de sens que sur une fenêtre réellement couverte : diviser
     // par des mois inconnus reviendrait à affirmer qu'ils valent zéro.
     monthlyAverageOperatingSurplus:
-      coverage.status === "COMPLETE" && !currencyIncomplete
+      coverage.status === "COMPLETE" && !blocked("operatingCashFlowBeforeDebt")
         ? operatingCashFlowBeforeDebt / coverage.requestedMonths
         : null,
   };
@@ -669,6 +726,8 @@ export interface BudgetLine {
   budget: number | null;
   /** `null` = réalisé non calculable : une opération de la catégorie est dans une autre devise. */
   actual: number | null;
+  /** Dépenses observées dans la catégorie : zéro = rien d'observé, pas un réalisé nul certifié. */
+  observedCount: number;
   forecast: number;
   variance: number | null;
   variancePercentage: number | null;
@@ -691,6 +750,7 @@ export function compareBudgets(
 ): BudgetLine[] {
   const index = categoryIndex(categories);
   const actualByCategory = new Map<string, number>();
+  const countByCategory = new Map<string, number>();
   const foreignCategories = new Set<string>();
   for (const transaction of transactions) {
     if (transaction.date < periodStart || transaction.date > periodEnd) continue;
@@ -699,6 +759,10 @@ export function compareBudgets(
       foreignCategories.add(transaction.categoryId);
       continue;
     }
+    countByCategory.set(
+      transaction.categoryId,
+      (countByCategory.get(transaction.categoryId) ?? 0) + 1,
+    );
     actualByCategory.set(
       transaction.categoryId,
       (actualByCategory.get(transaction.categoryId) ?? 0) + -transaction.amount,
@@ -725,6 +789,7 @@ export function compareBudgets(
         groupName: category.groupName,
         budget,
         actual,
+        observedCount: countByCategory.get(category.id) ?? 0,
         forecast: forecastByCategory.get(category.id) ?? 0,
         variance,
         variancePercentage:
@@ -740,8 +805,15 @@ export function compareBudgets(
 
 export interface SurplusComparison {
   scenarioAssumption: number;
-  /** Mois en cours à date. Partiel par nature : jamais une moyenne mensuelle. */
-  monthToDate: number;
+  /**
+   * Mois en cours à date. Partiel par nature : jamais une moyenne mensuelle. `null` quand
+   * une opération dont il dépend est dans une autre devise, non convertie.
+   */
+  monthToDate: number | null;
+  /** Vrai si une moyenne ou le mois à date est bloqué par une devise non convertie. */
+  currencyBlockedMonthToDate: boolean;
+  currencyBlockedT3M: boolean;
+  currencyBlockedT12M: boolean;
   /** Période réellement observée pour le MTD. */
   monthToDateStart: string;
   monthToDateEnd: string;
@@ -791,7 +863,15 @@ export function compareSurplusToScenario(
 
   return {
     scenarioAssumption,
-    monthToDate: monthly.operatingCashFlowBeforeDebt,
+    monthToDate: aggregateBlocked(monthly.dataQuality, "operatingCashFlowBeforeDebt")
+      ? null
+      : monthly.operatingCashFlowBeforeDebt,
+    currencyBlockedMonthToDate: aggregateBlocked(
+      monthly.dataQuality,
+      "operatingCashFlowBeforeDebt",
+    ),
+    currencyBlockedT3M: aggregateBlocked(observed3.dataQuality, "operatingCashFlowBeforeDebt"),
+    currencyBlockedT12M: aggregateBlocked(observed12.dataQuality, "operatingCashFlowBeforeDebt"),
     monthToDateStart: mtdStart,
     monthToDateEnd: mtdEnd,
     monthToDatePartialCoverage: mtdStart > month.start,

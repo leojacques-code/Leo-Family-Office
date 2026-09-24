@@ -3191,9 +3191,12 @@ dd {
   }
   .header-actions {
     width: 100%;
+    /* Quatre actions ne tiennent pas sur 390 px : elles passent à la ligne au lieu de
+       déborder de l'écran (page Dettes avec un contrat). */
+    flex-wrap: wrap;
   }
   .header-actions .button {
-    flex: 1;
+    flex: 1 1 calc(50% - 4px);
   }
   .metrics-grid.four,
   .metrics-grid.two,

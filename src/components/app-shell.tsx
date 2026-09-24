@@ -146,7 +146,7 @@ export function AppShell({
    */
   const [primaryAction, setPrimaryAction] = useState<{ run: () => void } | null>(null);
 
-  async function mutate(mutation: Mutation) {
+  async function mutate(mutation: Mutation, options?: { onError?: (message: string) => void }) {
     if (debtNeedsRefresh) return false;
     setBusy(true);
     setError("");
@@ -170,7 +170,10 @@ export function AppShell({
       } else setState(body);
       return true;
     } catch (mutationError) {
-      setError(mutationError instanceof Error ? mutationError.message : "Modification impossible");
+      const message =
+        mutationError instanceof Error ? mutationError.message : "Modification impossible";
+      setError(message);
+      options?.onError?.(message);
       return false;
     } finally {
       setBusy(false);

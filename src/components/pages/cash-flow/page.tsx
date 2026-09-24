@@ -35,6 +35,7 @@ import {
   effectiveCashFlowKind,
   categoryIndex,
   forecastCashFlow,
+  aggregateBlocked,
   completeMonthsPeriod,
   monthPeriod,
 } from "@/lib/engine/cash-flow";
@@ -135,12 +136,16 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       }),
     [state.transactions, state.expenseCategories, month.start, month.end, state.reportingCurrency],
   );
-  const nothingObserved = observed.transactionCount === 0;
-  // Des opérations dans une autre devise sont EXCLUES des totaux faute de conversion : les
-  // totaux du mois sont alors amputés, et ne s'affichent pas comme s'ils étaient complets.
-  const currencyBlocked = observed.dataQuality.foreignCurrencyTransactionCount > 0;
-  const monthValue = (node: React.ReactNode) =>
-    nothingObserved ? NOT_OBSERVED : currencyBlocked ? NOT_COMPUTABLE : node;
+  // Une opération exclue pour devise reste une opération OBSERVÉE : le mois n'est pas vide.
+  const nothingObserved =
+    observed.transactionCount + observed.dataQuality.foreignCurrencyTransactionCount === 0;
+  // Des opérations dans une autre devise sont EXCLUES des totaux faute de conversion. Seuls
+  // les agrégats qui dépendent de leur nature deviennent non calculables (§4 : le garde-fou
+  // se pose au niveau où l'information manque).
+  const blockedBy = (aggregate: Parameters<typeof aggregateBlocked>[1]) =>
+    aggregateBlocked(observed.dataQuality, aggregate);
+  const monthValue = (aggregate: Parameters<typeof aggregateBlocked>[1], node: React.ReactNode) =>
+    nothingObserved ? NOT_OBSERVED : blockedBy(aggregate) ? NOT_COMPUTABLE : node;
   // Moyenne sur les trois derniers mois RÉVOLUS : le mois en cours en est exclu.
   const t3 = completeMonthsPeriod(state.asOfDate, 3);
   const observedT3M = useMemo(
@@ -226,14 +231,16 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
     );
     // Un mois dont une opération est dans une autre devise n'a pas de total : sa barre est
     // absente (null), pas amputée de la devise non convertie.
-    const blocked = period.dataQuality.foreignCurrencyTransactionCount > 0;
+    const incomeBlocked = aggregateBlocked(period.dataQuality, "income");
+    const expenseBlocked = aggregateBlocked(period.dataQuality, "consumerExpenses");
+    const debtBlocked = aggregateBlocked(period.dataQuality, "debtServicePaid");
     return {
       month: formatDate(bounds.start, { month: "short", year: "2-digit" }),
-      income: blocked ? null : period.income,
-      expense: blocked ? null : period.consumerExpenses,
-      debt: blocked ? null : period.debtServicePaid,
+      income: incomeBlocked ? null : period.income,
+      expense: expenseBlocked ? null : period.consumerExpenses,
+      debt: debtBlocked ? null : period.debtServicePaid,
       count: period.transactionCount + period.dataQuality.foreignCurrencyTransactionCount,
-      blocked,
+      blocked: incomeBlocked || expenseBlocked || debtBlocked,
     };
   });
   const blockedMonths = months.filter((entry) => entry.blocked).length;
@@ -379,6 +386,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         <MetricCard
           label="Revenus observés"
           value={monthValue(
+            "income",
             <Currency currency={state.reportingCurrency} value={observed.income} />,
           )}
           detail={
@@ -391,9 +399,10 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           label="Dépenses de consommation"
           value={
             // Aucune dépense de consommation saisie : « 0 € » affirmerait un mois sans dépense.
-            !currencyBlocked && observed.consumerExpenseCount === 0
+            !blockedBy("consumerExpenses") && observed.consumerExpenseCount === 0
               ? NOT_OBSERVED
               : monthValue(
+                  "consumerExpenses",
                   <Currency currency={state.reportingCurrency} value={observed.consumerExpenses} />,
                 )
           }
@@ -402,6 +411,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         <MetricCard
           label="Surplus avant service de dette"
           value={monthValue(
+            "operatingCashFlowBeforeDebt",
             <Currency
               currency={state.reportingCurrency}
               value={observed.operatingCashFlowBeforeDebt}
@@ -409,7 +419,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
             />,
           )}
           tone={
-            nothingObserved || currencyBlocked
+            nothingObserved || blockedBy("operatingCashFlowBeforeDebt")
               ? undefined
               : observed.operatingCashFlowBeforeDebt >= 0
                 ? "positive"
@@ -420,17 +430,18 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         <MetricCard
           label="Surplus après service de dette"
           value={monthValue(
+            "cashFlowAfterDebt",
             <Currency currency={state.reportingCurrency} value={observed.cashFlowAfterDebt} sign />,
           )}
           tone={
-            nothingObserved || currencyBlocked
+            nothingObserved || blockedBy("cashFlowAfterDebt")
               ? undefined
               : observed.cashFlowAfterDebt >= 0
                 ? "positive"
                 : "negative"
           }
           detail={
-            nothingObserved || currencyBlocked ? undefined : (
+            nothingObserved || blockedBy("debtServicePaid") ? undefined : (
               <>
                 Service de dette payé{" "}
                 <Currency currency={state.reportingCurrency} value={observed.debtServicePaid} />
@@ -533,7 +544,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
            * afficher « 0 € » affirmerait un mois sans dépense. Idem quand des opérations dans
            * une autre devise sont exclues : la structure serait amputée sans le dire.
            */}
-          {currencyBlocked ? (
+          {blockedBy("consumerExpenses") ? (
             <p className="muted-copy">
               Non calculable : des opérations dans une autre devise que {state.reportingCurrency} ne
               sont pas converties.
@@ -719,8 +730,19 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                 {formatDate(comparison.monthToDateEnd)})
               </dt>
               <dd>
-                <Currency currency={state.reportingCurrency} value={comparison.monthToDate} sign />
-                {comparison.monthToDatePartialCoverage ? (
+                {comparison.currencyBlockedMonthToDate ? (
+                  <span className="warning-text">
+                    Non calculable · opération dans une autre devise que {state.reportingCurrency},
+                    non convertie
+                  </span>
+                ) : (
+                  <Currency
+                    currency={state.reportingCurrency}
+                    value={comparison.monthToDate}
+                    sign
+                  />
+                )}
+                {comparison.currencyBlockedMonthToDate ? null : comparison.monthToDatePartialCoverage ? (
                   <span className="warning-text">
                     {" "}
                     · données partielles depuis le {formatDate(comparison.monthToDateStart)}
@@ -738,8 +760,9 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <dd>
                 {comparison.observedT3M === null ? (
                   <span className="warning-text">
-                    Historique insuffisant · {comparison.coverageT3M.completeCoveredMonths} mois
-                    couverts sur {comparison.coverageT3M.requestedMonths}
+                    {comparison.currencyBlockedT3M
+                      ? `Non calculable · opération dans une autre devise que ${state.reportingCurrency}, non convertie`
+                      : `Historique insuffisant · ${comparison.coverageT3M.completeCoveredMonths} mois couverts sur ${comparison.coverageT3M.requestedMonths}`}
                   </span>
                 ) : (
                   <>
@@ -758,8 +781,9 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <dd>
                 {comparison.observedT12M === null ? (
                   <span className="warning-text">
-                    Historique insuffisant · {comparison.coverageT12M.completeCoveredMonths} mois
-                    couverts sur {comparison.coverageT12M.requestedMonths}
+                    {comparison.currencyBlockedT12M
+                      ? `Non calculable · opération dans une autre devise que ${state.reportingCurrency}, non convertie`
+                      : `Historique insuffisant · ${comparison.coverageT12M.completeCoveredMonths} mois couverts sur ${comparison.coverageT12M.requestedMonths}`}
                   </span>
                 ) : (
                   <>
@@ -876,9 +900,20 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                             : "Comportement inconnu"}
                     </small>
                     <small>
-                      Réalisé{" "}
-                      <Currency currency={state.reportingCurrency} value={line ? line.actual : 0} />
-                      {line?.variance !== null && line?.variance !== undefined ? (
+                      {/* Aucune dépense observée dans la catégorie : « Réalisé 0 € » et un écart
+                          favorable affirmeraient un mois sans dépense. */}
+                      {line && line.actual !== null && line.observedCount === 0 ? (
+                        "Aucune dépense observée"
+                      ) : (
+                        <>
+                          Réalisé{" "}
+                          <Currency
+                            currency={state.reportingCurrency}
+                            value={line ? line.actual : null}
+                          />
+                        </>
+                      )}
+                      {line && line.observedCount > 0 && line.variance !== null ? (
                         <>
                           {" "}
                           · écart{" "}
@@ -1073,6 +1108,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                   {transaction.provenance.source === NET_INCOME_SOURCE &&
                   transaction.kindOverride === "INCOME" ? (
                     <button
+                      aria-label={`Corriger ${transaction.label} du ${formatDate(transaction.date)}`}
                       className="button secondary"
                       onClick={() => setCorrectingId(transaction.id)}
                       type="button"
@@ -1111,10 +1147,15 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
             state.cashFlowCloses.find((close) => close.month === correcting.date.slice(0, 7))
               ?.version ?? null
           }
+          closedVersionOf={(target) =>
+            state.cashFlowCloses.find((close) => close.month === target)?.version ?? null
+          }
           maxDate={state.dates?.today}
           busy={busy}
           onClose={() => setCorrectingId(null)}
-          onSubmit={(draft) => mutate({ action: "correct_net_income", ...draft })}
+          onSubmit={(draft, onError) =>
+            mutate({ action: "correct_net_income", ...draft }, { onError })
+          }
         />
       ) : null}
       {modal === "income" ? (
@@ -1424,7 +1465,11 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         )}{" "}
         · moyenne mensuelle sur les 3 derniers mois révolus{" "}
         {observedT3M.monthlyAverageOperatingSurplus === null ? (
-          <span className="warning-text">non calculable, historique insuffisant</span>
+          <span className="warning-text">
+            {aggregateBlocked(observedT3M.dataQuality, "operatingCashFlowBeforeDebt")
+              ? `non calculable, opération dans une autre devise que ${state.reportingCurrency} non convertie`
+              : "non calculable, historique insuffisant"}
+          </span>
         ) : (
           <Currency
             currency={state.reportingCurrency}

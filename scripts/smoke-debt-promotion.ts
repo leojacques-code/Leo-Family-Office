@@ -230,15 +230,29 @@ try {
     "liability_terms_transitions_liability_fk",
   );
 
-  await client.query("set local role authenticated");
-  await client.query("select set_config('request.jwt.claims', $1, true)", [
-    JSON.stringify({ sub: otherUser, role: "authenticated" }),
-  ]);
-  const visible = await client.query<{ count: string }>(
-    "select count(*)::text as count from public.liability_terms_transitions where liability_id = $1",
-    [debtId],
-  );
-  assert(visible.rows[0]!.count === "0", "Trace d'un autre propriétaire visible");
+  // Les DEUX réglages : `auth.uid()` du shim local lit `request.jwt.claim.sub`, celui de la
+  // plateforme `request.jwt.claims`. Sans le premier, `auth.uid()` vaut NULL et toute
+  // assertion d'invisibilité serait vraie par construction.
+  const actAs = async (subject: string) => {
+    await client.query("reset role");
+    await client.query(
+      "select set_config('request.jwt.claim.sub', $1, true), set_config('request.jwt.claims', $2, true)",
+      [subject, JSON.stringify({ sub: subject, role: "authenticated" })],
+    );
+    await client.query("set local role authenticated");
+  };
+  const transitionCount = async () =>
+    (
+      await client.query<{ count: string }>(
+        "select count(*)::text as count from public.liability_terms_transitions where liability_id = $1",
+        [debtId],
+      )
+    ).rows[0]!.count;
+  // Contrôle POSITIF d'abord : le propriétaire voit sa trace. Sans lui, un zéro ne prouve rien.
+  await actAs(userId);
+  assert((await transitionCount()) === "1", "Le propriétaire ne voit pas sa propre trace");
+  await actAs(otherUser);
+  assert((await transitionCount()) === "0", "Trace d'un autre propriétaire visible");
   await rejects(
     save,
     [otherUser, JSON.stringify({ ...contract(debtId), promote_outstanding: true })],

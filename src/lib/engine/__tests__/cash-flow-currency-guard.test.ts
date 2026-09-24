@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregateBlocked,
   compareBudgets,
   compareSurplusToScenario,
   computeObservedCashFlow,
@@ -26,6 +27,43 @@ const tx = (id: string, amount: number, currency: string, date = "2026-09-10"): 
 
 describe("Flux : aucune addition silencieuse de devises (FX ABSENT ≠ FX ÉGAL À 1)", () => {
   const ledger = [tx("salaire", 3000, "EUR"), tx("loyer", -1000, "EUR"), tx("bonus", 2000, "CHF")];
+
+  it("ne bloque que les agrégats qui dépendent de la nature exclue (§4)", () => {
+    const observed = computeObservedCashFlow(ledger, categories, "2026-09-01", "2026-09-30", {
+      reportingCurrency: "EUR",
+    });
+    // Le bonus CHF est un REVENU : le revenu est bloqué, la consommation en euros ne l'est pas.
+    expect(observed.dataQuality.foreignCurrencyKinds).toEqual(["INCOME"]);
+    expect(aggregateBlocked(observed.dataQuality, "income")).toBe(true);
+    expect(aggregateBlocked(observed.dataQuality, "consumerExpenses")).toBe(false);
+    expect(aggregateBlocked(observed.dataQuality, "debtServicePaid")).toBe(false);
+    expect(aggregateBlocked(observed.dataQuality, "cashFlowAfterDebt")).toBe(true);
+  });
+
+  it("ne qualifie pas de « non rapproché » un transfert dont une jambe est dans une autre devise", () => {
+    const legs: Transaction[] = [
+      { ...tx("vers-chf", -1000, "EUR"), kindOverride: "INTERNAL_TRANSFER", transferGroupId: "g1" },
+      { ...tx("depuis-eur", 930, "CHF"), kindOverride: "INTERNAL_TRANSFER", transferGroupId: "g1" },
+    ];
+    const observed = computeObservedCashFlow(legs, categories, "2026-09-01", "2026-09-30", {
+      reportingCurrency: "EUR",
+    });
+    expect(observed.dataQuality.unmatchedTransferCount).toBe(0);
+    expect(observed.dataQuality.foreignCurrencyTransactionCount).toBe(1);
+  });
+
+  it("rend le mois à date non calculable quand une opération non convertie y entre", () => {
+    const comparison = compareSurplusToScenario(
+      [tx("bonus", 2000, "CHF", "2026-09-10")],
+      categories,
+      "2026-09-24",
+      1000,
+      "2026-01-01",
+      "EUR",
+    );
+    expect(comparison.monthToDate).toBeNull();
+    expect(comparison.currencyBlockedMonthToDate).toBe(true);
+  });
 
   it("exclut, compte et nomme une opération dans une autre devise que celle de lecture", () => {
     const observed = computeObservedCashFlow(ledger, categories, "2026-09-01", "2026-09-30", {
@@ -104,6 +142,7 @@ describe("Flux : aucune addition silencieuse de devises (FX ABSENT ≠ FX ÉGAL 
       "EUR",
     );
     expect(lines.find((line) => line.categoryId === "food")?.actual).toBe(80);
+    expect(lines.find((line) => line.categoryId === "food")?.observedCount).toBe(1);
     const rent = lines.find((line) => line.categoryId === "rent");
     expect(rent?.actual).toBeNull();
     expect(rent?.variance).toBeNull();

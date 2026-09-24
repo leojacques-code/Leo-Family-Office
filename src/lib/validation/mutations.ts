@@ -1255,7 +1255,10 @@ export const mutationSchema = z.discriminatedUnion("action", [
       reason: z.string().trim().min(1).max(500),
       expected: z
         .object({
-          amount: finite.positive().max(99_999_999_999_999),
+          // Texte décimal simple, tel que lu en base (`numeric(20,6)`) : aucun flottant.
+          amount: z
+            .string()
+            .regex(/^[0-9]{1,14}(\.[0-9]{1,6})?$/, "Montant attendu en texte décimal"),
           receivedOn: realDate,
           label: z.string().min(1).max(180),
         })

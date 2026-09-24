@@ -131,11 +131,12 @@ export interface MonthFlowView {
   readonly periodEnd: string;
   /** Le mois est-il intégralement couvert ? `LABEL_AS_PARTIAL` du registre des KPI. */
   readonly partial: boolean;
-  readonly income: number;
-  readonly essentialExpenses: number;
-  readonly debtService: number;
+  /** `null` : non calculable (opération dans une autre devise, non convertie). Jamais 0. */
+  readonly income: number | null;
+  readonly essentialExpenses: number | null;
+  readonly debtService: number | null;
   /** Solde après tout, y compris le service de dette. */
-  readonly freeCashFlow: number;
+  readonly freeCashFlow: number | null;
   /**
    * Flux non classés de la période.
    *

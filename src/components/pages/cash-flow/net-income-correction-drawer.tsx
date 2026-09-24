@@ -24,7 +24,7 @@ import type { Transaction, TransactionCorrection } from "@/lib/types";
 export interface NetIncomeCorrectionDraft {
   transactionId: string;
   reason: string;
-  expected: { amount: number; receivedOn: string; label: string };
+  expected: { amount: string; receivedOn: string; label: string };
   corrected: { amount?: number; receivedOn?: string; label?: string };
 }
 
@@ -38,6 +38,7 @@ export function NetIncomeCorrectionDrawer({
   open,
   transaction,
   closedMonthVersion,
+  closedVersionOf,
   maxDate,
   busy,
   onClose,
@@ -50,10 +51,16 @@ export function NetIncomeCorrectionDrawer({
    * photographie décidée : la correction ne la réécrit pas, une nouvelle version le fera.
    */
   closedMonthVersion: number | null;
+  /** Version de clôture d'un mois donné (`AAAA-MM`), `null` s'il n'est pas clôturé. */
+  closedVersionOf?: (month: string) => number | null;
   maxDate?: string;
   busy: boolean;
   onClose: () => void;
-  onSubmit: (draft: NetIncomeCorrectionDraft) => Promise<boolean>;
+  /** `onError` affiche dans le tiroir la raison du refus rédigée par le serveur. */
+  onSubmit: (
+    draft: NetIncomeCorrectionDraft,
+    onError: (message: string) => void,
+  ) => Promise<boolean>;
 }) {
   const [label, setLabel] = useState(transaction.label);
   const [amount, setAmount] = useState<number | null>(transaction.amount);
@@ -62,6 +69,12 @@ export function NetIncomeCorrectionDrawer({
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const history = transaction.corrections ?? [];
+  // Déplacer la date VERS un mois clôturé fait diverger sa clôture du ledger : on le dit.
+  const targetMonth = receivedOn?.slice(0, 7) ?? null;
+  const targetClosedVersion =
+    targetMonth && targetMonth !== transaction.date.slice(0, 7)
+      ? (closedVersionOf?.(targetMonth) ?? null)
+      : null;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -102,21 +115,26 @@ export function NetIncomeCorrectionDrawer({
       return;
     }
     setError(null);
-    const saved = await onSubmit({
-      transactionId: transaction.id,
-      reason: reason.trim(),
-      expected: {
-        amount: transaction.amount,
-        receivedOn: transaction.date,
-        label: transaction.label,
+    let refusal: string | null = null;
+    const saved = await onSubmit(
+      {
+        transactionId: transaction.id,
+        reason: reason.trim(),
+        expected: {
+          // Le texte lu en base ; à défaut, le nombre en notation simple à six décimales.
+          amount: transaction.amountText ?? transaction.amount.toFixed(6),
+          receivedOn: transaction.date,
+          label: transaction.label,
+        },
+        corrected,
       },
-      corrected,
-    });
+      (message) => {
+        refusal = message;
+      },
+    );
     if (saved) onClose();
     else
-      setError(
-        "La correction n’a pas été enregistrée : le motif du refus est affiché en haut de la page.",
-      );
+      setError(`La correction n’a pas été enregistrée : ${refusal ?? "modification impossible"}`);
   }
 
   return (
@@ -182,6 +200,9 @@ export function NetIncomeCorrectionDrawer({
           Le compte et la devise ne se corrigent pas ici.
           {closedMonthVersion !== null
             ? ` Ce mois est clôturé (v${closedMonthVersion}) : la clôture reste la photographie décidée, créez une nouvelle version pour y intégrer la correction.`
+            : ""}
+          {targetClosedVersion !== null
+            ? ` Le mois de la nouvelle date est clôturé (v${targetClosedVersion}) : sa clôture ne portera pas ce revenu tant qu’une nouvelle version n’est pas créée.`
             : ""}
         </p>
         {history.length ? (

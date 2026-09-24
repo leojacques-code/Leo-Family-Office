@@ -28,7 +28,14 @@ import { Callout, Currency, DataBadge } from "@/components/ui";
 import { ChevronRight } from "lucide-react";
 import type { FinancialAccount } from "@/lib/types";
 
-export type Mutate = (mutation: Mutation) => Promise<boolean>;
+/**
+ * `onError` reçoit le message de refus RÉDIGÉ PAR LE SERVEUR (jamais le texte d'une base) :
+ * un tiroir modal masque le bandeau d'erreur global, il doit donc pouvoir l'afficher.
+ */
+export type Mutate = (
+  mutation: Mutation,
+  options?: { onError?: (message: string) => void },
+) => Promise<boolean>;
 
 export interface SectionProps {
   section: string;

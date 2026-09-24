@@ -399,7 +399,8 @@ try {
       action: "correct_net_income",
       transactionId: txAfterFix.rows[0].id,
       reason: "Seconde décision sur un état périmé",
-      expected: { amount: 2450.35, receivedOn: "2026-09-23", label: "Salaire septembre" },
+      // Montant attendu en TEXTE, comme l'envoie le tiroir (état lu en base).
+      expected: { amount: "2450.350000", receivedOn: "2026-09-23", label: "Salaire septembre" },
       corrected: { amount: 2400 },
     },
   });
@@ -520,23 +521,48 @@ try {
   );
   await page.reload();
   await page.waitForLoadState("networkidle");
+  const tilesUnclassified = (await page.locator(".metrics-grid").first().innerText()).replace(
+    /\s+/g,
+    " ",
+  );
+  const fluxUnclassified = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  check(
+    "X2",
+    "opération CHF NON CLASSÉE : nommée et exclue, mais aucun total n'en dépend (revenu intact)",
+    /Revenus observés 2\s405,35\s€/.test(tilesUnclassified) &&
+      fluxUnclassified.includes("autre devise que EUR") &&
+      /[−-]30\sCHF/.test(fluxUnclassified),
+    { tuiles: tilesUnclassified.slice(0, 160) },
+  );
+  // Classée en DÉPENSE, la même opération rend la consommation et les surplus incalculables,
+  // sans effacer le revenu en euros, qui reste certain (§4).
+  const chfTx = await one(
+    "select id::text as id from public.transactions where user_id = $1 and label = 'Achat en francs'",
+    [user.id],
+  );
+  await page.request.post(`${APP}/api/state`, {
+    headers: { Origin: APP },
+    data: { action: "classify_transaction", transactionId: chfTx.id, kindOverride: "EXPENSE" },
+  });
+  await page.reload();
+  await page.waitForLoadState("networkidle");
   const tilesFx = (await page.locator(".metrics-grid").first().innerText()).replace(/\s+/g, " ");
   const fluxFx = (await page.locator("main").innerText()).replace(/\s+/g, " ");
   check(
-    "X2",
-    "Flux : totaux « Non calculable » et opération CHF nommée, jamais additionnée à l'euro",
-    tilesFx.includes("Non calculable") &&
-      !/2\s405,35\s€/.test(tilesFx) &&
-      fluxFx.includes("autre devise que EUR") &&
-      /[−-]30\sCHF/.test(fluxFx),
-    { tuiles: tilesFx.slice(0, 160) },
+    "X6",
+    "opération CHF classée en dépense : consommation et surplus « Non calculable », revenu 2 405,35 € conservé",
+    /Revenus observés 2\s405,35\s€/.test(tilesFx) &&
+      /Dépenses de consommation Non calculable/.test(tilesFx) &&
+      /Surplus avant service de dette Non calculable/.test(tilesFx) &&
+      /Surplus après service de dette Non calculable/.test(tilesFx),
+    { tuiles: tilesFx.slice(0, 200) },
   );
   const callout = (
     await page.locator(".callout, [role=note]", { hasText: "Qualité des données" }).first().innerText()
   ).replace(/\s+/g, " ");
   check(
     "X5",
-    "l'encadré qualité NOMME la devise non convertie, et le mois concerné n'a pas de barre",
+    "l'encadré qualité NOMME la devise non convertie, et la série touchée n'a pas de barre",
     callout.includes("dans une autre devise que EUR") &&
       !callout.includes("non identifié") &&
       fluxFx.includes("mois sans barre"),

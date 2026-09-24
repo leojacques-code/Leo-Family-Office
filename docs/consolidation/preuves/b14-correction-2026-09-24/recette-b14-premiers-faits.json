@@ -1,7 +1,7 @@
 {
-  "date": "2026-09-24T12:49:26.314Z",
+  "date": "2026-09-24T13:15:06.052Z",
   "app": "http://localhost:3120",
-  "utilisateur": "recette-b14-1790254144420@lfo.invalid",
+  "utilisateur": "recette-b14-1790255681205@lfo.invalid",
   "environnement": "pile Supabase auto-hébergée locale ; build de production",
   "checks": [
     {
@@ -19,7 +19,7 @@
       "id": "D2",
       "label": "dette affichée avec son encours, sa devise et sa date",
       "ok": true,
-      "panelText": "t que les termes sont inconnus. Prêt familial Créancier non renseigné 1 500,50 € Au 20 septembre 2026 Corriger l’encours"
+      "panelText": "nt inconnus. Prêt familial Créancier non renseigné 1 500,50 € Au 20 septembre 2026 Corriger l’encours Décrire le contrat"
     },
     {
       "id": "D3",
@@ -86,7 +86,7 @@
       "id": "C2",
       "label": "après rechargement : 1 400 € au 24 septembre 2026",
       "ok": true,
-      "reloaded": "nus. Prêt familial Créancier non renseigné 1 400 € Au 24 septembre 2026 Corriger l’encours"
+      "reloaded": "Créancier non renseigné 1 400 € Au 24 septembre 2026 Corriger l’encours Décrire le contrat"
     },
     {
       "id": "C3",
@@ -195,7 +195,7 @@
       "label": "piste : avant, après, motif, champ modifié, acteur = propriétaire, rôle constaté",
       "ok": true,
       "piste": {
-        "actor_user_id": "c2fa20ec-3f8b-49ed-bb67-fce35742a688",
+        "actor_user_id": "83cacc6a-65a5-4055-ad63-bbb31adf652c",
         "executed_by": "service_role",
         "reason": "Montant saisi avant retenue à la source",
         "before_values": {
@@ -270,13 +270,19 @@
     },
     {
       "id": "X2",
-      "label": "Flux : totaux « Non calculable » et opération CHF nommée, jamais additionnée à l'euro",
+      "label": "opération CHF NON CLASSÉE : nommée et exclue, mais aucun total n'en dépend (revenu intact)",
       "ok": true,
-      "tuiles": "Revenus observés Non calculable Mois en cours · Incomplet Dépenses de consommation Non calculable Hors transferts, investissements et service de dette Surplus a"
+      "tuiles": "Revenus observés 2 405,35 € Mois en cours · Incomplet Dépenses de consommation Non observé Hors transferts, investissements et service de dette Surplus avant se"
+    },
+    {
+      "id": "X6",
+      "label": "opération CHF classée en dépense : consommation et surplus « Non calculable », revenu 2 405,35 € conservé",
+      "ok": true,
+      "tuiles": "Revenus observés 2 405,35 € Mois en cours · Incomplet Dépenses de consommation Non calculable Hors transferts, investissements et service de dette Surplus avant service de dette Non calculable Surplus"
     },
     {
       "id": "X5",
-      "label": "l'encadré qualité NOMME la devise non convertie, et le mois concerné n'a pas de barre",
+      "label": "l'encadré qualité NOMME la devise non convertie, et la série touchée n'a pas de barre",
       "ok": true,
       "encadre": "Qualité des données : Incomplet profondeur d’historique non déclarée par la source : aucun mois ne peut être certifié complet · 1 transaction(s) non classifiée(s) · 1 opération(s) dans une autre devise que EUR : non converties, elles sont exclues des totaux. Les agrégats portent sur ce qui est réellement classifié, sans substitution."
     },

@@ -1,0 +1,71 @@
+{
+  "date": "2026-09-24T13:15:17.422Z",
+  "app": "http://localhost:3120",
+  "utilisateur": "recette-3b-1790255706486@lfo.invalid",
+  "environnement": "pile Supabase auto-hébergée locale ; build de production",
+  "checks": [
+    {
+      "id": "P1",
+      "label": "point de départ : une dette OUTSTANDING_ONLY",
+      "ok": true
+    },
+    {
+      "id": "P2",
+      "label": "le formulaire garde la dette (nom), ne redemande pas l'encours et dit que l'historique reste",
+      "ok": true,
+      "extrait": "Décrire le contrat de Prêt familial La même dette devient contractuelle : l’encours observé et son historique sont conservés. Tous les montants de ce contrat et de son échéancier sont en EUR. Commence"
+    },
+    {
+      "id": "P3",
+      "label": "après rechargement : plus d'encours « sans contrat », la dette apparaît comme contrat",
+      "ok": true,
+      "extrait": "PASSIF Dettes Échéanciers datés, coût du crédit et arbitrage remboursement vs investissement. Modifier le contrat Nouvel encours Encours seul Nouvelle dette Capital restant dû 1 500,50 € Prêt familial"
+    },
+    {
+      "id": "1ca210ba-2244-4756-a436-9f7f95d1cf80",
+      "label": "base : même ligne passée à CONTRACT, une seule dette, encours et historique intacts, décision tracée",
+      "ok": true,
+      "terms_status": "CONTRACT",
+      "balance": "1500.500000",
+      "currency": "EUR",
+      "debts": "1",
+      "observations": "1",
+      "transitions": "1"
+    },
+    {
+      "id": "P5",
+      "label": "bilan : passif 1 500,50 compté une fois, désormais contractuel ; patrimoine net 1 499,50",
+      "ok": true,
+      "passif": 1500.5,
+      "contractuel": 1500.5,
+      "net": 1499.5
+    },
+    {
+      "id": "P6",
+      "label": "Patrimoine : la dette n'est plus « sans contrat détaillé »",
+      "ok": true
+    },
+    {
+      "id": "P7",
+      "label": "Aujourd'hui : le domaine Dettes reste renseigné",
+      "ok": true
+    },
+    {
+      "id": "P8",
+      "label": "Flux : plus de « dette sans échéancier », la prévision lit le contrat",
+      "ok": true
+    },
+    {
+      "id": "M1",
+      "label": "Dettes sur mobile sans débordement horizontal",
+      "ok": true,
+      "scrollWidth": 390
+    },
+    {
+      "id": "E1",
+      "label": "aucune erreur JavaScript",
+      "ok": true,
+      "errors": []
+    }
+  ]
+}

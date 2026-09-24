@@ -49,7 +49,7 @@ describe("correction d'un revenu saisi par /api/state", () => {
     action: "correct_net_income",
     transactionId: "22222222-2222-4222-8222-222222222222",
     reason: "Montant saisi avant retenue à la source",
-    expected: { amount: 2450.35, receivedOn: "2026-09-23", label: "Salaire septembre" },
+    expected: { amount: "2450.350000", receivedOn: "2026-09-23", label: "Salaire septembre" },
     corrected: { amount: 2405.35 },
   };
   it("transmet la commande validée", async () => {
@@ -65,7 +65,7 @@ describe("correction d'un revenu saisi par /api/state", () => {
       { ...correction, corrected: { amount: 0 } },
       { ...correction, corrected: { receivedOn: "2099-01-01" } },
       { ...correction, corrected: { label: "  " } },
-      { ...correction, expected: { amount: 2450.35, receivedOn: "2026-09-23" } },
+      { ...correction, expected: { amount: "2450.350000", receivedOn: "2026-09-23" } },
       { ...correction, reason: " " },
       { ...correction, transactionId: "pas-un-uuid" },
     ])

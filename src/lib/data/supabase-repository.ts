@@ -583,7 +583,10 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
     return readAllPages<Row, PostgrestError>(`transactions depuis ${since}`, async (from, to) => {
       const result = await db
         .from("transactions")
-        .select("*")
+        // `amount_text` : le montant tel que la base l'a écrit, en TEXTE. Il sert d'état
+        // attendu à une correction : un aller-retour par un flottant perdrait la précision
+        // d'un `numeric(20,6)` au-delà d'environ 1e10, et le revenu deviendrait incorrigible.
+        .select("*, amount_text:amount::text")
         .eq("user_id", user)
         .gte("transaction_date", since)
         .order("transaction_date", { ascending: false })
@@ -1303,6 +1306,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       categoryId: str(row.category_id),
       categoryName: categoryNames.get(str(row.category_id)) ?? "",
       amount: finiteNumber(row.amount, `transactions[id=${str(row.id)}].amount`),
+      ...(typeof row.amount_text === "string" ? { amountText: row.amount_text } : {}),
       currency: str(row.currency),
       kindOverride: row.kind_override
         ? (str(row.kind_override) as Transaction["kindOverride"])
@@ -2023,6 +2027,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       tax: taxCalculation.monthly,
       transactions,
       categories: expenseCategories,
+      reportingCurrency,
     });
     // Le domaine immobilier est dérivé AVANT le bilan : il en produit les lignes d'actif.
     // Il ne produit AUCUNE ligne de passif : la dette immobilière est déjà portée par
@@ -2844,7 +2849,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
             // L'état attendu voyage en TEXTE, comme le montant corrigé : la base compare en
             // `numeric`, un flottant perdrait la précision d'un `numeric(20,6)`.
             expected: {
-              amount: decimalText(mutation.expected.amount),
+              amount: mutation.expected.amount,
               received_on: mutation.expected.receivedOn,
               label: mutation.expected.label,
             },
@@ -2862,16 +2867,22 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
           },
         });
         if (result.error) {
+          // Routage sur le SQLSTATE dédié quand la base le porte, sur le libellé sinon.
           const message = result.error.message;
-          if (message.startsWith("Conflit"))
+          const code = result.error.code;
+          if (code === "LF409" || message.startsWith("Conflit"))
             throw new MutationConflictError(
               "Ce revenu a changé depuis son affichage : rechargez la page avant de le corriger.",
             );
-          if (message.startsWith("Aucune valeur modifiée"))
+          if (code === "LF422" || message.startsWith("Aucune valeur modifiée"))
             throw new MutationRejectedError(
               "Aucune valeur n’a changé : ce n’est pas une correction.",
             );
-          if (message.startsWith("Seul un revenu net saisi") || message === "Revenu introuvable")
+          if (
+            code === "LF403" ||
+            message.startsWith("Seul un revenu net saisi") ||
+            message === "Revenu introuvable"
+          )
             throw new MutationRejectedError(
               "Seul un revenu net saisi à la main se corrige ici. Une opération importée se corrige par son import.",
             );

@@ -53,7 +53,18 @@ npm run build && npx next start -p 3120 -H localhost
 # 5. Parcours A/B
 RECETTE_APP=http://localhost:3120 RECETTE_OUT=… RECETTE_PLAYWRIGHT=…/package.json \
 RECETTE_CHROMIUM=/opt/pw-browsers/chromium RECETTE_ADMIN_DB_URL=… node scripts/recette-auth/parcours-ab.mjs
+# 6. Premiers faits B14 (dette, revenu, correction, opération non classée, devises) : mêmes variables
+node scripts/recette-auth/parcours-b14.mjs
 bash scripts/recette-auth/stop.sh
+```
+
+Vérificateur de schéma sur cette pile : `supabase_admin` a `auth` dans son `search_path`, et
+PostgreSQL rend alors les politiques sous la forme `uid()` au lieu de `auth.uid()`, ce que le
+vérificateur lit comme 108 politiques invalides. Le lancer avec un `search_path` public :
+
+```sh
+SUPABASE_DB_URL="postgres://supabase_admin:…@127.0.0.1:55432/postgres?sslmode=disable&options=-c%20search_path%3Dpublic" \
+  node --experimental-strip-types scripts/verify-supabase-schema.ts
 ```
 
 Chaque script refuse un hôte non local, base d'administration comprise. `parcours-ab.mjs` ne

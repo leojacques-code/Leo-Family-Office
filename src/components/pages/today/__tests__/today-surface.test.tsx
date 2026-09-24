@@ -35,6 +35,13 @@ const EMPTY_INPUT: TodayViewInput = {
     cashFlowAfterDebt: 0,
     unclassifiedFlows: 0,
     fullyCovered: false,
+    foreignCurrencyTransactionCount: 0,
+    blocked: {
+      income: false,
+      essentialExpenses: false,
+      debtServicePaid: false,
+      cashFlowAfterDebt: false,
+    },
   },
   goal: null,
   events: [],

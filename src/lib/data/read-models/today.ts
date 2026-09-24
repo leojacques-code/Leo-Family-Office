@@ -1,6 +1,6 @@
 import "server-only";
 
-import { computeObservedCashFlow, monthPeriod } from "@/lib/engine/cash-flow";
+import { aggregateBlocked, computeObservedCashFlow, monthPeriod } from "@/lib/engine/cash-flow";
 import { buildGlobalFinancialContext } from "@/lib/engine/global-financial-model";
 import { railSourcesFor } from "@/lib/presentation/rail-sources";
 import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
@@ -194,6 +194,13 @@ export function todayViewInputFrom(
       // d'opérations : un mois avec trois opérations n'est pas un mois couvert, et une absence
       // d'historique n'est pas un mois à zéro.
       fullyCovered: observed.coverage.status === "COMPLETE",
+      foreignCurrencyTransactionCount: observed.dataQuality.foreignCurrencyTransactionCount,
+      blocked: {
+        income: aggregateBlocked(observed.dataQuality, "income"),
+        essentialExpenses: aggregateBlocked(observed.dataQuality, "consumerExpenses"),
+        debtServicePaid: aggregateBlocked(observed.dataQuality, "debtServicePaid"),
+        cashFlowAfterDebt: aggregateBlocked(observed.dataQuality, "cashFlowAfterDebt"),
+      },
     },
     goal,
     events: context.timeline.events,

@@ -263,6 +263,10 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
     label: "Opération constatée retenue",
     state: "AVAILABLE",
   },
+  OBSERVED_INCOME_FOREIGN_CURRENCY: {
+    label: "Revenu constaté dans une autre devise, non converti",
+    state: P,
+  },
   CASH_INCLUDED_IN_CAREER_TAX_MONTH: {
     label: "Encaissement déjà compté au mois de paie",
     state: P,
