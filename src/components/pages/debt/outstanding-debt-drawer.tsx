@@ -193,9 +193,9 @@ export function OutstandingDebtDrawer({
         </label>
         {debt ? null : (
           <p className="full outstanding-debt-note">
-            Si vous décrivez plus tard le contrat de cette dette, corrigez cet encours à zéro : le
-            passage d’un encours seul à un contrat n’est pas encore disponible, et deux saisies
-            compteraient la même dette deux fois.
+            Si vous connaissez plus tard son contrat, utilisez « Décrire le contrat » sur cette
+            dette : elle deviendra contractuelle sans être saisie une seconde fois, et son
+            historique d’encours sera conservé.
           </p>
         )}
         {error ? (

@@ -74,6 +74,8 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const [selectedId, setSelectedId] = useState(state.liabilities[0]?.id ?? "");
   const [investmentReturn, setInvestmentReturn] = useState(5.5);
   const [contractEditor, setContractEditor] = useState<"new" | "edit" | null>(null);
+  // B16 : dette encours seul dont on décrit le contrat (même ligne, décision tracée).
+  const [promoting, setPromoting] = useState<OutstandingDebt | null>(null);
   useRegisterPrimaryAction(busy ? null : () => setContractEditor(loan ? "edit" : "new"));
   const [balanceEditor, setBalanceEditor] = useState(false);
   const [balance, setBalance] = useState({ value: "", date: state.asOfDate, notes: "" });
@@ -213,11 +215,43 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
               >
                 <Edit3 size={15} /> Corriger l’encours
               </button>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => setPromoting(debt)}
+              >
+                <Plus size={15} /> Décrire le contrat
+              </button>
             </li>
           ))}
         </ul>
       </section>
     ) : null;
+
+  const promotionModal = (
+    <Modal
+      open={promoting !== null}
+      onClose={() => setPromoting(null)}
+      title={promoting ? `Décrire le contrat de ${promoting.name}` : "Décrire le contrat"}
+      subtitle="La même dette devient contractuelle : l’encours observé et son historique sont conservés."
+      wide
+    >
+      {promoting ? (
+        <DebtContractForm
+          key={`promote-${promoting.id}`}
+          loan={null}
+          promoteFrom={promoting}
+          asOfDate={state.asOfDate}
+          reportingCurrency={state.reportingCurrency}
+          busy={busy}
+          onCancel={() => setPromoting(null)}
+          onSave={(contract: DebtContractInput) =>
+            mutate({ action: "save_debt_contract", contract })
+          }
+        />
+      ) : null}
+    </Modal>
+  );
 
   const editorModal = (
     <Modal
@@ -281,6 +315,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           />
         )}
         {editorModal}
+        {promotionModal}
         {outstandingDrawer}
       </div>
     );
@@ -701,6 +736,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
         </section>
       ) : null}
       {editorModal}
+      {promotionModal}
       <Modal
         open={balanceEditor}
         onClose={() => setBalanceEditor(false)}

@@ -8,7 +8,9 @@ import { OptionalNumberInput } from "@/components/primitives/optional-number-inp
 import { PercentInput } from "@/components/primitives/percent-input";
 
 import type { DebtContractInput } from "@/lib/data/contracts";
-import type { Liability } from "@/lib/types";
+import { formatCurrency } from "@/lib/presentation/currency";
+import { formatDate } from "@/components/pages/shared";
+import type { Liability, OutstandingDebt } from "@/lib/types";
 
 function nextYear(date: string): string {
   const parsed = new Date(`${date}T00:00:00Z`);
@@ -101,8 +103,26 @@ function fromLiability(loan: Liability): DebtContractInput {
 const number = (value: string) => Number(value.replace(",", "."));
 const nullableNumber = (value: string) => (value === "" ? null : number(value));
 
+/**
+ * B16 : contrat d'une dette connue par son seul encours. La MÊME ligne devient contractuelle
+ * (aucune seconde dette) ; son encours observé et son historique ne sont pas redemandés, ils
+ * restent l'observé que le Debt Engine confronte au contrat.
+ */
+function fromOutstanding(debt: OutstandingDebt, asOfDate: string): DebtContractInput {
+  return {
+    ...blankContract(asOfDate),
+    liabilityId: debt.id,
+    promoteOutstanding: true,
+    name: debt.name,
+    lender: debt.lender ?? "",
+    initialBalance: null,
+    balanceDate: null,
+  };
+}
+
 export function DebtContractForm({
   loan,
+  promoteFrom = null,
   asOfDate,
   reportingCurrency,
   busy,
@@ -110,6 +130,8 @@ export function DebtContractForm({
   onCancel,
 }: {
   loan: Liability | null;
+  /** Dette encours seul dont on décrit le contrat (B16). Exclusif de `loan`. */
+  promoteFrom?: OutstandingDebt | null;
   asOfDate: string;
   reportingCurrency: string;
   busy: boolean;
@@ -117,10 +139,17 @@ export function DebtContractForm({
   onCancel: () => void;
 }) {
   // La RPC de création omet currency : le schéma persiste EUR. L’édition conserve la devise native.
-  const currency = loan ? (loan.currency ?? null) : "EUR";
+  // Une dette encours seul garde SA devise : la promotion ne change que les termes.
+  const currency = loan ? (loan.currency ?? null) : promoteFrom ? promoteFrom.currency : "EUR";
+  // Ligne déjà existante : l'encours observé initial n'est pas redemandé.
+  const existing = loan !== null || promoteFrom !== null;
   const currencyLabel = currency ?? "devise non renseignée";
   const [contract, setContract] = useState<DebtContractInput>(() =>
-    loan ? fromLiability(loan) : blankContract(asOfDate),
+    loan
+      ? fromLiability(loan)
+      : promoteFrom
+        ? fromOutstanding(promoteFrom, asOfDate)
+        : blankContract(asOfDate),
   );
   const [requiredValues, setRequiredValues] = useState(() => ({
     principal: loan?.principal ?? null,
@@ -145,7 +174,7 @@ export function DebtContractForm({
       requiredValues.paymentCount === null ||
       !Number.isInteger(requiredValues.paymentCount) ||
       requiredValues.paymentCount < 1 ||
-      (!loan && requiredValues.initialBalance === null);
+      (!existing && requiredValues.initialBalance === null);
     if (missing) {
       setFormError(
         "Complétez les montants, le taux et le nombre d’échéances avant l’enregistrement.",
@@ -157,7 +186,7 @@ export function DebtContractForm({
       await onSave({
         ...contract,
         principal: requiredValues.principal!,
-        initialBalance: loan ? null : requiredValues.initialBalance,
+        initialBalance: existing ? null : requiredValues.initialBalance,
         annualRate: requiredValues.annualRate!,
         paymentAmount: requiredValues.paymentAmount!,
         paymentCount: requiredValues.paymentCount!,
@@ -170,7 +199,7 @@ export function DebtContractForm({
     <form className="form-grid debt-contract-form" onSubmit={submit}>
       <p className="full">
         Tous les montants de ce contrat et de son échéancier sont en {currencyLabel}.
-        {!loan && reportingCurrency !== "EUR"
+        {!existing && reportingCurrency !== "EUR"
           ? " La création est actuellement limitée à EUR, indépendamment de votre devise de lecture."
           : ""}
       </p>
@@ -213,7 +242,15 @@ export function DebtContractForm({
         }
         required
       />
-      {!loan ? (
+      {promoteFrom ? (
+        <p className="full outstanding-debt-note">
+          L’encours de {formatCurrency(promoteFrom.currentBalance, promoteFrom.currency)} observé
+          {promoteFrom.balanceDate ? ` au ${formatDate(promoteFrom.balanceDate)}` : ""} et son
+          historique sont conservés : le contrat décrit ce qui était prévu, l’encours observé reste
+          ce qui a été constaté. Aucune seconde dette n’est créée.
+        </p>
+      ) : null}
+      {!existing ? (
         <MoneyInput
           id="debt-initial-balance"
           label="Encours observé initial"
@@ -225,7 +262,7 @@ export function DebtContractForm({
           required
         />
       ) : null}
-      {!loan ? (
+      {!existing ? (
         <label>
           Date de l’encours initial
           <input

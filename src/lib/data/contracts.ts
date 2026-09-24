@@ -51,6 +51,8 @@ import type {
 
 export interface DebtContractInput {
   liabilityId: string | null;
+  /** B16 : `true` pour décrire le contrat d'une dette encours seul (même ligne, tracé). */
+  promoteOutstanding?: true;
   name: string;
   lender: string;
   principal: number;

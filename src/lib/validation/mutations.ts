@@ -131,6 +131,9 @@ const datedTermKind = z.enum(["CONTRACTUAL", "ASSUMPTION"]);
 const debtContractSchema = z
   .object({
     liabilityId: z.uuid().nullable(),
+    // B16 : décrire le contrat d'une dette connue par son seul encours est une DÉCISION
+    // explicite. Seul `true` est accepté ; la base refuse la clé hors de ce cas.
+    promoteOutstanding: z.literal(true).optional(),
     name: z.string().trim().min(1).max(160),
     lender: z.string().trim().min(1).max(160),
     principal: finite.nonnegative(),
@@ -208,6 +211,13 @@ const debtContractSchema = z
   })
   .strict()
   .superRefine((contract, context) => {
+    if (contract.promoteOutstanding && contract.liabilityId === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Seule une dette existante connue par son seul encours se décrit par promotion",
+        path: ["promoteOutstanding"],
+      });
+    }
     if (
       contract.liabilityId === null &&
       (contract.initialBalance === null || contract.balanceDate === null)

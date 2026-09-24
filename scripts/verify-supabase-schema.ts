@@ -63,9 +63,18 @@ const canonicalMigrations = [
   "20260924081000",
   "20260924091000",
   "20260924120000",
+  "20260924150000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
+  liability_terms_transitions: [
+    "liability_id",
+    "actor_user_id",
+    "executed_by",
+    "from_status",
+    "to_status",
+    "decided_at",
+  ],
   transaction_corrections: [
     "transaction_id",
     "actor_user_id",
@@ -1125,6 +1134,7 @@ const userOwnedTables = [
   "position_snapshots",
   "position_snapshot_corrections",
   "transaction_corrections",
+  "liability_terms_transitions",
   "liabilities",
   "loan_schedules",
   "income_sources",
@@ -1520,6 +1530,7 @@ const requiredTriggers = [
   "position_snapshot_corrections_immutable",
   "user_domain_declarations_immutable",
   "transaction_corrections_immutable",
+  "liability_terms_transitions_immutable",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1539,9 +1550,14 @@ const requiredTriggerFunctions = [
   "bank_observed_transaction_frozen",
   "user_domain_declaration_immutable",
   "transaction_correction_immutable",
+  "liability_terms_transition_immutable",
 ] as const;
 
 const requiredConstraints = [
+  // Passage encours seul → contrat : la trace ne perd ni la dette, ni son auteur.
+  "liability_terms_transitions_liability_fk",
+  "liability_terms_transitions_actor_is_owner_ck",
+  "liability_terms_transitions_direction_ck",
   // Correction de revenu net saisi : la piste ne perd ni l'ancienne valeur, ni son auteur.
   "transaction_corrections_transaction_fk",
   "transaction_corrections_owner_fk",
@@ -2316,6 +2332,8 @@ const readOnlyAuditTables = [
   "user_domain_declarations",
   // Une correction de revenu saisi est la seule trace de la valeur remplacée.
   "transaction_corrections",
+  // Le passage au contrat est la seule trace du statut « encours seul » antérieur.
+  "liability_terms_transitions",
 ] as const;
 
 const storagePolicies = [

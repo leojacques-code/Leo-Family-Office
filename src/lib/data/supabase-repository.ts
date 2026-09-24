@@ -2763,6 +2763,9 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
             p_user_id: user,
             p_payload: {
               liability_id: contract.liabilityId,
+              // Clé présente seulement quand elle est décidée : son absence signifie « pas de
+              // promotion », et la base refuse toute autre forme.
+              ...(contract.promoteOutstanding ? { promote_outstanding: true } : {}),
               name: contract.name,
               lender: contract.lender,
               principal: contract.principal,
