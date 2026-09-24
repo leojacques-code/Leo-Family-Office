@@ -89,11 +89,11 @@ try {
   const panel = page.getByRole("region", { name: "Encours déclarés sans contrat" });
   await panel.waitFor();
   const panelText = await panel.innerText();
-  // Format du Currency partagé : zéros décimaux finaux retirés (« 1 500,5 € »).
+  // Un montant qui porte des centimes les affiche tous : « 1 500,50 € ».
   check(
     "D2",
     "dette affichée avec son encours, sa devise et sa date",
-    /1\s500,5\s€/.test(panelText) &&
+    /1\s500,50\s€/.test(panelText) &&
       panelText.includes("Au 20 septembre 2026") &&
       panelText.includes("Créancier non renseigné"),
     {
@@ -162,7 +162,7 @@ try {
   check(
     "D7",
     "Patrimoine affiche le passif et le patrimoine net négatif",
-    /1\s500,5\s€/.test(netWorthText) && /[−-]\s?1\s500,5\s€/.test(netWorthText),
+    /1\s500,50\s€/.test(netWorthText) && /[−-]\s?1\s500,50\s€/.test(netWorthText),
   );
   check(
     "D9",
@@ -282,9 +282,12 @@ try {
   await page.reload();
   await page.waitForLoadState("networkidle");
   const tilesAfter = (await page.locator(".metrics-grid").first().innerText()).replace(/\s+/g, " ");
-  check("R2", "après rechargement : revenus observés 2 450,35 €", /2\s450,35\s€/.test(tilesAfter), {
-    tuiles: tilesAfter.slice(0, 140),
-  });
+  check(
+    "R2",
+    "après rechargement : revenus 2 450,35 €, dépenses « Non observé » (aucune saisie), pas « 0 € »",
+    /2\s450,35\s€/.test(tilesAfter) && /Dépenses de consommation Non observé/.test(tilesAfter),
+    { tuiles: tilesAfter.slice(0, 140) },
+  );
   await page.screenshot({ path: `${OUT}/07_flux_apres_revenu_bureau.png` });
   const tx = await sql.query(
     `select amount::text, currency, category_id, kind_override, data_kind, transaction_date::text
@@ -334,6 +337,242 @@ try {
       ) === 0,
   );
 
+  // ---------- Correction NON DESTRUCTIVE du revenu saisi ----------
+  await page.goto(`${APP}/cash-flow`);
+  await page.waitForLoadState("networkidle");
+  const incomeRow = page.locator(".cash-ledger-table .table-row", { hasText: "Salaire septembre" });
+  await incomeRow.getByRole("button", { name: "Corriger" }).click();
+  const fixIncome = page.getByRole("dialog");
+  const prefilled = (await fixIncome.getByLabel(/Montant net versé/).inputValue()).replace(/\s/g, "");
+  check("K1", "le tiroir de correction reprend le montant enregistré", prefilled === "2450,35", {
+    prefilled,
+  });
+  await fixIncome.getByLabel(/Montant net versé/).fill("2 405,35");
+  await fixIncome.getByLabel(/Motif de la correction/).fill("Montant saisi avant retenue à la source");
+  await page.screenshot({ path: `${OUT}/09_correction_revenu_saisie_bureau.png` });
+  await fixIncome.getByRole("button", { name: "Enregistrer la correction" }).click();
+  await page.waitForTimeout(800);
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  const tilesCorrected = (await page.locator(".metrics-grid").first().innerText()).replace(
+    /\s+/g,
+    " ",
+  );
+  const ledgerText = (await page.locator(".cash-ledger-table").innerText()).replace(/\s+/g, " ");
+  check(
+    "K2",
+    "après rechargement : revenus 2 405,35 €, ligne marquée corrigée",
+    /2\s405,35\s€/.test(tilesCorrected) && ledgerText.includes("corrigé"),
+    { tuiles: tilesCorrected.slice(0, 120) },
+  );
+  await page.screenshot({ path: `${OUT}/10_flux_apres_correction_bureau.png` });
+  const txAfterFix = await sql.query(
+    "select id, amount::text, transaction_date::text from public.transactions where user_id = $1",
+    [user.id],
+  );
+  const trail = await sql.query(
+    `select actor_user_id::text, executed_by, reason, before_values, after_values, changed_fields
+       from public.transaction_corrections where user_id = $1`,
+    [user.id],
+  );
+  check(
+    "K3",
+    "base : une seule transaction corrigée en place, aucune régularisation fabriquée",
+    txAfterFix.rows.length === 1 && Number(txAfterFix.rows[0].amount) === 2405.35,
+    { transactions: txAfterFix.rows.length },
+  );
+  check(
+    "K4",
+    "piste : avant, après, motif, champ modifié, acteur = propriétaire, rôle constaté",
+    trail.rows.length === 1 &&
+      Number(trail.rows[0].before_values.amount) === 2450.35 &&
+      Number(trail.rows[0].after_values.amount) === 2405.35 &&
+      trail.rows[0].reason === "Montant saisi avant retenue à la source" &&
+      trail.rows[0].changed_fields.join() === "amount" &&
+      trail.rows[0].actor_user_id === user.id &&
+      trail.rows[0].executed_by === "service_role",
+    { piste: trail.rows[0] ?? null },
+  );
+  const stale = await page.request.post(`${APP}/api/state`, {
+    headers: { Origin: APP },
+    data: {
+      action: "correct_net_income",
+      transactionId: txAfterFix.rows[0].id,
+      reason: "Seconde décision sur un état périmé",
+      expected: { amount: 2450.35, receivedOn: "2026-09-23", label: "Salaire septembre" },
+      corrected: { amount: 2400 },
+    },
+  });
+  const staleBody = await stale.json();
+  const unchanged = await one("select amount::text from public.transactions where id = $1", [
+    txAfterFix.rows[0].id,
+  ]);
+  check(
+    "K5",
+    "seconde décision sur état périmé : 409, message fixe, rien d'écrasé",
+    stale.status() === 409 &&
+      staleBody.code === "CONFLICT" &&
+      !JSON.stringify(staleBody).includes("2405") &&
+      Number(unchanged.amount) === 2405.35,
+    { status: stale.status(), body: staleBody },
+  );
+  await incomeRow.getByRole("button", { name: "Corriger" }).click();
+  const reopened = (await page.getByRole("dialog").innerText()).replace(/\s+/g, " ");
+  check(
+    "K6",
+    "l'historique de correction est lisible dans le tiroir",
+    reopened.includes("Corrections précédentes") &&
+      reopened.includes("Montant saisi avant retenue à la source") &&
+      /2\s450,35\s€\s→\s2\s405,35\s€/.test(reopened),
+    { extrait: reopened.slice(-200) },
+  );
+  await page.screenshot({ path: `${OUT}/11_correction_historique_bureau.png` });
+  await page.getByRole("dialog").getByRole("button", { name: "Annuler" }).click();
+  const todayFixed = await (await page.request.get(`${APP}/api/today`)).json();
+  const flowJson = JSON.stringify(todayFixed.monthFlow ?? {});
+  const stateFixed = await (await page.request.get(`${APP}/api/state`)).json();
+  check(
+    "K7",
+    "propagation : Aujourd'hui porte 2405.35 (plus 2450.35), patrimoine net inchangé à 1 600 €",
+    flowJson.includes("2405.35") &&
+      !flowJson.includes("2450.35") &&
+      stateFixed.balanceSheet.netWorth.value === 1600,
+    { monthFlow: todayFixed.monthFlow },
+  );
+
+  // ---------- Opération sans catégorie ----------
+  await page.getByRole("button", { name: "Ajouter une opération" }).click();
+  const opModal = page.getByRole("dialog");
+  const categoryDefault = await opModal.getByLabel("Catégorie").inputValue();
+  await opModal.getByLabel("Libellé").fill("Courses marché");
+  await opModal.getByLabel(/Montant signé/).fill("-45.2");
+  await opModal.getByLabel("Date").fill("2026-09-22");
+  await page.screenshot({ path: `${OUT}/12_operation_sans_categorie_bureau.png` });
+  await opModal.getByRole("button", { name: "Enregistrer" }).click();
+  await page.waitForTimeout(800);
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  const ledgerOp = (
+    await page.locator(".cash-ledger-table .table-row", { hasText: "Courses marché" }).innerText()
+  ).replace(/\s+/g, " ");
+  const op = await one(
+    "select category_id, currency, amount::text from public.transactions where user_id = $1 and label = 'Courses marché'",
+    [user.id],
+  );
+  check(
+    "T1",
+    "opération enregistrée NON CLASSÉE (aucune catégorie supposée), en EUR, affichée −45,20 €",
+    categoryDefault === "" &&
+      op?.category_id === null &&
+      op?.currency === "EUR" &&
+      Number(op?.amount) === -45.2 &&
+      ledgerOp.includes("Sans catégorie") &&
+      ledgerOp.includes("À classer") &&
+      /[−-]45,20\s€/.test(ledgerOp),
+    { ligne: ledgerOp, base: op ?? null },
+  );
+  const structure = (
+    await page.locator("article", { hasText: "Structure des dépenses" }).innerText()
+  ).replace(/\s+/g, " ");
+  check(
+    "T2",
+    "structure des dépenses : « aucune dépense observée », jamais une grille de 0 €",
+    structure.includes("Aucune dépense de consommation observée") && !/0\s€/.test(structure),
+    { structure },
+  );
+
+  // ---------- Garde-fou de devises ----------
+  const chf = await page.request.post(`${APP}/api/state`, {
+    headers: { Origin: APP },
+    data: {
+      action: "add_account",
+      institution: "Banque recette",
+      name: "Compte CHF",
+      accountType: "BANK",
+      balance: 500,
+      balanceDate: "2026-09-24",
+      currency: "CHF",
+    },
+  });
+  const chfState = await chf.json();
+  const chfAccount = chfState.accounts.find((item) => item.name === "Compte CHF");
+  const chfOp = await page.request.post(`${APP}/api/state`, {
+    headers: { Origin: APP },
+    data: {
+      action: "add_transaction",
+      accountId: chfAccount.id,
+      categoryId: null,
+      date: "2026-09-21",
+      label: "Achat en francs",
+      amount: -30,
+      updateBalance: false,
+    },
+  });
+  const chfRow = await one(
+    "select currency from public.transactions where user_id = $1 and label = 'Achat en francs'",
+    [user.id],
+  );
+  check(
+    "X1",
+    "opération sur un compte CHF : devise du compte (CHF), pas la devise de lecture",
+    chfOp.ok() && chfRow?.currency === "CHF",
+    { devise: chfRow?.currency ?? null },
+  );
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  const tilesFx = (await page.locator(".metrics-grid").first().innerText()).replace(/\s+/g, " ");
+  const fluxFx = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  check(
+    "X2",
+    "Flux : totaux « Non calculable » et opération CHF nommée, jamais additionnée à l'euro",
+    tilesFx.includes("Non calculable") &&
+      !/2\s405,35\s€/.test(tilesFx) &&
+      fluxFx.includes("autre devise que EUR") &&
+      /[−-]30\sCHF/.test(fluxFx),
+    { tuiles: tilesFx.slice(0, 160) },
+  );
+  const callout = (
+    await page.locator(".callout, [role=note]", { hasText: "Qualité des données" }).first().innerText()
+  ).replace(/\s+/g, " ");
+  check(
+    "X5",
+    "l'encadré qualité NOMME la devise non convertie, et le mois concerné n'a pas de barre",
+    callout.includes("dans une autre devise que EUR") &&
+      !callout.includes("non identifié") &&
+      fluxFx.includes("mois sans barre"),
+    { encadre: callout },
+  );
+  await page.screenshot({ path: `${OUT}/13_flux_devise_etrangere_bureau.png` });
+  const close = await page.request.post(`${APP}/api/state`, {
+    headers: { Origin: APP },
+    data: { action: "close_cash_flow_month", month: "2026-09" },
+  });
+  const closes = await one(
+    "select count(*)::text as count from public.cash_flow_monthly_closes where user_id = $1",
+    [user.id],
+  );
+  check(
+    "X3",
+    "clôture d'un mois avec opération non convertie refusée (422), aucune clôture écrite",
+    close.status() === 422 && closes.count === "0",
+    { status: close.status(), body: await close.json() },
+  );
+  await page.getByRole("button", { name: "Ajouter une opération" }).click();
+  const fxModal = page.getByRole("dialog");
+  // Le libellé accessible du select inclut ses options : on vise le premier select du modal.
+  await fxModal.locator("select").first().selectOption({ label: "Compte CHF · CHF" });
+  await fxModal.getByLabel("Libellé").fill("Autre achat");
+  await fxModal.getByLabel(/Montant signé/).fill("-10");
+  await fxModal.getByRole("button", { name: "Enregistrer" }).click();
+  const fxError = (await fxModal.getByRole("alert").innerText()).replace(/\s+/g, " ");
+  check(
+    "X4",
+    "formulaire : une opération sur compte CHF est refusée avec la raison, sans écriture",
+    fxError.includes("les flux dans plusieurs devises ne sont pas encore convertis"),
+    { message: fxError },
+  );
+  await fxModal.getByRole("button", { name: "Annuler" }).click();
+
   // ---------- Mobile ----------
   const mobile = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -352,6 +591,18 @@ try {
   await mpage.goto(`${APP}/cash-flow`);
   await mpage.waitForLoadState("networkidle");
   await mpage.screenshot({ path: `${OUT}/08_flux_revenu_mobile.png` });
+  await mpage
+    .locator(".cash-ledger-table .table-row", { hasText: "Salaire septembre" })
+    .getByRole("button", { name: "Corriger" })
+    .click();
+  await mpage.screenshot({ path: `${OUT}/14_correction_revenu_mobile.png` });
+  const drawerBox = await mpage.getByRole("dialog").boundingBox();
+  check(
+    "M3",
+    "tiroir de correction utilisable sur mobile (dans la largeur de l'écran)",
+    drawerBox !== null && drawerBox.x >= 0 && drawerBox.x + drawerBox.width <= 391,
+    { box: drawerBox },
+  );
   const scrollFlux = await mpage.evaluate(() => document.documentElement.scrollWidth);
   check("M2", "Flux sur mobile sans débordement horizontal", scrollFlux <= 390, {
     scrollWidth: scrollFlux,

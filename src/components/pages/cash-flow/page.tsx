@@ -20,7 +20,6 @@ import {
   cashFlowExplanation,
   formatDate,
   inputNumber,
-  issueSummary,
   requiredNumberInput,
   type SectionProps,
 } from "@/components/pages/shared";
@@ -225,14 +224,19 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       bounds.end,
       { reportingCurrency: state.reportingCurrency },
     );
+    // Un mois dont une opération est dans une autre devise n'a pas de total : sa barre est
+    // absente (null), pas amputée de la devise non convertie.
+    const blocked = period.dataQuality.foreignCurrencyTransactionCount > 0;
     return {
       month: formatDate(bounds.start, { month: "short", year: "2-digit" }),
-      income: period.income,
-      expense: period.consumerExpenses,
-      debt: period.debtServicePaid,
-      count: period.transactionCount,
+      income: blocked ? null : period.income,
+      expense: blocked ? null : period.consumerExpenses,
+      debt: blocked ? null : period.debtServicePaid,
+      count: period.transactionCount + period.dataQuality.foreignCurrencyTransactionCount,
+      blocked,
     };
   });
+  const blockedMonths = months.filter((entry) => entry.blocked).length;
   const ledgerMonths = months.filter((entry) => entry.count > 0).length;
   const currentMonthClose = state.cashFlowCloses.find(
     (close) => close.month === month.start.slice(0, 7),
@@ -385,9 +389,14 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         />
         <MetricCard
           label="Dépenses de consommation"
-          value={monthValue(
-            <Currency currency={state.reportingCurrency} value={observed.consumerExpenses} />,
-          )}
+          value={
+            // Aucune dépense de consommation saisie : « 0 € » affirmerait un mois sans dépense.
+            !currencyBlocked && observed.consumerExpenseCount === 0
+              ? NOT_OBSERVED
+              : monthValue(
+                  <Currency currency={state.reportingCurrency} value={observed.consumerExpenses} />,
+                )
+          }
           detail="Hors transferts, investissements et service de dette"
         />
         <MetricCard
@@ -435,8 +444,10 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           tone="warning"
           title={`Qualité des données : ${QUALITY_LABELS[observed.dataQuality.status]}`}
         >
-          {issueSummary(observed.dataQuality.reasons)}. Les agrégats portent sur ce qui est
-          réellement classifié, sans substitution.
+          {/* Les raisons du moteur sont des phrases déjà rédigées, pas des codes à traduire :
+              les passer au traducteur de codes les réduisait à « N points non identifiés ». */}
+          {observed.dataQuality.reasons.join(" · ")}. Les agrégats portent sur ce qui est réellement
+          classifié, sans substitution.
         </Callout>
       ) : null}
       <section className="two-column wide-left">
@@ -483,6 +494,9 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               </div>
               <p className="muted-copy">
                 {ledgerMonths} mois sur 6 portent au moins une transaction.{" "}
+                {blockedMonths > 0
+                  ? `${blockedMonths} mois sans barre : une opération dans une autre devise que ${state.reportingCurrency} n’est pas convertie. `
+                  : ""}
                 {INTERNAL_TRANSFER_NOTICE}{" "}
                 {observed.internalTransferVolume > 0 ? (
                   <>
@@ -1023,7 +1037,9 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                 <div className={`table-row ${isTransfer ? "muted" : ""}`} key={transaction.id}>
                   <span>{formatDate(transaction.date)}</span>
                   <strong>{transaction.label}</strong>
-                  <span>{transaction.categoryName}</span>
+                  <span className={transaction.categoryName ? "" : "muted-copy"}>
+                    {transaction.categoryName || "Sans catégorie"}
+                  </span>
                   <span className={isTransfer ? "warning-text" : ""}>
                     {KIND_LABELS[kind]}
                     {transaction.kindOverride ? " (forcée)" : ""}
