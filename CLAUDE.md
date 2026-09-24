@@ -126,6 +126,19 @@ Corollaires appliqués dans le code existant, à préserver :
   mesure, un corps se lit de façon incrémentale sous un plafond déclaré, seul du JSON est parsé,
   et un diagnostic d'échec ne reprend JAMAIS `error.message` — un `fetch` y cite l'URL demandée,
   jetons de requête compris, et ce message est persisté puis affiché ;
+- une erreur de saisie n'est pas un flux : un revenu net SAISI se corrige en place par
+  `lfo_correct_net_income`, sous verrou et sur état attendu complet, avec une piste immuable
+  (`transaction_corrections`, `RESTRICT`), jamais par une opération de régularisation. Une
+  opération IMPORTÉE se corrige par sa chaîne d'acquisition ;
+- une dette connue par son seul encours devient contractuelle sur la MÊME ligne, par décision
+  explicite (`promote_outstanding: true` de `lfo_save_debt_contract`) tracée dans
+  `liability_terms_transitions` : aucun second passif, encours courant et historique
+  d'observations conservés ; l'observé reste l'observé et le Debt Engine le confronte au
+  contrat sans recalculer l'un pour coller à l'autre ;
+- le moteur Flux n'additionne jamais deux devises : une opération dans une autre devise que
+  celle de lecture est exclue des totaux, comptée et nommée ; seuls les agrégats qui dépendent
+  de SA nature deviennent non calculables (`aggregateBlocked`), et un mois qui en contient ne
+  se clôture pas, tant que la conversion des flux (phase Flux) n'existe pas ;
 - les flux immobiliers observés sont convertis par le FX Engine à la date de chaque transaction ;
   une dette future dans une autre devise reste non calculable sans courbe FX future explicite, le
   dernier spot n'étant jamais prolongé silencieusement.
@@ -163,15 +176,17 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **51 migrations** sur la branche de consolidation (gate local du 24 septembre
-2026 : 51 appliquées depuis zéro, 107 tables publiques, 441 contraintes, 118 RPC). Les six
-dernières ne sont PAS en production :
+Le DÉPÔT porte **53 migrations** sur la branche de consolidation (gate local du 24 septembre
+2026 : 53 appliquées depuis zéro, 109 tables publiques, 454 contraintes relevées par le
+vérificateur, 119 RPC). Les huit dernières ne sont PAS en production :
 
 - `20260914191901_verified_personal_session` : `lfo_verify_session` (B12) ;
 - `20260915064740_personal_reference_isolation` : références composites par propriétaire (B13) ;
 - `20260915180426_personal_first_intent` et `20260917071520_personal_context` : accueil (B14) ;
 - `20260924081000_debt_outstanding_only` : dette connue par son seul encours (B14) ;
-- `20260924091000_net_income_observation` : premier revenu net observé (B14).
+- `20260924091000_net_income_observation` : premier revenu net observé (B14) ;
+- `20260924120000_net_income_correction` : correction auditée d'un revenu net saisi (B14) ;
+- `20260924150000_debt_outstanding_to_contract` : passage d'un encours seul à un contrat (B16).
 
 Les 45 précédentes s'arrêtent à la déclaration d'applicabilité de domaine, ajoutée par la
 phase 2 de productisation ; les onze qui la précèdent sont les cinq

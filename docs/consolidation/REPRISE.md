@@ -257,3 +257,7 @@ Preuves : LFO_devises_decisions_* dans docs/consolidation/preuves. Auth reste un
 ## Reprise par Claude, 24 septembre 2026
 
 Voir `docs/consolidation/PASSATION_2026-09-24.md` : cause du 503 d'Auth (clé publiable absente de Vercel, preview branchée sur la production), recette Supabase auto-hébergée locale (Auth A/B 35/35), premiers faits B14 livrés (dette par son seul encours, premier revenu net observé ; 23/23), deux migrations additives `20260924081000` et `20260924091000`, décisions en attente (recette hébergée, variables Vercel de preview, correction des transactions observées, Flux multidevise). Aucune écriture en production, `main` et la branche de sauvegarde inchangées.
+
+## Reprise par Claude, 24 septembre 2026, tranche 2
+
+Voir `docs/consolidation/PASSATION_2026-09-24_v2.md` : limites B14 fermées côté code (correction non destructive du revenu saisi, opération non classée, devise du compte, garde-fous de devises, faux zéros, formatage), B16 livré (encours seul → contrat, même ligne, décision tracée), relecture indépendante traitée sauf les durcissements de base soumis à arbitrage, deux migrations additives `20260924120000` et `20260924150000`. Recettes locales B14 41/41, Dette 3B 10/10, Auth A/B 35/35. B14 n'est pas déclaré terminé (volet documentaire en attente de 3C). Aucune écriture en production.

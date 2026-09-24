@@ -55,6 +55,8 @@ RECETTE_APP=http://localhost:3120 RECETTE_OUT=… RECETTE_PLAYWRIGHT=…/package
 RECETTE_CHROMIUM=/opt/pw-browsers/chromium RECETTE_ADMIN_DB_URL=… node scripts/recette-auth/parcours-ab.mjs
 # 6. Premiers faits B14 (dette, revenu, correction, opération non classée, devises) : mêmes variables
 node scripts/recette-auth/parcours-b14.mjs
+# 7. Dette 3B, B16 (encours seul → contrat, même ligne, historique conservé) : mêmes variables
+node scripts/recette-auth/parcours-dette-3b.mjs
 bash scripts/recette-auth/stop.sh
 ```
 

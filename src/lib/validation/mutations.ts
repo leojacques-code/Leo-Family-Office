@@ -1246,7 +1246,7 @@ export const mutationSchema = z.discriminatedUnion("action", [
     })
     .strict(),
   // Correction NON DESTRUCTIVE d'un revenu saisi : l'état attendu est COMPLET (les trois
-  // champs affichés), la correction porte au moins un champ, et rien d'autre n'est accepté —
+  // champs affichés), la correction porte au moins un champ, et rien d'autre n'est accepté :
   // ni acteur, ni compte, ni devise.
   z
     .object({

@@ -38,10 +38,10 @@ Le 503 de `POST /api/auth` constaté sur la preview `dpl_2AFAmcjBbiTXkhHJJnHDk7R
 
 Une seconde cause était masquée par la première : toutes les variables Vercel ciblent ensemble `production` et `preview`, donc la preview parle à la base de production, qui n’a pas `lfo_verify_session`. Ajouter la seule clé ferait passer la connexion Auth puis échouer la vérification de session (`AUTH_SESSION_CHECK_MISSING`), et une inscription depuis la preview créerait de vrais comptes dans l’Auth de production. Correction attendue, par ordre :
 
-1. un projet ou une branche Supabase de recette, avec les 49 migrations appliquées ;
+1. un projet ou une branche Supabase de recette, avec les 53 migrations du dépôt appliquées (décompte du 24 septembre 2026, à relire dans `supabase/migrations/`) ;
 2. des variables Vercel limitées à `preview` pointant cette recette : `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, toutes sur le MÊME projet ; les variables actuelles restent réservées à `production` ;
 3. dans Auth (recette puis production) : Site URL du déploiement et, dans la liste de redirections, `https://<hôte>/auth/confirm` (un motif pour les previews Vercel si nécessaire) ;
-4. avant toute fusion vers `main` : appliquer les quatre migrations manquantes en production, ajouter `SUPABASE_PUBLISHABLE_KEY` en production, et vérifier que le propriétaire des données existantes peut se connecter avec le compte Auth dont l’identifiant est `OWNER_USER_ID`, sans quoi il arrivera sur un espace vide.
+4. avant toute fusion vers `main` : appliquer les huit migrations manquantes en production (liste dans `CLAUDE.md` §5), ajouter `SUPABASE_PUBLISHABLE_KEY` en production, et vérifier que le propriétaire des données existantes peut se connecter avec le compte Auth dont l’identifiant est `OWNER_USER_ID`, sans quoi il arrivera sur un espace vide.
 
 Le lien de confirmation revient sur `/auth/confirm`, qui échange le code (PKCE) ou le `token_hash`, vérifie la session puis crée le seul profil vide. Sans cette route, l’adresse était confirmée mais l’utilisateur arrivait sans explication sur la Site URL du projet.
 
