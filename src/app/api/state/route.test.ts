@@ -87,3 +87,30 @@ describe("correction d'un revenu saisi par /api/state", () => {
     expect(JSON.stringify(await failure.json())).not.toContain("12");
   });
 });
+
+describe("opération saisie par /api/state", () => {
+  const operation = {
+    action: "add_transaction",
+    accountId: "11111111-1111-4111-8111-111111111111",
+    categoryId: null,
+    date: "2026-09-20",
+    label: "Courses",
+    amount: -45.2,
+    updateBalance: false,
+  };
+  it("accepte une opération NON CLASSÉE, sans devise reçue", async () => {
+    expect((await post(operation)).status).toBe(200);
+    expect(mocks.mutate).toHaveBeenCalledWith(operation);
+  });
+  it("refuse une date future, une devise envoyée, un montant nul ou un libellé vide", async () => {
+    for (const invalid of [
+      { ...operation, date: "2099-01-01" },
+      { ...operation, amount: 0 },
+      { ...operation, label: "  " },
+      { ...operation, categoryId: "" },
+      { ...operation, date: "2026-02-30" },
+    ])
+      expect((await post(invalid)).status).toBe(400);
+    expect(mocks.mutate).not.toHaveBeenCalled();
+  });
+});

@@ -1263,13 +1263,16 @@ export const mutationSchema = z.discriminatedUnion("action", [
         ),
     })
     .strict(),
+  // Opération saisie : la catégorie est FACULTATIVE (`null` = non classée, que le Cash Flow
+  // Engine compte comme telle), la devise n'est pas reçue (celle du compte fait foi) et une
+  // date future est refusée, comme pour tout fait observé.
   z.object({
     action: z.literal("add_transaction"),
     accountId: z.string().min(1),
-    categoryId: z.string().min(1),
-    date,
-    label: z.string().min(1).max(180),
-    amount: finite,
+    categoryId: z.string().min(1).nullable(),
+    date: businessDate,
+    label: z.string().trim().min(1).max(180),
+    amount: finite.refine((value) => value !== 0, "Une opération à zéro n’est pas un flux"),
     updateBalance: z.boolean(),
   }),
   z.object({

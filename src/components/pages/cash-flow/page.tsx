@@ -18,15 +18,14 @@ import {
 } from "@/components/ui";
 import {
   cashFlowExplanation,
-  chartCurrency,
   formatDate,
-  formatEur,
   inputNumber,
   issueSummary,
   requiredNumberInput,
   type SectionProps,
 } from "@/components/pages/shared";
 import { addMonths, monthBounds } from "@/lib/engine/debt";
+import { formatCurrency } from "@/lib/presentation/currency";
 import { shouldDeriveBalance } from "@/lib/data/shared";
 import {
   INTERNAL_TRANSFER_NOTICE,
@@ -99,12 +98,17 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const [coverageEdit, setCoverageEdit] = useState<string | null>(null);
   const [form, setForm] = useState({
     accountId: state.accounts[0]?.id ?? "",
-    categoryId: "exp_groceries",
+    // Vide = NON CLASSÉE. Un identifiant de catégorie de démonstration servait de défaut :
+    // il n'existe dans aucun espace réel et faisait échouer la première saisie.
+    categoryId: "",
     date: state.asOfDate,
     label: "",
     amount: "",
     updateBalance: true,
   });
+  // Le compte choisi, ou le premier compte existant : un compte ajouté APRÈS l'ouverture de
+  // la page n'aurait sinon jamais été sélectionné.
+  const formAccountId = form.accountId || state.accounts[0]?.id || "";
   const [ruleForm, setRuleForm] = useState({
     name: "",
     categoryId: state.expenseCategories[0]?.id ?? "",
@@ -127,10 +131,17 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   const NOT_COMPUTABLE = <span className="metric-unknown">Non calculable</span>;
   const observed = useMemo(
     () =>
-      computeObservedCashFlow(state.transactions, state.expenseCategories, month.start, month.end),
-    [state.transactions, state.expenseCategories, month.start, month.end],
+      computeObservedCashFlow(state.transactions, state.expenseCategories, month.start, month.end, {
+        reportingCurrency: state.reportingCurrency,
+      }),
+    [state.transactions, state.expenseCategories, month.start, month.end, state.reportingCurrency],
   );
   const nothingObserved = observed.transactionCount === 0;
+  // Des opérations dans une autre devise sont EXCLUES des totaux faute de conversion : les
+  // totaux du mois sont alors amputés, et ne s'affichent pas comme s'ils étaient complets.
+  const currencyBlocked = observed.dataQuality.foreignCurrencyTransactionCount > 0;
+  const monthValue = (node: React.ReactNode) =>
+    nothingObserved ? NOT_OBSERVED : currencyBlocked ? NOT_COMPUTABLE : node;
   // Moyenne sur les trois derniers mois RÉVOLUS : le mois en cours en est exclu.
   const t3 = completeMonthsPeriod(state.asOfDate, 3);
   const observedT3M = useMemo(
@@ -138,6 +149,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       computeObservedCashFlow(state.transactions, state.expenseCategories, t3.start, t3.end, {
         ledgerCoverageStart: state.ledgerCoverageStart,
         asOfDate: state.asOfDate,
+        reportingCurrency: state.reportingCurrency,
       }),
     [
       state.transactions,
@@ -146,6 +158,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       t3.end,
       state.ledgerCoverageStart,
       state.asOfDate,
+      state.reportingCurrency,
     ],
   );
   const central =
@@ -157,6 +170,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         state.asOfDate,
         central.monthlySavings,
         state.ledgerCoverageStart,
+        state.reportingCurrency,
       )
     : null;
   const forecast = useMemo(
@@ -189,8 +203,16 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         month.start,
         month.end,
         forecast.occurrences,
+        state.reportingCurrency,
       ),
-    [state.expenseCategories, state.transactions, month.start, month.end, forecast.occurrences],
+    [
+      state.expenseCategories,
+      state.transactions,
+      month.start,
+      month.end,
+      forecast.occurrences,
+      state.reportingCurrency,
+    ],
   );
 
   // Six mois d'historique, agrégés par nature et jamais par signe.
@@ -201,6 +223,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       state.expenseCategories,
       bounds.start,
       bounds.end,
+      { reportingCurrency: state.reportingCurrency },
     );
     return {
       month: formatDate(bounds.start, { month: "short", year: "2-digit" }),
@@ -228,13 +251,27 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       setFormError(amount.error);
       return;
     }
+    const account = state.accounts.find((item) => item.id === formAccountId);
+    if (!account) {
+      setFormError("Une opération passe par un compte : ajoutez d’abord le compte concerné.");
+      return;
+    }
+    if (account.currency !== state.reportingCurrency) {
+      setFormError(
+        `Ce compte est en ${account.currency} et votre lecture en ${state.reportingCurrency} : les flux dans plusieurs devises ne sont pas encore convertis, cette opération serait exclue des totaux.`,
+      );
+      return;
+    }
+    if (form.date > (state.dates?.today ?? form.date)) {
+      setFormError("La date d’une opération observée ne peut pas être future.");
+      return;
+    }
     setFormError(null);
-    const account = state.accounts.find((item) => item.id === form.accountId);
-    const canUpdate = shouldDeriveBalance(form.date, account?.balanceDate ?? state.asOfDate);
+    const canUpdate = shouldDeriveBalance(form.date, account.balanceDate ?? state.asOfDate);
     const ok = await mutate({
       action: "add_transaction",
-      accountId: form.accountId,
-      categoryId: form.categoryId,
+      accountId: account.id,
+      categoryId: form.categoryId === "" ? null : form.categoryId,
       date: form.date,
       label: form.label,
       amount: amount.value,
@@ -304,7 +341,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
     }
   }
 
-  const selectedAccount = state.accounts.find((item) => item.id === form.accountId);
+  const selectedAccount = state.accounts.find((item) => item.id === formAccountId);
   const canUpdateBalance = shouldDeriveBalance(
     form.date,
     selectedAccount?.balanceDate ?? state.asOfDate,
@@ -337,7 +374,9 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
       <section className="metrics-grid four">
         <MetricCard
           label="Revenus observés"
-          value={nothingObserved ? NOT_OBSERVED : <Currency value={observed.income} />}
+          value={monthValue(
+            <Currency currency={state.reportingCurrency} value={observed.income} />,
+          )}
           detail={
             nothingObserved
               ? "Mois en cours · aucune opération saisie"
@@ -346,20 +385,22 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         />
         <MetricCard
           label="Dépenses de consommation"
-          value={nothingObserved ? NOT_OBSERVED : <Currency value={observed.consumerExpenses} />}
+          value={monthValue(
+            <Currency currency={state.reportingCurrency} value={observed.consumerExpenses} />,
+          )}
           detail="Hors transferts, investissements et service de dette"
         />
         <MetricCard
           label="Surplus avant service de dette"
-          value={
-            nothingObserved ? (
-              NOT_OBSERVED
-            ) : (
-              <Currency value={observed.operatingCashFlowBeforeDebt} sign />
-            )
-          }
+          value={monthValue(
+            <Currency
+              currency={state.reportingCurrency}
+              value={observed.operatingCashFlowBeforeDebt}
+              sign
+            />,
+          )}
           tone={
-            nothingObserved
+            nothingObserved || currencyBlocked
               ? undefined
               : observed.operatingCashFlowBeforeDebt >= 0
                 ? "positive"
@@ -369,16 +410,21 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         />
         <MetricCard
           label="Surplus après service de dette"
-          value={
-            nothingObserved ? NOT_OBSERVED : <Currency value={observed.cashFlowAfterDebt} sign />
-          }
+          value={monthValue(
+            <Currency currency={state.reportingCurrency} value={observed.cashFlowAfterDebt} sign />,
+          )}
           tone={
-            nothingObserved ? undefined : observed.cashFlowAfterDebt >= 0 ? "positive" : "negative"
+            nothingObserved || currencyBlocked
+              ? undefined
+              : observed.cashFlowAfterDebt >= 0
+                ? "positive"
+                : "negative"
           }
           detail={
-            nothingObserved ? undefined : (
+            nothingObserved || currencyBlocked ? undefined : (
               <>
-                Service de dette payé <Currency value={observed.debtServicePaid} />
+                Service de dette payé{" "}
+                <Currency currency={state.reportingCurrency} value={observed.debtServicePaid} />
               </>
             )
           }
@@ -409,8 +455,16 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                   <BarChart data={months}>
                     <CartesianGrid vertical={false} stroke="var(--border-soft)" />
                     <XAxis dataKey="month" axisLine={false} tickLine={false} />
-                    <YAxis tickFormatter={chartCurrency} axisLine={false} tickLine={false} />
-                    <Tooltip formatter={(value) => formatEur(Number(value))} />
+                    <YAxis
+                      tickFormatter={(value: number) =>
+                        formatCurrency(value, state.reportingCurrency, true)
+                      }
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <Tooltip
+                      formatter={(value) => formatCurrency(Number(value), state.reportingCurrency)}
+                    />
                     <Bar dataKey="income" name="Revenus" fill="#39747a" radius={[4, 4, 0, 0]} />
                     <Bar
                       dataKey="expense"
@@ -432,8 +486,11 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                 {INTERNAL_TRANSFER_NOTICE}{" "}
                 {observed.internalTransferVolume > 0 ? (
                   <>
-                    <Currency value={observed.internalTransferVolume} /> déplacés ce mois-ci entre
-                    vos poches.
+                    <Currency
+                      currency={state.reportingCurrency}
+                      value={observed.internalTransferVolume}
+                    />{" "}
+                    déplacés ce mois-ci entre vos poches.
                   </>
                 ) : null}
               </p>
@@ -457,44 +514,40 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <h2>Mois en cours</h2>
             </div>
           </div>
-          <dl>
-            <div>
-              <dt>Essentielles</dt>
-              <dd>
-                <Currency value={observed.breakdown.essential} />
-              </dd>
-            </div>
-            <div>
-              <dt>Non essentielles</dt>
-              <dd>
-                <Currency value={observed.breakdown.nonEssential} />
-              </dd>
-            </div>
-            <div>
-              <dt>Fixes</dt>
-              <dd>
-                <Currency value={observed.fixedExpenses} />
-              </dd>
-            </div>
-            <div>
-              <dt>Variables</dt>
-              <dd>
-                <Currency value={observed.variableExpenses} />
-              </dd>
-            </div>
-            <div>
-              <dt>Discrétionnaires</dt>
-              <dd>
-                <Currency value={observed.discretionaryExpenses} />
-              </dd>
-            </div>
-            <div>
-              <dt>Non qualifiées</dt>
-              <dd>
-                <Currency value={observed.breakdown.unknownEssentiality} />
-              </dd>
-            </div>
-          </dl>
+          {/*
+           * Sans dépense de consommation OBSERVÉE, chaque ligne vaudrait 0 par construction :
+           * afficher « 0 € » affirmerait un mois sans dépense. Idem quand des opérations dans
+           * une autre devise sont exclues : la structure serait amputée sans le dire.
+           */}
+          {currencyBlocked ? (
+            <p className="muted-copy">
+              Non calculable : des opérations dans une autre devise que {state.reportingCurrency} ne
+              sont pas converties.
+            </p>
+          ) : observed.consumerExpenseCount === 0 ? (
+            <p className="muted-copy">Aucune dépense de consommation observée ce mois-ci.</p>
+          ) : (
+            <dl>
+              {(
+                [
+                  ["Essentielles", observed.breakdown.essential],
+                  ["Non essentielles", observed.breakdown.nonEssential],
+                  ["Essentialité non qualifiée", observed.breakdown.unknownEssentiality],
+                  ["Fixes", observed.fixedExpenses],
+                  ["Variables", observed.variableExpenses],
+                  ["Discrétionnaires", observed.discretionaryExpenses],
+                  ["Comportement non qualifié", observed.breakdown.unknownBehavior],
+                ] as const
+              ).map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>
+                    <Currency currency={state.reportingCurrency} value={value} />
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </article>
       </section>
       <section className="panel">
@@ -519,13 +572,22 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           <div>
             <span>Trésorerie projetée</span>
             <strong>
-              {forecastReserve ? NOT_COMPUTABLE : <Currency value={forecast.forecastEndingCash} />}
+              {forecastReserve ? (
+                NOT_COMPUTABLE
+              ) : (
+                <Currency currency={state.reportingCurrency} value={forecast.forecastEndingCash} />
+              )}
             </strong>
             <small>
               {forecastReserve ?? (
                 <>
-                  Départ <Currency value={forecast.openingCash} /> · net{" "}
-                  <Currency value={forecast.forecastNetCashFlow} sign />
+                  Départ{" "}
+                  <Currency currency={state.reportingCurrency} value={forecast.openingCash} /> · net{" "}
+                  <Currency
+                    currency={state.reportingCurrency}
+                    value={forecast.forecastNetCashFlow}
+                    sign
+                  />
                 </>
               )}
             </small>
@@ -536,7 +598,10 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               {forecastReserve ? (
                 NOT_COMPUTABLE
               ) : (
-                <Currency value={forecast.minimumProjectedCash} />
+                <Currency
+                  currency={state.reportingCurrency}
+                  value={forecast.minimumProjectedCash}
+                />
               )}
             </strong>
             <small>
@@ -551,7 +616,11 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           <div>
             <span>Service de dette prévu</span>
             <strong>
-              {unscheduledDebt ? NOT_COMPUTABLE : <Currency value={forecast.forecastDebtService} />}
+              {unscheduledDebt ? (
+                NOT_COMPUTABLE
+              ) : (
+                <Currency currency={state.reportingCurrency} value={forecast.forecastDebtService} />
+              )}
             </strong>
             <small>
               {unscheduledDebt
@@ -599,7 +668,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                 </span>
                 <span>{formatDate(rule.startDate)}</span>
                 <strong className={rule.amount < 0 ? "negative-text" : "positive-text"}>
-                  <Currency value={rule.amount} sign />
+                  <Currency currency={state.reportingCurrency} value={rule.amount} sign />
                 </strong>
               </div>
             ))}
@@ -623,7 +692,11 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
             <div>
               <dt>Hypothèse du scénario {central?.name}</dt>
               <dd>
-                <Currency value={comparison.scenarioAssumption} /> par mois
+                <Currency
+                  currency={state.reportingCurrency}
+                  value={comparison.scenarioAssumption}
+                />{" "}
+                par mois
               </dd>
             </div>
             <div>
@@ -632,7 +705,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                 {formatDate(comparison.monthToDateEnd)})
               </dt>
               <dd>
-                <Currency value={comparison.monthToDate} sign />
+                <Currency currency={state.reportingCurrency} value={comparison.monthToDate} sign />
                 {comparison.monthToDatePartialCoverage ? (
                   <span className="warning-text">
                     {" "}
@@ -656,8 +729,12 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                   </span>
                 ) : (
                   <>
-                    <Currency value={comparison.observedT3M} /> ·{" "}
-                    <Currency value={comparison.differenceT3M ?? 0} sign />
+                    <Currency currency={state.reportingCurrency} value={comparison.observedT3M} /> ·{" "}
+                    <Currency
+                      currency={state.reportingCurrency}
+                      value={comparison.differenceT3M ?? 0}
+                      sign
+                    />
                   </>
                 )}
               </dd>
@@ -672,8 +749,13 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                   </span>
                 ) : (
                   <>
-                    <Currency value={comparison.observedT12M} /> ·{" "}
-                    <Currency value={comparison.differenceT12M ?? 0} sign />
+                    <Currency currency={state.reportingCurrency} value={comparison.observedT12M} />{" "}
+                    ·{" "}
+                    <Currency
+                      currency={state.reportingCurrency}
+                      value={comparison.differenceT12M ?? 0}
+                      sign
+                    />
                   </>
                 )}
               </dd>
@@ -780,13 +862,18 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                             : "Comportement inconnu"}
                     </small>
                     <small>
-                      Réalisé <Currency value={line?.actual ?? 0} />
+                      Réalisé{" "}
+                      <Currency currency={state.reportingCurrency} value={line ? line.actual : 0} />
                       {line?.variance !== null && line?.variance !== undefined ? (
                         <>
                           {" "}
                           · écart{" "}
                           <span className={line.overBudget ? "negative-text" : "positive-text"}>
-                            <Currency value={line.variance} sign />
+                            <Currency
+                              currency={state.reportingCurrency}
+                              value={line.variance}
+                              sign
+                            />
                           </span>
                         </>
                       ) : null}
@@ -885,10 +972,14 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                 <span>{close.month}</span>
                 <strong>v{close.version}</strong>
                 <span>
-                  <Currency value={close.operatingSurplusBeforeDebt} sign />
+                  <Currency
+                    currency={state.reportingCurrency}
+                    value={close.operatingSurplusBeforeDebt}
+                    sign
+                  />
                 </span>
                 <span>
-                  <Currency value={close.postDebtSurplus} sign />
+                  <Currency currency={state.reportingCurrency} value={close.postDebtSurplus} sign />
                 </span>
                 <strong>{close.unclassifiedTransactionCount}</strong>
               </div>
@@ -981,8 +1072,8 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           </div>
         ) : (
           <EmptyState
-            title="Aucune transaction importée"
-            detail="Ajoutez une première transaction manuelle ou importez un CSV dans une prochaine itération."
+            title="Aucune opération au ledger"
+            detail="Ajoutez une première opération ou un revenu net. Une opération sans catégorie reste non classée, sans rien supposer."
             action={
               <button className="button secondary" onClick={() => setModal("transaction")}>
                 Ajouter la première
@@ -1037,12 +1128,13 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
             Compte
             <select
               className="text-input"
-              value={form.accountId}
+              value={formAccountId}
               onChange={(event) => setForm({ ...form, accountId: event.target.value })}
             >
+              {state.accounts.length === 0 ? <option value="">Aucun compte</option> : null}
               {state.accounts.map((account) => (
                 <option key={account.id} value={account.id}>
-                  {account.name}
+                  {account.name} · {account.currency}
                 </option>
               ))}
             </select>
@@ -1053,6 +1145,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               className="text-input"
               type="date"
               value={form.date}
+              max={state.dates?.today}
               onChange={(event) => setForm({ ...form, date: event.target.value })}
               required
             />
@@ -1073,6 +1166,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               value={form.categoryId}
               onChange={(event) => setForm({ ...form, categoryId: event.target.value })}
             >
+              <option value="">Non classée (à classer plus tard)</option>
               {state.expenseCategories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name} · {KIND_LABELS[category.cashFlowKind]}
@@ -1081,7 +1175,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
             </select>
           </label>
           <label>
-            Montant signé
+            Montant signé ({selectedAccount?.currency ?? "devise du compte"})
             <input
               className="text-input"
               type="number"
@@ -1316,7 +1410,10 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         {observedT3M.monthlyAverageOperatingSurplus === null ? (
           <span className="warning-text">non calculable, historique insuffisant</span>
         ) : (
-          <Currency value={observedT3M.monthlyAverageOperatingSurplus} />
+          <Currency
+            currency={state.reportingCurrency}
+            value={observedT3M.monthlyAverageOperatingSurplus}
+          />
         )}
         . Sans revenu encaissé observé, aucun taux n’est substitué ; sans mois révolu certifié
         couvert, aucune moyenne n’est fabriquée.

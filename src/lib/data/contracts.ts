@@ -621,7 +621,8 @@ export type Mutation =
   | {
       action: "add_transaction";
       accountId: string;
-      categoryId: string;
+      /** `null` = opération non classée : aucune catégorie n'est supposée. */
+      categoryId: string | null;
       date: string;
       label: string;
       amount: number;

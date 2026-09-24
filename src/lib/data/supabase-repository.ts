@@ -2108,6 +2108,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       transactions,
       dates.asOfDate,
       outstandingDebts,
+      reportingCurrency,
     );
     const dashboardState: DashboardState = {
       asOfDate: dates.asOfDate,
@@ -2955,6 +2956,22 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
         break;
       }
       case "add_transaction": {
+        // La DEVISE est celle du compte, lue chez son propriétaire : un mouvement sur un
+        // compte en CHF est en CHF. Elle était fixée à la devise de reporting par défaut,
+        // ce qui étiquetait en euros un débit en francs.
+        const accountRows = unwrap(
+          await db
+            .from("financial_accounts")
+            .select("currency")
+            .eq("id", mutation.accountId)
+            .eq("user_id", user)
+            .limit(1),
+          "lecture du compte de l’opération",
+        ) as Row[];
+        if (!accountRows[0])
+          throw new MutationRejectedError(
+            "Ce compte est introuvable : l’opération n’est pas enregistrée.",
+          );
         unwrap(
           await db.rpc("lfo_add_transaction", {
             p_user_id: user,
@@ -2963,7 +2980,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
             p_transaction_date: mutation.date,
             p_label: mutation.label,
             p_amount: finiteNumber(mutation.amount, "add_transaction.amount"),
-            p_currency: REPORTING_CURRENCY,
+            p_currency: str(accountRows[0].currency),
             p_update_balance: mutation.updateBalance,
           }),
           "insertion atomique de transaction",
@@ -3598,7 +3615,15 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
           state.expenseCategories,
           bounds.start,
           bounds.end,
+          { reportingCurrency: state.reportingCurrency },
         );
+        // Une clôture est une photographie DÉCIDÉE : figer des totaux amputés des opérations
+        // dans une autre devise les ferait passer pour complets. Refus nommé plutôt que
+        // clôture partielle.
+        if (observed.dataQuality.foreignCurrencyTransactionCount > 0)
+          throw new MutationRejectedError(
+            `Ce mois contient ${observed.dataQuality.foreignCurrencyTransactionCount} opération(s) dans une autre devise que ${state.reportingCurrency}, non converties : il ne peut pas être clôturé.`,
+          );
         unwrap(
           await db.rpc("lfo_close_cash_flow_month", {
             p_user_id: user,

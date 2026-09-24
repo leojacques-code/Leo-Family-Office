@@ -125,7 +125,11 @@ export function todayViewInputFrom(
     state.expenseCategories ?? [],
     month.start,
     month.end,
-    { ledgerCoverageStart: state.ledgerCoverageStart, asOfDate: state.asOfDate },
+    {
+      ledgerCoverageStart: state.ledgerCoverageStart,
+      asOfDate: state.asOfDate,
+      reportingCurrency: state.reportingCurrency,
+    },
   );
   const ranked = rankGoals(
     (state.goals ?? []).filter((goal) => goal.status === "ACTIVE"),

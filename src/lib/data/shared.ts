@@ -307,8 +307,11 @@ export function computeFlowRates(
   expenses: ExpenseCategory[],
   periodStart: string,
   periodEnd: string,
+  reportingCurrency?: string,
 ): { savingsRate: number | null; investmentRate: number | null } {
-  const observed = computeObservedCashFlow(transactions, expenses, periodStart, periodEnd);
+  const observed = computeObservedCashFlow(transactions, expenses, periodStart, periodEnd, {
+    reportingCurrency,
+  });
   return {
     savingsRate: observed.observedSavingsRate,
     investmentRate: observed.observedInvestmentRate,
@@ -336,6 +339,8 @@ export function deriveFlowMetrics(
   asOfDate: string,
   // Dettes connues par leur seul encours : leur service est INCONNU, pas nul.
   outstandingDebts: OutstandingDebt[] = [],
+  // Devise des taux constatés : une opération dans une autre devise les rend inconnus.
+  reportingCurrency?: string,
 ): DeclaredFlowMetrics {
   const activeIncomes = incomes.filter((income) => income.active);
   const monthlyIncome =
@@ -362,6 +367,7 @@ export function deriveFlowMetrics(
     expenses,
     period.start,
     period.end,
+    reportingCurrency,
   );
   return {
     monthlyIncome,
