@@ -64,6 +64,7 @@ const canonicalMigrations = [
   "20260924091000",
   "20260924120000",
   "20260924150000",
+  "20260924160000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -2345,6 +2346,9 @@ const readOnlyAuditTables = [
   "transaction_corrections",
   // Le passage au contrat est la seule trace du statut « encours seul » antérieur.
   "liability_terms_transitions",
+  // Les opérations ne s'écrivent que par le serveur : sans quoi la piste des corrections
+  // pourrait être contournée par une réécriture directe (`20260924160000`).
+  "transactions",
 ] as const;
 
 const storagePolicies = [

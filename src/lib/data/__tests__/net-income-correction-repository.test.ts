@@ -15,8 +15,8 @@ const correction = {
   expected: { amount: "2450.350000", receivedOn: "2026-09-23", label: "Salaire septembre" },
   corrected: { amount: 2405.35 },
 };
-const failWith = (message: string) =>
-  mocks.rpc.mockResolvedValueOnce({ data: null, error: { message, code: "P0001" } });
+const failWith = (message: string, code = "P0001") =>
+  mocks.rpc.mockResolvedValueOnce({ data: null, error: { message, code } });
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -44,7 +44,7 @@ describe("correction d'un revenu saisi (repository)", () => {
   });
 
   it("traduit un conflit d'état attendu en message fixe, sans reprendre les valeurs de la base", async () => {
-    failWith("Conflit : montant attendu 2450.35, trouvé 2405.350000");
+    failWith("Conflit : l'état attendu ne correspond plus au revenu enregistré", "LF409");
     const error = await createSupabaseRepository("A")
       .mutateState(correction)
       .catch((caught: unknown) => caught);
@@ -53,14 +53,22 @@ describe("correction d'un revenu saisi (repository)", () => {
   });
 
   it("traduit une correction sans changement et un hors périmètre en refus métier", async () => {
-    failWith("Aucune valeur modifiée : ce n'est pas une correction");
+    failWith("Aucune valeur modifiée : ce n'est pas une correction", "LF422");
     await expect(createSupabaseRepository("A").mutateState(correction)).rejects.toBeInstanceOf(
       MutationRejectedError,
     );
-    failWith("Seul un revenu net saisi à la main se corrige ici");
+    failWith("Revenu hors périmètre de correction", "LF403");
     await expect(createSupabaseRepository("A").mutateState(correction)).rejects.toBeInstanceOf(
       MutationRejectedError,
     );
+  });
+
+  it("ne route jamais sur le texte : un libellé « Conflit » sans SQLSTATE reste une panne", async () => {
+    failWith("Conflit : montant attendu 1, trouvé 2");
+    const error = await createSupabaseRepository("A")
+      .mutateState(correction)
+      .catch((caught: unknown) => caught);
+    expect(error).not.toBeInstanceOf(MutationConflictError);
   });
 
   it("laisse une autre erreur de base remonter comme une panne", async () => {

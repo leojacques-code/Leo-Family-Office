@@ -134,12 +134,44 @@ try {
     "Compte introuvable",
   );
 
+  // `lfo_add_transaction` : la devise vient du compte, une devise d'appelant différente est
+  // refusée, `null` laisse la base décider (`20260924160000`).
+  const addTx =
+    "select public.lfo_add_transaction($1, $2, null, '2026-09-22', 'Achat', -12, $3, false)::text as id";
+  const byBase = await client.query<{ id: string }>(addTx, [userId, accountId, null]);
+  const byBaseRow = await client.query<{ currency: string }>(
+    "select currency from public.transactions where id = $1",
+    [byBase.rows[0]!.id],
+  );
+  assert(
+    byBaseRow.rows[0]!.currency === "CHF",
+    "La devise de l'opération n'est pas celle du compte",
+  );
+  await rejects(
+    addTx,
+    [userId, accountId, "EUR"],
+    "Devise d'appelant différente acceptée",
+    "Devise différente",
+  );
+  await rejects(
+    addTx,
+    [userId, foreignAccountId, null],
+    "Compte d'autrui accepté",
+    "Compte introuvable",
+  );
+
   await client.query("reset role");
   await client.query("set local role authenticated");
   await rejects(
     sql,
     [userId, JSON.stringify(valid)],
     "RPC appelable par authenticated",
+    "permission denied",
+  );
+  await rejects(
+    "update public.transactions set amount = 1 where user_id = $1",
+    [userId],
+    "Écriture directe de transactions ouverte à authenticated",
     "permission denied",
   );
   succeeded = true;

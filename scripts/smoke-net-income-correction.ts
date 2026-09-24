@@ -156,7 +156,7 @@ try {
     correct,
     [userId, JSON.stringify({ ...valid, corrected: { amount: "2400" } })],
     "Correction sur un état périmé acceptée",
-    "Conflit : montant attendu",
+    "Conflit : l'état attendu ne correspond plus",
   );
   const second = await client.query<{ id: string }>(correct, [
     userId,
@@ -228,9 +228,60 @@ try {
   );
   await refuse({ ...base, reason: "  " }, "Motif vide accepté", "Motif de correction requis");
   await refuse(
+    { ...base, reason: "\u00a0\u202f" },
+    "Motif fait de blancs insécables accepté",
+    "Motif de correction requis",
+  );
+  await refuse(
+    { ...base, corrected: { label: "\u00a0\t" } },
+    "Libellé fait de blancs Unicode accepté",
+    "Libellé corrigé requis",
+  );
+  await refuse(
+    { ...base, corrected: { received_on: "2099-01-01" } },
+    "Date corrigée future acceptée",
+    "Date corrigée future",
+  );
+  // Le conflit porte un SQLSTATE dédié et ne cite AUCUNE valeur persistée.
+  await client.query("savepoint smoke_code");
+  try {
+    await client.query(correct, [
+      userId,
+      JSON.stringify({
+        ...base,
+        expected: { ...current, amount: "1" },
+        corrected: { amount: "2" },
+      }),
+    ]);
+    throw new Error("Conflit non levé");
+  } catch (error) {
+    const { code, message } = error as { code?: string; message: string };
+    assert(code === "LF409", `SQLSTATE de conflit inattendu : ${code}`);
+    assert(!/2405|2450|Salaire/.test(message), "Le message de conflit cite une valeur persistée");
+  } finally {
+    await client.query("rollback to savepoint smoke_code");
+  }
+  // Sous un autre DateStyle, la comparaison de date ne produit pas de conflit perpétuel.
+  await client.query("savepoint smoke_datestyle");
+  await client.query("set local datestyle = 'SQL, DMY'");
+  await client.query(correct, [
+    userId,
+    JSON.stringify({ ...base, reason: "Libellé précisé", corrected: { label: "Salaire sept." } }),
+  ]);
+  const lastTrail = await client.query<{ before_values: Record<string, string> }>(
+    // `decided_at` est l'horodatage de la TRANSACTION, partagé : la ligne se retrouve par son motif.
+    "select before_values from public.transaction_corrections where transaction_id = $1 and reason = 'Libellé précisé'",
+    [incomeId],
+  );
+  assert(
+    lastTrail.rows[0]!.before_values.transaction_date === "2026-09-24",
+    "Date de la piste sérialisée selon DateStyle",
+  );
+  await client.query("rollback to savepoint smoke_datestyle");
+  await refuse(
     { ...base, transaction_id: foreignIncome.rows[0]!.id },
     "Revenu d'un autre propriétaire corrigé",
-    "Revenu introuvable",
+    "hors périmètre de correction",
   );
 
   // Une dépense saisie ne se corrige pas par ce chemin.
@@ -247,7 +298,7 @@ try {
       expected: { amount: "40", received_on: "2026-09-22", label: "Courses" },
     },
     "Dépense corrigée comme un revenu",
-    "Seul un revenu net saisi",
+    "hors périmètre de correction",
   );
 
   // Une RECETTE importée (autre source) de nature INCOME ne se corrige pas ici : sa
@@ -266,7 +317,7 @@ try {
       expected: { amount: "300", received_on: "2026-09-21", label: "Virement reçu" },
     },
     "Recette importée corrigée comme une saisie",
-    "Seul un revenu net saisi",
+    "hors périmètre de correction",
   );
 
   await client.query("reset role");

@@ -2867,22 +2867,17 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
           },
         });
         if (result.error) {
-          // Routage sur le SQLSTATE dédié quand la base le porte, sur le libellé sinon.
-          const message = result.error.message;
+          // Routage sur le SQLSTATE dédié (`20260924160000`), jamais sur le texte de la base.
           const code = result.error.code;
-          if (code === "LF409" || message.startsWith("Conflit"))
+          if (code === "LF409")
             throw new MutationConflictError(
               "Ce revenu a changé depuis son affichage : rechargez la page avant de le corriger.",
             );
-          if (code === "LF422" || message.startsWith("Aucune valeur modifiée"))
+          if (code === "LF422")
             throw new MutationRejectedError(
               "Aucune valeur n’a changé : ce n’est pas une correction.",
             );
-          if (
-            code === "LF403" ||
-            message.startsWith("Seul un revenu net saisi") ||
-            message === "Revenu introuvable"
-          )
+          if (code === "LF403")
             throw new MutationRejectedError(
               "Seul un revenu net saisi à la main se corrige ici. Une opération importée se corrige par son import.",
             );
@@ -2970,35 +2965,23 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
         break;
       }
       case "add_transaction": {
-        // La DEVISE est celle du compte, lue chez son propriétaire : un mouvement sur un
-        // compte en CHF est en CHF. Elle était fixée à la devise de reporting par défaut,
-        // ce qui étiquetait en euros un débit en francs.
-        const accountRows = unwrap(
-          await db
-            .from("financial_accounts")
-            .select("currency")
-            .eq("id", mutation.accountId)
-            .eq("user_id", user)
-            .limit(1),
-          "lecture du compte de l’opération",
-        ) as Row[];
-        if (!accountRows[0])
+        // La DEVISE est déterminée PAR LA BASE (`20260924160000`) : celle du compte, lue chez
+        // son propriétaire dans la même transaction que l'insertion. `null` la laisse décider.
+        const result = await db.rpc("lfo_add_transaction", {
+          p_user_id: user,
+          p_account_id: mutation.accountId,
+          p_category_id: mutation.categoryId,
+          p_transaction_date: mutation.date,
+          p_label: mutation.label,
+          p_amount: finiteNumber(mutation.amount, "add_transaction.amount"),
+          p_currency: null,
+          p_update_balance: mutation.updateBalance,
+        });
+        if (result.error?.code === "LF403")
           throw new MutationRejectedError(
             "Ce compte est introuvable : l’opération n’est pas enregistrée.",
           );
-        unwrap(
-          await db.rpc("lfo_add_transaction", {
-            p_user_id: user,
-            p_account_id: mutation.accountId,
-            p_category_id: mutation.categoryId,
-            p_transaction_date: mutation.date,
-            p_label: mutation.label,
-            p_amount: finiteNumber(mutation.amount, "add_transaction.amount"),
-            p_currency: str(accountRows[0].currency),
-            p_update_balance: mutation.updateBalance,
-          }),
-          "insertion atomique de transaction",
-        );
+        unwrap(result, "insertion atomique de transaction");
         break;
       }
       case "update_expense": {
