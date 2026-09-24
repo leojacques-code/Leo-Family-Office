@@ -288,8 +288,8 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   return (
     <div className="page-stack">
       <SectionHeader
-        eyebrow="Income & spending"
-        title="Cash Flow"
+        eyebrow="Revenus et dépenses"
+        title="Flux de trésorerie"
         description="Ce que chaque euro signifie réellement : revenu, consommation, impôt, service de dette, allocation de capital ou simple déplacement entre poches."
         actions={
           <button className="button secondary" onClick={() => setModal("rule")}>

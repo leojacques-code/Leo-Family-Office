@@ -583,6 +583,15 @@ export type Mutation =
       notes: string | null;
     }
   | { action: "archive_debt"; liabilityId: string }
+  | {
+      action: "record_outstanding_debt";
+      name: string;
+      lender: string | null;
+      balance: number;
+      currency: string;
+      observedAt: string;
+      notes: string | null;
+    }
   | { action: "update_account"; accountId: string; balance: number; balanceDate: string }
   | {
       action: "add_account";

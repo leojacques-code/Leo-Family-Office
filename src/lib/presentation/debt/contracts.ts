@@ -1,4 +1,4 @@
-import type { Liability, Scenario } from "@/lib/types";
+import type { Liability, OutstandingDebt, Scenario } from "@/lib/types";
 import type { FinancialDateContext } from "@/lib/financial-date";
 import type { DerivedRailSource } from "@/lib/presentation/rail-sources";
 import type { CanonicalAggregate } from "@/lib/engine/balance-sheet";
@@ -9,6 +9,8 @@ export interface DebtReadModel {
   readonly dates: FinancialDateContext;
   readonly reportingCurrency: string;
   readonly liabilities: Liability[];
+  /** Dettes connues par leur seul encours : aucun échéancier, aucun coût calculé. */
+  readonly outstandingDebts: OutstandingDebt[];
   readonly scenarios: Scenario[];
   readonly metrics: { readonly bankCash: number | null };
   readonly cashObservationPresent: boolean;

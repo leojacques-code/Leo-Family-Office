@@ -37,6 +37,8 @@ echo $! > "$RECETTE_DIR/smtp.pid"
   export GOTRUE_SMTP_MAX_FREQUENCY=1s GOTRUE_RATE_LIMIT_EMAIL_SENT=1000
   export GOTRUE_MAILER_URLPATHS_CONFIRMATION=/auth/v1/verify GOTRUE_MAILER_URLPATHS_RECOVERY=/auth/v1/verify
   export GOTRUE_MAILER_URLPATHS_INVITE=/auth/v1/verify GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
+  # `serve` n'applique PAS les migrations du schéma auth : elles sont lancées explicitement.
+  ./auth migrate
   exec ./auth serve
 ) > "$LOGS/auth.log" 2>&1 &
 echo $! > "$RECETTE_DIR/auth.pid"
@@ -87,4 +89,15 @@ docker run -d --name lfo-recette-kong --network host \
   -e SUPABASE_ANON_KEY="$ANON" -e SUPABASE_SERVICE_KEY="$SERVICE" \
   -e DASHBOARD_USERNAME=disabled -e DASHBOARD_PASSWORD="$(head -c 24 /dev/urandom | base64)" \
   --entrypoint /bin/sh kong/kong:3.9.3 /home/kong/kong-entrypoint.sh > /dev/null
+# Les migrations LFO exigent auth.sessions (GoTrue) et storage.buckets à jour (Storage).
+export PGPASSWORD="$PW"
+for _ in $(seq 1 60); do
+  ready="$(psql -h 127.0.0.1 -p "${RECETTE_PG_PORT:-55432}" -U postgres -d postgres -tAc \
+    "select (to_regclass('auth.sessions') is not null)
+        and (select count(*) from information_schema.columns
+              where table_schema = 'storage' and table_name = 'buckets'
+                and column_name = 'allowed_mime_types') = 1" 2>/dev/null || true)"
+  [ "$ready" = "t" ] && break; sleep 1
+done
+[ "$ready" = "t" ] || { echo "Auth ou Storage n'a pas migré : voir $LOGS" >&2; exit 1; }
 echo "Passerelle : http://127.0.0.1:$GATEWAY_PORT  (journaux : $LOGS)"

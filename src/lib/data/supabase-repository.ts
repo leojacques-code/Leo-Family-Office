@@ -107,6 +107,7 @@ import type {
   Goal,
   IncomeSource,
   Liability,
+  OutstandingDebt,
   MonthlyClose,
   NetWorthSnapshot,
   PortfolioEnvelopePolicy,
@@ -373,6 +374,12 @@ function mapAccountFacts(institutionRows: Row[], accountRows: Row[], balanceRows
   return { accounts, accountBalanceHistory };
 }
 
+/** Décimal en notation simple, six décimales au plus, sans zéros superflus. */
+function decimalText(value: number): string {
+  if (!Number.isFinite(value) || value < 0) throw new Error("Montant invalide");
+  return value.toFixed(6).replace(/\.?0+$/, "");
+}
+
 function mapDebtFacts(
   liabilityRows: Row[],
   liabilityObservationRows: Row[],
@@ -388,8 +395,31 @@ function mapDebtFacts(
     "liability_id",
     "observed_at",
   );
-  const liabilities: Liability[] = liabilityRows
-    .filter((row) => row.archived !== true)
+  // Une dette connue par son SEUL encours n'a aucun terme : elle est séparée AVANT
+  // `readLoanTerms`, dont les parseurs stricts lèveraient sur ses colonnes NULL et feraient
+  // tomber toute la lecture. Une base sans la colonne `terms_status` (antérieure à la migration
+  // 20260924081000) ne porte que des contrats : l'absence vaut donc CONTRACT.
+  const active = liabilityRows.filter((row) => row.archived !== true);
+  const isOutstandingOnly = (row: Row) => row.terms_status === "OUTSTANDING_ONLY";
+  const outstandingDebts: OutstandingDebt[] = active.filter(isOutstandingOnly).map((row) => {
+    const observation = latestLiabilityObservations.get(str(row.id));
+    return {
+      id: str(row.id),
+      name: str(row.name),
+      lender: optional(row.lender) ?? null,
+      currentBalance: finiteNumber(
+        observation?.balance ?? row.current_balance,
+        `liability_balance_observations[liability_id=${str(row.id)}].balance`,
+      ),
+      // La RPC exige une devise déclarée : aucun repli sur la devise de lecture.
+      currency: requiredString(row.currency, `liabilities[id=${str(row.id)}].currency`),
+      ...(observation ? { balanceDate: str(observation.observed_at) } : {}),
+      notes: optional(row.notes) ?? null,
+      provenance: observation ? provenance(observation) : provenance(row),
+    };
+  });
+  const liabilities: Liability[] = active
+    .filter((row) => !isOutstandingOnly(row))
     .map((row) => {
       const observation = latestLiabilityObservations.get(str(row.id));
       return {
@@ -437,7 +467,7 @@ function mapDebtFacts(
       };
     });
 
-  return liabilities;
+  return { liabilities, outstandingDebts };
 }
 
 function mapScenarioFacts(scenarioRows: Row[], scenarioVersionRows: Row[]) {
@@ -649,7 +679,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
     });
     const reportingCurrency = str(rows.profiles[0]?.reporting_currency || REPORTING_CURRENCY);
     const { accounts } = mapAccountFacts([], cashRows, balanceRows);
-    const liabilities = mapDebtFacts(
+    const { liabilities, outstandingDebts } = mapDebtFacts(
       rows.liabilities,
       rows.liability_balance_observations,
       rows.loan_schedules,
@@ -674,13 +704,14 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       dates,
       reportingCurrency,
       liabilities,
+      outstandingDebts,
       scenarios,
       metrics: { bankCash: cashQuality.value },
       cashQuality,
       cashObservationPresent: accounts.length > 0,
       railSources: railSourcesFor(
         PAGE_REGISTRY.debt,
-        { liabilities },
+        { liabilities, outstandingDebts },
         {
           BANK_TRANSACTIONS: {
             count: transactionRows.length,
@@ -1085,7 +1116,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
         };
       });
 
-    const liabilities = mapDebtFacts(
+    const { liabilities, outstandingDebts } = mapDebtFacts(
       liabilityRows,
       liabilityObservationRows,
       loanScheduleRows,
@@ -2001,6 +2032,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       accounts,
       positions,
       liabilities,
+      outstandingDebts,
       contributions: [
         ...realEstateBalanceSheetContributions(realEstate),
         ...businessEquityBalanceSheetContributions(businessEquity),
@@ -2042,6 +2074,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       expenseCategories,
       transactions,
       dates.asOfDate,
+      outstandingDebts,
     );
     const dashboardState: DashboardState = {
       asOfDate: dates.asOfDate,
@@ -2083,6 +2116,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       taxCalculation,
       careerTaxMonthly,
       liabilities,
+      outstandingDebts,
       incomes,
       expenseCategories,
       transactions,
@@ -2761,6 +2795,26 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
             p_notes: mutation.notes,
           }),
           "enregistrement atomique de l’encours observé",
+        );
+        break;
+      }
+      case "record_outstanding_debt": {
+        unwrap(
+          await db.rpc("lfo_record_outstanding_debt", {
+            p_user_id: user,
+            p_payload: {
+              name: mutation.name,
+              lender: mutation.lender,
+              // Le montant voyage en TEXTE décimal simple : la RPC refuse l'exponentielle
+              // qu'un `String(nombre)` produirait au-delà de 1e21, et le plafond du schéma
+              // l'exclut déjà.
+              balance: decimalText(mutation.balance),
+              currency: mutation.currency,
+              observed_at: mutation.observedAt,
+              notes: mutation.notes,
+            },
+          }),
+          "enregistrement atomique de la dette connue par son encours",
         );
         break;
       }

@@ -24,6 +24,7 @@ import type {
   InterestConvention,
   LedgerCoverageSource,
   Liability,
+  OutstandingDebt,
   LoanCharge,
   LoanDeferral,
   PaymentChange,
@@ -333,6 +334,8 @@ export function deriveFlowMetrics(
   transactions: Transaction[] = [],
   // Aucun défaut : la date d'arrêté est une donnée de l'appel, pas une constante du module.
   asOfDate: string,
+  // Dettes connues par leur seul encours : leur service est INCONNU, pas nul.
+  outstandingDebts: OutstandingDebt[] = [],
 ): DeclaredFlowMetrics {
   const activeIncomes = incomes.filter((income) => income.active);
   const monthlyIncome =
@@ -345,8 +348,13 @@ export function deriveFlowMetrics(
     0,
   );
   const monthlyDebtService = monthlyDebtServiceAt(liabilities, asOfDate);
+  // `monthlyDebtService` ne couvre que les contrats : avec une dette sans échéancier active,
+  // soustraire ce seul service surestimerait le cash-flow libre sans le dire.
+  const unscheduledDebt = outstandingDebts.some((debt) => debt.currentBalance > 0);
   const freeCashFlow =
-    monthlyIncome === null ? null : monthlyIncome - monthlyExpenses - monthlyDebtService;
+    monthlyIncome === null || unscheduledDebt
+      ? null
+      : monthlyIncome - monthlyExpenses - monthlyDebtService;
   const completeFields = knownExpenses.length;
   const period = monthBounds(asOfDate);
   const { savingsRate, investmentRate } = computeFlowRates(

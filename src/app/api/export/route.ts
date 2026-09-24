@@ -33,6 +33,15 @@ export async function GET(request: Request) {
         state.asOfDate,
         liability.provenance.kind,
       ]),
+      // Encours seul : la date est celle de l'observation, jamais la date d'arrêté.
+      ...(state.outstandingDebts ?? []).map((debt) => [
+        "passif",
+        debt.lender ?? "",
+        debt.name,
+        -debt.currentBalance,
+        debt.balanceDate ?? "",
+        debt.provenance.kind,
+      ]),
     ];
     const csv = rows.map((row) => row.map(csvEscape).join(",")).join("\r\n");
     return new Response(`\uFEFF${csv}`, {

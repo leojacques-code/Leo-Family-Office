@@ -60,6 +60,7 @@ const canonicalMigrations = [
   "20260915064740",
   "20260915180426",
   "20260917071520",
+  "20260924081000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -159,6 +160,7 @@ const requiredColumns: Record<string, string[]> = {
     "facility_id",
     "archived",
     "currency",
+    "terms_status",
   ],
   loan_schedules: ["id", "insurance", "fees"],
   loan_early_repayments: ["id", "liability_id", "amount", "penalty", "outcome"],
@@ -1598,6 +1600,8 @@ const requiredConstraints = [
   "liabilities_payment_frequency_ck",
   "liabilities_interest_convention_ck",
   "liabilities_rate_type_ck",
+  "liabilities_terms_status_ck",
+  "liabilities_terms_completeness_ck",
   "loan_rate_changes_kind_ck",
   "loan_payment_changes_kind_ck",
   "loan_payment_changes_amount_ck",
@@ -2023,6 +2027,7 @@ const requiredConstraints = [
 
 const requiredRpcs: Record<string, string> = {
   lfo_verify_session: "p_user_id uuid, p_session_id uuid",
+  lfo_record_outstanding_debt: "p_user_id uuid, p_payload jsonb",
   lfo_declare_domain_applicability: "p_user_id uuid, p_payload jsonb",
   lfo_add_account:
     "p_user_id uuid, p_institution text, p_name text, p_account_type text, p_balance numeric, p_currency text, p_as_of_date date",

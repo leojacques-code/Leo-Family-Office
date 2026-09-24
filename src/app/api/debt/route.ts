@@ -37,7 +37,12 @@ export async function POST(request: Request) {
     const parsed = mutationSchema.safeParse(await request.json().catch(() => null));
     if (
       !parsed.success ||
-      !["save_debt_contract", "record_debt_balance", "archive_debt"].includes(parsed.data.action)
+      ![
+        "save_debt_contract",
+        "record_debt_balance",
+        "record_outstanding_debt",
+        "archive_debt",
+      ].includes(parsed.data.action)
     ) {
       return NextResponse.json(
         { error: "Commande de dette invalide" },

@@ -161,6 +161,8 @@ export function canonicalLineLabel(state: DashboardState, line: ConvertedBalance
   if (position) return position.securityName;
   const liability = state.liabilities.find((item) => item.id === line.entityId);
   if (liability) return liability.name;
+  const outstanding = (state.outstandingDebts ?? []).find((item) => item.id === line.entityId);
+  if (outstanding) return outstanding.name;
   return line.entityId;
 }
 

@@ -101,9 +101,16 @@ function readEvidence(
         latestDate: maxDate(listOf(state.transactions).map((t) => t.date)),
       };
     case "LIABILITIES":
+      // Des CONTRATS seulement : une dette connue par son seul encours ne prouve aucun
+      // contrat détenu, et le rail de Dette nomme cette source « Contrat ».
       return {
         count: listOf(state.liabilities).length,
         latestDate: maxDate(listOf(state.liabilities).map((l) => l.balanceDate)),
+      };
+    case "OUTSTANDING_DEBTS":
+      return {
+        count: listOf(state.outstandingDebts).length,
+        latestDate: maxDate(listOf(state.outstandingDebts).map((d) => d.balanceDate)),
       };
     case "LIABILITY_PROVIDED_SCHEDULE": {
       // La dette porte son échéancier fourni : la source existe dès qu'UNE dette en a un.

@@ -414,6 +414,15 @@ export const PAGE_REGISTRY = manifests([
         planRef:
           "§6.2 : « compte débité » ; §24 : « le rapprochement compare service contractuel et débit bancaire »",
       },
+      {
+        // Document 04 §2 : « Enregistrer une somme que je dois » produit un passif daté sans
+        // calendrier. Source distincte du contrat : un encours déclaré ne prouve aucun contrat.
+        id: "outstanding",
+        category: "SAISIE_MANUELLE",
+        name: "Encours",
+        evidence: "OUTSTANDING_DEBTS",
+        planRef: "Document 04 §2 : « passif daté ; aucun calendrier inventé »",
+      },
     ],
     // Section 24 : « la règle document-first ». L'action primaire est l'import de
     // l'échéancier, pas l'ouverture d'un formulaire de contrat.

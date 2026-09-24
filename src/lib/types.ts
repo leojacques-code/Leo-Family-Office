@@ -187,6 +187,26 @@ export interface ProvidedScheduleEntry {
   closingBalance: number;
 }
 
+/**
+ * Dette dont seul l'encours est connu (`terms_status = 'OUTSTANDING_ONLY'`).
+ *
+ * Aucun taux, paiement, durée ni date d'échéance : ils ne sont pas à zéro, ils sont
+ * INCONNUS, et ce type ne porte donc aucun champ pour eux. Le bilan en fait un passif daté ;
+ * le service de dette et le cash-flow libre qui en dépendent deviennent partiels.
+ */
+export interface OutstandingDebt {
+  id: string;
+  name: string;
+  /** Créancier s'il est connu ; `null` n'est pas un créancier vide. */
+  lender: string | null;
+  currentBalance: number;
+  currency: string;
+  /** Date de la dernière observation d'encours ; absente si aucune n'est datée. */
+  balanceDate?: string;
+  notes: string | null;
+  provenance: Provenance;
+}
+
 export interface Liability {
   /** Notes du contrat, distinctes de la provenance du dernier encours observé. */
   contractNotes?: string | null;
@@ -887,6 +907,12 @@ export interface DashboardState {
   /** Projection unifiée, dérivée en lecture : aucune conséquence n'est persistée. */
   eventTimeline?: import("@/lib/engine/event-contracts").CanonicalTimeline;
   liabilities: Liability[];
+  /**
+   * Dettes connues par leur SEUL encours. Jamais mêlées à `liabilities` : les moteurs
+   * d'échéancier en déduiraient un service de dette nul, alors qu'il est inconnu. Optionnel
+   * pour les états construits à la main ; un consommateur lit `?? []`.
+   */
+  outstandingDebts?: OutstandingDebt[];
   incomes: IncomeSource[];
   expenseCategories: ExpenseCategory[];
   transactions: Transaction[];

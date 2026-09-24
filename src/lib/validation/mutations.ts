@@ -1192,6 +1192,19 @@ export const mutationSchema = z.discriminatedUnion("action", [
     notes: z.string().trim().max(500).nullable(),
   }),
   z.object({ action: z.literal("archive_debt"), liabilityId: z.uuid() }),
+  // Dette connue par son SEUL encours : aucun terme n'est demandé, et aucun n'est accepté.
+  // Stricte : une clé d'acteur ou un terme glissé dans la charge est REFUSÉ, pas ignoré.
+  z
+    .object({
+      action: z.literal("record_outstanding_debt"),
+      name: z.string().trim().min(1).max(160),
+      lender: z.string().trim().min(1).max(160).nullable(),
+      balance: finite.nonnegative().max(1e15),
+      currency: z.string().regex(/^[A-Z]{3}$/, "Devise ISO à trois lettres"),
+      observedAt: realDate,
+      notes: z.string().trim().max(500).nullable(),
+    })
+    .strict(),
   z.object({
     action: z.literal("update_account"),
     accountId: z.string().min(1),

@@ -56,4 +56,29 @@ describe("frontière HTTP Dettes", () => {
     expect(await (await GET()).json()).toEqual({ liabilities: [], asOfDate: "2026-08-31" });
     expect(mocks.global).not.toHaveBeenCalled();
   });
+  it("accepte une dette connue par son seul encours, sans terme ni acteur injecté", async () => {
+    const command = {
+      action: "record_outstanding_debt",
+      name: "Prêt familial",
+      lender: null,
+      balance: 1000,
+      currency: "EUR",
+      observedAt: "2026-09-20",
+      notes: null,
+    };
+    expect((await post(command)).status).toBe(200);
+    expect(mocks.write).toHaveBeenCalledWith(command);
+    mocks.write.mockClear();
+    for (const invalid of [
+      { ...command, annualRate: 0.03 },
+      { ...command, userId: "11111111-1111-4111-8111-111111111111" },
+      { ...command, balance: -1 },
+      { ...command, balance: Number.NaN },
+      { ...command, currency: "eur" },
+      { ...command, observedAt: "2026-02-30" },
+      { ...command, name: "  " },
+    ])
+      expect((await post(invalid)).status).toBe(400);
+    expect(mocks.write).not.toHaveBeenCalled();
+  });
 });

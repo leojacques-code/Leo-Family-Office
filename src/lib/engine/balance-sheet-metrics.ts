@@ -1,5 +1,9 @@
 import { debtServiceBreakdownForPeriod, nextDebtEvent } from "@/lib/engine/debt";
-import type { CanonicalAggregate, CanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
+import {
+  OUTSTANDING_DEBT_CATEGORY,
+  type CanonicalAggregate,
+  type CanonicalBalanceSheet,
+} from "@/lib/engine/balance-sheet";
 import type { ExpenseCategory, Liability, NetWorthSnapshot, Position } from "@/lib/types";
 
 export interface MetricValue {
@@ -142,23 +146,49 @@ export function deriveCanonicalBalanceSheetMetrics(input: {
   const debt30 = debtServiceBreakdownForPeriod(input.liabilities, asOf, asOf, addDays(asOf, 30));
   const debt90 = debtServiceBreakdownForPeriod(input.liabilities, asOf, asOf, addDays(asOf, 90));
   const debt12 = debtServiceBreakdownForPeriod(input.liabilities, asOf, asOf, addMonths(asOf, 12));
-  const debtQuality = (breakdown: typeof debt30, scope: string): MetricValue =>
+  // Une dette connue par son SEUL encours est au bilan mais n'a aucun échéancier : les sorties
+  // de dette connues ne sont alors qu'une partie des sorties réelles. Les compter comme le tout
+  // sous-estimerait les obligations et surestimerait la couverture, sans rien signaler.
+  // La présence se lit sur le bilan canonique, sans nouvelle entrée ni recalcul.
+  const unscheduledDebt = sheet.contributions.some(
+    (line) =>
+      line.side === "LIABILITY" &&
+      line.isAccountingPrimary &&
+      line.category === OUTSTANDING_DEBT_CATEGORY &&
+      (line.nativeValue ?? 0) > 0,
+  );
+  const partialDebt = (scope?: string): MetricValue => ({
+    value: null,
+    status: "PARTIAL",
+    blockers: ["DEBT_TERMS_UNDECLARED"],
+    ...(scope ? { scope } : {}),
+  });
+  const debtAmount = (breakdown: typeof debt30, value: number, scope?: string): MetricValue =>
     breakdown.kind === "MISSING"
       ? unavailable("DEBT_NOT_PROJECTABLE", scope)
-      : complete(breakdown.totalCashOut, scope);
+      : unscheduledDebt
+        ? partialDebt(scope)
+        : complete(value, scope);
+  const debtQuality = (breakdown: typeof debt30, scope: string): MetricValue =>
+    debtAmount(breakdown, breakdown.totalCashOut, scope);
   const essential = input.expenses.filter((expense) => expense.essential);
   const missingEssential = essential.some((expense) => expense.monthlyAmount === null);
   const knownEssential = essential.reduce((sum, expense) => sum + (expense.monthlyAmount ?? 0), 0);
   const monthlyDebt = debt30.totalCashOut;
   const incompressibleValue = knownEssential + monthlyDebt;
-  const incompressible = missingEssential
-    ? {
-        value: null,
-        status: "PARTIAL" as const,
-        blockers: ["MISSING_ESSENTIAL_EXPENSE"],
-        scope: "essential expenses + exact debt cash-outs due in 30 days",
-      }
-    : complete(incompressibleValue, "essential expenses + exact debt cash-outs due in 30 days");
+  const obligationBlockers = [
+    ...(missingEssential ? ["MISSING_ESSENTIAL_EXPENSE"] : []),
+    ...(unscheduledDebt ? ["DEBT_TERMS_UNDECLARED"] : []),
+  ];
+  const incompressible: MetricValue =
+    obligationBlockers.length > 0
+      ? {
+          value: null,
+          status: "PARTIAL" as const,
+          blockers: obligationBlockers,
+          scope: "essential expenses + exact debt cash-outs due in 30 days",
+        }
+      : complete(incompressibleValue, "essential expenses + exact debt cash-outs due in 30 days");
   const coverage = (assets: CanonicalAggregate): MetricValue => {
     if (assets.value === null || incompressible.value === null)
       return unavailable("INCOMPLETE_INPUT");
@@ -172,11 +202,11 @@ export function deriveCanonicalBalanceSheetMetrics(input: {
           "INCOMPLETE_LIQUID_ASSETS",
           "known essential expenses + exact debt cash-outs; taxes and unmodelled outflows excluded",
         )
-      : missingEssential
+      : obligationBlockers.length > 0
         ? {
             value: null,
             status: "PARTIAL" as const,
-            blockers: ["MISSING_ESSENTIAL_EXPENSE"],
+            blockers: obligationBlockers,
             scope:
               "known essential expenses + exact debt cash-outs; taxes and unmodelled outflows excluded",
           }
@@ -249,30 +279,21 @@ export function deriveCanonicalBalanceSheetMetrics(input: {
       service30d: debtQuality(debt30, "exact due entries in 30 days"),
       service90d: debtQuality(debt90, "exact due entries in 90 days"),
       service12m: debtQuality(debt12, "exact due entries in 12 months"),
-      principal12m:
-        debt12.kind === "MISSING"
-          ? unavailable("DEBT_NOT_PROJECTABLE")
-          : complete(debt12.principal),
-      interest12m:
-        debt12.kind === "MISSING"
-          ? unavailable("DEBT_NOT_PROJECTABLE")
-          : complete(debt12.interest + debt12.capitalisedInterest),
-      insurance12m:
-        debt12.kind === "MISSING"
-          ? unavailable("DEBT_NOT_PROJECTABLE")
-          : complete(debt12.insurance),
-      fees12m:
-        debt12.kind === "MISSING"
-          ? unavailable("DEBT_NOT_PROJECTABLE")
-          : complete(debt12.fees + debt12.capitalisedCharges),
-      economicCost12m:
-        debt12.kind === "MISSING"
-          ? unavailable("DEBT_NOT_PROJECTABLE")
-          : complete(debt12.economicCost),
-      nextCashOut: next
-        ? complete(next.entry.totalCashOut, "Debt Engine next due entry")
-        : complete(0, "no active debt cash-out"),
-      nextCashOutDate: next?.entry.dueDate ?? null,
+      principal12m: debtAmount(debt12, debt12.principal),
+      interest12m: debtAmount(debt12, debt12.interest + debt12.capitalisedInterest),
+      insurance12m: debtAmount(debt12, debt12.insurance),
+      fees12m: debtAmount(debt12, debt12.fees + debt12.capitalisedCharges),
+      economicCost12m: debtAmount(debt12, debt12.economicCost),
+      // Zéro n'est affirmé que si AUCUNE dette n'est active : une dette sans échéancier peut
+      // sortir avant la prochaine échéance connue.
+      nextCashOut: unscheduledDebt
+        ? partialDebt("Debt Engine next due entry")
+        : next
+          ? complete(next.entry.totalCashOut, "Debt Engine next due entry")
+          : complete(0, "no active debt cash-out"),
+      // Même règle : la date agrégée d'une « prochaine sortie » n'est pas connue si une dette
+      // sans échéancier peut la précéder. Chaque contrat garde sa propre échéance au domaine Dette.
+      nextCashOutDate: unscheduledDebt ? null : (next?.entry.dueDate ?? null),
     },
     history: {
       mtd: historyChange(current, startOfMonth, snapshots),

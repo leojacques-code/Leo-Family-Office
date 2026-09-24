@@ -37,6 +37,8 @@ import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import type { Liability } from "@/lib/types";
 import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
 import { DebtContractForm } from "@/components/pages/debt/debt-contract-form";
+import { OutstandingDebtDrawer } from "@/components/pages/debt/outstanding-debt-drawer";
+import type { OutstandingDebt } from "@/lib/types";
 
 const PROFILE_LABELS: Record<Liability["amortisationProfile"], string> = {
   AMORTIZING: "Amortissable",
@@ -64,7 +66,8 @@ type DebtPageProps = Pick<SectionProps, "mutate" | "busy" | "setExplanation"> & 
   state: { cashObservationPresent?: boolean } & Pick<
     DebtReadModel,
     "asOfDate" | "liabilities" | "scenarios" | "metrics" | "reportingCurrency"
-  >;
+  > &
+    Partial<Pick<DebtReadModel, "outstandingDebts" | "dates">>;
 };
 
 function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
@@ -74,6 +77,11 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   useRegisterPrimaryAction(busy ? null : () => setContractEditor(loan ? "edit" : "new"));
   const [balanceEditor, setBalanceEditor] = useState(false);
   const [balance, setBalance] = useState({ value: "", date: state.asOfDate, notes: "" });
+  // Tiroir « encours seul » : création (`debt: null`) ou correction d'une dette existante.
+  const [outstandingEditor, setOutstandingEditor] = useState<{
+    debt: OutstandingDebt | null;
+  } | null>(null);
+  const outstandingDebts = state.outstandingDebts ?? [];
   const loan = state.liabilities.find((item) => item.id === selectedId) ?? state.liabilities[0];
   const timeline = useMemo(
     () => (loan ? buildLoanTimeline(loan, state.asOfDate) : null),
@@ -100,8 +108,8 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
 
   const header = (
     <SectionHeader
-      eyebrow="Liabilities"
-      title="Debt"
+      eyebrow="Passif"
+      title="Dettes"
       description="Échéanciers datés, coût du crédit et arbitrage remboursement vs investissement."
       actions={
         <>
@@ -131,6 +139,13 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             </>
           ) : null}
           <button
+            className="button secondary"
+            disabled={busy}
+            onClick={() => setOutstandingEditor({ debt: null })}
+          >
+            <WalletCards size={15} /> Encours seul
+          </button>
+          <button
             className="button primary"
             disabled={busy}
             onClick={() => setContractEditor("new")}
@@ -141,6 +156,68 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
       }
     />
   );
+
+  const outstandingDrawer = outstandingEditor ? (
+    <OutstandingDebtDrawer
+      key={outstandingEditor.debt?.id ?? "new"}
+      open
+      debt={outstandingEditor.debt}
+      defaultCurrency={state.reportingCurrency}
+      maxDate={state.dates?.today}
+      busy={busy}
+      onClose={() => setOutstandingEditor(null)}
+      onSubmit={(draft) =>
+        outstandingEditor.debt
+          ? mutate({
+              action: "record_debt_balance",
+              liabilityId: outstandingEditor.debt.id,
+              observedAt: draft.observedAt,
+              balance: draft.balance,
+              notes: draft.notes,
+            })
+          : mutate({ action: "record_outstanding_debt", ...draft })
+      }
+    />
+  ) : null;
+
+  const outstandingPanel =
+    outstandingDebts.length > 0 ? (
+      <section className="panel outstanding-debts" aria-label="Encours déclarés sans contrat">
+        <div className="panel-header">
+          <div>
+            <span className="eyebrow">Encours déclarés</span>
+            <h2>Sans contrat détaillé</h2>
+          </div>
+        </div>
+        <p className="outstanding-debt-note">
+          Aucun échéancier, coût ni prochaine échéance n’est calculé tant que les termes sont
+          inconnus.
+        </p>
+        <ul className="outstanding-debt-list">
+          {outstandingDebts.map((debt) => (
+            <li key={debt.id}>
+              <div>
+                <strong>{debt.name}</strong>
+                <span>{debt.lender ?? "Créancier non renseigné"}</span>
+              </div>
+              <div className="outstanding-debt-value">
+                <Currency currency={debt.currency} value={debt.currentBalance} />
+                <span>
+                  {debt.balanceDate ? `Au ${formatDate(debt.balanceDate)}` : "Date non renseignée"}
+                </span>
+              </div>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => setOutstandingEditor({ debt })}
+              >
+                <Edit3 size={15} /> Corriger l’encours
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ) : null;
 
   const editorModal = (
     <Modal
@@ -179,20 +256,32 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
     return (
       <div className="page-stack">
         {header}
-        <EmptyState
-          title="Aucune dette enregistrée"
-          detail="Ajoutez un contrat ou un échéancier pour connaître vos engagements. Une absence de saisie ne signifie pas une absence de dette."
-          action={
-            <button
-              className="button primary"
-              disabled={busy}
-              onClick={() => setContractEditor("new")}
-            >
-              <Plus size={15} /> Enregistrer une dette
-            </button>
-          }
-        />
+        {outstandingPanel ?? (
+          <EmptyState
+            title="Aucune dette enregistrée"
+            detail="Une absence de saisie ne signifie pas une absence de dette."
+            action={
+              <div className="empty-actions">
+                <button
+                  className="button primary"
+                  disabled={busy}
+                  onClick={() => setOutstandingEditor({ debt: null })}
+                >
+                  <WalletCards size={15} /> Je connais l’encours
+                </button>
+                <button
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={() => setContractEditor("new")}
+                >
+                  <Plus size={15} /> Décrire le contrat
+                </button>
+              </div>
+            }
+          />
+        )}
         {editorModal}
+        {outstandingDrawer}
       </div>
     );
   }
@@ -219,6 +308,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   return (
     <div className="page-stack">
       {header}
+      {outstandingPanel}
       {state.liabilities.length > 1 ? (
         <section className="decision-case-strip">
           {state.liabilities.map((item) => (
@@ -662,6 +752,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           </div>
         </form>
       </Modal>
+      {outstandingDrawer}
     </div>
   );
 }

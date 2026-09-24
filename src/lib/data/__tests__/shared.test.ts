@@ -133,6 +133,31 @@ const positions: Position[] = [
 
 const AS_OF = "2030-01-15";
 
+describe("deriveFlowMetrics avec une dette connue par son seul encours", () => {
+  it("rend le cash-flow libre inconnu : le service de cette dette n'est pas nul", () => {
+    const debt = {
+      id: "d",
+      name: "Prêt familial",
+      lender: null,
+      currentBalance: 1000,
+      currency: "EUR",
+      balanceDate: AS_OF,
+      notes: null,
+      provenance: { kind: "ACTUAL" as const, confidence: "HIGH" as const },
+    };
+    const known = deriveFlowMetrics(liabilities, incomes, expenses, [], AS_OF);
+    const withDebt = deriveFlowMetrics(liabilities, incomes, expenses, [], AS_OF, [debt]);
+    expect(known.freeCashFlow).not.toBeNull();
+    expect(withDebt.freeCashFlow).toBeNull();
+    // Le service contractuel reste celui des contrats, sans rien inventer pour la dette seule.
+    expect(withDebt.monthlyDebtService).toBe(known.monthlyDebtService);
+    const extinguished = deriveFlowMetrics(liabilities, incomes, expenses, [], AS_OF, [
+      { ...debt, currentBalance: 0 },
+    ]);
+    expect(extinguished.freeCashFlow).toBe(known.freeCashFlow);
+  });
+});
+
 describe("deriveFlowMetrics", () => {
   const metrics = deriveFlowMetrics(liabilities, incomes, expenses, [], AS_OF);
 

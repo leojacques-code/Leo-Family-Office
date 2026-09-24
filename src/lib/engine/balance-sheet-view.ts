@@ -43,6 +43,7 @@ export function canonicalBalanceSheetOf(state: DashboardState): CanonicalBalance
       accounts: state.accounts,
       positions: state.positions,
       liabilities: state.liabilities,
+      outstandingDebts: state.outstandingDebts ?? [],
       contributions: [
         ...realEstateBalanceSheetContributions(realEstateOf(state)),
         ...businessEquityBalanceSheetContributions(businessEquityOf(state)),

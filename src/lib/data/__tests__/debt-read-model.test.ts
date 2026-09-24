@@ -131,7 +131,9 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
       account_balances: [observation],
     };
     install(rows);
-    expect((await createSupabaseRepository("owner").getDebtReadModel()).metrics.bankCash).toBeNull();
+    expect(
+      (await createSupabaseRepository("owner").getDebtReadModel()).metrics.bankCash,
+    ).toBeNull();
     install({
       ...rows,
       currency_rates: [
@@ -145,10 +147,9 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
         },
       ],
     });
-    expect((await createSupabaseRepository("owner").getDebtReadModel()).metrics.bankCash).toBeCloseTo(
-      1614.969,
-      6,
-    );
+    expect(
+      (await createSupabaseRepository("owner").getDebtReadModel()).metrics.bankCash,
+    ).toBeCloseTo(1614.969, 6);
   });
   it("échoue explicitement si une dépendance manque, sans rendre de résultat partiel", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -173,7 +174,9 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
     vi.setSystemTime(new Date("2026-09-13T12:00:00Z"));
     try {
       install({ monthly_closes: [{ close_date: "2026-12-31" }, { close_date: "2026-08-31" }] });
-      expect((await createSupabaseRepository("owner").getDebtReadModel()).asOfDate).toBe("2026-08-31");
+      expect((await createSupabaseRepository("owner").getDebtReadModel()).asOfDate).toBe(
+        "2026-08-31",
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -186,16 +189,18 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
       ],
       account_balances: [observation, { id: "bad", account_id: "pea", balance: "invalid" }],
     });
-    expect((await createSupabaseRepository("owner").getDebtReadModel()).metrics.bankCash).toBe(1794.41);
+    expect((await createSupabaseRepository("owner").getDebtReadModel()).metrics.bankCash).toBe(
+      1794.41,
+    );
   });
   it("un OTHER immédiat ne prouve pas du cash bancaire, un découvert bancaire est une observation", async () => {
     install({
       financial_accounts: [{ ...account, account_type: "OTHER" }],
       account_balances: [observation],
     });
-    expect((await createSupabaseRepository("owner").getDebtReadModel()).cashObservationPresent).toBe(
-      false,
-    );
+    expect(
+      (await createSupabaseRepository("owner").getDebtReadModel()).cashObservationPresent,
+    ).toBe(false);
     install({
       financial_accounts: [account],
       account_balances: [{ ...observation, balance: -50 }],
@@ -212,5 +217,123 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
     });
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
     expect(mocks.from).not.toHaveBeenCalled();
+  });
+  it("sépare une dette connue par son seul encours sans lire de terme, et garde les contrats", async () => {
+    const provenance = { data_kind: "ACTUAL", confidence: "HIGH", source: "Saisie" };
+    install({
+      liabilities: [
+        {
+          id: "outstanding",
+          name: "Prêt familial",
+          lender: null,
+          current_balance: "1000",
+          currency: "USD",
+          terms_status: "OUTSTANDING_ONLY",
+          principal: null,
+          annual_rate: null,
+          monthly_payment: null,
+          payment_count: null,
+          first_payment_date: null,
+          maturity_date: null,
+          rate_type: null,
+          deferral_kind: null,
+          deferral_months: null,
+          deferral_interest_treatment: null,
+          amortisation_profile: null,
+          payment_frequency: null,
+          interest_convention: null,
+          monthly_insurance: null,
+          recurring_fees: null,
+          payment_includes_insurance: null,
+          balloon_amount: null,
+          facility_id: null,
+          notes: null,
+          archived: false,
+          ...provenance,
+        },
+        {
+          // Base antérieure à la migration : aucune colonne terms_status, donc un contrat.
+          id: "contract",
+          name: "Crédit auto",
+          lender: "Banque",
+          principal: "1200",
+          current_balance: "1200",
+          currency: "EUR",
+          annual_rate: "0",
+          monthly_payment: "100",
+          payment_count: "12",
+          first_payment_date: "2026-10-05",
+          maturity_date: "2027-09-05",
+          rate_type: "FIXED",
+          deferral_kind: "NONE",
+          deferral_months: 0,
+          deferral_interest_treatment: "UNKNOWN",
+          amortisation_profile: "AMORTIZING",
+          payment_frequency: "MONTHLY",
+          interest_convention: "PROPORTIONAL",
+          monthly_insurance: null,
+          recurring_fees: null,
+          payment_includes_insurance: null,
+          balloon_amount: null,
+          facility_id: null,
+          notes: null,
+          archived: false,
+          ...provenance,
+        },
+      ],
+      liability_balance_observations: [
+        {
+          id: "o1",
+          liability_id: "outstanding",
+          observed_at: "2026-09-20",
+          balance: "950",
+          created_at: "2026-09-20T10:00:00Z",
+          ...provenance,
+        },
+      ],
+    });
+    const model = await createSupabaseRepository("owner").getDebtReadModel();
+    expect(model.liabilities.map((item) => item.id)).toEqual(["contract"]);
+    expect(model.outstandingDebts).toEqual([
+      expect.objectContaining({
+        id: "outstanding",
+        lender: null,
+        currentBalance: 950,
+        currency: "USD",
+        balanceDate: "2026-09-20",
+      }),
+    ]);
+    // Aucun champ de terme n'existe sur une dette encours seul : rien ne peut valoir zéro.
+    expect(model.outstandingDebts[0]).not.toHaveProperty("annualRate");
+    expect(model.outstandingDebts[0]).not.toHaveProperty("monthlyPayment");
+    // L'encours déclaré est présent ; le contrat l'est aussi (ligne legacy), mais par SA preuve.
+    const rail = Object.fromEntries(model.railSources.map((source) => [source.id, source.status]));
+    expect(rail.outstanding).not.toBe("ABSENTE");
+    expect(rail.contract).not.toBe("ABSENTE");
+  });
+  it("ne présente pas un encours déclaré comme un contrat détenu", async () => {
+    install({
+      liabilities: [
+        {
+          id: "outstanding",
+          name: "Prêt familial",
+          lender: null,
+          current_balance: "1000",
+          currency: "EUR",
+          terms_status: "OUTSTANDING_ONLY",
+          notes: null,
+          archived: false,
+          data_kind: "ACTUAL",
+          confidence: "HIGH",
+          source: "Saisie",
+        },
+      ],
+    });
+    const model = await createSupabaseRepository("owner").getDebtReadModel();
+    const rail = Object.fromEntries(model.railSources.map((source) => [source.id, source.status]));
+    expect(rail.contract).toBe("ABSENTE");
+    expect(rail.outstanding).not.toBe("ABSENTE");
+    // Sans observation datée, aucune date n'est fabriquée.
+    expect(model.outstandingDebts[0]).not.toHaveProperty("balanceDate");
   });
 });

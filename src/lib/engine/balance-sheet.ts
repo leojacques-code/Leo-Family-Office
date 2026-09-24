@@ -4,7 +4,17 @@ import {
   type CurrencyRate,
   type FxResolution,
 } from "@/lib/engine/fx";
-import type { Confidence, FinancialAccount, Liability, Position, Provenance } from "@/lib/types";
+import type {
+  Confidence,
+  FinancialAccount,
+  Liability,
+  OutstandingDebt,
+  Position,
+  Provenance,
+} from "@/lib/types";
+
+/** Catégorie de bilan d'une dette connue par son seul encours (termes non déclarés). */
+export const OUTSTANDING_DEBT_CATEGORY = "OUTSTANDING_DEBT";
 
 export type BalanceSheetDomain =
   | "FINANCIAL_ACCOUNT"
@@ -165,6 +175,8 @@ export interface BuildCanonicalBalanceSheetInput {
   accounts?: FinancialAccount[];
   positions?: Position[];
   liabilities?: Liability[];
+  /** Dettes connues par leur seul encours : passif daté, jamais contrat implicite. */
+  outstandingDebts?: OutstandingDebt[];
   contributions?: CanonicalBalanceSheetContribution[];
   currencyRates?: CurrencyRate[];
 }
@@ -305,6 +317,39 @@ function debtContributions(
     }));
 }
 
+/**
+ * Dette connue par son SEUL encours : même lecture de bilan qu'un contrat (encours observé,
+ * devise native, date d'observation), mais une catégorie PROPRE. La ranger en
+ * `CONTRACTUAL_DEBT` gonflerait l'encours « contractuel » que le modèle mensuel amortit : ici
+ * elle rejoint les autres passifs, que la projection porte constants et signale.
+ */
+function outstandingDebtContributions(
+  debts: OutstandingDebt[],
+  asOfDate: string,
+): CanonicalBalanceSheetContribution[] {
+  return debts
+    .filter((debt) => debt.currentBalance > 0)
+    .map((debt) => ({
+      id: `debt:${debt.id}`,
+      entityId: debt.id,
+      domain: "DEBT" as const,
+      side: "LIABILITY" as const,
+      category: OUTSTANDING_DEBT_CATEGORY,
+      nativeValue: debt.currentBalance,
+      currency: debt.currency,
+      valuationDate: debt.balanceDate ?? debt.provenance.effectiveDate ?? asOfDate,
+      valuationMethod: "OBSERVED_BALANCE" as const,
+      valuationStatus: "CURRENT" as const,
+      liquidity: "ILLIQUID" as const,
+      provenance: debt.provenance,
+      confidence: debt.provenance.confidence,
+      source: debt.provenance.source,
+      reconciliationState: "NOT_APPLICABLE" as const,
+      isAccountingPrimary: true,
+      flags: ["DEBT_TERMS_UNDECLARED"],
+    }));
+}
+
 function reconcilePositions(
   accounts: FinancialAccount[],
   positions: Position[],
@@ -404,6 +449,7 @@ export function buildCanonicalBalanceSheet(
   const native = [
     ...accountContributions(accounts),
     ...debtContributions(input.liabilities ?? [], input.asOfDate, input.reportingCurrency),
+    ...outstandingDebtContributions(input.outstandingDebts ?? [], input.asOfDate),
     ...(input.contributions ?? []),
   ];
   for (const line of native) {
