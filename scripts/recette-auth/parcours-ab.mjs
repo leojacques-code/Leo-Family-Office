@@ -27,7 +27,11 @@ const pg = createRequire(import.meta.url)("pg");
 const GATEWAY = process.env.RECETTE_GATEWAY ?? "http://127.0.0.1:55321";
 const ANON = readFileSync(`${DIR}/anon.key`, "utf8").trim();
 const SKIP_RENEWAL = process.env.RECETTE_SKIP_RENEWAL === "1";
-for (const host of [new URL(APP).hostname, new URL(GATEWAY).hostname])
+for (const host of [
+  new URL(APP).hostname,
+  new URL(GATEWAY).hostname,
+  new URL(env("RECETTE_ADMIN_DB_URL")).hostname,
+])
   if (!["localhost", "127.0.0.1"].includes(host))
     throw new Error(`Hôte non local refusé : ${host}`);
 
@@ -105,7 +109,10 @@ const browser = await chromium.launch(
 const contexts = {};
 try {
   // ---------- A : création, confirmation, espace vierge ----------
-  const ctxA = (contexts.A = await browser.newContext({ viewport: { width: 1280, height: 900 } }));
+  const ctxA = (contexts.A = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    locale: "fr-FR",
+  }));
   const pageA = await ctxA.newPage();
   const browserErrors = [];
   pageA.on("pageerror", (error) => browserErrors.push(String(error)));
@@ -241,6 +248,7 @@ try {
   const ctxB = (contexts.B = await browser.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,
+    locale: "fr-FR",
   }));
   const pageB = await ctxB.newPage();
   await pageB.goto(`${APP}/login`);
@@ -331,9 +339,13 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ p_user_id: users.A.id, p_session_id: sessionA }),
   });
-  check("B9", "RPC de session réservée au serveur : refusée sous le JWT de B", rpcB.status >= 400, {
-    status: rpcB.status,
-  });
+  // 401/403 = refus de droit ; un 404 (RPC absente) ne prouverait rien.
+  check(
+    "B9",
+    "RPC de session réservée au serveur : refusée sous le JWT de B",
+    [401, 403].includes(rpcB.status),
+    { status: rpcB.status, code: rpcB.body?.code },
+  );
 
   // Charge VALIDE en tout point sauf la propriété du compte : le refus ne peut venir que de là.
   const balancesBefore = Number(
@@ -412,11 +424,22 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prefix: users.A.id }),
   });
+  const listA = await rest(
+    `/storage/v1/object/list/family-office-documents`,
+    await accessToken(ctxA),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prefix: users.A.id }),
+    },
+  );
   check(
     "B15",
-    "Storage : B ne liste aucun objet du dossier de A",
-    listB.status >= 400 || (Array.isArray(listB.body) && listB.body.length === 0),
-    { status: listB.status },
+    "Storage : B ne liste aucun objet du dossier de A, que A liste bien",
+    Array.isArray(listA.body) &&
+      listA.body.length === 1 &&
+      (listB.status >= 400 || (Array.isArray(listB.body) && listB.body.length === 0)),
+    { statusB: listB.status, objetsVusParA: Array.isArray(listA.body) ? listA.body.length : null },
   );
 
   // ---------- Déconnexion et révocation ----------
@@ -456,6 +479,52 @@ try {
     { status: revoked.status() },
   );
   await ctxA3.close();
+  // Révocation propre à l'application : une session dont `not_after` est passé reste acceptée
+  // par GoTrue tant que son JWT vit ; seul `lfo_verify_session` la refuse. Ce contrôle prouve
+  // donc la garde de l'application, et non celle d'Auth.
+  const ctxA4 = await browser.newContext();
+  const loginA4 = await ctxA4.request.post(`${APP}/api/auth`, {
+    headers: { Origin: APP },
+    data: { email: users.A.email, password: users.A.password, intent: "sign-in" },
+  });
+  const tokenA4 = await accessToken(ctxA4);
+  const sessionA4 = claims(tokenA4).session_id;
+  const service = readFileSync(`${DIR}/service.key`, "utf8").trim();
+  const verify = async () =>
+    (
+      await fetch(`${GATEWAY}/rest/v1/rpc/lfo_verify_session`, {
+        method: "POST",
+        headers: {
+          apikey: service,
+          Authorization: `Bearer ${service}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ p_user_id: users.A.id, p_session_id: sessionA4 }),
+      })
+    ).json();
+  const liveBefore = await verify();
+  await sql.query(
+    "update auth.sessions set not_after = now() - interval '1 minute' where id = $1",
+    [sessionA4],
+  );
+  const verifyAfter = await verify();
+  const gotrueUser = await fetch(`${GATEWAY}/auth/v1/user`, {
+    headers: { apikey: ANON, Authorization: `Bearer ${tokenA4}` },
+  });
+  const appAfter = await ctxA4.request.get(`${APP}/api/state`);
+  check(
+    "R6",
+    "session expirée par not_after : lfo_verify_session la refuse sur le vrai schéma Auth",
+    loginA4.ok() && liveBefore === true && verifyAfter === false,
+    { avant: liveBefore, apres: verifyAfter },
+  );
+  check(
+    "R7",
+    "l'application refuse la session expirée même si GoTrue l'accepte encore",
+    appAfter.status() === 401,
+    { app: appAfter.status(), gotrueUser: gotrueUser.status },
+  );
+  await ctxA4.close();
   const demoRows = await one(
     `select count(*) as total from public.financial_accounts where name ilike '%démo%' or name ilike '%demo%'`,
   );

@@ -56,5 +56,8 @@ RECETTE_CHROMIUM=/opt/pw-browsers/chromium RECETTE_ADMIN_DB_URL=… node scripts
 bash scripts/recette-auth/stop.sh
 ```
 
-Chaque script refuse un hôte non local. Les comptes créés portent le domaine réservé
+Chaque script refuse un hôte non local, base d'administration comprise. `parcours-ab.mjs` ne
+peut pas vérifier la configuration de l'application qu'il pilote : `next start` DOIT être lancé
+avec `SUPABASE_URL=http://127.0.0.1:55321` et les clés de `RECETTE_DIR`, jamais avec un
+`.env.local` pointant un projet hébergé (sinon A1 créerait un compte réel avant que A2 échoue). Les comptes créés portent le domaine réservé
 `lfo.invalid` ; la base est jetable et reconstruite par `db-init.sh`.

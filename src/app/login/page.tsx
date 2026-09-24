@@ -4,9 +4,11 @@ import { LoginForm } from "@/components/login-form";
 
 const CONFIRMATION_MESSAGES: Record<string, string> = {
   "sign-in": "Si votre adresse est confirmée, connectez-vous avec votre mot de passe.",
-  expired: "Ce lien de confirmation a expiré ou a déjà servi. Connectez-vous pour vérifier.",
+  expired:
+    "Ce lien de confirmation a expiré ou a déjà servi. Si votre adresse est confirmée, connectez-vous avec votre mot de passe.",
   invalid: "Ce lien de confirmation est incomplet.",
-  unavailable: "Confirmation momentanément indisponible. Réessayez depuis le lien reçu.",
+  unavailable:
+    "Confirmation momentanément indisponible. Connectez-vous avec votre mot de passe ; si l’erreur persiste, réessayez plus tard.",
 };
 
 export default async function LoginPage({

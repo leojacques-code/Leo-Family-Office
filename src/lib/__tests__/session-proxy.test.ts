@@ -46,4 +46,22 @@ describe("Cookies de session traversant le proxy", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toContain("no-store");
   });
+  it("laisse passer le seul retour de confirmation, sans élargir la surface voisine", async () => {
+    const open = await proxy(new NextRequest("http://localhost/auth/confirm?code=abc"));
+    expect(open.status).toBe(200);
+    expect(mocks.verify).not.toHaveBeenCalled();
+    mocks.verify.mockResolvedValue(null);
+    const neighbour = await proxy(new NextRequest("http://localhost/auth/confirm-other"));
+    expect(neighbour.status).toBe(307);
+  });
+  it("journalise par code la panne du contrôle de session, sans le message", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.verify.mockRejectedValue(new Error("AUTH_SESSION_CHECK_MISSING"));
+    await proxy(new NextRequest("http://localhost/api/debt"));
+    expect(log.mock.calls[0]?.[1]).toMatchObject({
+      code: "AUTH_SESSION_CHECK_MISSING",
+      stage: "session",
+    });
+    log.mockRestore();
+  });
 });

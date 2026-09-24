@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
 const mocks = vi.hoisted(() => ({
   fixture: vi.fn(),
   signIn: vi.fn(),
@@ -109,13 +110,31 @@ describe("Authentification personnelle HTTP", () => {
     expect(mocks.signIn).not.toHaveBeenCalled();
     mocks.actor.mockRejectedValueOnce(new Error("AUTH_SESSION_CHECK_MISSING"));
     expect((await post(body)).status).toBe(503);
-    mocks.signIn.mockRejectedValueOnce(new Error("fetch failed https://secret.invalid?token=abc"));
+    // Le vrai client ne lève pas : une panne réseau revient dans result.error (statut 0).
+    mocks.signIn.mockResolvedValueOnce({
+      data: { session: null },
+      error: new AuthRetryableFetchError("fetch failed https://secret.invalid?token=abc", 0),
+    });
     const unreachable = await post(body);
+    expect(unreachable.status).toBe(503);
     expect(await unreachable.text()).not.toContain("secret.invalid");
+    // Clé publiable refusée par la passerelle : 401 SANS code auth-js.
+    mocks.signIn.mockResolvedValueOnce({
+      data: { session: null },
+      error: new AuthApiError("Invalid API key", 401, undefined),
+    });
+    expect((await post(body)).status).toBe(503);
+    // Identifiants faux : erreur de l'utilisateur, 401 sans journal.
+    mocks.signIn.mockResolvedValueOnce({
+      data: { session: null },
+      error: new AuthApiError("Invalid login credentials", 400, "invalid_credentials"),
+    });
+    expect((await post(body)).status).toBe(401);
     expect(log.mock.calls.map(([, detail]) => (detail as { code: string }).code)).toEqual([
       "AUTH_NOT_CONFIGURED",
       "AUTH_SESSION_CHECK_MISSING",
       "AUTH_PROVIDER_UNAVAILABLE",
+      "AUTH_KEY_REJECTED",
     ]);
     expect(JSON.stringify(log.mock.calls)).not.toContain("secret.invalid");
     expect(JSON.stringify(log.mock.calls)).not.toContain("recipe@example.invalid");

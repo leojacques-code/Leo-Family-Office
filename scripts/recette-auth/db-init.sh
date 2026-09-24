@@ -15,6 +15,7 @@ set -euo pipefail
 PORT="${RECETTE_PG_PORT:-55432}"
 CLUSTER="${RECETTE_PG_CLUSTER:-recette}"
 PG_VERSION="${RECETTE_PG_VERSION:-16}"
+case "$CLUSTER" in recette*) ;; *) echo "Cluster refusé : $CLUSTER (préfixe « recette » requis, ce script le détruit)"; exit 1 ;; esac
 PW="$(cat "$RECETTE_DIR/pgpass.txt")"
 PLATFORM="$RECETTE_DIR/pgrepo/migrations/db"
 [ -d "$PLATFORM/init-scripts" ] || git clone -q --depth 1 --filter=blob:none --sparse \
@@ -24,7 +25,8 @@ PLATFORM="$RECETTE_DIR/pgrepo/migrations/db"
 if pg_lsclusters -h | awk '{print $2}' | grep -qx "$CLUSTER"; then
   pg_dropcluster --stop "$PG_VERSION" "$CLUSTER"
 fi
-pwfile="$(mktemp /tmp/lfo-recette-pw.XXXXXX)"; printf '%s\n' "$PW" > "$pwfile"; chmod 644 "$pwfile"
+pwfile="$(mktemp /tmp/lfo-recette-pw.XXXXXX)"; printf '%s\n' "$PW" > "$pwfile"
+chgrp postgres "$pwfile"; chmod 640 "$pwfile"   # lisible par initdb, pas par les autres comptes
 pg_createcluster "$PG_VERSION" "$CLUSTER" -p "$PORT" -- --username=supabase_admin \
   --pwfile="$pwfile" --auth-local=trust --auth-host=scram-sha-256 >/dev/null
 rm -f "$pwfile"

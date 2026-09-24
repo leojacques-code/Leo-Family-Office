@@ -6,7 +6,7 @@ import { usesLocalFixtureAuth } from "@/lib/auth-config";
 import { serverSessionClient } from "@/lib/session-client";
 import { verifySessionActor } from "@/lib/verified-session";
 import { initializePersonalProfile } from "@/lib/personal-profile";
-import { reportAuthFailure } from "@/lib/auth-failure";
+import { providerFailureCode, reportAuthFailure, reportProviderFailure } from "@/lib/auth-failure";
 
 const loginSchema = z
   .object({
@@ -66,7 +66,15 @@ export async function POST(request: Request) {
       intent === "sign-up"
         ? await client.auth.signUp({ email, password, options: confirmationOptions(request) })
         : await client.auth.signInWithPassword({ email, password });
-    if (result.error)
+    if (result.error) {
+      const outage = providerFailureCode(result.error);
+      if (outage) {
+        reportProviderFailure(outage, result.error, intent);
+        return NextResponse.json(
+          { error: "Connexion momentanément indisponible. Réessayez." },
+          { status: 503 },
+        );
+      }
       return NextResponse.json(
         {
           error:
@@ -74,6 +82,7 @@ export async function POST(request: Request) {
         },
         { status: 401 },
       );
+    }
     if (!result.data.session) return NextResponse.json({ ok: true, confirmationRequired: true });
     const actor = await verifySessionActor(client);
     if (!actor) return NextResponse.json({ error: "Session non valide." }, { status: 401 });
