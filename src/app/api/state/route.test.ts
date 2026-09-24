@@ -43,3 +43,47 @@ describe("revenu net observé par /api/state", () => {
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
 });
+
+describe("correction d'un revenu saisi par /api/state", () => {
+  const correction = {
+    action: "correct_net_income",
+    transactionId: "22222222-2222-4222-8222-222222222222",
+    reason: "Montant saisi avant retenue à la source",
+    expected: { amount: 2450.35, receivedOn: "2026-09-23", label: "Salaire septembre" },
+    corrected: { amount: 2405.35 },
+  };
+  it("transmet la commande validée", async () => {
+    expect((await post(correction)).status).toBe(200);
+    expect(mocks.mutate).toHaveBeenCalledWith(correction);
+  });
+  it("refuse acteur, compte, devise, état attendu incomplet, correction vide ou future", async () => {
+    for (const invalid of [
+      { ...correction, actorUserId: "11111111-1111-4111-8111-111111111111" },
+      { ...correction, corrected: { accountId: "11111111-1111-4111-8111-111111111111" } },
+      { ...correction, corrected: { currency: "CHF" } },
+      { ...correction, corrected: {} },
+      { ...correction, corrected: { amount: 0 } },
+      { ...correction, corrected: { receivedOn: "2099-01-01" } },
+      { ...correction, corrected: { label: "  " } },
+      { ...correction, expected: { amount: 2450.35, receivedOn: "2026-09-23" } },
+      { ...correction, reason: " " },
+      { ...correction, transactionId: "pas-un-uuid" },
+    ])
+      expect((await post(invalid)).status).toBe(400);
+    expect(mocks.mutate).not.toHaveBeenCalled();
+  });
+  it("rend un conflit 409 et un refus 422 avec le message du repository, pas celui de la base", async () => {
+    const { MutationConflictError, MutationRejectedError } =
+      await import("@/lib/data/mutation-errors");
+    mocks.mutate.mockRejectedValueOnce(new MutationConflictError("Ce revenu a changé"));
+    const conflict = await post(correction);
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ error: "Ce revenu a changé", code: "CONFLICT" });
+    mocks.mutate.mockRejectedValueOnce(new MutationRejectedError("Aucune valeur n’a changé"));
+    expect((await post(correction)).status).toBe(422);
+    mocks.mutate.mockRejectedValueOnce(new Error("Supabase correction : Conflit : montant 12"));
+    const failure = await post(correction);
+    expect(failure.status).toBe(500);
+    expect(JSON.stringify(await failure.json())).not.toContain("12");
+  });
+});

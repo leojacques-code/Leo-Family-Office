@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
 import { Banknote, Repeat } from "lucide-react";
 import { NetIncomeDrawer } from "@/components/pages/cash-flow/net-income-drawer";
+import { NetIncomeCorrectionDrawer } from "@/components/pages/cash-flow/net-income-correction-drawer";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   Callout,
@@ -39,7 +40,12 @@ import {
   completeMonthsPeriod,
   monthPeriod,
 } from "@/lib/engine/cash-flow";
-import { CASH_FLOW_KINDS, type CashFlowKind, type LedgerCoverageSource } from "@/lib/types";
+import {
+  CASH_FLOW_KINDS,
+  NET_INCOME_SOURCE,
+  type CashFlowKind,
+  type LedgerCoverageSource,
+} from "@/lib/types";
 
 /** Lignes rendues dans la table. Les agrégats, eux, portent sur toute la fenêtre lue. */
 const LEDGER_TABLE_ROWS = 50;
@@ -78,6 +84,11 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
    * proposer une action que son contrat ne déclare pas.
    */
   useRegisterPrimaryAction(() => setModal("transaction"));
+  /** Revenu saisi en cours de correction : identifiant seul, la ligne est relue dans l'état. */
+  const [correctingId, setCorrectingId] = useState<string | null>(null);
+  const correcting = correctingId
+    ? (state.transactions.find((item) => item.id === correctingId) ?? null)
+    : null;
   const [formError, setFormError] = useState<string | null>(null);
   const [horizon, setHorizon] = useState(90);
   /**
@@ -904,7 +915,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           </span>
         </div>
         {state.transactions.length ? (
-          <div className="holdings-table">
+          <div className="holdings-table cash-ledger-table">
             <div className="table-head">
               <span>Date</span>
               <span>Libellé</span>
@@ -912,6 +923,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <span>Nature</span>
               <span>Montant</span>
               <span>Reclasser</span>
+              <span>Corriger</span>
             </div>
             {state.transactions.slice(0, LEDGER_TABLE_ROWS).map((transaction) => {
               const kind = effectiveCashFlowKind(transaction, index);
@@ -926,7 +938,11 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                     {transaction.kindOverride ? " (forcée)" : ""}
                   </span>
                   <strong className={transaction.amount < 0 ? "negative-text" : "positive-text"}>
-                    <Currency value={transaction.amount} sign />
+                    {/* Devise NATIVE de l'opération : un versement en CHF n'est pas en euros. */}
+                    <Currency value={transaction.amount} sign currency={transaction.currency} />
+                    {transaction.corrections?.length ? (
+                      <span className="panel-note"> · corrigé</span>
+                    ) : null}
                   </strong>
                   <select
                     className="text-input"
@@ -947,6 +963,18 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
                       </option>
                     ))}
                   </select>
+                  {transaction.provenance.source === NET_INCOME_SOURCE &&
+                  transaction.kindOverride === "INCOME" ? (
+                    <button
+                      className="button secondary"
+                      onClick={() => setCorrectingId(transaction.id)}
+                      type="button"
+                    >
+                      Corriger
+                    </button>
+                  ) : (
+                    <span />
+                  )}
                 </div>
               );
             })}
@@ -967,6 +995,21 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
           immédiatement les dépenses de consommation sans modifier aucun solde.
         </p>
       </section>
+      {correcting ? (
+        <NetIncomeCorrectionDrawer
+          open
+          key={correcting.id}
+          transaction={correcting}
+          closedMonthVersion={
+            state.cashFlowCloses.find((close) => close.month === correcting.date.slice(0, 7))
+              ?.version ?? null
+          }
+          maxDate={state.dates?.today}
+          busy={busy}
+          onClose={() => setCorrectingId(null)}
+          onSubmit={(draft) => mutate({ action: "correct_net_income", ...draft })}
+        />
+      ) : null}
       {modal === "income" ? (
         <NetIncomeDrawer
           open

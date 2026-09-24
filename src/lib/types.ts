@@ -395,7 +395,26 @@ export interface Transaction {
   propertyId: string | null;
   notes: string | null;
   provenance: Provenance;
+  /**
+   * Corrections décidées sur cette transaction, de la plus ancienne à la plus récente. Seul
+   * un revenu net SAISI se corrige (`lfo_correct_net_income`) : la valeur ci-dessus est la
+   * valeur corrigée, l'avant et le motif vivent ici. Absent = aucune correction.
+   */
+  corrections?: TransactionCorrection[];
 }
+
+/** Entrée de la piste immuable `transaction_corrections`. Montants en texte décimal. */
+export interface TransactionCorrection {
+  id: string;
+  decidedAt: string;
+  reason: string;
+  changedFields: ("amount" | "transaction_date" | "label")[];
+  before: { amount: string; date: string; label: string };
+  after: { amount: string; date: string; label: string };
+}
+
+/** Source écrite par `lfo_record_net_income` : seule forme de revenu corrigible ici. */
+export const NET_INCOME_SOURCE = "Saisie revenu net observé";
 
 export type RecurrenceFrequency = "MONTHLY" | "QUARTERLY" | "ANNUAL";
 

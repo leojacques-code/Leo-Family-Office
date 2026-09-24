@@ -1,4 +1,5 @@
 import "server-only";
+import { MutationConflictError, MutationRejectedError } from "@/lib/data/mutation-errors";
 import { reportReadFailure } from "@/lib/data/read-failure";
 import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import { railSourcesFor } from "@/lib/presentation/rail-sources";
@@ -122,6 +123,7 @@ import type {
   RecurringCashFlowRule,
   Scenario,
   Transaction,
+  TransactionCorrection,
 } from "@/lib/types";
 import {
   CASH_FLOW_KINDS,
@@ -791,6 +793,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       taxRuleSetRows,
       taxRuleRows,
       taxObservationRows,
+      transactionCorrectionRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -853,6 +856,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       fetchAllPages("tax_rule_sets", "effective_from"),
       mine("tax_rules"),
       fetchAllPages("tax_observations", "observed_date"),
+      fetchAllPages("transaction_corrections", "decided_at"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -1264,6 +1268,32 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
 
     const accountNames = new Map(accountRows.map((row) => [str(row.id), str(row.name)]));
     const categoryNames = new Map(categoryRows.map((row) => [str(row.id), str(row.name)]));
+    const correctionsByTransaction = new Map<string, TransactionCorrection[]>();
+    for (const row of transactionCorrectionRows) {
+      const before = (row.before_values ?? {}) as Record<string, unknown>;
+      const after = (row.after_values ?? {}) as Record<string, unknown>;
+      const entry: TransactionCorrection = {
+        id: str(row.id),
+        decidedAt: str(row.decided_at),
+        reason: str(row.reason),
+        changedFields: (Array.isArray(row.changed_fields) ? row.changed_fields : []).map(
+          (field) => str(field) as TransactionCorrection["changedFields"][number],
+        ),
+        before: {
+          amount: str(before.amount),
+          date: str(before.transaction_date),
+          label: str(before.label),
+        },
+        after: {
+          amount: str(after.amount),
+          date: str(after.transaction_date),
+          label: str(after.label),
+        },
+      };
+      const list = correctionsByTransaction.get(str(row.transaction_id)) ?? [];
+      list.push(entry);
+      correctionsByTransaction.set(str(row.transaction_id), list);
+    }
     const transactions: Transaction[] = transactionRows.map((row) => ({
       id: str(row.id),
       accountId: str(row.account_id),
@@ -1285,6 +1315,9 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
         : null,
       notes: row.notes ? str(row.notes) : null,
       provenance: provenance(row),
+      ...(correctionsByTransaction.has(str(row.id))
+        ? { corrections: correctionsByTransaction.get(str(row.id)) }
+        : {}),
     }));
 
     const scenarios = mapScenarioFacts(scenarioRows, scenarioVersionRows);
@@ -2796,6 +2829,50 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
           }),
           "enregistrement atomique de l’encours observé",
         );
+        break;
+      }
+      case "correct_net_income": {
+        const result = await db.rpc("lfo_correct_net_income", {
+          p_user_id: user,
+          p_payload: {
+            transaction_id: mutation.transactionId,
+            reason: mutation.reason,
+            // L'état attendu voyage en TEXTE, comme le montant corrigé : la base compare en
+            // `numeric`, un flottant perdrait la précision d'un `numeric(20,6)`.
+            expected: {
+              amount: decimalText(mutation.expected.amount),
+              received_on: mutation.expected.receivedOn,
+              label: mutation.expected.label,
+            },
+            corrected: {
+              ...(mutation.corrected.amount !== undefined
+                ? { amount: decimalText(mutation.corrected.amount) }
+                : {}),
+              ...(mutation.corrected.receivedOn !== undefined
+                ? { received_on: mutation.corrected.receivedOn }
+                : {}),
+              ...(mutation.corrected.label !== undefined
+                ? { label: mutation.corrected.label }
+                : {}),
+            },
+          },
+        });
+        if (result.error) {
+          const message = result.error.message;
+          if (message.startsWith("Conflit"))
+            throw new MutationConflictError(
+              "Ce revenu a changé depuis son affichage : rechargez la page avant de le corriger.",
+            );
+          if (message.startsWith("Aucune valeur modifiée"))
+            throw new MutationRejectedError(
+              "Aucune valeur n’a changé : ce n’est pas une correction.",
+            );
+          if (message.startsWith("Seul un revenu net saisi") || message === "Revenu introuvable")
+            throw new MutationRejectedError(
+              "Seul un revenu net saisi à la main se corrige ici. Une opération importée se corrige par son import.",
+            );
+        }
+        unwrap(result, "correction du revenu net observé");
         break;
       }
       case "record_net_income": {

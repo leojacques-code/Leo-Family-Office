@@ -584,6 +584,14 @@ export type Mutation =
     }
   | { action: "archive_debt"; liabilityId: string }
   | {
+      action: "correct_net_income";
+      transactionId: string;
+      reason: string;
+      /** État AFFICHÉ au moment de la décision : un état périmé fait échouer la correction. */
+      expected: { amount: number; receivedOn: string; label: string };
+      corrected: { amount?: number; receivedOn?: string; label?: string };
+    }
+  | {
       action: "record_net_income";
       accountId: string;
       receivedOn: string;

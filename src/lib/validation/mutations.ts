@@ -1235,6 +1235,34 @@ export const mutationSchema = z.discriminatedUnion("action", [
       notes: z.string().trim().max(500).nullable(),
     })
     .strict(),
+  // Correction NON DESTRUCTIVE d'un revenu saisi : l'état attendu est COMPLET (les trois
+  // champs affichés), la correction porte au moins un champ, et rien d'autre n'est accepté —
+  // ni acteur, ni compte, ni devise.
+  z
+    .object({
+      action: z.literal("correct_net_income"),
+      transactionId: z.uuid(),
+      reason: z.string().trim().min(1).max(500),
+      expected: z
+        .object({
+          amount: finite.positive().max(99_999_999_999_999),
+          receivedOn: realDate,
+          label: z.string().min(1).max(180),
+        })
+        .strict(),
+      corrected: z
+        .object({
+          amount: finite.positive().max(99_999_999_999_999).optional(),
+          receivedOn: businessDate.optional(),
+          label: z.string().trim().min(1).max(180).optional(),
+        })
+        .strict()
+        .refine(
+          (value) => Object.values(value).some((field) => field !== undefined),
+          "Aucune valeur corrigée",
+        ),
+    })
+    .strict(),
   z.object({
     action: z.literal("add_transaction"),
     accountId: z.string().min(1),
