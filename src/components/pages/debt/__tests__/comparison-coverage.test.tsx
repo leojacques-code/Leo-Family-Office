@@ -45,7 +45,12 @@ it("interdit les ouvertures pendant la reprise et utilise ensuite le nouvel enco
   const state = buildDemoState("2026-09-13");
   const props = { mutate: vi.fn(), setExplanation: vi.fn() };
   const { rerender } = render(<DebtPage {...props} state={state} busy />);
-  for (const name of ["Modifier le contrat", "Nouvel encours", "Nouvelle dette"]) {
+  for (const name of [
+    "Événement ou avenant",
+    "Corriger le contrat",
+    "Nouvel encours",
+    "Nouvelle dette",
+  ]) {
     const button = screen.getByRole("button", { name });
     expect(button).toBeDisabled();
     await userEvent.click(button);

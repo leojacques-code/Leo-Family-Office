@@ -46,6 +46,8 @@ import { operationalToday } from "@/lib/financial-date";
 import type { Liability } from "@/lib/types";
 import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
 import { DebtContractForm } from "@/components/pages/debt/debt-contract-form";
+import { DebtEventForm } from "@/components/pages/debt/debt-event-form";
+import { DebtHistory } from "@/components/pages/debt/debt-history";
 import { OutstandingDebtDrawer } from "@/components/pages/debt/outstanding-debt-drawer";
 import type { OutstandingDebt } from "@/lib/types";
 
@@ -83,6 +85,8 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const [selectedId, setSelectedId] = useState(state.liabilities[0]?.id ?? "");
   const [investmentReturn, setInvestmentReturn] = useState(5.5);
   const [contractEditor, setContractEditor] = useState<"new" | "edit" | null>(null);
+  // B18 : événement ou avenant daté, distinct d'une correction de saisie du contrat.
+  const [eventEditor, setEventEditor] = useState(false);
   // B16 : dette encours seul dont on décrit le contrat (même ligne, décision tracée).
   const [promoting, setPromoting] = useState<OutstandingDebt | null>(null);
   useRegisterPrimaryAction(busy ? null : () => setContractEditor(loan ? "edit" : "new"));
@@ -225,9 +229,16 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
               <button
                 className="button secondary"
                 disabled={busy}
+                onClick={() => setEventEditor(true)}
+              >
+                <Plus size={15} /> Événement ou avenant
+              </button>
+              <button
+                className="button secondary"
+                disabled={busy}
                 onClick={() => setContractEditor("edit")}
               >
-                <Edit3 size={15} /> Modifier le contrat
+                <Edit3 size={15} /> Corriger le contrat
               </button>
               <button
                 className="button secondary"
@@ -483,8 +494,12 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
         setContractEditor(null);
         setResumedDraft(null);
       }}
-      title={contractEditor === "edit" && loan ? `Modifier ${loan.name}` : "Nouvelle dette"}
-      subtitle="Les termes contractuels et l’encours observé restent deux vérités distinctes."
+      title={contractEditor === "edit" && loan ? `Corriger ${loan.name}` : "Nouvelle dette"}
+      subtitle={
+        contractEditor === "edit"
+          ? "Corriger une erreur de saisie. Un changement réel du contrat s’enregistre comme événement daté."
+          : "Les termes contractuels et l’encours observé restent deux vérités distinctes."
+      }
       wide
     >
       <DebtContractForm
@@ -501,10 +516,37 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           setContractEditor(null);
           setResumedDraft(null);
         }}
-        onSave={(contract: DebtContractInput) => mutate({ action: "save_debt_contract", contract })}
+        onSave={(contract: DebtContractInput, changeReason?: string | null) =>
+          mutate({
+            action: "save_debt_contract",
+            contract,
+            ...(changeReason ? { changeReason } : {}),
+          })
+        }
       />
     </Modal>
   );
+
+  const eventModal = loan ? (
+    <Modal
+      open={eventEditor}
+      onClose={() => setEventEditor(false)}
+      title={`Événement ou avenant · ${loan.name}`}
+      subtitle="L’événement s’ajoute à l’historique ; le contrat et les événements antérieurs sont conservés."
+      wide
+    >
+      <DebtEventForm
+        key={`event-${loan.id}-${eventEditor}`}
+        loan={loan}
+        asOfDate={state.asOfDate}
+        busy={busy}
+        onCancel={() => setEventEditor(false)}
+        onSubmit={(event) =>
+          mutate({ action: "record_debt_event", liabilityId: loan.id, ...event })
+        }
+      />
+    </Modal>
+  ) : null;
 
   async function recordBalance(event: FormEvent) {
     event.preventDefault();
@@ -631,8 +673,8 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                 ? `Aucune échéance exigible ce mois · prochaine le ${formatDate(upcoming.entry.dueDate)}`
                 : "Aucune échéance exigible ce mois"
               : paymentDeclared
-                ? `Paiement ${FREQUENCY_LABELS[loan.paymentFrequency]} annoncé ${formatLoanAmount(loan.monthlyPayment)}`
-                : `Paiement ${FREQUENCY_LABELS[loan.paymentFrequency]} non déclaré, dérivé par le moteur`
+                ? `Échéance ${FREQUENCY_LABELS[loan.paymentFrequency]} annoncée : ${formatLoanAmount(loan.monthlyPayment)}`
+                : `Échéance ${FREQUENCY_LABELS[loan.paymentFrequency]} non déclarée, dérivée par le moteur`
           }
           onExplain={() =>
             setExplanation({
@@ -990,6 +1032,13 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           ))}
         </div>
       </section>
+      <DebtHistory
+        loan={loan}
+        busy={busy}
+        onCancelEvent={(eventId, reason) =>
+          mutate({ action: "cancel_debt_event", eventId, reason })
+        }
+      />
       {!comparison ? (
         <Callout title="Comparaison à compléter">
           {state.cashObservationPresent === false || state.metrics.bankCash === null
@@ -1064,6 +1113,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
         </section>
       ) : null}
       {editorModal}
+      {eventModal}
       {promotionModal}
       <Modal
         open={balanceEditor}

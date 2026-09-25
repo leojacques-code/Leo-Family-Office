@@ -1,0 +1,124 @@
+{
+  "date": "2026-09-25T10:23:33.591Z",
+  "app": "http://localhost:3120",
+  "utilisateurs": [
+    "recette-evenement-a-1790331788080-756230@lfo.invalid",
+    "recette-evenement-b-1790331788214-407734@lfo.invalid"
+  ],
+  "environnement": "pile Supabase auto-hébergée locale ; build de production",
+  "checks": [
+    {
+      "id": "E0",
+      "label": "contrat de départ enregistré",
+      "ok": true
+    },
+    {
+      "id": "E1",
+      "label": "historique visible : aucun événement, version 1 de création",
+      "ok": true
+    },
+    {
+      "id": "E2",
+      "label": "conséquences avant enregistrement : avant et après, dernière échéance repoussée, aucun solde résiduel",
+      "ok": true,
+      "apercu": "Conséquences avant enregistrement Encours retenu Prochaine échéance Dernière échéance Intérêts restant à payer Aujourd’hui 1 200 € 100 € le 5 octobre 2026 5 septembre 2027 0 € Avec l’événement 1 200 € 100 € le 5 octobre 2026 5 juin 2028 0 € Aperçu calculé, non enregistré. L’historique garde le contr"
+    },
+    {
+      "id": "0429deac-dba0-4221-a3bf-34e259b7402b",
+      "label": "base : avenant CONTRACTUEL, mensualité en texte, nouvelle fin",
+      "ok": true,
+      "nature": "CONTRACTUAL",
+      "payment": "50",
+      "maturity": "2028-06-05"
+    },
+    {
+      "id": "E4",
+      "label": "après rechargement : nouvelle dernière échéance, échéances à 50 € après l'effet, avenant dans l'historique avec sa source",
+      "ok": true,
+      "historique": "HISTORIQUE Événements et versions du contrat 5 janvier 2027 Avenant · mensualité 50 € · dernière échéance 5 juin 2028 Contractuel · source : Avenant n° 1 signé Annuler l’événement Versions du contrat "
+    },
+    {
+      "id": "E5",
+      "label": "remboursement effectué : encours constaté ACTUAL écrit, patrimoine au nouvel encours (1 000 €)",
+      "ok": true,
+      "observation": {
+        "data_kind": "ACTUAL",
+        "balance": "1000.000000",
+        "source": "Remboursement anticipé"
+      },
+      "passif": 1000
+    },
+    {
+      "id": "E6",
+      "label": "prévu accepté sans écrire d'encours ; « effectué » daté dans le futur refusé",
+      "ok": true,
+      "statutFutur": 400
+    },
+    {
+      "id": "E7",
+      "label": "annulation : motif exigé, trace motivée, avenant toujours lisible et barré",
+      "ok": true,
+      "annulation": {
+        "reason": "Avenant saisi sur le mauvais prêt",
+        "events": "3"
+      }
+    },
+    {
+      "id": "E8",
+      "label": "correction : version 2 motivée, événements du journal intacts (non réabsorbés par le contrat)",
+      "ok": true,
+      "versions": [
+        {
+          "version_no": 1,
+          "change_kind": "INITIAL",
+          "change_reason": null
+        },
+        {
+          "version_no": 2,
+          "change_kind": "CORRECTION",
+          "change_reason": "Nom du prêteur incomplet"
+        }
+      ]
+    },
+    {
+      "id": "E9",
+      "label": "aucun événement recopié dans les listes du contrat",
+      "ok": true,
+      "n": "0"
+    },
+    {
+      "id": "E10",
+      "label": "isolation : B ne voit rien et ne peut rien ajouter à la dette de A",
+      "ok": true,
+      "statut": 422
+    },
+    {
+      "id": "E11",
+      "label": "solde total : encours constaté nul, archivage proposé",
+      "ok": true
+    },
+    {
+      "id": "K1",
+      "label": "clavier : le formulaire d'événement s'ouvre à l'Entrée avec le focus dedans",
+      "ok": true
+    },
+    {
+      "id": "M1",
+      "label": "Dettes et historique à 390 px sans débordement horizontal",
+      "ok": true,
+      "scrollWidth": 390
+    },
+    {
+      "id": "M2",
+      "label": "Dettes et historique à 768 px sans débordement horizontal",
+      "ok": true,
+      "scrollWidth": 768
+    },
+    {
+      "id": "E12",
+      "label": "aucune erreur JavaScript",
+      "ok": true,
+      "errors": []
+    }
+  ]
+}

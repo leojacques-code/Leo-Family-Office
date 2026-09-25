@@ -85,6 +85,8 @@ it("conserve les notes du contrat distinctes de la dernière observation lors d�
       notes: "Échéancier fourni : extrait bancaire",
       initialBalance: null,
     }),
+    // Aucun motif saisi : la correction n'invente pas de motif.
+    null,
   );
 });
 

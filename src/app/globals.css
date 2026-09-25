@@ -410,6 +410,14 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Une page peut porter cinq actions (Dettes avec un contrat) : elles passent à la ligne
+     plutôt que de faire défiler la page horizontalement, à toute largeur. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  /* Élément flex de l'en-tête : sans largeur minimale nulle, il ne rétrécirait jamais et
+     le retour à la ligne ne se déclencherait pas. */
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .button {
@@ -3581,9 +3589,9 @@ dd {
 .debt-schedule-table .table-row {
   grid-template-columns: 110px 1.6fr 0.8fr 0.8fr 0.8fr 0.9fr;
 }
-/* Écran étroit ou zoom 200 % : six colonnes tronqueraient l'assurance et le solde. Chaque
-   ligne s'empile, et chaque montant porte l'intitulé de sa colonne. */
-@media (max-width: 720px) {
+/* Écran étroit, tablette ou zoom 200 % : six colonnes tronqueraient l'assurance et le solde.
+   Chaque ligne s'empile, et chaque montant porte l'intitulé de sa colonne. */
+@media (max-width: 900px) {
   .debt-schedule-table .table-head {
     display: none;
   }
@@ -3748,6 +3756,111 @@ dd {
 }
 @media (max-width: 640px) {
   .debt-draft-list li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* B18 : historique des événements et conséquences avant enregistrement. */
+.debt-event-choice {
+  display: grid;
+  gap: 2px;
+}
+.debt-event-form .debt-event-choice .checkbox-row {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.debt-event-form .debt-event-choice small {
+  padding-left: 26px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.debt-event-form .radio-row small {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.debt-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.debt-history-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: start;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.debt-history-list li > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+.debt-history-date {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.debt-history-list li.cancelled strong {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+.debt-history-cancelled {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.debt-history-cancel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+}
+.debt-history-versions {
+  margin-top: 12px;
+}
+.debt-history-versions ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.debt-consequence-table {
+  display: grid;
+  gap: 6px;
+}
+.debt-consequence-table > div,
+.debt-consequence-table > dl {
+  display: grid;
+  grid-template-columns: 140px repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  align-items: baseline;
+}
+.debt-consequence-head span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.debt-consequence-table dt {
+  font-weight: 600;
+}
+.debt-consequence-table dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 720px) {
+  .debt-consequence-head {
+    display: none !important;
+  }
+  .debt-consequence-table > dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .debt-consequence-table dt {
+    grid-column: 1 / -1;
+  }
+  .debt-history-list li {
     grid-template-columns: minmax(0, 1fr);
   }
 }

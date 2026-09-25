@@ -1,9 +1,9 @@
 {
-  "date": "2026-09-25T09:35:23.897Z",
+  "date": "2026-09-25T10:23:52.119Z",
   "app": "http://localhost:3120",
   "utilisateurs": [
-    "recette-brouillon-a-1790328905380-676781@lfo.invalid",
-    "recette-brouillon-b-1790328905518-35324@lfo.invalid"
+    "recette-brouillon-a-1790331814156-818709@lfo.invalid",
+    "recette-brouillon-b-1790331814300-694751@lfo.invalid"
   ],
   "environnement": "pile Supabase auto-hébergée locale ; build de production",
   "checks": [
@@ -11,7 +11,7 @@
       "id": "D1",
       "label": "brouillon incomplet enregistré, sans aucune dette ni observation écrite",
       "ok": true,
-      "statut": "Brouillon enregistré le 25 septembre 2026 à 11:35. Il n’alimente ni le patrimoine ni les calculs ; « Ajouter cette dette » valide le contrat.",
+      "statut": "Brouillon enregistré le 25 septembre 2026 à 12:23. Il n’alimente ni le patrimoine ni les calculs ; « Ajouter cette dette » valide le contrat.",
       "brouillons": 1
     },
     {

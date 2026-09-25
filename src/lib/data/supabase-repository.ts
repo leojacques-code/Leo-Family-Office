@@ -100,6 +100,7 @@ import {
   requiredString,
 } from "@/lib/data/row-validation";
 import { readAllPages } from "@/lib/data/pagination";
+import { withDebtEvents } from "@/lib/engine/debt-events";
 import type { DomainDeclarationInput, FamilyOfficeRepository } from "@/lib/data/repository";
 import type { DomainDeclaration } from "@/lib/presentation/today/contracts";
 import { DOMAIN_IDS } from "@/lib/presentation/today/domains";
@@ -132,6 +133,10 @@ import type {
   Transaction,
   TransactionCorrection,
   InsurancePolicy,
+  DebtEvent,
+  DebtEventContent,
+  DebtEventNature,
+  ContractVersion,
   InsuranceMode,
 } from "@/lib/types";
 import {
@@ -397,6 +402,75 @@ function decimalText(value: number): string {
   return value.toFixed(6).replace(/\.?0+$/, "");
 }
 
+const DEBT_EVENT_NATURES = ["OBSERVED", "CONTRACTUAL", "PLANNED"] as const;
+const CONTRACT_CHANGE_KINDS = ["INITIAL", "PROMOTION", "CORRECTION"] as const;
+
+/**
+ * Contenu d'un événement relu tel que la RPC l'a contrôlé : montants en texte décimal,
+ * valeurs fermées. Une forme inattendue est une donnée invalide, nommée, jamais complétée.
+ */
+function readDebtEventContent(row: Row): DebtEventContent {
+  const context = `liability_events[id=${str(row.id)}].payload`;
+  const payload = (row.payload ?? {}) as Record<string, unknown>;
+  const amount = (key: string) => finiteNumber(payload[key], `${context}.${key}`);
+  const optionalAmount = (key: string) =>
+    payload[key] === undefined || payload[key] === null ? null : amount(key);
+  switch (str(row.event_kind)) {
+    case "RATE_CHANGE":
+      return { kind: "RATE_CHANGE", annualRate: amount("annual_rate") };
+    case "PAYMENT_CHANGE":
+      return { kind: "PAYMENT_CHANGE", paymentAmount: amount("payment_amount") };
+    case "AMENDMENT":
+      return {
+        kind: "AMENDMENT",
+        annualRate: optionalAmount("annual_rate"),
+        paymentAmount: optionalAmount("payment_amount"),
+        maturityDate: optional(payload.maturity_date) ?? null,
+        note: optional(payload.note) ?? null,
+      };
+    case "DEFERRAL":
+      return {
+        kind: "DEFERRAL",
+        months: amount("months"),
+        deferralKind: enumValue(
+          payload.deferral_kind,
+          ["PRINCIPAL_ONLY", "TOTAL"] as const,
+          `${context}.deferral_kind`,
+        ) as "PRINCIPAL_ONLY" | "TOTAL",
+        interestTreatment: enumValue(
+          payload.interest_treatment,
+          ["PAID", "CAPITALISED", "UNKNOWN"] as const,
+          `${context}.interest_treatment`,
+        ) as "PAID" | "CAPITALISED" | "UNKNOWN",
+        termEffect: enumValue(
+          payload.term_effect,
+          ["EXTEND_TERM", "RECALCULATE_PAYMENT", "UNKNOWN"] as const,
+          `${context}.term_effect`,
+        ) as "EXTEND_TERM" | "RECALCULATE_PAYMENT" | "UNKNOWN",
+      };
+    case "EARLY_REPAYMENT":
+      return {
+        kind: "EARLY_REPAYMENT",
+        amount: amount("amount"),
+        penalty: optionalAmount("penalty"),
+        outcome: enumValue(
+          payload.outcome,
+          ["SHORTEN_TERM", "REDUCE_PAYMENT", "UNKNOWN"] as const,
+          `${context}.outcome`,
+        ) as "SHORTEN_TERM" | "REDUCE_PAYMENT" | "UNKNOWN",
+        balanceAfter: optionalAmount("balance_after"),
+      };
+    case "FULL_REPAYMENT":
+      return {
+        kind: "FULL_REPAYMENT",
+        amount: amount("amount"),
+        penalty: optionalAmount("penalty"),
+      };
+    default:
+      throw new Error(`Supabase donnée invalide (${context}) : nature d'événement inconnue`);
+  }
+}
+
 function mapDebtFacts(
   liabilityRows: Row[],
   liabilityObservationRows: Row[],
@@ -412,7 +486,57 @@ function mapDebtFacts(
     insured: [],
     periods: [],
   },
+  // B18 : journal d'événements, annulations et versions de contrat.
+  historyRows: { events: Row[]; cancellations: Row[]; versions: Row[] } = {
+    events: [],
+    cancellations: [],
+    versions: [],
+  },
 ) {
+  const cancellations = new Map(historyRows.cancellations.map((row) => [str(row.event_id), row]));
+  const debtEvents: DebtEvent[] = historyRows.events.map((row) => {
+    const cancellation = cancellations.get(str(row.id));
+    return {
+      id: str(row.id),
+      liabilityId: str(row.liability_id),
+      nature: enumValue(
+        row.nature,
+        DEBT_EVENT_NATURES,
+        `liability_events[id=${str(row.id)}].nature`,
+      ) as DebtEventNature,
+      effectiveDate: str(row.effective_date),
+      source: str(row.source),
+      content: readDebtEventContent(row),
+      observationId: optional(row.observation_id) ?? null,
+      recordedAt: str(row.recorded_at),
+      cancellation: cancellation
+        ? { reason: str(cancellation.reason), cancelledAt: str(cancellation.cancelled_at) }
+        : null,
+    };
+  });
+  const versionsByLiability = new Map<string, ContractVersion[]>();
+  for (const row of historyRows.versions) {
+    const list = versionsByLiability.get(str(row.liability_id)) ?? [];
+    list.push({
+      id: str(row.id),
+      versionNo: finiteNumber(
+        row.version_no,
+        `liability_contract_versions[id=${str(row.id)}].version_no`,
+      ),
+      changeKind: enumValue(
+        row.change_kind,
+        CONTRACT_CHANGE_KINDS,
+        `liability_contract_versions[id=${str(row.id)}].change_kind`,
+      ) as ContractVersion["changeKind"],
+      changeReason: optional(row.change_reason) ?? null,
+      recordedAt: str(row.recorded_at),
+      terms:
+        typeof row.terms === "object" && row.terms !== null && !Array.isArray(row.terms)
+          ? (row.terms as Record<string, unknown>)
+          : {},
+    });
+    versionsByLiability.set(str(row.liability_id), list);
+  }
   const policiesByLiability = new Map<string, InsurancePolicy[]>();
   for (const row of insuranceRows.policies) {
     const policyId = str(row.id);
@@ -530,7 +654,7 @@ function mapDebtFacts(
       };
       // B16 : mensualité, durée et maturité sont DÉCLARÉES ou non (NULL). Le Debt Engine
       // déduit les termes manquants et nomme leur provenance ; rien de déduit n'est persisté.
-      return resolveContractTerms(mapped, {
+      const resolved = resolveContractTerms(mapped, {
         monthlyPayment: nullableFiniteNumber(
           row.monthly_payment,
           `liabilities[id=${str(row.id)}].monthly_payment`,
@@ -541,6 +665,13 @@ function mapDebtFacts(
         ),
         maturityDate: row.maturity_date ? str(row.maturity_date) : null,
       });
+      // B18 : les événements actifs s'appliquent APRÈS la résolution des termes déclarés.
+      return {
+        ...withDebtEvents(resolved, debtEvents),
+        contractVersions: (versionsByLiability.get(str(row.id)) ?? []).sort(
+          (a, b) => b.versionNo - a.versionNo,
+        ),
+      };
     });
 
   return { liabilities, outstandingDebts };
@@ -690,6 +821,9 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       "scenario_versions",
       "currency_rates",
       "form_drafts",
+      "liability_events",
+      "liability_event_cancellations",
+      "liability_contract_versions",
       "profiles",
     ] as const;
     const [results, cashResult, closeResult, transactionResult] = await Promise.all([
@@ -775,6 +909,11 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
         policies: rows.loan_insurance_policies,
         insured: rows.loan_insurance_insured,
         periods: rows.loan_insurance_periods,
+      },
+      {
+        events: rows.liability_events,
+        cancellations: rows.liability_event_cancellations,
+        versions: rows.liability_contract_versions,
       },
     );
     const scenarios = mapScenarioFacts(rows.scenarios, rows.scenario_versions);
@@ -904,6 +1043,9 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       insurancePolicyRows,
       insuredRows,
       insurancePeriodRows,
+      debtEventRows,
+      debtEventCancellationRows,
+      contractVersionRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -970,6 +1112,9 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       fetchAllPages("loan_insurance_policies", "id"),
       fetchAllPages("loan_insurance_insured", "id"),
       fetchAllPages("loan_insurance_periods", "id"),
+      fetchAllPages("liability_events", "effective_date"),
+      fetchAllPages("liability_event_cancellations", "cancelled_at"),
+      fetchAllPages("liability_contract_versions", "version_no"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -1243,6 +1388,11 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       paymentChangeRows,
       profileRows,
       { policies: insurancePolicyRows, insured: insuredRows, periods: insurancePeriodRows },
+      {
+        events: debtEventRows,
+        cancellations: debtEventCancellationRows,
+        versions: contractVersionRows,
+      },
     );
 
     const incomes: IncomeSource[] = incomeRows
@@ -2872,12 +3022,84 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
         );
         break;
       }
+      case "record_debt_event": {
+        const content = mutation.content;
+        const text = (value: number | null) => (value === null ? null : decimalText(value));
+        const payload =
+          content.kind === "RATE_CHANGE"
+            ? { annual_rate: text(content.annualRate) }
+            : content.kind === "PAYMENT_CHANGE"
+              ? { payment_amount: text(content.paymentAmount) }
+              : content.kind === "AMENDMENT"
+                ? {
+                    ...(content.annualRate !== null
+                      ? { annual_rate: text(content.annualRate) }
+                      : {}),
+                    ...(content.paymentAmount !== null
+                      ? { payment_amount: text(content.paymentAmount) }
+                      : {}),
+                    ...(content.maturityDate !== null
+                      ? { maturity_date: content.maturityDate }
+                      : {}),
+                    note: content.note,
+                  }
+                : content.kind === "DEFERRAL"
+                  ? {
+                      months: content.months,
+                      deferral_kind: content.deferralKind,
+                      interest_treatment: content.interestTreatment,
+                      term_effect: content.termEffect,
+                    }
+                  : content.kind === "EARLY_REPAYMENT"
+                    ? {
+                        amount: text(content.amount),
+                        penalty: text(content.penalty),
+                        outcome: content.outcome,
+                        ...(content.balanceAfter !== null
+                          ? { balance_after: text(content.balanceAfter) }
+                          : {}),
+                      }
+                    : { amount: text(content.amount), penalty: text(content.penalty) };
+        const result = await db.rpc("lfo_record_debt_event", {
+          p_user_id: user,
+          p_payload: {
+            liability_id: mutation.liabilityId,
+            event_kind: content.kind,
+            nature: mutation.nature,
+            effective_date: mutation.effectiveDate,
+            source: mutation.source,
+            content: payload,
+          },
+        });
+        if (result.error?.code === "LF404")
+          throw new MutationRejectedError("Cette dette n’existe plus ou a été archivée.");
+        if (result.error?.code === "LF422")
+          throw new MutationRejectedError(
+            "Événement refusé : sa forme n’est pas valide pour cette dette (une dette connue par son seul encours se met à jour par un nouvel encours).",
+          );
+        unwrap(result, "enregistrement de l'événement de dette");
+        break;
+      }
+      case "cancel_debt_event": {
+        const result = await db.rpc("lfo_cancel_debt_event", {
+          p_user_id: user,
+          p_event_id: mutation.eventId,
+          p_reason: mutation.reason,
+        });
+        if (result.error?.code === "LF409")
+          throw new MutationConflictError("Cet événement a déjà été annulé.");
+        if (result.error?.code === "LF404")
+          throw new MutationRejectedError("Cet événement n’existe plus.");
+        unwrap(result, "annulation de l'événement de dette");
+        break;
+      }
       case "save_debt_contract": {
         const contract = mutation.contract;
         unwrap(
           await db.rpc("lfo_save_debt_contract", {
             p_user_id: user,
             p_payload: {
+              ...(mutation.changeReason ? { change_reason: mutation.changeReason } : {}),
               liability_id: contract.liabilityId,
               // Clé présente seulement quand elle est décidée : son absence signifie « pas de
               // promotion », et la base refuse toute autre forme.

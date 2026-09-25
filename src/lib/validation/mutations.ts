@@ -654,6 +654,116 @@ const businessDate = realDate.refine(
   "Date postérieure au jour courant : un fait futur n’est pas un fait",
 );
 const ownershipRate = finite.min(0).max(1);
+
+/** Montant positif d'un événement de dette : même plafond que la colonne `numeric(20,6)`. */
+const eventAmount = finite.positive().max(99_999_999_999_999);
+/**
+ * B18 : événement de la vie d'un prêt. La nature se DÉDUIT de l'événement et se contrôle :
+ * une révision, un palier, un report ou un avenant sont contractuels ; un remboursement est
+ * effectué (jamais daté après aujourd'hui) ou prévu (daté après aujourd'hui).
+ */
+const debtEventSchema = z
+  .object({
+    action: z.literal("record_debt_event"),
+    liabilityId: z.uuid(),
+    nature: z.enum(["OBSERVED", "CONTRACTUAL", "PLANNED"]),
+    effectiveDate: realDate,
+    source: z.string().trim().min(1, "Source requise").max(200),
+    content: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("RATE_CHANGE"), annualRate: finite.min(0).max(10) }).strict(),
+      z.object({ kind: z.literal("PAYMENT_CHANGE"), paymentAmount: eventAmount }).strict(),
+      z
+        .object({
+          kind: z.literal("DEFERRAL"),
+          months: z.number().int().min(1).max(120),
+          deferralKind: z.enum(["PRINCIPAL_ONLY", "TOTAL"]),
+          interestTreatment: z.enum(["PAID", "CAPITALISED", "UNKNOWN"]),
+          termEffect: z.enum(["EXTEND_TERM", "RECALCULATE_PAYMENT", "UNKNOWN"]),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("AMENDMENT"),
+          annualRate: finite.min(0).max(10).nullable(),
+          paymentAmount: eventAmount.nullable(),
+          maturityDate: realDate.nullable(),
+          note: z.string().trim().max(500).nullable(),
+        })
+        .strict()
+        .refine(
+          (content) =>
+            content.annualRate !== null ||
+            content.paymentAmount !== null ||
+            content.maturityDate !== null,
+          "Un avenant change au moins le taux, la mensualité ou la durée",
+        ),
+      z
+        .object({
+          kind: z.literal("EARLY_REPAYMENT"),
+          amount: eventAmount,
+          penalty: finite.nonnegative().max(99_999_999_999_999).nullable(),
+          outcome: z.enum(["SHORTEN_TERM", "REDUCE_PAYMENT", "UNKNOWN"]),
+          balanceAfter: finite.nonnegative().max(99_999_999_999_999).nullable(),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("FULL_REPAYMENT"),
+          amount: eventAmount,
+          penalty: finite.nonnegative().max(99_999_999_999_999).nullable(),
+        })
+        .strict(),
+    ]),
+  })
+  .strict()
+  .superRefine((event, context) => {
+    const kind = event.content.kind;
+    const expected =
+      kind === "EARLY_REPAYMENT"
+        ? ["OBSERVED", "PLANNED"]
+        : kind === "FULL_REPAYMENT"
+          ? ["OBSERVED"]
+          : ["CONTRACTUAL"];
+    if (!expected.includes(event.nature))
+      context.addIssue({
+        code: "custom",
+        message: "Nature incompatible avec l’événement",
+        path: ["nature"],
+      });
+    const today = operationalToday();
+    if (event.nature === "OBSERVED" && event.effectiveDate > today)
+      context.addIssue({
+        code: "custom",
+        message: "Un remboursement effectué n’est pas daté après aujourd’hui",
+        path: ["effectiveDate"],
+      });
+    if (event.nature === "PLANNED" && event.effectiveDate <= today)
+      context.addIssue({
+        code: "custom",
+        message: "Un remboursement prévu est daté après aujourd’hui",
+        path: ["effectiveDate"],
+      });
+    if (
+      event.content.kind === "AMENDMENT" &&
+      event.content.maturityDate !== null &&
+      event.content.maturityDate <= event.effectiveDate
+    )
+      context.addIssue({
+        code: "custom",
+        message: "La nouvelle dernière échéance suit la date d’effet de l’avenant",
+        path: ["content", "maturityDate"],
+      });
+    if (
+      event.content.kind === "EARLY_REPAYMENT" &&
+      event.content.balanceAfter !== null &&
+      event.nature !== "OBSERVED"
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Seul un remboursement effectué porte un encours constaté",
+        path: ["content", "balanceAfter"],
+      });
+  });
 const shareCount = finite.positive().nullable();
 
 const businessSchema = z
@@ -1346,7 +1456,21 @@ export const mutationSchema = z.discriminatedUnion("action", [
       round: businessFundingRoundSchema,
     })
     .strict(),
-  z.object({ action: z.literal("save_debt_contract"), contract: debtContractSchema }),
+  z
+    .object({
+      action: z.literal("save_debt_contract"),
+      contract: debtContractSchema,
+      changeReason: z.string().trim().max(500).nullable().optional(),
+    })
+    .strict(),
+  debtEventSchema,
+  z
+    .object({
+      action: z.literal("cancel_debt_event"),
+      eventId: z.uuid(),
+      reason: z.string().trim().min(1, "Motif d’annulation requis").max(500),
+    })
+    .strict(),
   z.object({
     action: z.literal("record_debt_balance"),
     liabilityId: z.uuid(),

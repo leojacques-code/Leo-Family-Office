@@ -106,15 +106,19 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
       expect.arrayContaining(["liabilities", "loan_schedules", "financial_accounts"]),
     );
     // 14 lectures historiques + les trois tables de l'assurance séparée (B17) + les
-    // brouillons de formulaire, toutes propres au domaine Dettes et cloisonnées par
-    // propriétaire. Un brouillon est LU pour être repris, jamais pour être calculé.
-    expect(queries).toHaveLength(18);
+    // brouillons de formulaire + le journal, les annulations et les versions (B18), toutes
+    // propres au domaine Dettes et cloisonnées par propriétaire. Un brouillon est LU pour
+    // être repris, jamais pour être calculé.
+    expect(queries).toHaveLength(21);
     expect(queries.map((q) => q.table)).toEqual(
       expect.arrayContaining([
         "loan_insurance_policies",
         "loan_insurance_insured",
         "loan_insurance_periods",
         "form_drafts",
+        "liability_events",
+        "liability_event_cancellations",
+        "liability_contract_versions",
       ]),
     );
     expect(model.drafts).toEqual([]);

@@ -112,6 +112,11 @@ export type LoanFlagCode =
   | "BALANCE_MISMATCH"
   | "PAYMENT_EXCEEDS_AMORTISATION"
   | "INCLUDED_INSURANCE_UNKNOWN"
+  | "DEFERRAL_TERM_EFFECT_UNKNOWN"
+  | "EARLY_REPAYMENT_PLANNED"
+  | "RATE_REVISION_PAYMENT_KEPT"
+  | "BALANCE_PREDATES_REPAYMENT"
+  | "AMENDMENT_MATURITY_NOT_ON_SCHEDULE"
   | "INSURANCE_TREATMENT_UNKNOWN"
   | "DEFERRAL_INTEREST_UNKNOWN"
   | "DEFERRAL_CONTRADICTORY"
@@ -812,9 +817,21 @@ function amortise(input: AmortiseInput): AmortiseResult {
         insurance: 0,
         fees: repayment.penalty ?? 0,
         closingBalance: balance - repaid,
-        kind: repayment.penalty === null ? "MODEL_ASSUMPTION" : "ACTUAL",
+        // Un remboursement PRÉVU est une intention déclarée, jamais un fait constaté.
+        kind: repayment.planned
+          ? "USER_ASSUMPTION"
+          : repayment.penalty === null
+            ? "MODEL_ASSUMPTION"
+            : "ACTUAL",
       }),
     );
+    if (repayment.planned) {
+      assumed = true;
+      flags.push({
+        code: "EARLY_REPAYMENT_PLANNED",
+        detail: `Remboursement anticipé prévu le ${frDate(event.date)} : intégré à la projection comme intention, non constaté.`,
+      });
+    }
     balance -= repaid;
 
     const remaining = firstPaymentNumber + paymentsToProduce - 1 - paymentNumber;
@@ -833,6 +850,31 @@ function amortise(input: AmortiseInput): AmortiseResult {
 
   const lastPaymentNumber = firstPaymentNumber + paymentsToProduce - 1;
   const totalPayments = Math.trunc(liability.paymentCount);
+
+  // B18 : reports d'échéances en cours de vie. Chaque report couvre les `months` échéances
+  // dont la date tombe à partir de sa date d'effet ; son effet sur la durée est DÉCLARÉ.
+  const windows = (liability.deferralPeriods ?? []).map((period) => {
+    let first = 1;
+    while (first <= MAX_DERIVED_PAYMENTS && dueDateOf(liability, first) < period.startDate)
+      first += 1;
+    return { ...period, first, end: first + period.months - 1 };
+  });
+  for (const window of windows) {
+    if (window.termEffect === "UNKNOWN") {
+      flags.push({
+        code: "DEFERRAL_TERM_EFFECT_UNKNOWN",
+        detail: `Report du ${frDate(window.startDate)} sans effet déclaré sur la durée : mensualité et durée maintenues par hypothèse ; un solde peut rester dû à la dernière échéance.`,
+      });
+      assumed = true;
+    }
+    if (window.kind === "TOTAL" && window.interestTreatment === "UNKNOWN") {
+      flags.push({
+        code: "DEFERRAL_INTEREST_UNKNOWN",
+        detail: `Report total du ${frDate(window.startDate)} sans convention d'intérêts : intérêts supposés capitalisés.`,
+      });
+      assumed = true;
+    }
+  }
   let previousDueDate = dueDateOf(liability, firstPaymentNumber - 1);
 
   for (let offset = 0; offset < paymentsToProduce; offset += 1) {
@@ -866,13 +908,44 @@ function amortise(input: AmortiseInput): AmortiseResult {
       payment = Math.max(0, stepped - deduction);
     }
 
-    const inDeferral = paymentNumber <= deferral.months;
+    const window = windows.find(
+      (candidate) => paymentNumber >= candidate.first && paymentNumber <= candidate.end,
+    );
+    // Fin d'un report à mensualité recalculée : le capital restant est réparti sur les
+    // échéances restantes, au taux en vigueur.
+    const resumed = windows.find(
+      (candidate) =>
+        candidate.termEffect === "RECALCULATE_PAYMENT" && paymentNumber === candidate.end + 1,
+    );
+    // Avenant à nouvelle durée sans nouvelle mensualité : recalcul à la première échéance
+    // exigible à partir de sa date d'effet.
+    const amended = (liability.paymentRecalculations ?? []).some(
+      (point) =>
+        dueDate >= point.date &&
+        (paymentNumber === 1 || dueDateOf(liability, paymentNumber - 1) < point.date),
+    );
+    if (resumed || amended)
+      payment = pmt(
+        liability,
+        balance,
+        annualRate,
+        Math.max(1, Math.min(lastPaymentNumber, totalPayments) - paymentNumber + 1),
+      );
+    const eventDeferralCapitalises =
+      window !== undefined && window.kind === "TOTAL" && window.interestTreatment !== "PAID";
+    const inDeferral = paymentNumber <= deferral.months || window !== undefined;
     const isFinalPayment = paymentNumber >= Math.min(lastPaymentNumber, totalPayments);
     let interestPaid = 0;
     let capitalised = 0;
     let principal = 0;
 
-    if (inDeferral && deferral.kind === "TOTAL" && totalDeferralCapitalises) {
+    if (
+      (window === undefined &&
+        inDeferral &&
+        deferral.kind === "TOTAL" &&
+        totalDeferralCapitalises) ||
+      eventDeferralCapitalises
+    ) {
       capitalised = accrued;
     } else if (inDeferral) {
       // Différé de principal : les intérêts, l'assurance et les frais restent dus.
@@ -1294,6 +1367,22 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
         "Première échéance non datée : aucune échéance ne peut être positionnée dans le temps.",
     });
   }
+  for (const amendment of liability.unresolvedAmendments ?? [])
+    flags.push({
+      code: "AMENDMENT_MATURITY_NOT_ON_SCHEDULE",
+      detail: `Avenant du ${frDate(amendment.date)} : la nouvelle dernière échéance du ${frDate(amendment.maturityDate)} ne tombe sur aucune échéance du calendrier ; la durée n'est pas modifiée, rien n'est arrondi.`,
+    });
+  // B18 : un remboursement EFFECTUÉ postérieur au dernier encours observé, sans encours
+  // constaté. Le bilan garde l'encours observé (l'observé fait foi) et la projection ne
+  // rejoue pas un événement passé : l'écart est dit, jamais comblé par un calcul.
+  for (const repayment of liability.earlyRepayments ?? []) {
+    if (!repayment.eventId || repayment.planned || repayment.date > asOfDate) continue;
+    if (!liability.balanceDate || liability.balanceDate < repayment.date)
+      flags.push({
+        code: "BALANCE_PREDATES_REPAYMENT",
+        detail: `Remboursement anticipé du ${frDate(repayment.date)} postérieur au dernier encours observé${liability.balanceDate ? ` (${frDate(liability.balanceDate)})` : ""} : le patrimoine garde cet encours tant que le capital restant dû constaté n'est pas renseigné.`,
+      });
+  }
   // Contrat adaptatif : un terme déduit n'est pas un terme déclaré, et un contrat non
   // résoluble le dit au lieu de produire un échéancier vide lu comme « rien à payer ».
   const resolution = liability.termsResolution;
@@ -1330,6 +1419,19 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
         detail: `Termes non déclarés, calculés par le moteur : ${derived.join(" ; ")}.`,
       });
   }
+  // B18 : une révision de taux notifiée sans nouvelle mensualité. Le moteur garde la
+  // mensualité et laisse la durée absorber la révision : c'est une hypothèse, dite.
+  if ((liability.amortisationProfile ?? "AMORTIZING") === "AMORTIZING")
+    for (const change of (liability.rateSchedule ?? []).filter((item) => item.eventId)) {
+      const paired = (liability.paymentSchedule ?? []).some(
+        (item) => item.effectiveFrom === change.effectiveFrom,
+      );
+      if (!paired)
+        flags.push({
+          code: "RATE_REVISION_PAYMENT_KEPT",
+          detail: `Révision de taux du ${frDate(change.effectiveFrom)} sans nouvelle mensualité déclarée : mensualité maintenue par hypothèse, la durée absorbe la révision.`,
+        });
+    }
   if (hasProvidedSchedule(liability)) {
     flags.push({
       code: "PROVIDED_SCHEDULE_USED",

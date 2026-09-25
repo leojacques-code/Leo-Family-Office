@@ -143,15 +143,23 @@ function fromLiability(loan: Liability): DebtContractInput {
       : null,
     facilityId: loan.facilityId,
     notes: loan.contractNotes ?? null,
-    rateSchedule: loan.rateSchedule.map((change) => ({ ...change })),
-    paymentSchedule: loan.paymentSchedule.map((change) => ({ ...change })),
-    earlyRepayments: loan.earlyRepayments.map((repayment) => ({
-      id: repayment.id,
-      date: repayment.date,
-      amount: repayment.amount,
-      penalty: repayment.penalty,
-      outcome: repayment.outcome,
-    })),
+    // B18 : un terme issu d'un événement du journal n'est pas une clause du contrat ; le
+    // réenregistrer ici le dupliquerait et le rendrait inannulable.
+    rateSchedule: loan.rateSchedule
+      .filter((change) => !change.eventId)
+      .map(({ effectiveFrom, annualRate, kind }) => ({ effectiveFrom, annualRate, kind })),
+    paymentSchedule: loan.paymentSchedule
+      .filter((change) => !change.eventId)
+      .map(({ effectiveFrom, amount, kind }) => ({ effectiveFrom, amount, kind })),
+    earlyRepayments: loan.earlyRepayments
+      .filter((repayment) => !repayment.eventId)
+      .map((repayment) => ({
+        id: repayment.id,
+        date: repayment.date,
+        amount: repayment.amount,
+        penalty: repayment.penalty,
+        outcome: repayment.outcome,
+      })),
     charges: loan.oneOffCharges.map((charge) => ({
       id: charge.id,
       date: charge.date,
@@ -309,7 +317,8 @@ export function DebtContractForm({
   >;
   /** Retire le brouillon consommé par une validation réussie. */
   onDiscardDraft?: (draft: FormDraft) => Promise<boolean>;
-  onSave: (contract: DebtContractInput) => Promise<boolean>;
+  /** `changeReason` : motif d'une correction de saisie d'un contrat existant (B18). */
+  onSave: (contract: DebtContractInput, changeReason?: string | null) => Promise<boolean>;
   onCancel: () => void;
 }) {
   // La RPC de création omet currency : le schéma persiste EUR. L’édition conserve la devise native.
@@ -363,6 +372,7 @@ export function DebtContractForm({
       : null,
   );
   const [savingDraft, setSavingDraft] = useState(false);
+  const [changeReason, setChangeReason] = useState("");
   const [draftConflict, setDraftConflict] = useState(false);
 
   async function saveDraft(resolution: "normal" | "replace" | "copy" = "normal") {
@@ -596,7 +606,7 @@ export function DebtContractForm({
       return;
     }
     setFormError(null);
-    if (await onSave(candidate)) {
+    if (await onSave(candidate, loan ? changeReason.trim() || null : null)) {
       // Le brouillon consommé par la validation est retiré ; un échec de retrait laisse le
       // brouillon visible dans la liste, jamais un contrat non enregistré.
       if (currentDraft && onDiscardDraft) await onDiscardDraft(currentDraft);
@@ -1489,6 +1499,22 @@ export function DebtContractForm({
         </NestedSection>
       </details>
 
+      {loan ? (
+        <label className="full">
+          Motif de la correction (facultatif)
+          <input
+            className="text-input"
+            maxLength={500}
+            placeholder="Ex. taux mal recopié depuis l’offre"
+            value={changeReason}
+            onChange={(event) => setChangeReason(event.target.value)}
+          />
+          <small>
+            Corriger une erreur de saisie crée une nouvelle version du contrat. Un changement réel
+            (avenant, révision, report, remboursement) s’enregistre comme événement daté.
+          </small>
+        </label>
+      ) : null}
       {formError ? (
         <p className="full" role="alert">
           {formError}

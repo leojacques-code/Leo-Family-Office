@@ -71,6 +71,7 @@ const canonicalMigrations = [
   "20260925100000",
   "20260925110000",
   "20260925120000",
+  "20260925130000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -1131,6 +1132,10 @@ const userOwnedTables = [
   "profiles",
   // Brouillons de formulaire : état de saisie, jamais lu par un moteur (`20260925120000`).
   "form_drafts",
+  // B18 : journal d'événements, annulations et versions de contrat (`20260925130000`).
+  "liability_events",
+  "liability_event_cancellations",
+  "liability_contract_versions",
   "user_domain_declarations",
   "institutions",
   "asset_classes",
@@ -1553,6 +1558,9 @@ const requiredTriggers = [
   "transactions_observation_date_guard",
   "account_balances_observation_date_guard",
   "liability_balance_observations_date_guard",
+  "liability_events_immutable",
+  "liability_event_cancellations_immutable",
+  "liability_contract_versions_immutable",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1574,6 +1582,7 @@ const requiredTriggerFunctions = [
   "transaction_correction_immutable",
   "liability_terms_transition_immutable",
   "lfo_guard_observation_date",
+  "lfo_debt_history_immutable",
 ] as const;
 
 const requiredConstraints = [
@@ -1684,6 +1693,11 @@ const requiredConstraints = [
   "form_drafts_subject_ck",
   "form_drafts_content_ck",
   "form_drafts_subject_fk",
+  "liability_events_liability_fk",
+  "liability_events_nature_ck",
+  "liability_events_owner_actor_ck",
+  "liability_event_cancellations_event_fk",
+  "liability_contract_versions_liability_fk",
   "liabilities_payment_count_ck",
   "loan_rate_changes_kind_ck",
   "loan_payment_changes_kind_ck",
@@ -2112,6 +2126,8 @@ const requiredRpcs: Record<string, string> = {
   lfo_verify_session: "p_user_id uuid, p_session_id uuid",
   lfo_record_outstanding_debt: "p_user_id uuid, p_payload jsonb",
   lfo_save_form_draft: "p_user_id uuid, p_payload jsonb",
+  lfo_record_debt_event: "p_user_id uuid, p_payload jsonb",
+  lfo_cancel_debt_event: "p_user_id uuid, p_event_id uuid, p_reason text",
   lfo_delete_form_draft: "p_user_id uuid, p_draft_id uuid, p_expected_version integer",
   lfo_record_net_income: "p_user_id uuid, p_payload jsonb",
   lfo_correct_net_income: "p_user_id uuid, p_payload jsonb",
@@ -2406,6 +2422,10 @@ const readOnlyAuditTables = [
   "account_balances",
   // Brouillons : écrits par leurs deux RPC, sous version attendue (`20260925120000`).
   "form_drafts",
+  // Historique de la dette : immuable, écrit par ses RPC seulement (`20260925130000`).
+  "liability_events",
+  "liability_event_cancellations",
+  "liability_contract_versions",
 ] as const;
 
 const storagePolicies = [

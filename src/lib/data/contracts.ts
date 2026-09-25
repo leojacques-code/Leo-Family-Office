@@ -24,6 +24,7 @@ import type {
   FinancialAccount,
   AmortisationProfile,
   DatedTermKind,
+  DebtEventContent,
   DeferredInterestTreatment,
   DeferralKind,
   EarlyRepaymentOutcome,
@@ -595,7 +596,21 @@ export type Mutation =
   | { action: "set_tax_profile"; profile: TaxProfileInput }
   | { action: "save_tax_rule_set"; ruleSet: TaxRuleSetInput }
   | { action: "record_tax_observation"; observation: TaxObservationInput }
-  | { action: "save_debt_contract"; contract: DebtContractInput }
+  | {
+      action: "save_debt_contract";
+      contract: DebtContractInput;
+      /** B18 : motif d'une CORRECTION de saisie ; un avenant daté est un événement. */
+      changeReason?: string | null;
+    }
+  | {
+      action: "record_debt_event";
+      liabilityId: string;
+      nature: "OBSERVED" | "CONTRACTUAL" | "PLANNED";
+      effectiveDate: string;
+      source: string;
+      content: DebtEventContent;
+    }
+  | { action: "cancel_debt_event"; eventId: string; reason: string }
   | {
       action: "record_debt_balance";
       liabilityId: string;

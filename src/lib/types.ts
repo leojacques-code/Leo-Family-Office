@@ -111,6 +111,8 @@ export interface RateChange {
   effectiveFrom: string;
   annualRate: number;
   kind: DatedTermKind;
+  /** Présent quand le terme vient d'un événement du journal (B18), jamais du contrat. */
+  eventId?: string;
 }
 
 export interface PaymentChange {
@@ -118,6 +120,8 @@ export interface PaymentChange {
   /** Paiement contractuel par échéance à partir de cette date. */
   amount: number;
   kind: DatedTermKind;
+  /** Présent quand le palier vient d'un événement du journal (B18), jamais du contrat. */
+  eventId?: string;
 }
 
 /** Nature d'un différé de remboursement. */
@@ -153,6 +157,90 @@ export interface EarlyRepayment {
   /** Indemnité de remboursement anticipé. `null` = inconnue, jamais supposée nulle. */
   penalty: number | null;
   outcome: EarlyRepaymentOutcome;
+  /** Présent quand le remboursement vient d'un événement du journal (B18). */
+  eventId?: string;
+  /** Remboursement PRÉVU (annoncé, futur) : une intention, jamais un fait. */
+  planned?: boolean;
+}
+
+/**
+ * B18 : événement de la vie d'un prêt (document 04 §6). OBSERVÉ : un fait constaté, jamais
+ * daté après aujourd'hui. CONTRACTUEL : une modification du contrat (révision notifiée,
+ * palier, report, avenant). PRÉVU : un remboursement annoncé, futur. Une simulation n'est
+ * jamais un événement.
+ */
+export type DebtEventKind =
+  | "RATE_CHANGE"
+  | "PAYMENT_CHANGE"
+  | "DEFERRAL"
+  | "AMENDMENT"
+  | "EARLY_REPAYMENT"
+  | "FULL_REPAYMENT";
+export type DebtEventNature = "OBSERVED" | "CONTRACTUAL" | "PLANNED";
+
+/** Effet d'un report sur la durée : déclaré, jamais supposé. */
+export type DeferralTermEffect = "EXTEND_TERM" | "RECALCULATE_PAYMENT" | "UNKNOWN";
+
+export type DebtEventContent =
+  | { kind: "RATE_CHANGE"; annualRate: number }
+  | { kind: "PAYMENT_CHANGE"; paymentAmount: number }
+  | {
+      kind: "DEFERRAL";
+      months: number;
+      deferralKind: Exclude<DeferralKind, "NONE">;
+      interestTreatment: DeferredInterestTreatment;
+      termEffect: DeferralTermEffect;
+    }
+  | {
+      kind: "AMENDMENT";
+      annualRate: number | null;
+      paymentAmount: number | null;
+      /** Nouvelle date de dernière échéance, si l'avenant change la durée. */
+      maturityDate: string | null;
+      note: string | null;
+    }
+  | {
+      kind: "EARLY_REPAYMENT";
+      amount: number;
+      penalty: number | null;
+      outcome: EarlyRepaymentOutcome;
+      /** Capital restant dû constaté par le prêteur, s'il a été fourni. */
+      balanceAfter: number | null;
+    }
+  | { kind: "FULL_REPAYMENT"; amount: number; penalty: number | null };
+
+export interface DebtEvent {
+  id: string;
+  liabilityId: string;
+  nature: DebtEventNature;
+  effectiveDate: string;
+  source: string;
+  content: DebtEventContent;
+  /** Observation d'encours écrite avec l'événement ; `null` s'il n'en a pas écrit. */
+  observationId: string | null;
+  recordedAt: string;
+  /** Annulation motivée ; l'événement annulé reste lisible et ne produit plus rien. */
+  cancellation: { reason: string; cancelledAt: string } | null;
+}
+
+/** Version immuable des termes DÉCLARÉS du contrat (B18). */
+export interface ContractVersion {
+  id: string;
+  versionNo: number;
+  changeKind: "INITIAL" | "PROMOTION" | "CORRECTION";
+  changeReason: string | null;
+  recordedAt: string;
+  terms: Record<string, unknown>;
+}
+
+/** Report d'échéances en cours de vie, traduit d'un événement actif. */
+export interface DeferralPeriod {
+  eventId: string;
+  startDate: string;
+  months: number;
+  kind: Exclude<DeferralKind, "NONE">;
+  interestTreatment: DeferredInterestTreatment;
+  termEffect: DeferralTermEffect;
 }
 
 /** Frais ponctuel daté, hors échéancier : frais de dossier, garantie, avenant. */
@@ -288,6 +376,19 @@ export interface Liability {
    */
   paymentIncludesInsurance: boolean | null;
   deferral: LoanDeferral | null;
+  /** B18 : reports d'échéances en cours de vie, traduits des événements actifs. */
+  deferralPeriods?: DeferralPeriod[];
+  /**
+   * B18 : dates à partir desquelles la mensualité est recalculée sur la durée restante
+   * (avenant qui change la durée sans déclarer de nouvelle mensualité).
+   */
+  paymentRecalculations?: Array<{ eventId: string; date: string }>;
+  /** B18 : avenants dont la nouvelle dernière échéance ne tombe sur aucune échéance. */
+  unresolvedAmendments?: Array<{ eventId: string; date: string; maturityDate: string }>;
+  /** B18 : journal des événements, annulés compris, pour l'historique. */
+  events?: DebtEvent[];
+  /** B18 : versions immuables des termes déclarés. */
+  contractVersions?: ContractVersion[];
   /** Forme du remboursement du capital. `AMORTIZING` reproduit le comportement historique. */
   amortisationProfile: AmortisationProfile;
   /**

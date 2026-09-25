@@ -249,14 +249,14 @@ try {
 
   // ---------- D9 : brouillon d'une dette existante, repris à la réouverture ----------
   await page.reload();
-  await page.getByRole("button", { name: "Modifier le contrat" }).click();
+  await page.getByRole("button", { name: "Corriger le contrat" }).click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("Prêteur").fill("Banque renégociée");
   await dialog.getByRole("button", { name: "Enregistrer le brouillon" }).click();
   await dialog.getByRole("status").waitFor();
   await page.keyboard.press("Escape");
   await page.reload();
-  await page.getByRole("button", { name: "Modifier le contrat" }).click();
+  await page.getByRole("button", { name: "Corriger le contrat" }).click();
   dialog = page.getByRole("dialog");
   const reopened = await dialog.getByLabel("Prêteur").inputValue();
   const savedLender = await one(
