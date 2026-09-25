@@ -12,6 +12,7 @@ import {
   MAX_ROWS_PER_SESSION,
 } from "@/lib/acquisition/bank-csv";
 import { civilDateIn, resolveTimeZone } from "@/lib/acquisition/clock";
+import { operationalToday } from "@/lib/financial-date";
 import type {
   BankCsvAnalysis,
   ExistingIdentity,
@@ -64,7 +65,12 @@ const PREVIEW_READY_LIMIT = 200;
  * Lue ici, jamais dans le moteur : les fonctions pures reçoivent la date en paramètre.
  */
 function observationDate(): string {
-  return civilDateIn(new Date(), resolveTimeZone(process.env.LFO_TIME_ZONE));
+  const local = civilDateIn(new Date(), resolveTimeZone(process.env.LFO_TIME_ZONE));
+  // Le garde-fou de base (`LF425`) juge « aujourd'hui » à Paris. Un fuseau produit en avance
+  // sur Paris laisserait passer à la lecture une opération que la base refuserait à la
+  // validation : la date retenue est la plus ancienne des deux.
+  const paris = operationalToday();
+  return local < paris ? local : paris;
 }
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {

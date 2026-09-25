@@ -142,6 +142,14 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
     label: "Remboursement prévu à date passée, non constaté",
     state: A,
   },
+  CONTRACT_STEP_AFTER_AMENDMENT: {
+    label: "Palier du contrat postérieur à un avenant",
+    state: A,
+  },
+  TERM_ENDED_WITH_BALANCE: {
+    label: "Terme échu avec un capital restant",
+    state: A,
+  },
   MATURITY_MISMATCH: { label: "Maturité incohérente avec l’échéancier", state: C },
   TERMS_DERIVED: { label: "Termes du contrat calculés, non déclarés", state: "AVAILABLE" },
   TERMS_UNRESOLVED: { label: "Échéancier non calculable avec les termes déclarés", state: P },

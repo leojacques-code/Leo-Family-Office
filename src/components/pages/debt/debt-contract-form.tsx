@@ -408,7 +408,12 @@ export function DebtContractForm({
       // choisit : remplacer la version enregistrée ailleurs, ou garder les deux.
       setDraftStatus({
         tone: "error",
-        text: "Ce brouillon a été enregistré ailleurs depuis son ouverture. Votre saisie reste affichée : choisissez de remplacer la version enregistrée par votre saisie, ou de garder les deux.",
+        // Une dette existante n'a qu'un brouillon : « garder les deux » n'existe que pour
+        // une dette nouvelle.
+        text:
+          draftKind === "DEBT_CONTRACT_NEW"
+            ? "Ce brouillon a été enregistré ailleurs depuis son ouverture. Votre saisie reste affichée : choisissez de remplacer la version enregistrée par votre saisie, ou de garder les deux."
+            : "Un brouillon de cette dette a été enregistré ailleurs depuis son ouverture. Votre saisie reste affichée : vous pouvez remplacer la version enregistrée par votre saisie.",
       });
     } else {
       // La saisie reste affichée : seul le message change.
@@ -744,19 +749,29 @@ export function DebtContractForm({
         />
       ) : null}
       {!existing ? (
-        <label>
-          Date de l’encours initial
-          <input
-            className="text-input"
-            type="date"
-            max={operationalToday()}
-            value={contract.balanceDate ?? ""}
-            onChange={(event) =>
-              setContract({ ...contract, balanceDate: event.target.value || null })
-            }
-            required
-          />
-        </label>
+        <div>
+          <label>
+            Date de l’encours initial
+            <input
+              aria-describedby="debt-balance-date-hint"
+              className="text-input"
+              type="date"
+              max={operationalToday()}
+              value={contract.balanceDate ?? ""}
+              onChange={(event) =>
+                setContract({ ...contract, balanceDate: event.target.value || null })
+              }
+              required
+            />
+          </label>
+          {/* Convention du Debt Engine : une observation datée d'un jour d'échéance est lue
+              APRÈS le prélèvement de ce jour. La dire évite une échéance comptée deux fois
+              ou oubliée. */}
+          <small className="field-hint" id="debt-balance-date-hint">
+            Un encours daté d’un jour d’échéance est lu après le prélèvement de ce jour. Pour un
+            prêt qui démarre, indiquez la date du déblocage.
+          </small>
+        </div>
       ) : null}
       {mode ? (
         <>

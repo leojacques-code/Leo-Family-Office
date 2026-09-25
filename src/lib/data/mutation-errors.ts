@@ -20,3 +20,14 @@ export class MutationRejectedError extends Error {
     this.name = "MutationRejectedError";
   }
 }
+
+/**
+ * L'objet visé n'existe plus (supprimé ailleurs). Sous-classe d'un refus : tout appelant qui
+ * traite les refus le traite, et une route qui sait mieux faire peut le distinguer.
+ */
+export class MutationNotFoundError extends MutationRejectedError {
+  constructor(message: string) {
+    super(message);
+    this.name = "MutationNotFoundError";
+  }
+}

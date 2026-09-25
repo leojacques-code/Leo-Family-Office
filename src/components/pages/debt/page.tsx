@@ -148,11 +148,19 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
         payload.draftId = current.id;
         payload.expectedVersion = current.version;
       }
-      const response = await fetch("/api/drafts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, schemaVersion: DEBT_CONTRACT_DRAFT_SCHEMA_VERSION }),
-      });
+      const post = (draft: typeof payload) =>
+        fetch("/api/drafts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...draft, schemaVersion: DEBT_CONTRACT_DRAFT_SCHEMA_VERSION }),
+        });
+      let response = await post(payload);
+      // Brouillon supprimé ailleurs (autre onglet, validation) : la saisie affichée est
+      // enregistrée comme un nouveau brouillon, sans quoi chaque enregistrement répondrait
+      // « introuvable » sans issue. Une dette existante déjà pourvue d'un brouillon répond
+      // alors un conflit, traité comme tel.
+      if (response.status === 404 && payload.draftId)
+        response = await post({ ...payload, draftId: null, expectedVersion: null });
       const body = await response.json().catch(() => ({}));
       if (!response.ok)
         return {

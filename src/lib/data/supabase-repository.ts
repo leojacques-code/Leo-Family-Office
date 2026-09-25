@@ -1,5 +1,9 @@
 import "server-only";
-import { MutationConflictError, MutationRejectedError } from "@/lib/data/mutation-errors";
+import {
+  MutationConflictError,
+  MutationRejectedError,
+  MutationNotFoundError,
+} from "@/lib/data/mutation-errors";
 import { reportReadFailure } from "@/lib/data/read-failure";
 import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import type {
@@ -4001,7 +4005,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       throw new MutationConflictError(
         "Ce brouillon a été enregistré ailleurs depuis son ouverture, ou un brouillon existe déjà pour cette dette.",
       );
-    if (error.code === "LF404") throw new MutationRejectedError("Ce brouillon n’existe plus.");
+    if (error.code === "LF404") throw new MutationNotFoundError("Ce brouillon n’existe plus.");
     if (error.code === "LF422" || error.code === "23514" || error.code === "23503")
       throw new MutationRejectedError("Brouillon refusé : sa forme n’est pas valide.");
     throw new Error(`Supabase brouillon : ${error.code}`);

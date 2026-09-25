@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { requireAuthenticated } from "@/lib/auth";
 import { getRepository } from "@/lib/data/repository";
 import { API_HEADERS } from "@/lib/http";
-import { MutationConflictError, MutationRejectedError } from "@/lib/data/mutation-errors";
+import {
+  MutationConflictError,
+  MutationNotFoundError,
+  MutationRejectedError,
+} from "@/lib/data/mutation-errors";
 import { formDraftDeleteSchema, formDraftSaveSchema } from "@/lib/validation/drafts";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +21,11 @@ function failure(error: unknown, message: string) {
     return NextResponse.json(
       { error: error.message, code: "CONFLICT" },
       { status: 409, headers: API_HEADERS },
+    );
+  if (error instanceof MutationNotFoundError)
+    return NextResponse.json(
+      { error: error.message, code: "NOT_FOUND" },
+      { status: 404, headers: API_HEADERS },
     );
   if (error instanceof MutationRejectedError)
     return NextResponse.json(

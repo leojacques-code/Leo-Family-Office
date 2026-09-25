@@ -269,6 +269,15 @@ describe("B18 : événements de dette traduits pour le Debt Engine", () => {
     expect(forward.entries.some((row) => row.entryKind === "EARLY_REPAYMENT")).toBe(false);
     // Le capital projeté est exactement l'encours observé : 500 €, pas 500 € de moins.
     expect(forward.entries.reduce((sum, row) => sum + row.principal, 0)).toBeCloseTo(500, 6);
+    // Et le calendrier repart après l'observation : janvier et février y sont déjà.
+    const rows = forward.entries.filter((row) => row.entryKind === "PAYMENT");
+    expect(rows.map((row) => row.dueDate)).toEqual([
+      "2027-03-05",
+      "2027-04-05",
+      "2027-05-05",
+      "2027-06-05",
+      "2027-07-05",
+    ]);
   });
 
   it("relecture 2 : un report postérieur à un avenant de durée allonge la nouvelle durée", () => {
@@ -393,5 +402,118 @@ describe("B18 : événements de dette traduits pour le Debt Engine", () => {
     expect(buildLoanTimeline(planned, "2027-03-01").flags.map((flag) => flag.code)).toContain(
       "PLANNED_REPAYMENT_OVERDUE",
     );
+  });
+
+  // Relecture 2 (constats I1, I2, M1 à M3), oracles à la main sur 1 200 €, 12 × 100 €.
+  const forwardPayments = (liability: Liability, asOfDate: string) =>
+    buildForwardSchedule(liability, asOfDate).entries.filter((row) => row.entryKind === "PAYMENT");
+
+  it("relecture 2-I2 : un encours observé après la date de lecture ne rejoue pas l'échéance déjà payée", () => {
+    // Clôture au 28 février ; encours de 900 € relevé le 10 mars, échéance du 5 mars payée.
+    const rows = forwardPayments(
+      { ...loan, currentBalance: 900, balanceDate: "2027-03-10" },
+      "2027-02-28",
+    );
+    expect(rows).toHaveLength(9);
+    expect(rows[0]!.dueDate).toBe("2027-04-05");
+    expect(rows.at(-1)!.dueDate).toBe("2027-12-05");
+    expect(rows.reduce((sum, row) => sum + row.principal, 0)).toBeCloseTo(900, 6);
+  });
+
+  it("relecture 2-I1 : « mensualité réduite » tient même quand le remboursement est dans l'encours", () => {
+    const repaid = withDebtEvents({ ...loan, currentBalance: 500, balanceDate: "2027-02-20" }, [
+      event(
+        {
+          kind: "EARLY_REPAYMENT",
+          amount: 500,
+          penalty: 0,
+          outcome: "REDUCE_PAYMENT",
+          balanceAfter: 500,
+        },
+        "2027-02-20",
+      ),
+    ]);
+    const rows = forwardPayments(repaid, "2027-02-20");
+    // Dix échéances restantes, 500 € à taux nul : 50 € par mois jusqu'en décembre.
+    expect(rows).toHaveLength(10);
+    expect(rows[0]!.principal).toBeCloseTo(50, 6);
+    expect(rows.at(-1)!.dueDate).toBe("2027-12-05");
+    // L'échéancier purement contractuel ignore le remboursement et sa convention.
+    expect(payments(repaid).every((row) => Math.abs(row.principal - 100) < 1e-6)).toBe(true);
+  });
+
+  it("relecture 2-M1 : un remboursement prévu antérieur à l'encours observé est signalé, pas effacé", () => {
+    const planned = withDebtEvents({ ...loan, currentBalance: 900, balanceDate: "2027-03-10" }, [
+      event(
+        {
+          kind: "EARLY_REPAYMENT",
+          amount: 200,
+          penalty: 0,
+          outcome: "SHORTEN_TERM",
+          balanceAfter: null,
+        },
+        "2027-03-05",
+        { nature: "PLANNED" },
+      ),
+    ]);
+    const timeline = buildLoanTimeline(planned, "2027-02-28");
+    expect(timeline.flags.map((flag) => flag.code)).toContain("PLANNED_REPAYMENT_OVERDUE");
+    expect(timeline.forward.entries.some((row) => row.entryKind === "EARLY_REPAYMENT")).toBe(false);
+  });
+
+  it("relecture 2-M2 : à un même rang, un palier déclaré après un recalcul l'emporte", () => {
+    const changed = withDebtEvents(loan, [
+      event(
+        {
+          kind: "AMENDMENT",
+          annualRate: null,
+          paymentAmount: null,
+          maturityDate: "2028-06-05",
+          note: null,
+        },
+        "2027-03-01",
+      ),
+      event({ kind: "PAYMENT_CHANGE", paymentAmount: 80 }, "2027-03-04"),
+    ]);
+    expect(payments(changed)[2]!.principal).toBeCloseTo(80, 6);
+  });
+
+  it("relecture 2-M2 : un palier du contrat postérieur à un avenant est appliqué et signalé", () => {
+    const withStep: Liability = {
+      ...loan,
+      paymentSchedule: [{ effectiveFrom: "2027-08-01", amount: 100, kind: "CONTRACTUAL" }],
+    };
+    const amended = withDebtEvents(withStep, [
+      event(
+        {
+          kind: "AMENDMENT",
+          annualRate: null,
+          paymentAmount: null,
+          maturityDate: "2028-06-05",
+          note: null,
+        },
+        "2027-03-01",
+      ),
+    ]);
+    expect(buildLoanTimeline(amended, "2027-03-01").flags.map((flag) => flag.code)).toContain(
+      "CONTRACT_STEP_AFTER_AMENDMENT",
+    );
+  });
+
+  it("relecture 2-M3 : un terme échu avec un capital restant est signalé", () => {
+    const amended = withDebtEvents({ ...loan, currentBalance: 600, balanceDate: "2027-06-10" }, [
+      event(
+        {
+          kind: "AMENDMENT",
+          annualRate: null,
+          paymentAmount: null,
+          maturityDate: "2027-03-05",
+          note: null,
+        },
+        "2027-02-01",
+      ),
+    ]);
+    const timeline = buildLoanTimeline(amended, "2027-06-10");
+    expect(timeline.flags.map((flag) => flag.code)).toContain("TERM_ENDED_WITH_BALANCE");
   });
 });

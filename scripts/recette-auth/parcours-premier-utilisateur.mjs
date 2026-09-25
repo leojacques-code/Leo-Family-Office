@@ -49,6 +49,12 @@ function observe(id, label, detail = {}) {
   observations.push({ id, label, ...detail });
   console.log(`NOTE ${id} ${label} ${JSON.stringify(detail)}`);
 }
+/**
+ * Montant affiché, borné à gauche : « 2 500 € » ne doit pas être trouvé dans « 12 500 € »
+ * ni « 999,50 € » dans « −999,50 € ». Le texte est normalisé (espaces fines comprises).
+ */
+const shows = (text, amount) =>
+  new RegExp(`(?<![0-9,+−-])${amount.replace(/ /g, "\\s")}\\s€`).test(text);
 const sql = new pg.Client({ connectionString: env("RECETTE_ADMIN_DB_URL") });
 await sql.connect();
 const one = async (text, values = []) => (await sql.query(text, values)).rows[0];
@@ -115,10 +121,15 @@ try {
     "select display_name, first_intent, residence_country, context_date from public.profiles where user_id = $1",
     [user.id],
   );
-  check("U2", "accueil quittable sans rien enregistrer", leftTo === "/" || leftTo === "/setup", {
-    leftTo,
-    profil: profileAfterLeave,
-  });
+  check(
+    "U2",
+    "accueil quittable : retour à Aujourd'hui, ni contexte ni intention enregistrés",
+    leftTo === "/" &&
+      profileAfterLeave?.first_intent === null &&
+      profileAfterLeave?.residence_country === null &&
+      profileAfterLeave?.context_date === null,
+    { leftTo, profil: profileAfterLeave },
+  );
 
   // Reprenable : l'accueil se rouvre et reprend là où il en était.
   await page.goto(`${APP}/setup?edit=1`);
@@ -202,19 +213,23 @@ try {
         })
       ).replace(/\s+/g, " ")
     : "";
-  const declarations = await one(
-    "select count(*)::int as n from public.user_domain_declarations where user_id = $1",
-    [user.id],
-  );
+  const declarations = (
+    await sql.query(
+      "select applicability from public.user_domain_declarations where user_id = $1 order by created_at, revision",
+      [user.id],
+    )
+  ).rows.map((row) => row.applicability);
   check(
     "T2",
-    "domaines : « pas maintenant » et « non concerné » enregistrés, relus et réversibles après rechargement",
+    "domaines : « je ne sais pas encore » (UNDECIDED) et « non » (DECLARED_NONE) enregistrés, relus et modifiables après rechargement",
     declared.length === 2 &&
-      declarations.n === 2 &&
+      declarations.length === 2 &&
+      declarations[0] === "UNDECIDED" &&
+      declarations[1] === "DECLARED_NONE" &&
       answersText.includes(declared[0]) &&
       answersText.includes(declared[1]) &&
       answersText.includes("Changer"),
-    { declares: declared, enBase: declarations.n },
+    { declares: declared, enBase: declarations },
   );
 
   // ---------- Premier compte ----------
@@ -282,13 +297,16 @@ try {
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(800);
   const income = await one(
-    "select id, amount::text as amount, transaction_date::text as date, label from public.transactions where user_id = $1",
+    "select id, account_id, amount::text as amount, transaction_date::text as date, label from public.transactions where user_id = $1",
     [user.id],
   );
   check(
     "F3",
     "premier revenu net observé : montant, date et compte enregistrés",
-    income && Number(income.amount) === 3100 && income.date === incomeDate,
+    income &&
+      Number(income.amount) === 3100 &&
+      income.date === incomeDate &&
+      income.account_id === account?.id,
     { revenu: income ?? null },
   );
 
@@ -304,6 +322,7 @@ try {
       notes: null,
     },
   });
+  const futureBody = await future.json().catch(() => ({}));
   const afterFuture = await counts();
   observe("N2", "revenu observé daté dans le futur par l'API", {
     statut: future.status(),
@@ -311,8 +330,10 @@ try {
   });
   check(
     "F4",
-    "revenu observé daté dans le futur : refusé, aucune écriture",
-    !future.ok() && afterFuture.transactions === 1,
+    "revenu observé daté dans le futur : refusé pour sa date, aucune écriture",
+    future.status() === 400 &&
+      JSON.stringify(futureBody).includes("un fait futur n’est pas un fait") &&
+      afterFuture.transactions === 1,
     { statut: future.status() },
   );
 
@@ -327,12 +348,17 @@ try {
   check(
     "T4",
     "Aujourd'hui lit le même patrimoine net que Patrimoine, centimes compris (999,50 €)",
-    /999,50\s€/.test(todayText),
+    shows(todayText, "999,50"),
   );
   check(
     "T3",
-    "Aujourd'hui relit l'installation après les premiers faits",
-    installationAfter.length > 0,
+    "Aujourd'hui : l'installation progresse après les premiers faits",
+    (installationBefore.match(/\d+ sur \d+/)?.[0] ?? null) !== null &&
+      (installationAfter.match(/\d+ sur \d+/)?.[0] ?? null) !== null &&
+      installationBefore.match(/\d+ sur \d+/)?.[0] !==
+        installationAfter.match(/\d+ sur \d+/)?.[0] &&
+      Number(installationAfter.match(/(\d+) sur/)?.[1]) >
+        Number(installationBefore.match(/(\d+) sur/)?.[1]),
     {
       avant: installationBefore.match(/\d+ sur \d+/)?.[0] ?? null,
       apres: installationAfter.match(/\d+ sur \d+/)?.[0] ?? null,
@@ -346,7 +372,7 @@ try {
   check(
     "P1",
     "Patrimoine : actifs, dette et patrimoine net issus des faits saisis (2 500 − 1 500,50)",
-    /2\s500\s€/.test(worth) && /1\s500,50\s€/.test(worth) && /999,50\s€/.test(worth),
+    shows(worth, "2 500") && shows(worth, "1 500,50") && shows(worth, "999,50"),
   );
 
   await page.goto(`${APP}/cash-flow`);
@@ -355,7 +381,7 @@ try {
   check(
     "P2",
     "Flux : le revenu saisi y figure",
-    flows.includes("Salaire recette") && /3\s100/.test(flows),
+    flows.includes("Salaire recette") && shows(flows, "3 100"),
   );
   await page.screenshot({ path: `${OUT}/06_flux.png`, fullPage: true });
 
@@ -394,9 +420,9 @@ try {
   check(
     "R1",
     "après rechargement : compte, dette et revenu corrigé relus",
-    /2\s500/.test(reloaded["/net-worth"]) &&
+    shows(reloaded["/net-worth"], "2 500") &&
       reloaded["/debt"].includes("Prêt personnel") &&
-      /3\s150/.test(reloaded["/cash-flow"]),
+      shows(reloaded["/cash-flow"], "3 150"),
   );
 
   // ---------- Mobile et clavier ----------
