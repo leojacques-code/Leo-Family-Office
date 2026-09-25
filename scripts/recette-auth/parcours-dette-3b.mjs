@@ -465,6 +465,47 @@ try {
   await zpage.screenshot({ path: `${OUT}/07_dette_zoom200_sombre.png`, fullPage: true });
   await zoom.close();
 
+  // ---------- Clavier : ouvrir, parcourir, fermer sans souris ----------
+  await page.goto(`${APP}/debt`);
+  await page.waitForLoadState("networkidle");
+  const newDebt = page.getByRole("button", { name: "Nouvelle dette" });
+  let reached = false;
+  for (let step = 0; step < 60 && !reached; step += 1) {
+    await page.keyboard.press("Tab");
+    reached = await newDebt.evaluate((node) => node === document.activeElement);
+  }
+  if (reached) await page.keyboard.press("Enter");
+  const keyboardDialog = page.getByRole("dialog");
+  const dialogOpened = reached && (await keyboardDialog.isVisible().catch(() => false));
+  const focusInside = dialogOpened
+    ? await keyboardDialog.evaluate((node) => node.contains(document.activeElement))
+    : false;
+  if (dialogOpened) await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const closed = (await page.getByRole("dialog").count()) === 0;
+  const focusBack = closed
+    ? await newDebt.evaluate((node) => node === document.activeElement)
+    : false;
+  check(
+    "K1",
+    "clavier : « Nouvelle dette » atteinte par Tab, ouverte par Entrée, focus dans le dialogue, fermée par Échap",
+    reached && dialogOpened && focusInside && closed,
+    { atteint: reached, ouvert: dialogOpened, focusDansDialogue: focusInside, ferme: closed, focusRendu: focusBack },
+  );
+
+  // ---------- Tablette ----------
+  const tablet = await browser.newContext({ viewport: { width: 768, height: 1024 }, locale: "fr-FR" });
+  await tablet.addCookies(await ctx.cookies());
+  const tpage = await tablet.newPage();
+  await tpage.goto(`${APP}/debt`);
+  await tpage.waitForLoadState("networkidle");
+  const tscroll = await tpage.evaluate(() => document.documentElement.scrollWidth);
+  check("M2", "Dettes sur tablette (768 px) sans débordement horizontal", tscroll <= 768, {
+    scrollWidth: tscroll,
+  });
+  await tpage.screenshot({ path: `${OUT}/08_dette_tablette.png`, fullPage: false });
+  await tablet.close();
+
   // ---------- Mobile ----------
   const mobile = await browser.newContext({
     viewport: { width: 390, height: 844 },

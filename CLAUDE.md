@@ -176,9 +176,9 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **53 migrations** sur la branche de consolidation (gate local du 24 septembre
-2026 : 53 appliquées depuis zéro, 109 tables publiques, 454 contraintes relevées par le
-vérificateur, 119 RPC). Les huit dernières ne sont PAS en production :
+Le DÉPÔT porte **58 migrations** sur la branche de consolidation (gate local du 25 septembre
+2026 : 58 appliquées depuis zéro, 112 tables publiques, 467 contraintes relevées par le
+vérificateur, 119 RPC). Les treize dernières ne sont PAS en production :
 
 - `20260914191901_verified_personal_session` : `lfo_verify_session` (B12) ;
 - `20260915064740_personal_reference_isolation` : références composites par propriétaire (B13) ;
@@ -186,7 +186,21 @@ vérificateur, 119 RPC). Les huit dernières ne sont PAS en production :
 - `20260924081000_debt_outstanding_only` : dette connue par son seul encours (B14) ;
 - `20260924091000_net_income_observation` : premier revenu net observé (B14) ;
 - `20260924120000_net_income_correction` : correction auditée d'un revenu net saisi (B14) ;
-- `20260924150000_debt_outstanding_to_contract` : passage d'un encours seul à un contrat (B16).
+- `20260924150000_debt_outstanding_to_contract` : passage d'un encours seul à un contrat (B16) ;
+- `20260924160000_income_correction_hardening` : correction de revenu durcie, écritures
+  directes sur `transactions` retirées (B14) ;
+- `20260924170000_debt_adaptive_contract` : contrat adaptatif, mensualité OU durée OU
+  maturité (B16) ;
+- `20260924180000_debt_separate_insurance` : assurance emprunteur séparée (B17) ;
+- `20260925090000_debt_insurance_policy_details` : couverture, base assurée, compte débité (B17) ;
+- `20260925100000_debt_review_hardening` : écritures directes retirées sur les tables de
+  dette, périodes de prime sans chevauchement (relecture B16/B17).
+
+Avant tout push de `20260924170000` vers une base PARTAGÉE : ses contraintes
+`liabilities_payment_count_ck` et `liabilities_contract_dates_ck` sont ajoutées sans `NOT VALID`.
+Une ligne existante avec `payment_count = 0` ou une maturité antérieure à la première échéance
+ferait échouer le push : la compter d'abord, et documenter toute ligne trouvée au lieu de la
+corriger en silence.
 
 Les 45 précédentes s'arrêtent à la déclaration d'applicabilité de domaine, ajoutée par la
 phase 2 de productisation ; les onze qui la précèdent sont les cinq

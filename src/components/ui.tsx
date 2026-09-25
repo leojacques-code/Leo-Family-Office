@@ -1,7 +1,7 @@
 "use client";
 
 import { formatCurrency } from "@/lib/presentation/currency";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AlertTriangle, Check, CircleHelp, Info, X } from "lucide-react";
 import type { DataKind } from "@/lib/types";
 import { DATA_KIND_LABELS } from "@/lib/presentation/language";
@@ -176,14 +176,60 @@ export function Modal({
   onClose: () => void;
   wide?: boolean;
 }) {
+  const dialog = useRef<HTMLElement>(null);
+  // `onClose` est souvent recréée à chaque rendu : l'effet ne doit dépendre que de `open`,
+  // sans quoi chaque frappe dans le formulaire renverrait le focus au premier champ.
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
+  // Dialogue modal accessible : le focus y entre à l'ouverture, Tab n'en sort pas, et il
+  // revient à l'élément d'origine à la fermeture. Sans cela, un utilisateur au clavier ou au
+  // lecteur d'écran reste derrière un formulaire qu'il ne sait pas ouvert.
   useEffect(() => {
     if (!open) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusables = () =>
+      Array.from(
+        dialog.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((node) => {
+        // Invisible : dans un bloc masqué, ou dans un <details> fermé (hors de son résumé).
+        if (node.closest("[hidden]")) return false;
+        const details = node.closest("details");
+        return !details || details.open || node.closest("summary") !== null;
+      });
+    const first = focusables().find((node) => node.getAttribute("aria-label") !== "Fermer");
+    (first ?? dialog.current)?.focus();
     const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        closeRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !dialog.current) return;
+      const items = focusables();
+      if (items.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const head = items[0]!;
+      const tail = items[items.length - 1]!;
+      const active = document.activeElement;
+      if (event.shiftKey && (active === head || !dialog.current.contains(active))) {
+        event.preventDefault();
+        tail.focus();
+      } else if (!event.shiftKey && (active === tail || !dialog.current.contains(active))) {
+        event.preventDefault();
+        head.focus();
+      }
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener("keydown", handler);
+      if (previous && previous.isConnected) previous.focus();
+    };
+  }, [open]);
   if (!open) return null;
   return (
     <div
@@ -198,6 +244,8 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        ref={dialog}
+        tabIndex={-1}
       >
         <header>
           <div>

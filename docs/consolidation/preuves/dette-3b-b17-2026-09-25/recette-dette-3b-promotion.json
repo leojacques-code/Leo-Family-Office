@@ -1,7 +1,7 @@
 {
-  "date": "2026-09-25T08:47:06.169Z",
+  "date": "2026-09-25T08:56:54.846Z",
   "app": "http://localhost:3120",
-  "utilisateur": "recette-3b-1790326002585@lfo.invalid",
+  "utilisateur": "recette-3b-1790326586027@lfo.invalid",
   "environnement": "pile Supabase auto-hébergée locale ; build de production",
   "checks": [
     {
@@ -44,7 +44,7 @@
       "extrait": "PASSIF Dettes Échéanciers datés, coût du crédit et arbitrage remboursement vs investissement. Modifier le contrat Nouvel encours Encours seul Nouvelle dette Capital restant dû 1 500,50 € Prêt familial · Famille Taux 1,0 % Service de dette du mois 100 € Paiement mensuelle annoncé 100 € Profil contrac"
     },
     {
-      "id": "2fbb47c3-16f9-4ad7-ab1a-fc8fbf4402e7",
+      "id": "9781b88b-6ca5-4617-8b19-26dd50cb4c13",
       "label": "base : même ligne passée à CONTRACT, une seule dette, encours et historique intacts, décision tracée, durée et maturité non persistées",
       "ok": true,
       "terms_status": "CONTRACT",
@@ -123,7 +123,7 @@
       "synthese": "Synthèse avant enregistrement Capital d’origine 1 200 € Encours observé 1 200 € au 25 septembre 2026 Prochaine sortie 100 € le 5 octobre 2026 Premier remboursement de capital 5 octobre 2026 Dernière échéance 5 septembre 2027 (maturité déduite de la durée) Prélèvements à venir 12, dont 12 amortissant du capital (durée déduite de la mensualité) Capital futur remboursé 1 200 € Intérêts futurs 0 € Assurance future 60 € Frais futurs 20 € Total des sorties futures 1 280 € Termes non déclarés, calculés par le moteur : la durée, déduite de la mensualité ; la maturité, date de la dernière échéance."
     },
     {
-      "id": "a51a4cb9-903d-48a2-8bdc-f5d552b8863f",
+      "id": "484b1546-c352-462e-97f0-2c3bb06ca74c",
       "label": "base : mode SEPARATE, aucune prime par échéance, une police, un assuré à 100 %, une période ouverte",
       "ok": true,
       "insurance_mode": "SEPARATE",
@@ -183,6 +183,22 @@
       "ok": true,
       "attr": "dark",
       "bg": "rgb(13, 21, 19)"
+    },
+    {
+      "id": "K1",
+      "label": "clavier : « Nouvelle dette » atteinte par Tab, ouverte par Entrée, focus dans le dialogue, fermée par Échap",
+      "ok": true,
+      "atteint": true,
+      "ouvert": true,
+      "focusDansDialogue": true,
+      "ferme": true,
+      "focusRendu": true
+    },
+    {
+      "id": "M2",
+      "label": "Dettes sur tablette (768 px) sans débordement horizontal",
+      "ok": true,
+      "scrollWidth": 768
     },
     {
       "id": "M1",
