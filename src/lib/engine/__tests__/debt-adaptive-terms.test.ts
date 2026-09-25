@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildContractualSchedule,
   buildLoanTimeline,
+  debtServiceNextTwelveMonths,
   resolveContractTerms,
   UNDECLARED_LOAN_TERMS,
 } from "@/lib/engine/debt";
@@ -107,5 +108,84 @@ describe("B16 : contrat adaptatif, montant OU durée selon la donnée connue", (
     expect(flags.find((flag) => flag.code === "TERMS_DERIVED")?.detail).toContain(
       "déduite de la mensualité",
     );
+  });
+});
+
+describe("Relecture B16/B17 : assurance incluse inconnue et faux écarts", () => {
+  const loan100k: Liability = {
+    ...base,
+    principal: 100_000,
+    currentBalance: 100_000,
+    annualRate: 0.03,
+    recurringFees: 0,
+  };
+
+  it("ne déduit aucune durée d'une mensualité qui contient une assurance de montant inconnu", () => {
+    const loan = resolveContractTerms(
+      {
+        ...loan100k,
+        insuranceMode: "INCLUDED",
+        paymentIncludesInsurance: true,
+        monthlyInsurance: null,
+      },
+      { ...none, monthlyPayment: 600 },
+    );
+    expect(loan.termsResolution?.blocker).toBe("INCLUDED_INSURANCE_UNKNOWN");
+    expect(loan.paymentCount).toBe(0);
+    expect(buildContractualSchedule(loan).kind).toBe("MISSING");
+  });
+
+  it("amortit selon le contrat quand la durée est déclarée, et garde la mensualité comme sortie", () => {
+    const loan = resolveContractTerms(
+      {
+        ...base,
+        principal: 1200,
+        currentBalance: 1200,
+        recurringFees: 0,
+        paymentIncludesInsurance: true,
+        insuranceMode: "INCLUDED",
+        monthlyInsurance: null,
+      },
+      { ...none, monthlyPayment: 105, paymentCount: 12 },
+    );
+    const schedule = buildContractualSchedule(loan);
+    const first = schedule.entries[0]!;
+    // Taux nul, 1 200 € sur 12 : 100 € de capital ; 5 € lus comme assurance incluse.
+    expect(first.principal).toBeCloseTo(100, 6);
+    expect(first.insurance).toBeCloseTo(5, 6);
+    expect(first.totalCashOut).toBeCloseTo(105, 6);
+    expect(schedule.entries.filter((row) => row.entryKind === "PAYMENT")).toHaveLength(12);
+    expect(buildLoanTimeline(loan, "2026-01-01").flags.map((flag) => flag.code)).toContain(
+      "INCLUDED_INSURANCE_UNKNOWN",
+    );
+  });
+
+  it("ne signale pas d'assurance ou de frais cachés sur une durée déduite de la mensualité", () => {
+    const loan = resolveContractTerms(
+      { ...loan100k, insuranceMode: "NONE", paymentIncludesInsurance: false },
+      { ...none, monthlyPayment: 600 },
+    );
+    const codes = buildLoanTimeline(loan, "2026-01-01").flags.map((flag) => flag.code);
+    expect(codes).not.toContain("PAYMENT_EXCEEDS_AMORTISATION");
+    expect(buildLoanTimeline(loan, "2026-01-01").contractualGap).toBe(0);
+  });
+});
+
+describe("Relecture B17 : douze mois font douze échéances", () => {
+  it("ne compte pas deux fois l'échéance anniversaire quand la lecture tombe un jour d'échéance", () => {
+    const loan = resolveContractTerms(
+      {
+        ...base,
+        principal: 2400,
+        currentBalance: 2100,
+        balanceDate: "2026-03-05",
+        recurringFees: 0,
+        insuranceMode: "NONE",
+        paymentIncludesInsurance: false,
+      },
+      { ...none, monthlyPayment: 100 },
+    );
+    // Lecture le 5 mars 2026, jour d'échéance : du 5 mars 2026 au 4 mars 2027, 12 échéances.
+    expect(debtServiceNextTwelveMonths([loan], "2026-03-05").principal).toBeCloseTo(1200, 6);
   });
 });

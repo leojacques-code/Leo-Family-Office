@@ -93,3 +93,40 @@ describe("Event Engine cross-domain fixture", () => {
     expect(timeline.conflicts).toEqual([]);
   });
 });
+
+describe("Relecture B17 : débits d'assurance séparée dans le calendrier d'événements", () => {
+  it("garde deux polices débitées le même jour comme deux événements distincts et typés", () => {
+    const state = eventEngineCrossDomainFixture();
+    const loan = state.liabilities[0]!;
+    const period = {
+      firstDebitDate: loan.firstPaymentDate,
+      lastDebitDate: null,
+      frequency: "MONTHLY" as const,
+      premiumAmount: 10,
+    };
+    const insured = {
+      ...state,
+      liabilities: [
+        {
+          ...loan,
+          monthlyInsurance: null,
+          paymentIncludesInsurance: false,
+          insuranceMode: "SEPARATE" as const,
+          insurancePolicies: [
+            { id: "a", insurer: null, contractReference: null, insured: [], periods: [period] },
+            { id: "b", insurer: null, contractReference: null, insured: [], periods: [period] },
+          ],
+        },
+      ],
+    };
+    const timeline = buildDashboardEventTimeline({
+      state: insured,
+      startDate: "2026-01-01",
+      endDate: "2031-12-31",
+    });
+    const debits = timeline.events.filter((event) => event.type === "LOAN_INSURANCE_DEBIT");
+    const firstDay = debits.filter((event) => event.effectiveDate === debits[0]!.effectiveDate);
+    expect(firstDay).toHaveLength(2);
+    expect(new Set(debits.map((event) => event.id)).size).toBe(debits.length);
+  });
+});

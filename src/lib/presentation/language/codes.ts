@@ -119,6 +119,7 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
     state: A,
   },
   INSURANCE_TREATMENT_UNKNOWN: { label: "Traitement de l’assurance emprunteur inconnu", state: A },
+  INCLUDED_INSURANCE_UNKNOWN: { label: "Assurance incluse de montant non déclaré", state: A },
   MATURITY_MISMATCH: { label: "Maturité incohérente avec l’échéancier", state: C },
   TERMS_DERIVED: { label: "Termes du contrat calculés, non déclarés", state: "AVAILABLE" },
   TERMS_UNRESOLVED: { label: "Échéancier non calculable avec les termes déclarés", state: P },

@@ -68,6 +68,7 @@ const canonicalMigrations = [
   "20260924170000",
   "20260924180000",
   "20260925090000",
+  "20260925100000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -2372,6 +2373,15 @@ const readOnlyAuditTables = [
   "loan_insurance_policies",
   "loan_insurance_insured",
   "loan_insurance_periods",
+  // Dette : seules les RPC `lfo_*` écrivent le contrat et ses listes, sans quoi une écriture
+  // directe contournerait la piste de passage au contrat (`20260925100000`).
+  "liabilities",
+  "liability_balance_observations",
+  "loan_charges",
+  "loan_early_repayments",
+  "loan_payment_changes",
+  "loan_rate_changes",
+  "loan_schedules",
 ] as const;
 
 const storagePolicies = [

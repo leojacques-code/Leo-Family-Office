@@ -111,6 +111,7 @@ export type LoanFlagCode =
   | "EARLY_PAYOFF"
   | "BALANCE_MISMATCH"
   | "PAYMENT_EXCEEDS_AMORTISATION"
+  | "INCLUDED_INSURANCE_UNKNOWN"
   | "INSURANCE_TREATMENT_UNKNOWN"
   | "DEFERRAL_INTEREST_UNKNOWN"
   | "DEFERRAL_CONTRADICTORY"
@@ -167,12 +168,17 @@ function summarise(
   flags: LoanScheduleFlag[] = [],
 ): LoanSchedule {
   const sorted = [...entries].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  // Les bornes sont celles des ÉCHÉANCES du prêt : un débit d'assurance à sa propre date ou
+  // un frais ponctuel ne déplace ni la première ni la dernière échéance.
+  const dated = sorted.filter(
+    (entry) => entry.entryKind !== "INSURANCE" && entry.entryKind !== "CHARGE",
+  );
   return {
     liabilityId,
     entries: sorted,
     kind,
-    firstDueDate: sorted[0]?.dueDate ?? null,
-    lastDueDate: sorted.at(-1)?.dueDate ?? null,
+    firstDueDate: dated[0]?.dueDate ?? null,
+    lastDueDate: dated.at(-1)?.dueDate ?? null,
     totalInterest: sorted.reduce((sum, entry) => sum + entry.interest, 0),
     totalCashOut: sorted.reduce((sum, entry) => sum + entry.totalCashOut, 0),
     flags,
@@ -319,6 +325,24 @@ function insurancePerPayment(liability: Liability): number {
 }
 
 /** L'assurance future est-elle connue, y compris déclarée nulle ? */
+/**
+ * Deux périodes de prime d'une même police qui se recouvrent feraient compter deux primes
+ * pour le même débit. Une période ouverte (sans dernier débit) court jusqu'à la fin du prêt :
+ * seule la DERNIÈRE période peut l'être.
+ */
+export function insurancePeriodsOverlap(
+  periods: ReadonlyArray<{ firstDebitDate: string; lastDebitDate: string | null }>,
+): boolean {
+  const sorted = [...periods].sort((a, b) => a.firstDebitDate.localeCompare(b.firstDebitDate));
+  return sorted.some((period, index) => {
+    const next = sorted[index + 1];
+    return (
+      next !== undefined &&
+      (period.lastDebitDate === null || period.lastDebitDate >= next.firstDebitDate)
+    );
+  });
+}
+
 export function insuranceKnown(liability: Liability): boolean {
   const mode = liability.insuranceMode;
   if (mode === "NONE" || mode === "SEPARATE") return true;
@@ -355,6 +379,16 @@ export function totalContractualPayment(liability: Liability): number {
  */
 export function amortisingPayment(liability: Liability, atDate?: string): number {
   const declared = declaredPaymentAt(liability, atDate);
+  // Assurance INCLUSE de montant inconnu : le paiement mêle capital, intérêts et prime sans
+  // dire dans quelle proportion. La part qui amortit est celle du contrat (capital, taux,
+  // durée déclarés), jamais le paiement entier, qui ferait passer la prime pour du capital.
+  if (
+    declared > 0 &&
+    liability.paymentIncludesInsurance === true &&
+    liability.monthlyInsurance === null &&
+    Math.trunc(liability.paymentCount) > 0
+  )
+    return theoreticalPayment(liability);
   if (declared > 0) {
     // `null` = convention inconnue. On retient l'hypothèse la moins déformante : ne rien
     // retrancher, ce qui laisse l'amortissement identique à la donnée déclarée. Le drapeau
@@ -510,6 +544,10 @@ export function resolveContractTerms(liability: Liability, declared: DeclaredDeb
     count = found;
     countResolution = "DERIVED_FROM_MATURITY";
   } else if (payment !== null && profile === "AMORTIZING" && base.principal > 0) {
+    // Assurance INCLUSE de montant inconnu : la part de la mensualité qui rembourse capital
+    // et intérêts est inconnue. En déduire une durée compterait la prime comme du capital.
+    if (base.paymentIncludesInsurance === true && base.monthlyInsurance === null)
+      return unresolved("INCLUDED_INSURANCE_UNKNOWN");
     const probe = amortise({
       liability: { ...base, paymentCount: MAX_DERIVED_PAYMENTS },
       openingBalance: base.principal,
@@ -554,6 +592,11 @@ export function contractTermsBlocker(input: {
   firstPaymentDate: string;
   monthlyInsurance: number | null;
   paymentIncludesInsurance: boolean | null;
+  /** Différé et paliers changent la durée qu'une mensualité met à rembourser le capital :
+   *  la validation doit résoudre les MÊMES termes que la lecture. */
+  deferral?: Liability["deferral"];
+  rateSchedule?: Liability["rateSchedule"];
+  paymentSchedule?: Liability["paymentSchedule"];
   declared: DeclaredDebtTerms;
 }): DebtTermsResolution["blocker"] {
   const draft: Liability = {
@@ -574,6 +617,9 @@ export function contractTermsBlocker(input: {
     interestConvention: input.interestConvention,
     monthlyInsurance: input.monthlyInsurance,
     paymentIncludesInsurance: input.paymentIncludesInsurance,
+    ...(input.deferral ? { deferral: input.deferral } : {}),
+    ...(input.rateSchedule ? { rateSchedule: input.rateSchedule } : {}),
+    ...(input.paymentSchedule ? { paymentSchedule: input.paymentSchedule } : {}),
     provenance: { kind: "USER_ASSUMPTION", confidence: "HIGH" },
   };
   return resolveContractTerms(draft, input.declared).termsResolution?.blocker ?? null;
@@ -626,7 +672,17 @@ function amortise(input: AmortiseInput): AmortiseResult {
   const months = monthsPerPeriod(liability);
   const convention = liability.interestConvention ?? "PROPORTIONAL";
   const profile = liability.amortisationProfile ?? "AMORTIZING";
-  const insurance = insurancePerPayment(liability);
+  // Assurance INCLUSE de montant inconnu : la mensualité déclarée reste la sortie réelle.
+  // Sa part au-delà de l'échéance contractuelle (capital, taux, durée) est celle que
+  // l'utilisateur dit incluse ; elle est portée en assurance, jamais en capital.
+  const includedUnknown =
+    liability.monthlyPayment > 0 &&
+    liability.paymentIncludesInsurance === true &&
+    liability.monthlyInsurance === null &&
+    Math.trunc(liability.paymentCount) > 0;
+  const insurance = includedUnknown
+    ? Math.max(0, liability.monthlyPayment - amortisingPayment(liability))
+    : insurancePerPayment(liability);
   const fees = feesPerPayment(liability);
   const deferral = deferralOf(liability);
   const declaredTreatment = liability.deferral?.interestTreatment ?? "UNKNOWN";
@@ -691,6 +747,14 @@ function amortise(input: AmortiseInput): AmortiseResult {
     flags.push({
       code: "INSURANCE_TREATMENT_UNKNOWN",
       detail: `Assurance de ${formatCurrency(insurance, liability.currency ?? null)} par échéance déclarée sans préciser si la mensualité ${formatCurrency(liability.monthlyPayment, liability.currency ?? null)} la contient. Supposée en sus : si elle était incluse, l'amortissement serait plus lent et le coût du crédit plus élevé.`,
+    });
+    assumed = true;
+  }
+
+  if (includedUnknown) {
+    flags.push({
+      code: "INCLUDED_INSURANCE_UNKNOWN",
+      detail: `La mensualité ${formatCurrency(liability.monthlyPayment, liability.currency ?? null)} contient une assurance de montant non déclaré : l'amortissement suit le contrat (capital, taux, durée), et la part restante, ${formatCurrency(insurance, liability.currency ?? null)} par échéance, est lue comme l'assurance incluse. À confirmer par le contrat.`,
     });
     assumed = true;
   }
@@ -1241,7 +1305,9 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
           ? "La maturité déclarée ne tombe sur aucune échéance du calendrier : la durée n'est pas déductible, aucune n'est supposée."
           : resolution.blocker === "PAYMENT_DOES_NOT_AMORTISE"
             ? "La mensualité déclarée ne rembourse pas le capital : la durée n'est pas déductible, aucune n'est supposée."
-            : "Ni durée, ni maturité, ni mensualité exploitable : l'échéancier n'est pas calculable.",
+            : resolution.blocker === "INCLUDED_INSURANCE_UNKNOWN"
+              ? "La mensualité contient une assurance de montant inconnu : la part qui rembourse le capital est inconnue, la durée n'en est pas déduite."
+              : "Ni durée, ni maturité, ni mensualité exploitable : l'échéancier n'est pas calculable.",
     });
   } else if (resolution) {
     const derived = [
@@ -1332,7 +1398,9 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
   }
 
   const forwardResidual =
-    forward.entries.filter((row) => row.entryKind !== "CHARGE").at(-1)?.closingBalance ?? 0;
+    forward.entries
+      .filter((row) => row.entryKind !== "CHARGE" && row.entryKind !== "INSURANCE")
+      .at(-1)?.closingBalance ?? 0;
   if (forwardResidual > 0.01) {
     flags.push({
       code: "RECONCILIATION_REQUIRED",
@@ -1341,13 +1409,22 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
   }
 
   const amortising = amortisingPayment(liability);
-  const contractualGap = comparablePayments
+  // L'écart n'a de sens que si mensualité ET durée sont DÉCLARÉES : un terme déduit boucle
+  // par construction, et la dernière échéance ajustée ferait lire les intérêts comme des
+  // frais non déclarés.
+  const resolutionForGap = liability.termsResolution;
+  const gapComparable =
+    comparablePayments &&
+    (!resolutionForGap ||
+      (resolutionForGap.monthlyPayment === "DECLARED" &&
+        resolutionForGap.paymentCount === "DECLARED"));
+  const contractualGap = gapComparable
     ? amortising * Math.trunc(liability.paymentCount) - liability.principal
     : 0;
   let impliedChargePerPayment: number | null = null;
   const theoretical = theoreticalPayment(liability);
   if (
-    comparablePayments &&
+    gapComparable &&
     Math.trunc(liability.paymentCount) > 0 &&
     liability.monthlyPayment > 0 &&
     amortising - theoretical > 0.005
@@ -1663,6 +1740,25 @@ export function debtServiceBreakdownForPeriod(
       timeline.forward.kind,
     ]),
   });
+}
+
+/**
+ * Service de dette des DOUZE prochains mois : [asOf, asOf + 12 mois[, soit exactement douze
+ * mois. Une borne de fin incluse compterait deux fois la même échéance annuelle quand la
+ * date de lecture tombe un jour d'échéance (treize mensualités pour « douze mois »).
+ */
+export function debtServiceNextTwelveMonths(
+  liabilities: Liability[],
+  asOfDate: string,
+): DebtServiceBreakdown {
+  const end = new Date(`${addMonths(asOfDate, 12)}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() - 1);
+  return debtServiceBreakdownForPeriod(
+    liabilities,
+    asOfDate,
+    asOfDate,
+    end.toISOString().slice(0, 10),
+  );
 }
 
 /** Σ des cash-outs exigibles dans [startDate, endDate], bornes incluses. */

@@ -10,6 +10,7 @@ import { PercentInput } from "@/components/primitives/percent-input";
 import type { DebtContractInput } from "@/lib/data/contracts";
 import { formatCurrency } from "@/lib/presentation/currency";
 import { draftSynthesis } from "@/lib/presentation/debt/contract-draft";
+import { insurancePeriodsOverlap } from "@/lib/engine/debt";
 import { formatDate } from "@/components/pages/shared";
 import type { Liability, OutstandingDebt } from "@/lib/types";
 
@@ -444,6 +445,15 @@ export function DebtContractForm({
     }
     if (
       insurance.choice === "SEPARATE" &&
+      insurance.policies.some((policy) => insurancePeriodsOverlap(policy.periods))
+    ) {
+      setFormError(
+        "Deux périodes de prime d’une même police se chevauchent : renseignez le dernier débit de la période précédente, avant le premier débit de la suivante.",
+      );
+      return;
+    }
+    if (
+      insurance.choice === "SEPARATE" &&
       insurance.policies.some(
         (policy) =>
           policy.effectiveDate !== null &&
@@ -474,7 +484,9 @@ export function DebtContractForm({
       setFormError(
         synthesis.resolution.blocker === "MATURITY_NOT_ON_SCHEDULE"
           ? "La maturité ne tombe sur aucune échéance du calendrier : vérifiez la première échéance, la périodicité ou la maturité."
-          : "Cette mensualité ne rembourse pas le capital au taux indiqué : la durée n’est pas calculable.",
+          : synthesis.resolution.blocker === "INCLUDED_INSURANCE_UNKNOWN"
+            ? "L’assurance est incluse dans la mensualité sans montant : indiquez sa part, ou la durée ou la maturité, pour que la durée soit calculable."
+            : "Cette mensualité ne rembourse pas le capital au taux indiqué : la durée n’est pas calculable.",
       );
       return;
     }
@@ -792,7 +804,9 @@ export function DebtContractForm({
                 ? "la maturité ne tombe sur aucune échéance."
                 : synthesis.resolution.blocker === "PAYMENT_DOES_NOT_AMORTISE"
                   ? "la mensualité ne rembourse pas le capital."
-                  : "il manque la mensualité, la durée ou la maturité."}
+                  : synthesis.resolution.blocker === "INCLUDED_INSURANCE_UNKNOWN"
+                    ? "la mensualité contient une assurance de montant inconnu, sa part qui rembourse le capital est inconnue."
+                    : "il manque la mensualité, la durée ou la maturité."}
             </p>
           ) : (
             <dl>
@@ -1596,7 +1610,13 @@ function InsurancePoliciesEditor({
                     ...policy,
                     insured: policy.insured.map((item, row) =>
                       row === personIndex
-                        ? { ...item, coverageShare: number(event.target.value) / 100 }
+                        ? {
+                            ...item,
+                            // Quatre décimales en pourcentage = six en fraction, la précision
+                            // exacte de la colonne : rien n'est arrondi en silence en base.
+                            coverageShare:
+                              Math.round(number(event.target.value) * 10_000) / 1_000_000,
+                          }
                         : item,
                     ),
                   })
@@ -1625,6 +1645,10 @@ function InsurancePoliciesEditor({
             <Plus size={13} /> Ajouter un assuré
           </button>
           <strong>Périodes de prime</strong>
+          <small className="muted-copy">
+            Une variation de prime ouvre une nouvelle période : la précédente se clôt à son dernier
+            débit. Seule la dernière période peut rester ouverte.
+          </small>
           {policy.periods.map((period, periodIndex) => (
             <div className="debt-insurance-period" key={periodIndex}>
               <label>

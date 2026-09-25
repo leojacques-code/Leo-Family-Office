@@ -565,13 +565,28 @@ function debtEvents(state: DashboardState, startDate: string, endDate: string): 
     const forward = buildForwardSchedule(liability, state.asOfDate).entries.filter(
       (entry) => entry.dueDate > state.asOfDate,
     );
+    // Deux polices débitées le même jour, ou deux frais à la même date, partagent nature,
+    // numéro et date : un rang d'occurrence les distingue, sans quoi un index par identifiant
+    // (surcharges de scénario) en perdrait un. La première occurrence garde l'identifiant
+    // historique.
+    const occurrences = new Map<string, number>();
     for (const entry of [...historical, ...forward].filter(
       (row) => row.dueDate >= startDate && row.dueDate <= endDate,
     )) {
       const impact = debtImpactFromEntries([entry]);
       const kind = canonicalDataKind(entry.kind);
-      const type = entry.entryKind === "EARLY_REPAYMENT" ? "EARLY_REPAYMENT" : "LOAN_PAYMENT";
-      const id = `debt:${liability.id}:${entry.entryKind}:${entry.paymentNumber}:${entry.dueDate}`;
+      const type =
+        entry.entryKind === "EARLY_REPAYMENT"
+          ? "EARLY_REPAYMENT"
+          : entry.entryKind === "INSURANCE"
+            ? "LOAN_INSURANCE_DEBIT"
+            : entry.entryKind === "CHARGE"
+              ? "LOAN_CHARGE"
+              : "LOAN_PAYMENT";
+      const baseId = `debt:${liability.id}:${entry.entryKind}:${entry.paymentNumber}:${entry.dueDate}`;
+      const rank = occurrences.get(baseId) ?? 0;
+      occurrences.set(baseId, rank + 1);
+      const id = rank === 0 ? baseId : `${baseId}:${rank}`;
       const provenance = provenanceOf({
         source,
         sourceRecordId: liability.id,

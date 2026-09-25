@@ -277,6 +277,47 @@ try {
     "loan_insurance_policies_debit_account_fk",
   );
 
+  await refuse(
+    contract({
+      insurance_policies: [
+        {
+          ...policy,
+          periods: [
+            {
+              first_debit_date: "2026-01-15",
+              last_debit_date: null,
+              frequency: "MONTHLY",
+              premium_amount: 5,
+            },
+            {
+              first_debit_date: "2026-07-15",
+              last_debit_date: null,
+              frequency: "MONTHLY",
+              premium_amount: 3,
+            },
+          ],
+        },
+      ],
+    }),
+    "Périodes de prime chevauchantes acceptées",
+    "se chevauchent",
+  );
+  await refuse(
+    (() => {
+      const payload: Record<string, unknown> = {
+        ...contract({}),
+        liability_id: debtId,
+        initial_balance: null,
+        balance_date: null,
+      };
+      delete payload.insurance_mode;
+      delete payload.insurance_policies;
+      return payload;
+    })(),
+    "Choix d'assurance effacé par l'oubli de sa clé",
+    "Choix d'assurance absent",
+  );
+
   // Réédition : remplacement en bloc, aucune police orpheline.
   await client.query(save, [
     userId,
@@ -326,6 +367,17 @@ try {
     "Police supprimable par authenticated",
     "permission denied",
   );
+  for (const statement of [
+    "update public.liabilities set insurance_mode = null where id = $1",
+    "delete from public.liabilities where id = $1",
+    "delete from public.loan_schedules where liability_id = $1",
+  ])
+    await rejects(
+      statement,
+      [debtId],
+      `Écriture directe acceptée : ${statement}`,
+      "permission denied",
+    );
   await actAs(otherUser);
   assert((await visible()) === "0", "Police d'un autre propriétaire visible");
   succeeded = true;

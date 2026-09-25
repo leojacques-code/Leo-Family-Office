@@ -85,3 +85,44 @@ describe("mutations Debt Contract Input", () => {
     ).toBe(true);
   });
 });
+
+describe("Relecture B16/B17 : la validation résout les mêmes termes que la lecture", () => {
+  const minimal = { ...contract, paymentCount: null, maturityDate: null };
+
+  it("refuse une mensualité qu'un différé total capitalisé empêche de rembourser", () => {
+    // 100 000 € à 5 % : 420 € amortissent sans différé, pas après 36 mois capitalisés.
+    const plain = mutationSchema.safeParse({
+      action: "save_debt_contract",
+      contract: { ...minimal, annualRate: 0.05, paymentAmount: 420 },
+    });
+    expect(plain.success).toBe(true);
+    const deferred = mutationSchema.safeParse({
+      action: "save_debt_contract",
+      contract: {
+        ...minimal,
+        annualRate: 0.05,
+        paymentAmount: 420,
+        deferral: { kind: "TOTAL", months: 36, interestTreatment: "CAPITALISED" },
+      },
+    });
+    expect(deferred.success).toBe(false);
+  });
+
+  it("refuse de déduire une durée d'une mensualité qui contient une assurance inconnue", () => {
+    const result = mutationSchema.safeParse({
+      action: "save_debt_contract",
+      contract: {
+        ...minimal,
+        paymentAmount: 800,
+        insuranceMode: "INCLUDED",
+        paymentIncludesInsurance: true,
+        insuranceAmount: null,
+      },
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message).join(" ")).toContain(
+      "Assurance incluse de montant inconnu",
+    );
+  });
+});

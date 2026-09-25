@@ -1,4 +1,4 @@
-import { contractTermsBlocker } from "@/lib/engine/debt";
+import { contractTermsBlocker, insurancePeriodsOverlap } from "@/lib/engine/debt";
 import { z } from "zod";
 
 import {
@@ -172,7 +172,14 @@ const debtContractSchema = z
                 z
                   .object({
                     name: z.string().trim().min(1).max(160),
-                    coverageShare: finite.positive().max(1),
+                    // numeric(7,6) : au-delà de six décimales, la base arrondirait en silence.
+                    coverageShare: finite
+                      .positive()
+                      .max(1)
+                      .refine(
+                        (share) => Math.abs(share * 1e6 - Math.round(share * 1e6)) < 1e-6,
+                        "Quotité : quatre décimales au plus en pourcentage",
+                      ),
                   })
                   .strict(),
               )
@@ -204,6 +211,10 @@ const debtContractSchema = z
               policy.endDate === null ||
               policy.endDate >= policy.effectiveDate,
             "La fin de couverture précède sa date d’effet",
+          )
+          .refine(
+            (policy) => !insurancePeriodsOverlap(policy.periods),
+            "Deux périodes de prime d’une même police se chevauchent : la prime serait comptée deux fois",
           ),
       )
       .max(5),
@@ -342,6 +353,9 @@ const debtContractSchema = z
         firstPaymentDate: contract.firstPaymentDate,
         monthlyInsurance: contract.insuranceAmount,
         paymentIncludesInsurance: contract.paymentIncludesInsurance,
+        deferral: contract.deferral,
+        rateSchedule: contract.rateSchedule,
+        paymentSchedule: contract.paymentSchedule,
         declared: {
           monthlyPayment: contract.paymentAmount,
           paymentCount: contract.paymentCount,
@@ -353,6 +367,13 @@ const debtContractSchema = z
           code: "custom",
           message: "La maturité ne tombe sur aucune échéance du calendrier déclaré",
           path: ["maturityDate"],
+        });
+      if (blocker === "INCLUDED_INSURANCE_UNKNOWN")
+        context.addIssue({
+          code: "custom",
+          message:
+            "Assurance incluse de montant inconnu : indiquez sa part, ou la durée ou la maturité",
+          path: ["insuranceAmount"],
         });
       if (blocker === "PAYMENT_DOES_NOT_AMORTISE")
         context.addIssue({

@@ -14,9 +14,9 @@ import {
 } from "recharts";
 import { compareDebtVsInvest } from "@/lib/engine/decision";
 import {
-  addMonths,
   buildLoanTimeline,
   debtServiceBreakdownForPeriod,
+  debtServiceNextTwelveMonths,
   insuranceKnown,
   monthBounds,
   monthlyDebtServiceAt,
@@ -334,12 +334,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const currentDebtService = monthlyDebtServiceAt([loan], state.asOfDate);
   const monthWindow = monthBounds(state.asOfDate);
   // Composition des sorties des 12 prochains mois, lue dans le Debt Engine (V10 §12).
-  const yearBreakdown = debtServiceBreakdownForPeriod(
-    [loan],
-    state.asOfDate,
-    state.asOfDate,
-    addMonths(state.asOfDate, 12),
-  );
+  const yearBreakdown = debtServiceNextTwelveMonths([loan], state.asOfDate);
   const insuranceIsKnown = insuranceKnown(loan);
   const insuranceDebits = forward.entries.filter((row) => row.entryKind === "INSURANCE");
   const nextInsuranceDebit = insuranceDebits[0] ?? null;

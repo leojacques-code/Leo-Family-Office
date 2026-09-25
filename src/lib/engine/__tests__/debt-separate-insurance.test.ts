@@ -3,6 +3,7 @@ import {
   buildContractualSchedule,
   debtImpactFromEntries,
   debtServiceBreakdownForPeriod,
+  insurancePeriodsOverlap,
   summariseContract,
   UNDECLARED_LOAN_TERMS,
 } from "@/lib/engine/debt";
@@ -150,5 +151,41 @@ describe("B17 : assurance séparée sur son propre calendrier (oracle O03)", () 
     const unresolved = buildContractualSchedule({ ...o03, paymentCount: 0 });
     expect(unresolved.kind).toBe("MISSING");
     expect(unresolved.entries).toHaveLength(0);
+  });
+});
+
+describe("Relecture B17 : bornes et chevauchements", () => {
+  it("garde la dernière échéance du prêt quand l'assurance est débitée à une autre date", () => {
+    const shifted: Liability = {
+      ...o03,
+      insurancePolicies: [
+        {
+          ...o03.insurancePolicies![0]!,
+          periods: [
+            {
+              firstDebitDate: "2026-01-20",
+              lastDebitDate: "2026-12-20",
+              frequency: "MONTHLY",
+              premiumAmount: 5,
+            },
+          ],
+        },
+      ],
+    };
+    const schedule = buildContractualSchedule(shifted);
+    expect(schedule.lastDueDate).toBe("2026-12-05");
+    expect(schedule.entries.at(-1)!.entryKind).toBe("INSURANCE");
+  });
+
+  it("détecte deux périodes de prime qui se chevauchent, ouvertes ou non", () => {
+    const open = { firstDebitDate: "2026-01-05", lastDebitDate: null };
+    const closed = { firstDebitDate: "2026-01-05", lastDebitDate: "2026-12-05" };
+    const next = { firstDebitDate: "2027-01-05", lastDebitDate: null };
+    expect(insurancePeriodsOverlap([open, next])).toBe(true);
+    expect(insurancePeriodsOverlap([closed, next])).toBe(false);
+    expect(insurancePeriodsOverlap([next, closed])).toBe(false);
+    expect(insurancePeriodsOverlap([closed, { ...next, firstDebitDate: "2026-12-05" }])).toBe(
+      true,
+    );
   });
 });

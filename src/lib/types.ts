@@ -231,7 +231,14 @@ export interface DebtTermsResolution {
   paymentCount: DebtTermResolution;
   maturityDate: DebtTermResolution;
   /** Raison d'une résolution impossible, en code fermé. */
-  blocker: "TERMS_INSUFFICIENT" | "MATURITY_NOT_ON_SCHEDULE" | "PAYMENT_DOES_NOT_AMORTISE" | null;
+  blocker:
+    | "TERMS_INSUFFICIENT"
+    | "MATURITY_NOT_ON_SCHEDULE"
+    | "PAYMENT_DOES_NOT_AMORTISE"
+    /** Assurance incluse dans la mensualité pour un montant inconnu : la part qui amortit
+     *  est inconnue, aucune durée n'en est déduite. */
+    | "INCLUDED_INSURANCE_UNKNOWN"
+    | null;
 }
 
 export interface Liability {

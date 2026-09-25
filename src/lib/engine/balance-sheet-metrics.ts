@@ -1,4 +1,9 @@
-import { debtServiceBreakdownForPeriod, insuranceKnown, nextDebtEvent } from "@/lib/engine/debt";
+import {
+  debtServiceBreakdownForPeriod,
+  debtServiceNextTwelveMonths,
+  insuranceKnown,
+  nextDebtEvent,
+} from "@/lib/engine/debt";
 import {
   OUTSTANDING_DEBT_CATEGORY,
   type CanonicalAggregate,
@@ -145,7 +150,7 @@ export function deriveCanonicalBalanceSheetMetrics(input: {
   const asOf = sheet.asOfDate;
   const debt30 = debtServiceBreakdownForPeriod(input.liabilities, asOf, asOf, addDays(asOf, 30));
   const debt90 = debtServiceBreakdownForPeriod(input.liabilities, asOf, asOf, addDays(asOf, 90));
-  const debt12 = debtServiceBreakdownForPeriod(input.liabilities, asOf, asOf, addMonths(asOf, 12));
+  const debt12 = debtServiceNextTwelveMonths(input.liabilities, asOf);
   // Une dette connue par son SEUL encours est au bilan mais n'a aucun échéancier : les sorties
   // de dette connues ne sont alors qu'une partie des sorties réelles. Les compter comme le tout
   // sous-estimerait les obligations et surestimerait la couverture, sans rien signaler.
