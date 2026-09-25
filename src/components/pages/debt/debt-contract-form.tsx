@@ -11,6 +11,7 @@ import type { DebtContractInput } from "@/lib/data/contracts";
 import { formatCurrency } from "@/lib/presentation/currency";
 import { draftSynthesis } from "@/lib/presentation/debt/contract-draft";
 import { insurancePeriodsOverlap } from "@/lib/engine/debt";
+import { operationalToday } from "@/lib/financial-date";
 import { formatDate } from "@/components/pages/shared";
 import type { Liability, OutstandingDebt } from "@/lib/types";
 
@@ -588,7 +589,7 @@ export function DebtContractForm({
           <input
             className="text-input"
             type="date"
-            max={asOfDate}
+            max={operationalToday()}
             value={contract.balanceDate ?? ""}
             onChange={(event) =>
               setContract({ ...contract, balanceDate: event.target.value || null })

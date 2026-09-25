@@ -69,6 +69,7 @@ const canonicalMigrations = [
   "20260924180000",
   "20260925090000",
   "20260925100000",
+  "20260925110000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -1545,6 +1546,10 @@ const requiredTriggers = [
   "user_domain_declarations_immutable",
   "transaction_corrections_immutable",
   "liability_terms_transitions_immutable",
+  // Un fait observé n'est pas daté après aujourd'hui (`20260925110000`).
+  "transactions_observation_date_guard",
+  "account_balances_observation_date_guard",
+  "liability_balance_observations_date_guard",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1565,6 +1570,7 @@ const requiredTriggerFunctions = [
   "user_domain_declaration_immutable",
   "transaction_correction_immutable",
   "liability_terms_transition_immutable",
+  "lfo_guard_observation_date",
 ] as const;
 
 const requiredConstraints = [
@@ -2382,6 +2388,8 @@ const readOnlyAuditTables = [
   "loan_payment_changes",
   "loan_rate_changes",
   "loan_schedules",
+  // Soldes observés : écrits par le serveur et les RPC seulement (`20260925110000`).
+  "account_balances",
 ] as const;
 
 const storagePolicies = [

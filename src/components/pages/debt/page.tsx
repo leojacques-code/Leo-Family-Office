@@ -37,6 +37,7 @@ import { formatCurrency } from "@/lib/presentation/currency";
 import type { DebtContractInput } from "@/lib/data/contracts";
 import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import { balancePath } from "@/lib/presentation/debt/balance-path";
+import { operationalToday } from "@/lib/financial-date";
 import type { Liability } from "@/lib/types";
 import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
 import { DebtContractForm } from "@/components/pages/debt/debt-contract-form";
@@ -654,8 +655,13 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
               </dd>
             </div>
             <div>
-              <dt>Échéances payées à ce jour</dt>
-              <dd>{timeline.elapsedPayments}</dd>
+              {/* ÉCHUE ≠ PAYÉE : une échéance passée au calendrier n'est pas une preuve de
+                  paiement tant qu'aucune opération ne la rapproche (document 04 §5, B21). */}
+              <dt>Échéances échues à ce jour</dt>
+              <dd>
+                {timeline.elapsedPayments}
+                {timeline.elapsedPayments > 0 ? " · paiement non rapproché" : ""}
+              </dd>
             </div>
             <div>
               <dt>Intérêts du contrat, durée complète</dt>
@@ -855,6 +861,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             <input
               className="text-input"
               type="date"
+              max={state.dates?.today ?? operationalToday()}
               value={balance.date}
               onChange={(event) => setBalance({ ...balance, date: event.target.value })}
               required

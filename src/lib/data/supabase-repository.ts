@@ -143,6 +143,12 @@ type Row = Record<string, unknown>;
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
   if (result.error) {
+    // Refus d'une date d'observation future par la base (`20260925110000`), quel que soit le
+    // chemin d'écriture : routé sur le SQLSTATE, jamais sur le texte.
+    if (result.error.code === "LF425")
+      throw new MutationRejectedError(
+        "Date d’observation future : un fait observé ne peut pas être daté après aujourd’hui.",
+      );
     if (context.startsWith("lecture ") || /JWT issued at future/i.test(result.error.message)) {
       throw reportReadFailure(result.error, context);
     }

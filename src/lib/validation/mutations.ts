@@ -63,6 +63,11 @@ const essentiality = z.enum(["ESSENTIAL", "NON_ESSENTIAL", "UNKNOWN"]);
 const expenseBehavior = z.enum(["FIXED", "VARIABLE", "DISCRETIONARY", "UNKNOWN"]);
 
 const realDate = date.refine(isRealCalendarDate, "Date inexistante au calendrier");
+/** Date d'observation d'un fait : jamais postérieure au jour opérationnel (Europe/Paris). */
+const observedFactDate = realDate.refine(
+  (value) => value <= operationalToday(),
+  "Date postérieure au jour courant : un fait futur n’est pas un fait",
+);
 const scenarioDefinitionSchema = z
   .custom<ScenarioVersionDefinition>(
     isScenarioVersionDefinition,
@@ -139,7 +144,8 @@ const debtContractSchema = z
     lender: z.string().trim().min(1).max(160),
     principal: finite.nonnegative(),
     initialBalance: nullableMoney,
-    balanceDate: realDate.nullable(),
+    // L'encours initial est une OBSERVATION : les dates du contrat, elles, peuvent être futures.
+    balanceDate: observedFactDate.nullable(),
     annualRate: finite.min(0).max(10),
     // Document 04, étape C : « montant OU durée selon la donnée connue ». `null` = non
     // déclaré ; un paiement à zéro n'est pas un paiement. Le Debt Engine déduit le reste.
@@ -1369,7 +1375,7 @@ export const mutationSchema = z.discriminatedUnion("action", [
     action: z.literal("update_account"),
     accountId: z.string().min(1),
     balance: finite,
-    balanceDate: realDate,
+    balanceDate: businessDate,
   }),
   z.object({
     action: z.literal("add_account"),
@@ -1377,7 +1383,7 @@ export const mutationSchema = z.discriminatedUnion("action", [
     name: z.string().min(1).max(120),
     accountType: z.enum(["BANK", "PEA", "CTO", "SAVINGS", "OTHER"]),
     balance: finite,
-    balanceDate: realDate,
+    balanceDate: businessDate,
     currency: z.string().length(3),
   }),
   // Premier revenu net OBSERVÉ : aucune catégorie, aucune devise reçue (celle du compte fait
