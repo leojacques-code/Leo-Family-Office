@@ -36,6 +36,7 @@ import { type SectionProps, OptionalCurrency, formatDate } from "@/components/pa
 import { formatCurrency } from "@/lib/presentation/currency";
 import type { DebtContractInput } from "@/lib/data/contracts";
 import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
+import { balancePath } from "@/lib/presentation/debt/balance-path";
 import type { Liability } from "@/lib/types";
 import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
 import { DebtContractForm } from "@/components/pages/debt/debt-contract-form";
@@ -355,6 +356,12 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
       loan.termsResolution.paymentCount === "DECLARED");
   const paymentDeclared =
     !loan.termsResolution || loan.termsResolution.monthlyPayment === "DECLARED";
+  const countDeclared = !loan.termsResolution || loan.termsResolution.paymentCount === "DECLARED";
+  const maturityDeclared =
+    !loan.termsResolution || loan.termsResolution.maturityDate === "DECLARED";
+  // Les lignes d'assurance séparée, de frais et de remboursement anticipé ne sont pas des
+  // échéances du prêt : les compter gonflerait le nombre d'échéances restantes.
+  const remainingPayments = forward.entries.filter((entry) => entry.entryKind === "PAYMENT").length;
   // Un échéancier bancaire utilisé est une bonne nouvelle, pas une anomalie : le mélanger
   // aux écarts de réconciliation ferait passer une information pour un problème.
   const providedNotice = timeline.flags.find((flag) => flag.code === "PROVIDED_SCHEDULE_USED");
@@ -365,12 +372,14 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
       {header}
       {outstandingPanel}
       {state.liabilities.length > 1 ? (
-        <section className="decision-case-strip">
+        <section aria-label="Dettes suivies" className="decision-case-strip">
           {state.liabilities.map((item) => (
             <button
+              aria-pressed={item.id === loan.id}
               key={item.id}
               className={item.id === loan.id ? "active" : ""}
               onClick={() => setSelectedId(item.id)}
+              type="button"
             >
               {item.name}
               <span>{item.lender}</span>
@@ -555,15 +564,12 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           <div className="medium-chart">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={forward.entries
-                  // Un prélèvement d'assurance ne change pas l'encours : la courbe ne trace
-                  // que les lignes qui l'amortissent.
-                  .filter((entry) => entry.entryKind !== "INSURANCE")
-                  .filter((_, index, rows) => index % 6 === 0 || index === rows.length - 1)
-                  .map((entry) => ({
-                    date: entry.dueDate.slice(0, 7),
-                    balance: entry.closingBalance,
-                  }))}
+                data={balancePath(
+                  forward.entries,
+                  loan.balanceDate
+                    ? { date: loan.balanceDate, balance: loan.currentBalance }
+                    : null,
+                )}
               >
                 <defs>
                   <linearGradient id="debtArea" x1="0" y1="0" x2="0" y2="1">
@@ -572,7 +578,12 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                   </linearGradient>
                 </defs>
                 <CartesianGrid vertical={false} stroke="var(--border-soft)" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} />
+                <XAxis
+                  dataKey="date"
+                  axisLine={false}
+                  tickFormatter={(value: string) => value.slice(0, 7)}
+                  tickLine={false}
+                />
                 <YAxis
                   width={88}
                   tickFormatter={(value: number) => formatCurrency(value, currency, true)}
@@ -584,9 +595,11 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                     typeof value === "number" ? formatLoanAmount(value) : "Non calculable"
                   }
                 />
+                {/* Escalier : l'encours ne change qu'aux dates d'échéance, jamais entre deux. */}
                 <Area
                   isAnimationActive={false}
                   name="Solde restant"
+                  type="stepAfter"
                   dataKey="balance"
                   stroke="#ab5a4e"
                   fill="url(#debtArea)"
@@ -622,20 +635,22 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             </div>
             <div>
               <dt>
-                {loan.termsResolution && loan.termsResolution.maturityDate !== "DECLARED"
-                  ? "Dernière échéance calculée"
-                  : "Dernière échéance annoncée"}
+                {maturityDeclared ? "Dernière échéance annoncée" : "Dernière échéance calculée"}
               </dt>
               <dd>{loan.maturityDate ? formatDate(loan.maturityDate) : "Non calculable"}</dd>
             </div>
+            {/* Contre-lecture utile seulement face à une maturité DÉCLARÉE : calculée, elle
+                répéterait la ligne précédente, issue du même échéancier. */}
+            {maturityDeclared ? (
+              <div>
+                <dt>Dernière échéance dérivée</dt>
+                <dd>
+                  {contractual.lastDueDate ? formatDate(contractual.lastDueDate) : "Non calculable"}
+                </dd>
+              </div>
+            ) : null}
             <div>
-              <dt>Dernière échéance dérivée</dt>
-              <dd>
-                {contractual.lastDueDate ? formatDate(contractual.lastDueDate) : "Non calculable"}
-              </dd>
-            </div>
-            <div>
-              <dt>Nombre annoncé</dt>
+              <dt>{countDeclared ? "Nombre annoncé" : "Nombre calculé"}</dt>
               <dd>
                 {loan.paymentCount} échéances · fréquence {FREQUENCY_LABELS[loan.paymentFrequency]}
               </dd>
@@ -681,25 +696,31 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             <h2>Prochaines échéances</h2>
           </div>
           <span className="panel-note">
-            {forward.entries.length} restantes sur {loan.paymentCount} annoncées
+            {remainingPayments} échéances restantes sur {loan.paymentCount}{" "}
+            {countDeclared ? "annoncées" : "calculées"}
           </span>
         </div>
-        <div className="simple-table debt-schedule-table">
-          <div className="table-head">
-            <span>Date</span>
-            <span>Sortie</span>
-            <span>Intérêt</span>
-            <span>Principal</span>
-            <span>Assurance</span>
-            <span>Solde</span>
+        <div
+          aria-label="Prochaines échéances"
+          className="simple-table debt-schedule-table"
+          role="table"
+        >
+          <div className="table-head" role="row">
+            <span role="columnheader">Date</span>
+            <span role="columnheader">Sortie</span>
+            <span role="columnheader">Intérêt</span>
+            <span role="columnheader">Principal</span>
+            <span role="columnheader">Assurance</span>
+            <span role="columnheader">Solde</span>
           </div>
           {forward.entries.slice(0, 8).map((entry, index) => (
             <div
               className="table-row"
               key={`${entry.entryKind}-${entry.paymentNumber}-${entry.dueDate}-${index}`}
+              role="row"
             >
-              <span>{formatDate(entry.dueDate)}</span>
-              <strong>
+              <span role="cell">{formatDate(entry.dueDate)}</span>
+              <strong role="cell">
                 {entry.entryKind === "INSURANCE"
                   ? "Assurance (prélèvement séparé)"
                   : entry.entryKind === "CHARGE"
@@ -709,20 +730,20 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
                       : `Échéance n° ${entry.paymentNumber}`}{" "}
                 · <Currency currency={currency} value={entry.totalCashOut} />
               </strong>
-              <span>
+              <span data-label="Intérêt" role="cell">
                 <Currency currency={currency} value={entry.interest} />
               </span>
-              <span>
+              <span data-label="Principal" role="cell">
                 <Currency currency={currency} value={entry.principal} />
               </span>
-              <span>
+              <span data-label="Assurance" role="cell">
                 {insuranceIsKnown || entry.insurance > 0 ? (
                   <Currency currency={currency} value={entry.insurance} />
                 ) : (
                   "Inconnue"
                 )}
               </span>
-              <strong>
+              <strong data-label="Solde" role="cell">
                 <Currency currency={currency} value={entry.closingBalance} />
               </strong>
             </div>
@@ -1005,7 +1026,7 @@ function InsuranceFacts({
                   {policy.insured
                     .map(
                       (person) =>
-                        `${person.name} (${(person.coverageShare * 100).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %)`,
+                        `${person.name} (${(person.coverageShare * 100).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}\u00a0%)`,
                     )
                     .join(", ")}
                 </p>

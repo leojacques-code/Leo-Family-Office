@@ -47,14 +47,17 @@ export function draftLiability(
     recurringFees: contract.recurringFees,
     paymentIncludesInsurance: contract.paymentIncludesInsurance,
     insuranceMode: contract.insuranceMode,
-    // Une police sans prime lisible n'est pas projetée : aucune prime n'est supposée.
+    // Une période sans date, fréquence ou prime lisible n'est pas projetée : rien n'est supposé.
     insurancePolicies: contract.insurancePolicies.map((policy, index) => ({
       id: `draft-policy-${index}`,
       insurer: policy.insurer,
       contractReference: policy.contractReference,
       insured: policy.insured,
       periods: policy.periods.filter(
-        (period) => period.firstDebitDate !== "" && Number.isFinite(period.premiumAmount),
+        (period) =>
+          period.firstDebitDate !== "" &&
+          (period.frequency as string) !== "" &&
+          Number.isFinite(period.premiumAmount),
       ),
     })),
     deferral: contract.deferral,
@@ -69,7 +72,10 @@ export function draftLiability(
       ...repayment,
       liabilityId: context.id,
     })),
-    oneOffCharges: contract.charges.map((charge) => ({ ...charge, liabilityId: context.id })),
+    // Un frais en cours de saisie (sans date ni montant) n'entre pas dans la synthèse.
+    oneOffCharges: contract.charges
+      .filter((charge) => charge.date !== "" && Number.isFinite(charge.amount) && charge.amount > 0)
+      .map((charge) => ({ ...charge, liabilityId: context.id })),
     providedSchedule: contract.providedSchedule,
     facilityId: contract.facilityId,
     provenance: { kind: "USER_ASSUMPTION", confidence: "HIGH" },

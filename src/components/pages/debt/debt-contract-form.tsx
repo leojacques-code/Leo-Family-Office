@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { Children, useMemo, useState, type FormEvent } from "react";
 import { ScheduleImport } from "./schedule-import";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { MoneyInput } from "@/components/primitives/money-input";
@@ -402,12 +402,15 @@ export function DebtContractForm({
           (policy) =>
             policy.periods.length === 0 ||
             policy.periods.some(
-              (period) => !period.firstDebitDate || !Number.isFinite(period.premiumAmount),
+              (period) =>
+                !period.firstDebitDate ||
+                !isPaymentFrequency(period.frequency) ||
+                !Number.isFinite(period.premiumAmount),
             ),
         ))
     ) {
       setFormError(
-        "Une assurance séparée exige une police avec au moins une période : première date de débit et prime.",
+        "Une assurance séparée exige une police avec au moins une période : première date de débit, fréquence et prime.",
       );
       return;
     }
@@ -424,6 +427,18 @@ export function DebtContractForm({
       )
     ) {
       setFormError("Chaque assuré a un nom et une quotité entre 0 et 100 %.");
+      return;
+    }
+    if (
+      candidate.charges.some(
+        (charge) =>
+          !charge.date ||
+          charge.label.trim() === "" ||
+          !Number.isFinite(charge.amount) ||
+          charge.amount <= 0,
+      )
+    ) {
+      setFormError("Chaque frais ponctuel a une date, un libellé et un montant positif.");
       return;
     }
     if (mode === "BALLOON" && candidate.balloonAmount === null) {
@@ -1172,7 +1187,14 @@ export function DebtContractForm({
               ...contract,
               charges: [
                 ...contract.charges,
-                { id: crypto.randomUUID(), date: asOfDate, amount: 0, label: "", financed: false },
+                // Ni date ni montant supposés : un frais se déclare, il ne se devine pas.
+                {
+                  id: crypto.randomUUID(),
+                  date: "",
+                  amount: Number.NaN,
+                  label: "",
+                  financed: false,
+                },
               ],
             })
           }
@@ -1180,6 +1202,7 @@ export function DebtContractForm({
           {contract.charges.map((charge, index) => (
             <div className="debt-editor-row five" key={charge.id}>
               <input
+                aria-label={`Date du frais ${index + 1}`}
                 className="text-input"
                 type="date"
                 value={charge.date}
@@ -1190,7 +1213,9 @@ export function DebtContractForm({
                 }}
               />
               <input
+                aria-label={`Libellé du frais ${index + 1}`}
                 className="text-input"
+                maxLength={160}
                 value={charge.label}
                 placeholder="Libellé"
                 onChange={(event) => {
@@ -1200,14 +1225,18 @@ export function DebtContractForm({
                 }}
               />
               <input
+                aria-label={`Montant du frais ${index + 1}, en ${currencyLabel}`}
                 className="text-input"
                 type="number"
                 min="0.01"
                 step="0.01"
-                value={charge.amount}
+                value={Number.isFinite(charge.amount) ? charge.amount : ""}
                 onChange={(event) => {
                   const rows = [...contract.charges];
-                  rows[index] = { ...charge, amount: number(event.target.value) };
+                  rows[index] = {
+                    ...charge,
+                    amount: nullableNumber(event.target.value) ?? Number.NaN,
+                  };
                   setContract({ ...contract, charges: rows });
                 }}
               />
@@ -1221,7 +1250,7 @@ export function DebtContractForm({
                     setContract({ ...contract, charges: rows });
                   }}
                 />
-                Financé
+                Financé par le prêt
               </label>
               <RemoveButton
                 onClick={() =>
@@ -1342,14 +1371,20 @@ function NestedSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="debt-nested-editor">
+    <section aria-label={title} className="debt-nested-editor">
       <header>
         <strong>{title}</strong>
-        <button type="button" className="button secondary compact" onClick={onAdd}>
+        <button
+          aria-label={`Ajouter une ligne : ${title}`}
+          className="button secondary compact"
+          onClick={onAdd}
+          type="button"
+        >
           <Plus size={13} /> Ajouter
         </button>
       </header>
-      {children || <small>Aucune ligne déclarée.</small>}
+      {/* Une liste vide est un tableau, donc « vraie » : c'est le nombre d'enfants qui compte. */}
+      {Children.count(children) ? children : <small>Aucune ligne déclarée.</small>}
     </section>
   );
 }
@@ -1362,13 +1397,26 @@ function RemoveButton({ onClick }: { onClick: () => void }) {
   );
 }
 
+type PremiumFrequency =
+  DebtContractInput["insurancePolicies"][number]["periods"][number]["frequency"];
+const PREMIUM_FREQUENCIES: readonly string[] = ["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL"];
+/**
+ * Fréquence de débit pas encore choisie. Le brouillon la porte vide plutôt que « mensuelle » :
+ * une fréquence supposée changerait le coût de l'assurance sans que personne l'ait déclarée.
+ * Elle ne quitte jamais le formulaire, la soumission la refuse.
+ */
+const UNCHOSEN = "" as PremiumFrequency;
+function isPaymentFrequency(value: string): value is PremiumFrequency {
+  return PREMIUM_FREQUENCIES.includes(value);
+}
+
 function emptyPolicy(): DebtContractInput["insurancePolicies"][number] {
   return {
     insurer: null,
     contractReference: null,
     insured: [],
     periods: [
-      { firstDebitDate: "", lastDebitDate: null, frequency: "MONTHLY", premiumAmount: Number.NaN },
+      { firstDebitDate: "", lastDebitDate: null, frequency: UNCHOSEN, premiumAmount: Number.NaN },
     ],
   };
 }
@@ -1539,6 +1587,7 @@ function InsurancePoliciesEditor({
                     })
                   }
                 >
+                  <option value="">Choisir la fréquence</option>
                   <option value="MONTHLY">Mensuelle</option>
                   <option value="QUARTERLY">Trimestrielle</option>
                   <option value="SEMIANNUAL">Semestrielle</option>
@@ -1587,7 +1636,7 @@ function InsurancePoliciesEditor({
                   {
                     firstDebitDate: "",
                     lastDebitDate: null,
-                    frequency: "MONTHLY",
+                    frequency: UNCHOSEN,
                     premiumAmount: Number.NaN,
                   },
                 ],

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { DebtContractForm } from "../debt-contract-form";
 
 const chooseStructure = () => {
@@ -263,6 +263,12 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     fireEvent.change(screen.getByLabelText("Premier débit"), { target: { value: "2026-01-05" } });
     fillMoney(/Prime par débit/, "5");
     const synthesis = screen.getByRole("region", { name: "Synthèse du contrat" });
+    // Aucune fréquence de débit n'est supposée : la période n'est pas projetée tant qu'elle manque.
+    expect(screen.getByLabelText("Fréquence des débits")).toHaveValue("");
+    expect(synthesis).not.toHaveTextContent("Assurance future60 €");
+    fireEvent.change(screen.getByLabelText("Fréquence des débits"), {
+      target: { value: "MONTHLY" },
+    });
     // Oracle O03 : 12 débits de 5 € sur le calendrier propre de l'assurance.
     expect(synthesis).toHaveTextContent("Assurance future60 €");
     fireEvent.submit(screen.getByRole("button", { name: "Ajouter cette dette" }).closest("form")!);
@@ -309,8 +315,60 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     });
     fireEvent.change(screen.getByLabelText("Premier débit"), { target: { value: "2026-01-05" } });
     fillMoney(/Prime par débit/, "5");
+    fireEvent.change(screen.getByLabelText("Fréquence des débits"), {
+      target: { value: "MONTHLY" },
+    });
     fireEvent.submit(screen.getByRole("button", { name: "Ajouter cette dette" }).closest("form")!);
     expect(onSave).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent("quotité entre 0 et 100 %");
+  });
+
+  it("n'invente ni date ni montant pour un frais ponctuel et l'exige complet", () => {
+    const onSave = vi.fn();
+    render(
+      <DebtContractForm
+        asOfDate="2026-01-01"
+        reportingCurrency="EUR"
+        busy={false}
+        loan={null}
+        onCancel={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+    fillO03();
+    fireEvent.click(screen.getByLabelText("Absence d’assurance confirmée"));
+    const section = screen.getByRole("region", { name: "Frais ponctuels" });
+    expect(section).toHaveTextContent("Aucune ligne déclarée.");
+    fireEvent.click(
+      within(section).getByRole("button", { name: "Ajouter une ligne : Frais ponctuels" }),
+    );
+    expect(screen.getByLabelText("Date du frais 1")).toHaveValue("");
+    expect(screen.getByLabelText("Montant du frais 1, en EUR")).toHaveValue(null);
+    fireEvent.submit(screen.getByRole("button", { name: "Ajouter cette dette" }).closest("form")!);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("date, un libellé et un montant positif");
+  });
+
+  it("refuse une période d'assurance dont la fréquence n'a pas été choisie", () => {
+    const onSave = vi.fn();
+    render(
+      <DebtContractForm
+        asOfDate="2026-01-01"
+        reportingCurrency="EUR"
+        busy={false}
+        loan={null}
+        onCancel={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+    fillO03();
+    fireEvent.click(screen.getByLabelText("Prélevée séparément"));
+    fireEvent.change(screen.getByLabelText("Premier débit"), { target: { value: "2026-01-05" } });
+    fillMoney(/Prime par débit/, "5");
+    fireEvent.submit(screen.getByRole("button", { name: "Ajouter cette dette" }).closest("form")!);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "première date de débit, fréquence et prime",
+    );
   });
 });
