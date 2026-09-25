@@ -1,5 +1,6 @@
 "use client";
 
+import { formatCurrency } from "@/lib/presentation/currency";
 import { STATE_CONTRACTS } from "@/lib/presentation/language/states";
 import type { AnswerView } from "@/lib/presentation/today/contracts";
 
@@ -29,12 +30,10 @@ export function Amount({
   signed?: boolean;
 }) {
   // La devise vient du MODÈLE, jamais d'une constante : le produit ne présume pas l'euro, et
-  // un total en devise de reporting non déclarée serait un chiffre sans unité.
-  const formatted = new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(Math.abs(value));
+  // un total en devise de reporting non déclarée serait un chiffre sans unité. Le format est
+  // celui de tout le produit : un montant qui porte des centimes les affiche, sans quoi
+  // Aujourd'hui lirait « 1 000 € » là où Patrimoine lit « 999,50 € » pour le même bilan.
+  const formatted = formatCurrency(Math.abs(value), currency);
   return (
     <span className="today-amount">
       {value < 0 ? "−" : signed && value > 0 ? "+" : ""}
