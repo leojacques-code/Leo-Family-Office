@@ -14,7 +14,10 @@
  *   * le contenu est fermé par nature, les montants voyagent en texte décimal ;
  *   * annuler ajoute une trace motivée, une seule fois ; rien ne se modifie ni ne s'efface ;
  *   * une dette encours seul, archivée ou d'un autre propriétaire refuse l'événement ;
- *   * lecture seule et cloisonnement pour `authenticated`.
+ *   * lecture seule et cloisonnement pour `authenticated` ;
+ *   * (`20260925140000`) un contrat antérieur au versionnement garde ses termes en vigueur
+ *     dans une version de référence avant sa première correction ; une forme invalide est
+ *     refusée en `LF422`, jamais par une erreur de conversion brute.
  */
 import { randomUUID } from "node:crypto";
 import pg from "pg";
@@ -133,6 +136,79 @@ try {
       versions[1]!.change_reason === "Nom du prêteur mal saisi",
     `Versions de contrat inattendues : ${JSON.stringify(versions)}`,
   );
+
+  // Contrat antérieur au versionnement (`20260925140000`) : sa première correction fige
+  // d'abord les termes en vigueur dans une version BASELINE, puis écrit la correction.
+  const legacyId = (
+    await client.query<{ id: string }>(save, [
+      userId,
+      JSON.stringify({ ...contract, name: "Prêt antérieur", lender: "Banque d'origine" }),
+    ])
+  ).rows[0]!.id;
+  await client.query("reset role");
+  // Simulation d'un contrat enregistré avant `20260925130000` : sans trigger ni version.
+  await client.query("set local session_replication_role = replica");
+  await client.query("delete from public.liability_contract_versions where liability_id = $1", [
+    legacyId,
+  ]);
+  await client.query("set local session_replication_role = origin");
+  await client.query("set local role service_role");
+  await client.query(save, [
+    userId,
+    JSON.stringify({
+      ...contract,
+      liability_id: legacyId,
+      initial_balance: null,
+      balance_date: null,
+      name: "Prêt antérieur",
+      lender: "Banque corrigée",
+      change_reason: "Prêteur mal saisi",
+    }),
+  ]);
+  const legacyVersions = (
+    await client.query<{
+      version_no: number;
+      change_kind: string;
+      shape: string | null;
+      lender: string | null;
+      new_lender: string | null;
+    }>(
+      `select version_no, change_kind, terms ->> 'shape' as shape,
+              terms #>> '{liability,lender}' as lender, terms ->> 'lender' as new_lender
+         from public.liability_contract_versions where liability_id = $1 order by version_no`,
+      [legacyId],
+    )
+  ).rows;
+  assert(
+    legacyVersions.length === 2 &&
+      legacyVersions[0]!.change_kind === "BASELINE" &&
+      legacyVersions[0]!.shape === "DATABASE_ROWS" &&
+      legacyVersions[0]!.lender === "Banque d'origine" &&
+      legacyVersions[1]!.change_kind === "CORRECTION" &&
+      legacyVersions[1]!.new_lender === "Banque corrigée",
+    `Version de référence absente ou fausse : ${JSON.stringify(legacyVersions)}`,
+  );
+  // Une deuxième correction n'ajoute pas de seconde référence.
+  await client.query(save, [
+    userId,
+    JSON.stringify({
+      ...contract,
+      liability_id: legacyId,
+      initial_balance: null,
+      balance_date: null,
+      name: "Prêt antérieur",
+      lender: "Banque recorrigée",
+      change_reason: "Encore",
+    }),
+  ]);
+  const baselines = (
+    await client.query<{ n: string }>(
+      `select count(*)::text as n from public.liability_contract_versions
+        where liability_id = $1 and change_kind = 'BASELINE'`,
+      [legacyId],
+    )
+  ).rows[0]!.n;
+  assert(baselines === "1", `Références multiples : ${baselines}`);
 
   const record = "select public.lfo_record_debt_event($1::uuid, $2::jsonb)::text as id";
   const event = (
@@ -334,6 +410,38 @@ try {
     [userId, event("RATE_CHANGE", "OBSERVED", "2026-01-05", { annual_rate: "0.02" })],
     "Révision de taux « observée » acceptée",
     "23514",
+  );
+  // Formes invalides : refus NOMMÉ (LF422), jamais une erreur de conversion brute.
+  const deferral = (months: unknown) =>
+    event("DEFERRAL", "CONTRACTUAL", "2027-06-05", {
+      months,
+      deferral_kind: "TOTAL",
+      interest_treatment: "PAID",
+      term_effect: "EXTEND_TERM",
+    });
+  await refuses(record, [userId, deferral(1e12)], "Report de 1e12 mois", "LF422");
+  await refuses(record, [userId, deferral(2.5)], "Report non entier", "LF422");
+  await refuses(record, [userId, deferral("3")], "Report en texte", "LF422");
+  await refuses(
+    record,
+    [userId, event("RATE_CHANGE", "CONTRACTUAL", "2027-13-45", { annual_rate: "0.02" })],
+    "Date d'effet inexistante",
+    "LF422",
+  );
+  await refuses(
+    record,
+    [userId, event("AMENDMENT", "CONTRACTUAL", "2027-01-05", { maturity_date: "2029-02-30" })],
+    "Dernière échéance inexistante",
+    "LF422",
+  );
+  await refuses(
+    record,
+    [
+      userId,
+      event("RATE_CHANGE", "CONTRACTUAL", "2027-01-05", { annual_rate: "0.02" }, "pas-un-uuid"),
+    ],
+    "Identifiant de dette mal formé",
+    "LF422",
   );
   await refuses(
     record,

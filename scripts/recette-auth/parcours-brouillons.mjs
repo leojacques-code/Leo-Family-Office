@@ -252,13 +252,17 @@ try {
   await page.getByRole("button", { name: "Corriger le contrat" }).click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("Prêteur").fill("Banque renégociée");
+  await dialog.getByLabel("Motif de la correction (facultatif)").fill("Prêteur mal recopié");
   await dialog.getByRole("button", { name: "Enregistrer le brouillon" }).click();
   await dialog.getByRole("status").waitFor();
+  // Le premier enregistrement ne doit pas remonter le formulaire : le motif reste affiché.
+  const reasonAfterSave = await dialog.getByLabel("Motif de la correction (facultatif)").inputValue();
   await page.keyboard.press("Escape");
   await page.reload();
   await page.getByRole("button", { name: "Corriger le contrat" }).click();
   dialog = page.getByRole("dialog");
   const reopened = await dialog.getByLabel("Prêteur").inputValue();
+  const reasonReopened = await dialog.getByLabel("Motif de la correction (facultatif)").inputValue();
   const savedLender = await one(
     "select lender from public.liabilities where user_id = $1 and name = 'Prêt validé'",
     [userA.id],
@@ -268,6 +272,12 @@ try {
     "modification en brouillon : reprise à la réouverture, contrat enregistré inchangé",
     reopened === "Banque renégociée" && savedLender.lender === "Banque",
     { repris: reopened, enregistre: savedLender.lender },
+  );
+  check(
+    "D10",
+    "motif de correction conservé au premier enregistrement du brouillon et après rechargement",
+    reasonAfterSave === "Prêteur mal recopié" && reasonReopened === "Prêteur mal recopié",
+    { apresEnregistrement: reasonAfterSave, apresRechargement: reasonReopened },
   );
   await page.keyboard.press("Escape");
 

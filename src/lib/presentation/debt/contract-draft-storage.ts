@@ -26,6 +26,8 @@ export interface ContractDraftState {
     annualRate: number | null;
   };
   insurance: { choice: string; policies: DebtContractInput["insurancePolicies"] };
+  /** Motif d'une correction de saisie en cours (contrat existant) ; texte libre, facultatif. */
+  changeReason?: string;
 }
 
 const STRUCTURE_VALUES: Record<keyof ContractDraftState["structure"], readonly string[]> = {
@@ -160,5 +162,10 @@ export function restoreContractDraft(
         ? (normaliseMissing(insurance.policies) as DebtContractInput["insurancePolicies"])
         : base.insurance.policies,
     },
+    ...(typeof content.changeReason === "string" && content.changeReason.length <= 500
+      ? { changeReason: content.changeReason }
+      : base.changeReason !== undefined
+        ? { changeReason: base.changeReason }
+        : {}),
   };
 }

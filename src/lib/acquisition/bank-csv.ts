@@ -290,12 +290,14 @@ function normalizeRow(
   }
   // Postérieure à la date de l'IMPORT, pas à la date d'arrêté du reporting. Une opération
   // du 26/08 importée le 27/08 est un fait réel, même si le cockpit arrête au 19/08.
+  // BLOQUANTE : un fait observé n'est jamais daté après aujourd'hui, et la base refuse la
+  // ligne (`LF425`). La laisser passer ferait échouer tout le lot à la validation.
   if (parsedDate.value !== null && parsedDate.value > input.observationDate) {
     issues.push(
       issue(
         "DATE_IN_FUTURE",
-        "WARNING",
-        `Opération datée après le jour de l'import (${input.observationDate}) : vérifier la date.`,
+        "ERROR",
+        `Opération datée après le jour de l'import (${input.observationDate}) : un fait observé n'est pas daté dans le futur.`,
         "transactionDate",
         rawDate,
       ),

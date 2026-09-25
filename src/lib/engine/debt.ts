@@ -117,6 +117,8 @@ export type LoanFlagCode =
   | "RATE_REVISION_PAYMENT_KEPT"
   | "BALANCE_PREDATES_REPAYMENT"
   | "AMENDMENT_MATURITY_NOT_ON_SCHEDULE"
+  | "EVENTS_NOT_APPLIED_TO_PROVIDED_SCHEDULE"
+  | "PLANNED_REPAYMENT_OVERDUE"
   | "INSURANCE_TREATMENT_UNKNOWN"
   | "DEFERRAL_INTEREST_UNKNOWN"
   | "DEFERRAL_CONTRADICTORY"
@@ -877,6 +879,53 @@ function amortise(input: AmortiseInput): AmortiseResult {
   }
   let previousDueDate = dueDateOf(liability, firstPaymentNumber - 1);
 
+  const remainingFrom = (rank: number) =>
+    Math.max(1, Math.min(lastPaymentNumber, totalPayments) - rank + 1);
+  const firstRankOnOrAfter = (date: string) => {
+    let rank = 1;
+    while (rank <= MAX_DERIVED_PAYMENTS && dueDateOf(liability, rank) < date) rank += 1;
+    return rank;
+  };
+  const stepDeduction =
+    liability.paymentIncludesInsurance === true ? insurancePerPayment(liability) : 0;
+  // À un même rang, un palier s'applique avant un recalcul ; entre paliers, l'ordre déclaré
+  // (clause du contrat, puis événement) est conservé par un tri stable.
+  const paymentPoints = [
+    ...(liability.paymentSchedule ?? []).map((step) => ({
+      rank: firstRankOnOrAfter(step.effectiveFrom),
+      order: 0,
+      kind: "STEP" as const,
+      amount: Math.max(0, step.amount - stepDeduction),
+    })),
+    ...(liability.paymentRecalculations ?? []).map((point) => ({
+      rank: firstRankOnOrAfter(point.date),
+      order: 1,
+      kind: "RECALCULATE" as const,
+      amount: 0,
+    })),
+    ...windows
+      .filter((window) => window.termEffect === "RECALCULATE_PAYMENT")
+      .map((window) => ({
+        rank: window.end + 1,
+        order: 1,
+        kind: "RECALCULATE" as const,
+        amount: 0,
+      })),
+  ].sort((a, b) => a.rank - b.rank || a.order - b.order);
+  // Une projection qui démarre après un palier ou un recalcul en hérite : la mensualité en
+  // vigueur est celle du DERNIER point antérieur, recalculée sur l'encours de départ.
+  const inherited = paymentPoints.filter((point) => point.rank < firstPaymentNumber).at(-1);
+  if (inherited)
+    payment =
+      inherited.kind === "STEP"
+        ? inherited.amount
+        : pmt(
+            liability,
+            input.openingBalance,
+            annualRateAt(liability, dueDateOf(liability, firstPaymentNumber)),
+            remainingFrom(firstPaymentNumber),
+          );
+
   for (let offset = 0; offset < paymentsToProduce; offset += 1) {
     const paymentNumber = firstPaymentNumber + offset;
     const dueDate = dueDateOf(liability, paymentNumber);
@@ -899,38 +948,18 @@ function amortise(input: AmortiseInput): AmortiseResult {
       previousDueDate,
       dueDate,
     );
-    // Un palier daté remplace le paiement à sa date d'effet, sans toucher au passé. En
-    // l'absence de palier, le paiement courant est conservé : il a pu être recalculé.
-    const stepped = steppedPaymentAt(liability, dueDate);
-    if (stepped !== null) {
-      const deduction =
-        liability.paymentIncludesInsurance === true ? insurancePerPayment(liability) : 0;
-      payment = Math.max(0, stepped - deduction);
-    }
+    // Paliers et recalculs de mensualité : appliqués UNE fois, à leur rang d'échéance.
+    // Réappliquer un palier à chaque échéance écraserait une mensualité recalculée depuis
+    // (remboursement anticipé, avenant de durée, fin de report).
+    for (const point of paymentPoints.filter((candidate) => candidate.rank === paymentNumber))
+      payment =
+        point.kind === "STEP"
+          ? point.amount
+          : pmt(liability, balance, annualRate, remainingFrom(paymentNumber));
 
     const window = windows.find(
       (candidate) => paymentNumber >= candidate.first && paymentNumber <= candidate.end,
     );
-    // Fin d'un report à mensualité recalculée : le capital restant est réparti sur les
-    // échéances restantes, au taux en vigueur.
-    const resumed = windows.find(
-      (candidate) =>
-        candidate.termEffect === "RECALCULATE_PAYMENT" && paymentNumber === candidate.end + 1,
-    );
-    // Avenant à nouvelle durée sans nouvelle mensualité : recalcul à la première échéance
-    // exigible à partir de sa date d'effet.
-    const amended = (liability.paymentRecalculations ?? []).some(
-      (point) =>
-        dueDate >= point.date &&
-        (paymentNumber === 1 || dueDateOf(liability, paymentNumber - 1) < point.date),
-    );
-    if (resumed || amended)
-      payment = pmt(
-        liability,
-        balance,
-        annualRate,
-        Math.max(1, Math.min(lastPaymentNumber, totalPayments) - paymentNumber + 1),
-      );
     const eventDeferralCapitalises =
       window !== undefined && window.kind === "TOTAL" && window.interestTreatment !== "PAID";
     const inDeferral = paymentNumber <= deferral.months || window !== undefined;
@@ -1193,13 +1222,23 @@ function withSeparateInsurance(
  * C. Un échéancier bancaire fourni prime : ses lignes futures sont ce que la banque
  * prélèvera, quelle que soit la projection que nous aurions faite.
  */
+/**
+ * Un événement qui modifie l'encours (remboursement, frais financé) et qui est daté au plus
+ * tard à la date de l'encours OBSERVÉ y est déjà : le rejouer depuis cet encours le
+ * compterait deux fois. Un frais payé comptant ne touche pas l'encours et reste une sortie.
+ */
+function includedInObservedBalance(liability: Liability, event: LoanEvent): boolean {
+  if (!liability.balanceDate || event.date > liability.balanceDate) return false;
+  return event.type === "EARLY_REPAYMENT" || event.financed;
+}
+
 function forwardScheduleCore(liability: Liability, asOfDate: string): LoanSchedule {
   if (hasProvidedSchedule(liability)) {
     const future = fromProvided(liability, liability.providedSchedule).filter(
       (row) => row.dueDate > asOfDate,
     );
     const events = [...repaymentEvents(liability), ...chargeEvents(liability)]
-      .filter((event) => event.date > asOfDate)
+      .filter((event) => event.date > asOfDate && !includedInObservedBalance(liability, event))
       .sort((a, b) => a.date.localeCompare(b.date));
     // Les événements ne réécrivent pas un échéancier bancaire : ils s'y ajoutent comme
     // lignes de trésorerie distinctes, l'échéancier restant la source de vérité.
@@ -1260,7 +1299,7 @@ function forwardScheduleCore(liability: Liability, asOfDate: string): LoanSchedu
   const elapsed = elapsedPaymentsAt(liability, asOfDate);
   const remaining = Math.trunc(liability.paymentCount) - elapsed;
   const events = [...repaymentEvents(liability), ...chargeEvents(liability)].filter(
-    (event) => event.date > asOfDate,
+    (event) => event.date > asOfDate && !includedInObservedBalance(liability, event),
   );
   if (liability.currentBalance <= 0) {
     // Dette éteinte : plus aucune échéance, mais un frais ponctuel futur reste exigible.
@@ -1367,6 +1406,29 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
         "Première échéance non datée : aucune échéance ne peut être positionnée dans le temps.",
     });
   }
+  // B18 : un échéancier bancaire fourni prime sur toute reconstruction ; seuls les
+  // remboursements s'y ajoutent. Les autres événements sont conservés dans l'historique mais
+  // ne changent pas les prélèvements du document : c'est dit, jamais tu.
+  if (hasProvidedSchedule(liability)) {
+    const ignored =
+      (liability.rateSchedule ?? []).some((item) => item.eventId) ||
+      (liability.paymentSchedule ?? []).some((item) => item.eventId) ||
+      (liability.deferralPeriods ?? []).length > 0 ||
+      (liability.paymentRecalculations ?? []).length > 0;
+    if (ignored)
+      flags.push({
+        code: "EVENTS_NOT_APPLIED_TO_PROVIDED_SCHEDULE",
+        detail:
+          "L'échéancier bancaire fourni prime : les révisions, paliers, reports et avenants enregistrés restent dans l'historique mais ne modifient pas ses prélèvements. Importez l'échéancier mis à jour.",
+      });
+  }
+  // Un remboursement PRÉVU dont la date est passée n'est ni un fait ni encore une intention.
+  for (const repayment of liability.earlyRepayments ?? [])
+    if (repayment.planned && repayment.date <= asOfDate)
+      flags.push({
+        code: "PLANNED_REPAYMENT_OVERDUE",
+        detail: `Remboursement prévu le ${frDate(repayment.date)}, date passée, non constaté : enregistrez-le comme effectué ou annulez-le.`,
+      });
   for (const amendment of liability.unresolvedAmendments ?? [])
     flags.push({
       code: "AMENDMENT_MATURITY_NOT_ON_SCHEDULE",

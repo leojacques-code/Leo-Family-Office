@@ -251,4 +251,147 @@ describe("B18 : événements de dette traduits pour le Debt Engine", () => {
       "AMENDMENT_MATURITY_NOT_ON_SCHEDULE",
     );
   });
+
+  it("relecture 1 : un remboursement déjà dans l'encours observé n'est pas rejoué par la projection", () => {
+    const repaid = withDebtEvents({ ...loan, currentBalance: 500, balanceDate: "2027-02-20" }, [
+      event(
+        {
+          kind: "EARLY_REPAYMENT",
+          amount: 500,
+          penalty: 0,
+          outcome: "SHORTEN_TERM",
+          balanceAfter: 500,
+        },
+        "2027-02-20",
+      ),
+    ]);
+    const forward = buildForwardSchedule(repaid, "2027-01-31");
+    expect(forward.entries.some((row) => row.entryKind === "EARLY_REPAYMENT")).toBe(false);
+    // Le capital projeté est exactement l'encours observé : 500 €, pas 500 € de moins.
+    expect(forward.entries.reduce((sum, row) => sum + row.principal, 0)).toBeCloseTo(500, 6);
+  });
+
+  it("relecture 2 : un report postérieur à un avenant de durée allonge la nouvelle durée", () => {
+    const changed = withDebtEvents(loan, [
+      event(
+        {
+          kind: "AMENDMENT",
+          annualRate: null,
+          paymentAmount: null,
+          maturityDate: "2028-06-05",
+          note: null,
+        },
+        "2027-03-05",
+      ),
+      event(
+        {
+          kind: "DEFERRAL",
+          months: 3,
+          deferralKind: "PRINCIPAL_ONLY",
+          interestTreatment: "PAID",
+          termEffect: "EXTEND_TERM",
+        },
+        "2027-09-05",
+      ),
+    ]);
+    expect(changed.paymentCount).toBe(21);
+    expect(changed.maturityDate).toBe("2028-09-05");
+  });
+
+  it("relecture 3 : une projection postérieure à un recalcul garde la mensualité recalculée", () => {
+    const amended = withDebtEvents(loan, [
+      event(
+        {
+          kind: "AMENDMENT",
+          annualRate: null,
+          paymentAmount: null,
+          maturityDate: "2028-06-05",
+          note: null,
+        },
+        "2027-01-01",
+      ),
+    ]);
+    const perMonth = 1200 / 18;
+    const projected = withDebtEvents(
+      { ...loan, currentBalance: 1200 - 5 * perMonth, balanceDate: "2027-05-10" },
+      amended.events!,
+    );
+    const forward = buildForwardSchedule(projected, "2027-05-10");
+    const first = forward.entries.find((row) => row.entryKind === "PAYMENT")!;
+    expect(first.principal).toBeCloseTo(perMonth, 6);
+    expect(forward.entries.filter((row) => row.entryKind === "PAYMENT")).toHaveLength(13);
+    expect(forward.entries.at(-1)!.closingBalance).toBeCloseTo(0, 6);
+  });
+
+  it("relecture 3 bis : un palier antérieur ne réécrase pas un recalcul postérieur", () => {
+    const changed = withDebtEvents(loan, [
+      event({ kind: "PAYMENT_CHANGE", paymentAmount: 100 }, "2027-01-05"),
+      event(
+        {
+          kind: "AMENDMENT",
+          annualRate: null,
+          paymentAmount: null,
+          maturityDate: "2028-06-05",
+          note: null,
+        },
+        "2027-03-01",
+      ),
+    ]);
+    const rows = payments(changed);
+    expect(rows).toHaveLength(18);
+    // 2 × 100 € puis 1 000 € sur 16 échéances : 62,50 €, jusqu'au bout.
+    expect(rows[2]!.principal).toBeCloseTo(62.5, 6);
+    expect(rows[10]!.principal).toBeCloseTo(62.5, 6);
+    expect(rows.at(-1)!.closingBalance).toBeCloseTo(0, 6);
+  });
+
+  it("relecture 4 : un échéancier bancaire fourni signale les événements qu'il n'applique pas", () => {
+    const withProvided: Liability = {
+      ...loan,
+      providedSchedule: payments(loan).map((row) => ({
+        paymentNumber: row.paymentNumber,
+        dueDate: row.dueDate,
+        openingBalance: row.openingBalance,
+        interest: row.interest,
+        principal: row.principal,
+        insurance: row.insurance,
+        fees: row.fees,
+        closingBalance: row.closingBalance,
+      })),
+    };
+    const deferred = withDebtEvents(withProvided, [
+      event(
+        {
+          kind: "DEFERRAL",
+          months: 3,
+          deferralKind: "TOTAL",
+          interestTreatment: "CAPITALISED",
+          termEffect: "EXTEND_TERM",
+        },
+        "2027-04-01",
+      ),
+    ]);
+    expect(buildLoanTimeline(deferred, "2026-12-01").flags.map((flag) => flag.code)).toContain(
+      "EVENTS_NOT_APPLIED_TO_PROVIDED_SCHEDULE",
+    );
+  });
+
+  it("relecture 6 : un remboursement prévu dont la date est passée est signalé", () => {
+    const planned = withDebtEvents(loan, [
+      event(
+        {
+          kind: "EARLY_REPAYMENT",
+          amount: 100,
+          penalty: null,
+          outcome: "UNKNOWN",
+          balanceAfter: null,
+        },
+        "2027-02-10",
+        { nature: "PLANNED" },
+      ),
+    ]);
+    expect(buildLoanTimeline(planned, "2027-03-01").flags.map((flag) => flag.code)).toContain(
+      "PLANNED_REPAYMENT_OVERDUE",
+    );
+  });
 });

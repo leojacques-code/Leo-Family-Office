@@ -17,6 +17,7 @@ const NATURE_LABELS: Record<DebtEvent["nature"], string> = {
   PLANNED: "Prévu",
 };
 const VERSION_LABELS = {
+  BASELINE: "Termes antérieurs au versionnement",
   INITIAL: "Création",
   PROMOTION: "Contrat d’un encours",
   CORRECTION: "Correction de saisie",
@@ -163,8 +164,8 @@ export function DebtHistory({
                   {event.observationId ? (
                     <p className="muted-copy">
                       L’encours constaté écrit avec cet événement reste une observation datée :
-                      l’annulation ne le modifie pas. S’il était faux, enregistrez l’encours
-                      exact par « Nouvel encours ».
+                      l’annulation ne le modifie pas. S’il était faux, enregistrez l’encours exact
+                      par « Nouvel encours ».
                     </p>
                   ) : null}
                   {error ? (

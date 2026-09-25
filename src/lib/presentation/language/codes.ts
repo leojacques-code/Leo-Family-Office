@@ -134,6 +134,14 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
     label: "Nouvelle échéance d’avenant hors calendrier",
     state: A,
   },
+  EVENTS_NOT_APPLIED_TO_PROVIDED_SCHEDULE: {
+    label: "Événements non reportés sur l’échéancier fourni",
+    state: A,
+  },
+  PLANNED_REPAYMENT_OVERDUE: {
+    label: "Remboursement prévu à date passée, non constaté",
+    state: A,
+  },
   MATURITY_MISMATCH: { label: "Maturité incohérente avec l’échéancier", state: C },
   TERMS_DERIVED: { label: "Termes du contrat calculés, non déclarés", state: "AVAILABLE" },
   TERMS_UNRESOLVED: { label: "Échéancier non calculable avec les termes déclarés", state: P },

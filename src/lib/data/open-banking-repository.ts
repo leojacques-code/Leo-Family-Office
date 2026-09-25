@@ -23,6 +23,7 @@ import type {
   SandboxScenario,
 } from "@/lib/acquisition/banking";
 import { civilDateIn, resolveTimeZone } from "@/lib/acquisition/clock";
+import { operationalToday } from "@/lib/financial-date";
 import type { ExistingIdentity, ExistingTransactionFact } from "@/lib/acquisition/types";
 import type {
   BankSyncCommitResult,
@@ -602,6 +603,7 @@ export class OpenBankingRepository {
           accountCurrency: nullableStr(account.currency),
           mappedAccountId: canonicalAccountId,
           accountAmbiguous: false,
+          today: operationalToday(),
         }),
       );
       const identities = await this.existingIdentities(normalized);

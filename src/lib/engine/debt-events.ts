@@ -30,14 +30,13 @@ export function withDebtEvents(liability: Liability, events: readonly DebtEvent[
   const deferralPeriods = [...(liability.deferralPeriods ?? [])];
   const paymentRecalculations = [...(liability.paymentRecalculations ?? [])];
   const unresolvedAmendments = [...(liability.unresolvedAmendments ?? [])];
-  let extension = 0;
-  // Dernière nouvelle durée déclarée par un avenant, appliquée après les reports.
-  let amendedMaturity: {
-    eventId: string;
-    date: string;
-    maturityDate: string;
-    payment: boolean;
-  } | null = null;
+  // Changements de DURÉE, dans l'ordre chronologique des événements : un report « durée
+  // allongée » ajoute ses échéances au nombre EN VIGUEUR à sa date ; un avenant fixe une
+  // nouvelle dernière échéance, et un report postérieur l'allonge encore.
+  const termChanges: Array<
+    | { kind: "EXTEND"; months: number }
+    | { kind: "MATURITY"; eventId: string; date: string; maturityDate: string; payment: boolean }
+  > = [];
 
   for (const event of active) {
     const content = event.content;
@@ -75,12 +74,13 @@ export function withDebtEvents(liability: Liability, events: readonly DebtEvent[
             eventId: event.id,
           });
         if (content.maturityDate !== null)
-          amendedMaturity = {
+          termChanges.push({
+            kind: "MATURITY",
             eventId: event.id,
             date,
             maturityDate: content.maturityDate,
             payment: content.paymentAmount !== null,
-          };
+          });
         break;
       case "EARLY_REPAYMENT":
         earlyRepayments.push({
@@ -115,12 +115,13 @@ export function withDebtEvents(liability: Liability, events: readonly DebtEvent[
           interestTreatment: content.interestTreatment,
           termEffect: content.termEffect,
         });
-        if (content.termEffect === "EXTEND_TERM") extension += content.months;
+        if (content.termEffect === "EXTEND_TERM")
+          termChanges.push({ kind: "EXTEND", months: content.months });
         break;
     }
   }
 
-  let result: Liability = {
+  const result: Liability = {
     ...liability,
     rateSchedule,
     paymentSchedule,
@@ -130,45 +131,41 @@ export function withDebtEvents(liability: Liability, events: readonly DebtEvent[
     unresolvedAmendments,
     events: [...own].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate)),
   };
-  if (Math.trunc(liability.paymentCount) <= 0) return result;
-  if (extension > 0) {
-    // « Durée allongée » : les échéances reportées s'ajoutent en fin de prêt, déclaré par
-    // l'événement. La maturité est celle de la nouvelle dernière échéance.
-    const paymentCount = Math.trunc(liability.paymentCount) + extension;
-    result = {
-      ...result,
-      paymentCount,
-      maturityDate: dueDateOf({ ...result, paymentCount }, paymentCount),
-    };
-  }
-  if (amendedMaturity) {
+  if (Math.trunc(liability.paymentCount) <= 0 || termChanges.length === 0) return result;
+  let paymentCount = Math.trunc(liability.paymentCount);
+  for (const change of termChanges) {
+    if (change.kind === "EXTEND") {
+      // « Durée allongée » : les échéances reportées s'ajoutent en fin de prêt.
+      paymentCount += change.months;
+      continue;
+    }
     // Nouvelle durée d'un avenant : la dernière échéance DÉCLARÉE doit tomber sur le
     // calendrier des échéances. Hors calendrier, rien n'est arrondi : c'est signalé.
     let rank = 0;
     for (let candidate = 1; candidate <= 1200; candidate += 1) {
       const due = dueDateOf(result, candidate);
-      if (due === amendedMaturity.maturityDate) {
+      if (due === change.maturityDate) {
         rank = candidate;
         break;
       }
-      if (due > amendedMaturity.maturityDate) break;
+      if (due > change.maturityDate) break;
     }
     if (rank === 0) {
       unresolvedAmendments.push({
-        eventId: amendedMaturity.eventId,
-        date: amendedMaturity.date,
-        maturityDate: amendedMaturity.maturityDate,
+        eventId: change.eventId,
+        date: change.date,
+        maturityDate: change.maturityDate,
       });
-    } else {
-      result = { ...result, paymentCount: rank, maturityDate: amendedMaturity.maturityDate };
-      // Sans nouvelle mensualité déclarée, la mensualité se recalcule à la date d'effet sur
-      // la durée restante : c'est ce que « nouvelle durée » signifie pour un amortissable.
-      if (!amendedMaturity.payment)
-        paymentRecalculations.push({
-          eventId: amendedMaturity.eventId,
-          date: amendedMaturity.date,
-        });
+      continue;
     }
+    paymentCount = rank;
+    // Sans nouvelle mensualité déclarée, la mensualité se recalcule à la date d'effet sur
+    // la durée restante : c'est ce que « nouvelle durée » signifie pour un amortissable.
+    if (!change.payment) paymentRecalculations.push({ eventId: change.eventId, date: change.date });
   }
-  return result;
+  return {
+    ...result,
+    paymentCount,
+    maturityDate: dueDateOf({ ...result, paymentCount }, paymentCount),
+  };
 }

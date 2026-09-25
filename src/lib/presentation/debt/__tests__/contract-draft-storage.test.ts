@@ -116,4 +116,17 @@ describe("Brouillon de contrat : sérialisation et relecture défensive", () => 
     expect(restored.requiredValues.principal).toBeNull();
     expect(restored.insurance).toEqual(base.insurance);
   });
+
+  it("garde le motif d'une correction en cours, et refuse un motif de mauvaise forme", () => {
+    const withReason = restoreContractDraft(
+      serializeContractDraft({ ...base, changeReason: "Taux mal recopié" }),
+      { ...base, changeReason: "" },
+    );
+    expect(withReason.changeReason).toBe("Taux mal recopié");
+    const wrong = restoreContractDraft(
+      { ...serializeContractDraft(base), changeReason: 42 },
+      { ...base, changeReason: "" },
+    );
+    expect(wrong.changeReason).toBe("");
+  });
 });

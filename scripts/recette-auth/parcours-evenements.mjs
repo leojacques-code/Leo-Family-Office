@@ -167,6 +167,26 @@ try {
     { observation: observed, passif: stateA.balanceSheet.totalLiabilities.value },
   );
 
+  // ---------- E13 : bornes de date de l'interface, prévu au plus tôt demain ----------
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Événement ou avenant" }).click();
+  {
+    const bounds = page.getByRole("dialog");
+    await bounds.getByLabel(/Je vais rembourser une partie du capital/).check();
+    const plannedMin = await bounds.getByLabel("Date du remboursement").getAttribute("min");
+    await bounds.getByLabel(/J’ai remboursé une partie du capital/).check();
+    const observedMax = await bounds.getByLabel("Date du remboursement").getAttribute("max");
+    const tomorrow = await inDays(1);
+    check(
+      "E13",
+      "bornes de saisie : prévu au plus tôt demain, effectué au plus tard aujourd'hui",
+      plannedMin === tomorrow && observedMax === today,
+      { plannedMin, observedMax },
+    );
+    await page.keyboard.press("Escape");
+  }
+
   // ---------- Remboursement prévu : intention, aucun encours ----------
   const plannedDate = await inDays(40);
   const plannedResponse = await page.request.post(`${APP}/api/debt`, {

@@ -72,6 +72,7 @@ const canonicalMigrations = [
   "20260925110000",
   "20260925120000",
   "20260925130000",
+  "20260925140000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -1698,6 +1699,7 @@ const requiredConstraints = [
   "liability_events_owner_actor_ck",
   "liability_event_cancellations_event_fk",
   "liability_contract_versions_liability_fk",
+  "liability_contract_versions_kind_v2_ck",
   "liabilities_payment_count_ck",
   "loan_rate_changes_kind_ck",
   "loan_payment_changes_kind_ck",

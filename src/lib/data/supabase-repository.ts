@@ -403,7 +403,7 @@ function decimalText(value: number): string {
 }
 
 const DEBT_EVENT_NATURES = ["OBSERVED", "CONTRACTUAL", "PLANNED"] as const;
-const CONTRACT_CHANGE_KINDS = ["INITIAL", "PROMOTION", "CORRECTION"] as const;
+const CONTRACT_CHANGE_KINDS = ["BASELINE", "INITIAL", "PROMOTION", "CORRECTION"] as const;
 
 /**
  * Contenu d'un événement relu tel que la RPC l'a contrôlé : montants en texte décimal,

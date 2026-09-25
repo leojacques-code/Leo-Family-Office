@@ -196,6 +196,10 @@ export function DebtEventForm({
   const currency = loan.currency ?? null;
   const currencyLabel = currency ?? "devise non renseignée";
   const today = operationalToday();
+  // Lendemain civil : borne basse d'un remboursement PRÉVU, qui ne peut pas être aujourd'hui.
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000)
+    .toISOString()
+    .slice(0, 10);
   const nature = natureOf(choice);
   const content = contentOf(choice, draft);
   const dateProblem = !draft.date
@@ -222,9 +226,13 @@ export function DebtEventForm({
       recordedAt: new Date().toISOString(),
       cancellation: null,
     };
+    // L'encours constaté ne remplace l'encours courant que s'il n'est pas antérieur à la
+    // dernière observation : c'est la règle de la base, et l'aperçu ne doit pas promettre
+    // un bilan que l'enregistrement ne produira pas.
     const observedAfter =
-      (content.kind === "EARLY_REPAYMENT" && content.balanceAfter !== null) ||
-      content.kind === "FULL_REPAYMENT";
+      ((content.kind === "EARLY_REPAYMENT" && content.balanceAfter !== null) ||
+        content.kind === "FULL_REPAYMENT") &&
+      (!loan.balanceDate || loan.balanceDate <= draft.date);
     const base = observedAfter
       ? {
           ...loan,
@@ -327,7 +335,7 @@ export function DebtEventForm({
               type="date"
               value={draft.date}
               {...(nature === "OBSERVED" ? { max: today } : {})}
-              {...(nature === "PLANNED" ? { min: today } : {})}
+              {...(nature === "PLANNED" ? { min: tomorrow } : {})}
               onChange={(event) => set({ date: event.target.value })}
               required
             />

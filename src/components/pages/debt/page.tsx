@@ -126,13 +126,18 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   }): Promise<{ ok: true; draft: FormDraft } | { ok: false; message: string; conflict?: boolean }> {
     try {
       const { replaceLatest, ...payload } = input;
-      if (replaceLatest && payload.draftId) {
+      if (replaceLatest && (payload.draftId || payload.subjectId)) {
         // Remplacement DÉCIDÉ après un conflit : la version courante est relue, puis écrite
         // sous cette version. Un nouveau conflit entre-temps échoue encore, sans écraser.
+        // Sans identifiant (premier enregistrement alors qu'un brouillon de la même dette a
+        // été créé ailleurs), le brouillon courant se retrouve par sa nature et sa dette :
+        // il n'y en a qu'un par dette.
         const latest = await fetch("/api/debt", { cache: "no-store" });
         const model = latest.ok ? await latest.json() : null;
-        const current = (model?.drafts ?? []).find(
-          (item: FormDraft) => item.id === payload.draftId,
+        const current = (model?.drafts ?? []).find((item: FormDraft) =>
+          payload.draftId
+            ? item.id === payload.draftId
+            : item.kind === payload.kind && item.subjectId === payload.subjectId,
         );
         if (!current)
           return {
@@ -140,6 +145,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             message:
               "Ce brouillon n’existe plus : enregistrez votre saisie comme nouveau brouillon.",
           };
+        payload.draftId = current.id;
         payload.expectedVersion = current.version;
       }
       const response = await fetch("/api/drafts", {
@@ -354,7 +360,9 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
     >
       {promoting ? (
         <DebtContractForm
-          key={`promote-${promoting.id}-${draftFor("DEBT_CONTRACT_PROMOTION", promoting.id)?.id ?? "none"}`}
+          // Le brouillon ne sert qu'au montage : l'enregistrer ne doit pas remonter le
+          // formulaire, sans quoi le motif et l'état non sérialisé seraient perdus.
+          key={`promote-${promoting.id}`}
           loan={null}
           promoteFrom={promoting}
           asOfDate={state.asOfDate}
@@ -503,7 +511,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
       wide
     >
       <DebtContractForm
-        key={`${contractEditor}-${loan?.id ?? "new"}-${editorDraft?.id ?? "none"}`}
+        key={`${contractEditor}-${loan?.id ?? "new"}-${contractEditor === "new" ? (resumedDraft?.id ?? "none") : "own"}`}
         loan={contractEditor === "edit" ? (loan ?? null) : null}
         asOfDate={state.asOfDate}
         reportingCurrency={state.reportingCurrency}

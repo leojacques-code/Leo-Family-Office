@@ -227,7 +227,7 @@ export interface DebtEvent {
 export interface ContractVersion {
   id: string;
   versionNo: number;
-  changeKind: "INITIAL" | "PROMOTION" | "CORRECTION";
+  changeKind: "BASELINE" | "INITIAL" | "PROMOTION" | "CORRECTION";
   changeReason: string | null;
   recordedAt: string;
   terms: Record<string, unknown>;

@@ -348,6 +348,7 @@ export function DebtContractForm({
         annualRate: loan?.annualRate ?? null,
       },
       insurance: initialInsurance(loan),
+      changeReason: "",
     };
     return draft ? restoreContractDraft(draft.content, base) : base;
   });
@@ -372,7 +373,7 @@ export function DebtContractForm({
       : null,
   );
   const [savingDraft, setSavingDraft] = useState(false);
-  const [changeReason, setChangeReason] = useState("");
+  const [changeReason, setChangeReason] = useState(initial.changeReason ?? "");
   const [draftConflict, setDraftConflict] = useState(false);
 
   async function saveDraft(resolution: "normal" | "replace" | "copy" = "normal") {
@@ -386,7 +387,13 @@ export function DebtContractForm({
       kind: draftKind,
       subjectId: loan?.id ?? promoteFrom?.id ?? null,
       title: contract.name.trim() || promoteFrom?.name || loan?.name || "Dette sans nom",
-      content: serializeContractDraft({ contract, structure, requiredValues, insurance }),
+      content: serializeContractDraft({
+        contract,
+        structure,
+        requiredValues,
+        insurance,
+        ...(loan ? { changeReason } : {}),
+      }),
     });
     setSavingDraft(false);
     setDraftConflict(!result.ok && result.conflict === true);
