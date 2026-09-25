@@ -14,8 +14,10 @@ import {
 } from "recharts";
 import { compareDebtVsInvest } from "@/lib/engine/decision";
 import {
+  addMonths,
   buildLoanTimeline,
   debtServiceBreakdownForPeriod,
+  insuranceKnown,
   monthBounds,
   monthlyDebtServiceAt,
   nextDebtEvent,
@@ -327,6 +329,16 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const { contractual, forward } = timeline;
   const currentDebtService = monthlyDebtServiceAt([loan], state.asOfDate);
   const monthWindow = monthBounds(state.asOfDate);
+  // Composition des sorties des 12 prochains mois, lue dans le Debt Engine (V10 §12).
+  const yearBreakdown = debtServiceBreakdownForPeriod(
+    [loan],
+    state.asOfDate,
+    state.asOfDate,
+    addMonths(state.asOfDate, 12),
+  );
+  const insuranceIsKnown = insuranceKnown(loan);
+  const insuranceDebits = forward.entries.filter((row) => row.entryKind === "INSURANCE");
+  const nextInsuranceDebit = insuranceDebits[0] ?? null;
   const monthBreakdown = debtServiceBreakdownForPeriod(
     [loan],
     state.asOfDate,
@@ -544,7 +556,10 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={forward.entries
-                  .filter((_, index) => index % 6 === 0 || index === forward.entries.length - 1)
+                  // Un prélèvement d'assurance ne change pas l'encours : la courbe ne trace
+                  // que les lignes qui l'amortissent.
+                  .filter((entry) => entry.entryKind !== "INSURANCE")
+                  .filter((_, index, rows) => index % 6 === 0 || index === rows.length - 1)
                   .map((entry) => ({
                     date: entry.dueDate.slice(0, 7),
                     balance: entry.closingBalance,
@@ -579,6 +594,18 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
               </AreaChart>
             </ResponsiveContainer>
           </div>
+          <PaymentComposition
+            breakdown={yearBreakdown}
+            currency={currency}
+            insuranceLabel={
+              loan.insuranceMode === "SEPARATE"
+                ? "Assurance séparée"
+                : loan.insuranceMode === "INCLUDED"
+                  ? "Assurance incluse"
+                  : "Assurance"
+            }
+            insuranceKnown={insuranceIsKnown}
+          />
         </article>
         <article className="panel loan-facts">
           <div className="panel-header">
@@ -603,7 +630,9 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             </div>
             <div>
               <dt>Dernière échéance dérivée</dt>
-              <dd>{contractual.lastDueDate ? formatDate(contractual.lastDueDate) : "—"}</dd>
+              <dd>
+                {contractual.lastDueDate ? formatDate(contractual.lastDueDate) : "Non calculable"}
+              </dd>
             </div>
             <div>
               <dt>Nombre annoncé</dt>
@@ -628,6 +657,12 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
               </dd>
             </div>
           </dl>
+          <InsuranceFacts
+            loan={loan}
+            currency={currency}
+            nextDebit={nextInsuranceDebit}
+            debitCount={insuranceDebits.length}
+          />
           {loan.currentBalance <= 0.01 ? (
             <button
               className="button secondary debt-archive"
@@ -649,29 +684,43 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
             {forward.entries.length} restantes sur {loan.paymentCount} annoncées
           </span>
         </div>
-        <div className="simple-table">
+        <div className="simple-table debt-schedule-table">
           <div className="table-head">
             <span>Date</span>
-            <span>Échéance</span>
+            <span>Sortie</span>
             <span>Intérêt</span>
             <span>Principal</span>
+            <span>Assurance</span>
             <span>Solde</span>
           </div>
-          {forward.entries.slice(0, 6).map((entry, index) => (
+          {forward.entries.slice(0, 8).map((entry, index) => (
             <div
               className="table-row"
               key={`${entry.entryKind}-${entry.paymentNumber}-${entry.dueDate}-${index}`}
             >
               <span>{formatDate(entry.dueDate)}</span>
               <strong>
-                n° {entry.paymentNumber} ·{" "}
-                <Currency currency={currency} value={entry.totalCashOut} />
+                {entry.entryKind === "INSURANCE"
+                  ? "Assurance (prélèvement séparé)"
+                  : entry.entryKind === "CHARGE"
+                    ? "Frais"
+                    : entry.entryKind === "EARLY_REPAYMENT"
+                      ? "Remboursement anticipé"
+                      : `Échéance n° ${entry.paymentNumber}`}{" "}
+                · <Currency currency={currency} value={entry.totalCashOut} />
               </strong>
               <span>
                 <Currency currency={currency} value={entry.interest} />
               </span>
               <span>
                 <Currency currency={currency} value={entry.principal} />
+              </span>
+              <span>
+                {insuranceIsKnown || entry.insurance > 0 ? (
+                  <Currency currency={currency} value={entry.insurance} />
+                ) : (
+                  "Inconnue"
+                )}
               </span>
               <strong>
                 <Currency currency={currency} value={entry.closingBalance} />
@@ -812,3 +861,171 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
 }
 
 export default DebtPage;
+
+/**
+ * Bande de composition des sorties (V10 §12) : capital, intérêts, assurance et frais des
+ * douze prochains mois, en largeurs proportionnelles aux montants du Debt Engine. Une
+ * assurance inconnue n'est pas un segment nul : elle est nommée à part.
+ */
+function PaymentComposition({
+  breakdown,
+  currency,
+  insuranceLabel,
+  insuranceKnown,
+}: {
+  breakdown: {
+    principal: number;
+    interest: number;
+    insurance: number;
+    fees: number;
+    totalCashOut: number;
+  };
+  currency: string | null;
+  insuranceLabel: string;
+  insuranceKnown: boolean;
+}) {
+  const parts = [
+    { key: "principal", label: "Capital", value: breakdown.principal },
+    { key: "interest", label: "Intérêts", value: breakdown.interest },
+    ...(insuranceKnown || breakdown.insurance > 0
+      ? [{ key: "insurance", label: insuranceLabel, value: breakdown.insurance }]
+      : []),
+    { key: "fees", label: "Frais", value: breakdown.fees },
+  ];
+  if (breakdown.totalCashOut <= 0) return null;
+  return (
+    <figure className="payment-composition" aria-label="Composition des sorties sur 12 mois">
+      <div className="payment-composition-bar" aria-hidden="true">
+        {parts
+          .filter((part) => part.value > 0)
+          .map((part) => (
+            <span
+              data-part={part.key}
+              key={part.key}
+              style={{ flexGrow: part.value }}
+              title={`${part.label} : ${formatCurrency(part.value, currency)}`}
+            />
+          ))}
+      </div>
+      <figcaption>
+        <span className="payment-composition-title">
+          Sorties des 12 prochains mois · {formatCurrency(breakdown.totalCashOut, currency)}
+        </span>
+        <ul>
+          {parts.map((part) => (
+            <li data-part={part.key} key={part.key}>
+              {part.label} <strong>{formatCurrency(part.value, currency)}</strong>
+            </li>
+          ))}
+          {!insuranceKnown && breakdown.insurance === 0 ? (
+            <li data-part="unknown">
+              Assurance <strong>inconnue</strong>
+            </li>
+          ) : null}
+        </ul>
+      </figcaption>
+    </figure>
+  );
+}
+
+const INSURANCE_MODE_LABELS: Record<string, string> = {
+  INCLUDED: "Incluse dans les paiements",
+  SEPARATE: "Prélevée séparément",
+  NONE: "Absence confirmée",
+  UNKNOWN: "Inconnue",
+};
+
+/**
+ * Inspecteur de l'assurance (B17) : choix déclaré, polices, assurés et quotités, périodes
+ * de prime et prochain prélèvement à SA date. La quotité décrit une couverture, pas une
+ * part du passif : elle n'est rapprochée d'aucun montant de dette.
+ */
+function InsuranceFacts({
+  loan,
+  currency,
+  nextDebit,
+  debitCount,
+}: {
+  loan: Liability;
+  currency: string | null;
+  nextDebit: { dueDate: string; insurance: number } | null;
+  debitCount: number;
+}) {
+  const mode = loan.insuranceMode;
+  return (
+    <section className="insurance-facts" aria-label="Assurance emprunteur">
+      <h3>Assurance emprunteur</h3>
+      <dl>
+        <div>
+          <dt>Traitement</dt>
+          <dd>
+            {mode
+              ? INSURANCE_MODE_LABELS[mode]
+              : loan.monthlyInsurance === null
+                ? "Non renseigné"
+                : loan.paymentIncludesInsurance === true
+                  ? "Incluse dans les paiements"
+                  : loan.paymentIncludesInsurance === false
+                    ? "En sus de chaque paiement"
+                    : "Convention inconnue"}
+          </dd>
+        </div>
+        {mode === "INCLUDED" || (!mode && loan.monthlyInsurance !== null) ? (
+          <div>
+            <dt>Part par échéance</dt>
+            <dd>
+              {loan.monthlyInsurance === null
+                ? "Montant inconnu"
+                : formatCurrency(loan.monthlyInsurance, currency)}
+            </dd>
+          </div>
+        ) : null}
+        {mode === "SEPARATE" ? (
+          <div>
+            <dt>Prochain prélèvement</dt>
+            <dd>
+              {nextDebit
+                ? `${formatCurrency(nextDebit.insurance, currency)} le ${formatDate(nextDebit.dueDate)}`
+                : "Aucun à venir"}
+              {debitCount > 1 ? ` · ${debitCount} prélèvements à venir` : ""}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+      {mode === "SEPARATE"
+        ? (loan.insurancePolicies ?? []).map((policy) => (
+            <div className="insurance-policy" key={policy.id}>
+              <strong>
+                {policy.insurer ?? "Assureur non renseigné"}
+                {policy.contractReference ? ` · contrat ${policy.contractReference}` : ""}
+              </strong>
+              {policy.insured.length ? (
+                <p>
+                  Assurés :{" "}
+                  {policy.insured
+                    .map(
+                      (person) =>
+                        `${person.name} (${(person.coverageShare * 100).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} %)`,
+                    )
+                    .join(", ")}
+                </p>
+              ) : (
+                <p>Assurés non renseignés</p>
+              )}
+              <ul>
+                {policy.periods.map((period, index) => (
+                  <li key={index}>
+                    {formatCurrency(period.premiumAmount, currency)} ·{" "}
+                    {FREQUENCY_LABELS[period.frequency]} · du {formatDate(period.firstDebitDate)}{" "}
+                    {period.lastDebitDate
+                      ? `au ${formatDate(period.lastDebitDate)}`
+                      : "à la dernière échéance du prêt"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        : null}
+    </section>
+  );
+}

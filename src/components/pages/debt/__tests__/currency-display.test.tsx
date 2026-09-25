@@ -44,6 +44,12 @@ vi.mock("@/lib/engine/debt", () => ({
     economicCost: 2,
   }),
   nextDebtEvent: () => null,
+  addMonths: (date: string, months: number) => {
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCMonth(d.getUTCMonth() + months);
+    return d.toISOString().slice(0, 10);
+  },
+  insuranceKnown: () => true,
 }));
 // La synthèse du formulaire appelle le vrai moteur, remplacé ici par un double partiel.
 vi.mock("@/lib/presentation/debt/contract-draft", () => ({ draftSynthesis: () => null }));

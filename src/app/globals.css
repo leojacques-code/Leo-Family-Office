@@ -3573,3 +3573,108 @@ dd {
   font-weight: 600;
   color: var(--text);
 }
+
+/* Dettes (B17) : échéancier avec colonne d'assurance, bande de composition des sorties,
+   inspecteur d'assurance. Couleurs sémantiques V10 : capital acier, intérêts corail,
+   assurance ambre, frais or. */
+.debt-schedule-table .table-head,
+.debt-schedule-table .table-row {
+  grid-template-columns: 110px 1.6fr 0.8fr 0.8fr 0.8fr 0.9fr;
+}
+.payment-composition {
+  margin: 14px 0 0;
+  display: grid;
+  gap: 8px;
+}
+.payment-composition-bar {
+  display: flex;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--border-soft);
+}
+.payment-composition-bar span {
+  flex-basis: 0;
+  min-width: 3px;
+}
+.payment-composition [data-part="principal"] {
+  --part: var(--blue);
+}
+.payment-composition [data-part="interest"] {
+  --part: var(--red);
+}
+.payment-composition [data-part="insurance"] {
+  --part: #b7852f;
+}
+.payment-composition [data-part="fees"] {
+  --part: var(--gold);
+}
+.payment-composition [data-part="unknown"] {
+  --part: transparent;
+}
+.payment-composition-bar span {
+  background: var(--part);
+}
+.payment-composition figcaption {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.payment-composition-title {
+  font-weight: 600;
+}
+.payment-composition ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-soft);
+}
+.payment-composition li::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 2px;
+  background: var(--part);
+}
+.payment-composition li[data-part="unknown"]::before {
+  border: 1px dashed var(--text-muted);
+}
+.payment-composition li strong {
+  color: var(--text);
+}
+.insurance-facts {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 12px;
+  padding-top: 12px;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+.insurance-facts h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.insurance-policy {
+  display: grid;
+  gap: 4px;
+}
+.insurance-policy p,
+.insurance-policy ul {
+  margin: 0;
+  color: var(--text-soft);
+}
+.insurance-policy ul {
+  padding-left: 18px;
+}
+.debt-insurance-period {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  align-items: end;
+  margin-bottom: 8px;
+}
