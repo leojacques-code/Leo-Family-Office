@@ -70,6 +70,7 @@ const canonicalMigrations = [
   "20260925090000",
   "20260925100000",
   "20260925110000",
+  "20260925120000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -1128,6 +1129,8 @@ const requiredColumns: Record<string, string[]> = {
 
 const userOwnedTables = [
   "profiles",
+  // Brouillons de formulaire : état de saisie, jamais lu par un moteur (`20260925120000`).
+  "form_drafts",
   "user_domain_declarations",
   "institutions",
   "asset_classes",
@@ -1676,6 +1679,11 @@ const requiredConstraints = [
   "loan_insurance_policies_coverage_dates_ck",
   "loan_insurance_policies_insured_base_ck",
   "loan_insurance_policies_debit_account_fk",
+  "form_drafts_domain_ck",
+  "form_drafts_kind_ck",
+  "form_drafts_subject_ck",
+  "form_drafts_content_ck",
+  "form_drafts_subject_fk",
   "liabilities_payment_count_ck",
   "loan_rate_changes_kind_ck",
   "loan_payment_changes_kind_ck",
@@ -2103,6 +2111,8 @@ const requiredConstraints = [
 const requiredRpcs: Record<string, string> = {
   lfo_verify_session: "p_user_id uuid, p_session_id uuid",
   lfo_record_outstanding_debt: "p_user_id uuid, p_payload jsonb",
+  lfo_save_form_draft: "p_user_id uuid, p_payload jsonb",
+  lfo_delete_form_draft: "p_user_id uuid, p_draft_id uuid, p_expected_version integer",
   lfo_record_net_income: "p_user_id uuid, p_payload jsonb",
   lfo_correct_net_income: "p_user_id uuid, p_payload jsonb",
   lfo_declare_domain_applicability: "p_user_id uuid, p_payload jsonb",
@@ -2261,6 +2271,10 @@ const requiredRpcs: Record<string, string> = {
  */
 const declaredReturnTypeRpcs: Record<string, string> = {
   lfo_verify_session: "boolean",
+  // Rend l'identifiant ET la nouvelle version : sans elle, l'enregistrement suivant ne
+  // saurait pas quelle version il a lue.
+  lfo_save_form_draft: "jsonb",
+  lfo_delete_form_draft: "void",
   // Rend `null` quand la déclaration courante est déjà celle-là : rendre un identifiant
   // fabriqué laisserait croire à une écriture qui n'a pas eu lieu.
   lfo_declare_domain_applicability: "uuid",
@@ -2390,6 +2404,8 @@ const readOnlyAuditTables = [
   "loan_schedules",
   // Soldes observés : écrits par le serveur et les RPC seulement (`20260925110000`).
   "account_balances",
+  // Brouillons : écrits par leurs deux RPC, sous version attendue (`20260925120000`).
+  "form_drafts",
 ] as const;
 
 const storagePolicies = [

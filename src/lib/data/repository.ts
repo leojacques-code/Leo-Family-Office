@@ -5,6 +5,7 @@ import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import type { DashboardState, DocumentRecord } from "@/lib/types";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type { DomainDeclaration } from "@/lib/presentation/today/contracts";
+import type { FormDraftSaveInput, FormDraftSaved } from "@/lib/presentation/drafts/contracts";
 
 export type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 
@@ -52,6 +53,12 @@ export interface FamilyOfficeRepository {
    * signal d'invalidation ciblé. »
    */
   declareDomainApplicability(input: DomainDeclarationInput): Promise<boolean>;
+  /**
+   * Brouillon de formulaire (document 03 §8) : écrit ou remplace, sous version attendue.
+   * Un brouillon n'est pas une mutation de fait : il ne passe pas par `executeMutation`.
+   */
+  saveFormDraft(input: FormDraftSaveInput): Promise<FormDraftSaved>;
+  deleteFormDraft(draftId: string, expectedVersion: number): Promise<void>;
 }
 
 export async function getRepository(): Promise<FamilyOfficeRepository> {

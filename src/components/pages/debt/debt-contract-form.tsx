@@ -10,6 +10,12 @@ import { PercentInput } from "@/components/primitives/percent-input";
 import type { DebtContractInput } from "@/lib/data/contracts";
 import { formatCurrency } from "@/lib/presentation/currency";
 import { draftSynthesis } from "@/lib/presentation/debt/contract-draft";
+import {
+  restoreContractDraft,
+  serializeContractDraft,
+  type ContractDraftState,
+} from "@/lib/presentation/debt/contract-draft-storage";
+import { type FormDraft, type FormDraftKind } from "@/lib/presentation/drafts/contracts";
 import { insurancePeriodsOverlap } from "@/lib/engine/debt";
 import { operationalToday } from "@/lib/financial-date";
 import { formatDate } from "@/components/pages/shared";
@@ -159,6 +165,19 @@ function fromLiability(loan: Liability): DebtContractInput {
 
 type InsuranceChoice = "" | DebtContractInput["insuranceMode"];
 
+function formatDateTime(iso: string): string {
+  const value = new Date(iso);
+  if (Number.isNaN(value.getTime())) return "date inconnue";
+  return value.toLocaleString("fr-FR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Paris",
+  });
+}
+
 /** Police persistée → brouillon : chaque détail inconnu reste inconnu (`null`). */
 function policyDraft(
   policy: NonNullable<Liability["insurancePolicies"]>[number],
@@ -259,6 +278,9 @@ export function DebtContractForm({
   reportingCurrency,
   busy,
   accounts = [],
+  draft = null,
+  onSaveDraft,
+  onDiscardDraft,
   onSave,
   onCancel,
 }: {
@@ -270,6 +292,23 @@ export function DebtContractForm({
   busy: boolean;
   /** Comptes proposés comme compte débité d'une assurance séparée (facultatif). */
   accounts?: ReadonlyArray<{ id: string; name: string; institution: string }>;
+  /** Brouillon repris (document 03 §8) : l'état du formulaire en repart. */
+  draft?: FormDraft | null;
+  /** Enregistre le brouillon ; rend le brouillon enregistré, ou le message du refus. */
+  onSaveDraft?: (input: {
+    draftId: string | null;
+    expectedVersion: number | null;
+    kind: FormDraftKind;
+    subjectId: string | null;
+    title: string;
+    content: Record<string, unknown>;
+    /** Décision explicite après un conflit : écrire sur la version COURANTE, relue. */
+    replaceLatest?: boolean;
+  }) => Promise<
+    { ok: true; draft: FormDraft } | { ok: false; message: string; conflict?: boolean }
+  >;
+  /** Retire le brouillon consommé par une validation réussie. */
+  onDiscardDraft?: (draft: FormDraft) => Promise<boolean>;
   onSave: (contract: DebtContractInput) => Promise<boolean>;
   onCancel: () => void;
 }) {
@@ -279,21 +318,86 @@ export function DebtContractForm({
   // Ligne déjà existante : l'encours observé initial n'est pas redemandé.
   const existing = loan !== null || promoteFrom !== null;
   const currencyLabel = currency ?? "devise non renseignée";
-  const [contract, setContract] = useState<DebtContractInput>(() =>
-    loan ? fromLiability(loan) : promoteFrom ? fromOutstanding(promoteFrom) : blankContract(),
+  // État de départ : la dette ouverte, puis, si un brouillon est repris, sa saisie relue
+  // défensivement par-dessus. La dette visée ne vient jamais du brouillon.
+  const [initial] = useState<ContractDraftState>(() => {
+    const base: ContractDraftState = {
+      contract: loan
+        ? fromLiability(loan)
+        : promoteFrom
+          ? fromOutstanding(promoteFrom)
+          : blankContract(),
+      structure: {
+        mode: loan ? loan.amortisationProfile : "",
+        paymentFrequency: loan ? loan.paymentFrequency : "",
+        interestConvention: loan ? loan.interestConvention : "",
+        rateType: loan ? loan.rateType : "",
+      },
+      requiredValues: {
+        principal: loan?.principal ?? null,
+        initialBalance: null,
+        annualRate: loan?.annualRate ?? null,
+      },
+      insurance: initialInsurance(loan),
+    };
+    return draft ? restoreContractDraft(draft.content, base) : base;
+  });
+  const [contract, setContract] = useState<DebtContractInput>(initial.contract);
+  const [structure, setStructure] = useState<Structure>(initial.structure as Structure);
+  const [requiredValues, setRequiredValues] = useState(initial.requiredValues);
+  const [insurance, setInsurance] = useState(
+    initial.insurance as ReturnType<typeof initialInsurance>,
   );
-  const [structure, setStructure] = useState<Structure>(() => ({
-    mode: loan ? loan.amortisationProfile : "",
-    paymentFrequency: loan ? loan.paymentFrequency : "",
-    interestConvention: loan ? loan.interestConvention : "",
-    rateType: loan ? loan.rateType : "",
-  }));
-  const [requiredValues, setRequiredValues] = useState(() => ({
-    principal: loan?.principal ?? null,
-    initialBalance: null as number | null,
-    annualRate: loan?.annualRate ?? null,
-  }));
-  const [insurance, setInsurance] = useState(() => initialInsurance(loan));
+  const draftKind: FormDraftKind = loan
+    ? "DEBT_CONTRACT_EDIT"
+    : promoteFrom
+      ? "DEBT_CONTRACT_PROMOTION"
+      : "DEBT_CONTRACT_NEW";
+  const [currentDraft, setCurrentDraft] = useState<FormDraft | null>(draft);
+  const [draftStatus, setDraftStatus] = useState<{ tone: "ok" | "error"; text: string } | null>(
+    draft
+      ? {
+          tone: "ok",
+          text: `Brouillon du ${formatDateTime(draft.updatedAt)} repris. Il n’alimente ni le patrimoine ni les calculs tant que le contrat n’est pas enregistré.`,
+        }
+      : null,
+  );
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftConflict, setDraftConflict] = useState(false);
+
+  async function saveDraft(resolution: "normal" | "replace" | "copy" = "normal") {
+    if (!onSaveDraft) return;
+    setSavingDraft(true);
+    const target = resolution === "copy" ? null : currentDraft;
+    const result = await onSaveDraft({
+      draftId: target?.id ?? null,
+      expectedVersion: target?.version ?? null,
+      ...(resolution === "replace" ? { replaceLatest: true } : {}),
+      kind: draftKind,
+      subjectId: loan?.id ?? promoteFrom?.id ?? null,
+      title: contract.name.trim() || promoteFrom?.name || loan?.name || "Dette sans nom",
+      content: serializeContractDraft({ contract, structure, requiredValues, insurance }),
+    });
+    setSavingDraft(false);
+    setDraftConflict(!result.ok && result.conflict === true);
+    if (result.ok) {
+      setCurrentDraft(result.draft);
+      setDraftStatus({
+        tone: "ok",
+        text: `Brouillon enregistré le ${formatDateTime(result.draft.updatedAt)}. Il n’alimente ni le patrimoine ni les calculs ; « ${loan || promoteFrom ? "Enregistrer le contrat" : "Ajouter cette dette"} » valide le contrat.`,
+      });
+    } else if (result.conflict) {
+      // Conflit : rien n'est écrasé en silence. La saisie reste affichée, et l'utilisateur
+      // choisit : remplacer la version enregistrée ailleurs, ou garder les deux.
+      setDraftStatus({
+        tone: "error",
+        text: "Ce brouillon a été enregistré ailleurs depuis son ouverture. Votre saisie reste affichée : choisissez de remplacer la version enregistrée par votre saisie, ou de garder les deux.",
+      });
+    } else {
+      // La saisie reste affichée : seul le message change.
+      setDraftStatus({ tone: "error", text: result.message });
+    }
+  }
   const [formError, setFormError] = useState<string | null>(null);
   const mode = structure.mode;
   const structureComplete =
@@ -492,7 +596,12 @@ export function DebtContractForm({
       return;
     }
     setFormError(null);
-    if (await onSave(candidate)) onCancel();
+    if (await onSave(candidate)) {
+      // Le brouillon consommé par la validation est retiré ; un échec de retrait laisse le
+      // brouillon visible dans la liste, jamais un contrat non enregistré.
+      if (currentDraft && onDiscardDraft) await onDiscardDraft(currentDraft);
+      onCancel();
+    }
   }
 
   return (
@@ -1385,10 +1494,50 @@ export function DebtContractForm({
           {formError}
         </p>
       ) : null}
+      {draftStatus ? (
+        <p
+          className={`full draft-status ${draftStatus.tone === "error" ? "form-error" : ""}`}
+          role={draftStatus.tone === "error" ? "alert" : "status"}
+        >
+          {draftStatus.text}
+        </p>
+      ) : null}
+      {draftConflict ? (
+        <div className="full debt-draft-confirm">
+          <button
+            className="button secondary"
+            disabled={savingDraft}
+            onClick={() => saveDraft("replace")}
+            type="button"
+          >
+            Remplacer par ma saisie
+          </button>
+          {draftKind === "DEBT_CONTRACT_NEW" ? (
+            <button
+              className="button secondary"
+              disabled={savingDraft}
+              onClick={() => saveDraft("copy")}
+              type="button"
+            >
+              Enregistrer comme nouveau brouillon
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="form-actions">
         <button type="button" className="button secondary" onClick={onCancel}>
           Annuler
         </button>
+        {onSaveDraft ? (
+          <button
+            className="button secondary"
+            disabled={busy || savingDraft}
+            onClick={() => saveDraft()}
+            type="button"
+          >
+            Enregistrer le brouillon
+          </button>
+        ) : null}
         <button className="button primary" disabled={busy}>
           <Save size={15} />
           {promoteFrom

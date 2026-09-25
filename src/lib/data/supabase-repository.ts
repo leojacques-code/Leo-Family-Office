@@ -2,6 +2,11 @@ import "server-only";
 import { MutationConflictError, MutationRejectedError } from "@/lib/data/mutation-errors";
 import { reportReadFailure } from "@/lib/data/read-failure";
 import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
+import type {
+  FormDraft,
+  FormDraftSaveInput,
+  FormDraftSaved,
+} from "@/lib/presentation/drafts/contracts";
 import { railSourcesFor } from "@/lib/presentation/rail-sources";
 import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
 import { mapDecisionCases } from "@/lib/data/decision-snapshots";
@@ -684,6 +689,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       "scenarios",
       "scenario_versions",
       "currency_rates",
+      "form_drafts",
       "profiles",
     ] as const;
     const [results, cashResult, closeResult, transactionResult] = await Promise.all([
@@ -791,6 +797,22 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       metrics: { bankCash: cashQuality.value },
       cashQuality,
       cashObservationPresent: accounts.length > 0,
+      drafts: rows.form_drafts
+        .filter((row) => str(row.domain) === "DEBT")
+        .map((row) => ({
+          id: str(row.id),
+          kind: str(row.kind) as FormDraft["kind"],
+          subjectId: optional(row.subject_id) ?? null,
+          title: str(row.title),
+          content:
+            typeof row.content === "object" && row.content !== null && !Array.isArray(row.content)
+              ? (row.content as Record<string, unknown>)
+              : {},
+          schemaVersion: Number(row.schema_version),
+          version: Number(row.version),
+          updatedAt: str(row.updated_at),
+        }))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       debitAccounts: accounts.map((account) => ({
         id: account.id,
         name: account.name,
@@ -3751,6 +3773,47 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
     }
   }
 
+  /** Refus d'un brouillon routé sur son SQLSTATE, jamais sur le texte de la base. */
+  function draftFailure(error: PostgrestError): never {
+    if (error.code === "LF409")
+      throw new MutationConflictError(
+        "Ce brouillon a été enregistré ailleurs depuis son ouverture, ou un brouillon existe déjà pour cette dette.",
+      );
+    if (error.code === "LF404") throw new MutationRejectedError("Ce brouillon n’existe plus.");
+    if (error.code === "LF422" || error.code === "23514" || error.code === "23503")
+      throw new MutationRejectedError("Brouillon refusé : sa forme n’est pas valide.");
+    throw new Error(`Supabase brouillon : ${error.code}`);
+  }
+
+  async function saveFormDraft(input: FormDraftSaveInput): Promise<FormDraftSaved> {
+    const result = await db.rpc("lfo_save_form_draft", {
+      p_user_id: user,
+      p_payload: {
+        draft_id: input.draftId,
+        ...(input.draftId !== null ? { expected_version: input.expectedVersion } : {}),
+        domain: "DEBT",
+        kind: input.kind,
+        subject_id: input.subjectId,
+        title: input.title,
+        content: input.content,
+        schema_version: input.schemaVersion,
+      },
+    });
+    if (result.error) draftFailure(result.error);
+    const saved = result.data as { id: string; version: number; updated_at: string } | null;
+    if (!saved) throw new Error("Supabase brouillon : réponse vide");
+    return { id: saved.id, version: saved.version, updatedAt: saved.updated_at };
+  }
+
+  async function deleteFormDraft(draftId: string, expectedVersion: number): Promise<void> {
+    const result = await db.rpc("lfo_delete_form_draft", {
+      p_user_id: user,
+      p_draft_id: draftId,
+      p_expected_version: expectedVersion,
+    });
+    if (result.error) draftFailure(result.error);
+  }
+
   async function mutateState(mutation: Mutation): Promise<DashboardState> {
     await executeMutation(mutation);
     return getDashboardState();
@@ -3920,6 +3983,8 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
     getDashboardState,
     getDebtReadModel,
     executeMutation,
+    saveFormDraft,
+    deleteFormDraft,
     mutateState,
     storeDocument,
     saveSimulation,

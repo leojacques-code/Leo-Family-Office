@@ -37,6 +37,11 @@ import { formatCurrency } from "@/lib/presentation/currency";
 import type { DebtContractInput } from "@/lib/data/contracts";
 import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import { balancePath } from "@/lib/presentation/debt/balance-path";
+import {
+  DEBT_CONTRACT_DRAFT_SCHEMA_VERSION,
+  type FormDraft,
+  type FormDraftKind,
+} from "@/lib/presentation/drafts/contracts";
 import { operationalToday } from "@/lib/financial-date";
 import type { Liability } from "@/lib/types";
 import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
@@ -71,7 +76,7 @@ type DebtPageProps = Pick<SectionProps, "mutate" | "busy" | "setExplanation"> & 
     DebtReadModel,
     "asOfDate" | "liabilities" | "scenarios" | "metrics" | "reportingCurrency"
   > &
-    Partial<Pick<DebtReadModel, "outstandingDebts" | "dates" | "debitAccounts">>;
+    Partial<Pick<DebtReadModel, "outstandingDebts" | "dates" | "debitAccounts" | "drafts">>;
 };
 
 function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
@@ -90,6 +95,101 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const outstandingDebts = state.outstandingDebts ?? [];
   const loan = state.liabilities.find((item) => item.id === selectedId) ?? state.liabilities[0];
   const debitAccounts = state.debitAccounts ?? [];
+  // Brouillons (document 03 §8) : liste locale, tenue à jour par les réponses de la route
+  // dédiée, et resynchronisée à chaque relecture du modèle Dette.
+  const [drafts, setDrafts] = useState<FormDraft[]>(state.drafts ?? []);
+  const [draftsSource, setDraftsSource] = useState(state.drafts);
+  if (draftsSource !== state.drafts) {
+    setDraftsSource(state.drafts);
+    setDrafts(state.drafts ?? []);
+  }
+  const [resumedDraft, setResumedDraft] = useState<FormDraft | null>(null);
+  const [draftToDelete, setDraftToDelete] = useState<string | null>(null);
+  const [draftMessage, setDraftMessage] = useState<string | null>(null);
+  const draftFor = (kind: FormDraftKind, subjectId: string | null) =>
+    subjectId === null
+      ? null
+      : (drafts.find((item) => item.kind === kind && item.subjectId === subjectId) ?? null);
+
+  async function saveDraft(input: {
+    draftId: string | null;
+    expectedVersion: number | null;
+    kind: FormDraftKind;
+    subjectId: string | null;
+    title: string;
+    content: Record<string, unknown>;
+    replaceLatest?: boolean;
+  }): Promise<{ ok: true; draft: FormDraft } | { ok: false; message: string; conflict?: boolean }> {
+    try {
+      const { replaceLatest, ...payload } = input;
+      if (replaceLatest && payload.draftId) {
+        // Remplacement DÉCIDÉ après un conflit : la version courante est relue, puis écrite
+        // sous cette version. Un nouveau conflit entre-temps échoue encore, sans écraser.
+        const latest = await fetch("/api/debt", { cache: "no-store" });
+        const model = latest.ok ? await latest.json() : null;
+        const current = (model?.drafts ?? []).find(
+          (item: FormDraft) => item.id === payload.draftId,
+        );
+        if (!current)
+          return {
+            ok: false,
+            message:
+              "Ce brouillon n’existe plus : enregistrez votre saisie comme nouveau brouillon.",
+          };
+        payload.expectedVersion = current.version;
+      }
+      const response = await fetch("/api/drafts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, schemaVersion: DEBT_CONTRACT_DRAFT_SCHEMA_VERSION }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok)
+        return {
+          ok: false,
+          conflict: response.status === 409,
+          message: body.error ?? "Enregistrement du brouillon impossible",
+        };
+      const saved: FormDraft = {
+        id: body.saved.id,
+        kind: input.kind,
+        subjectId: input.subjectId,
+        title: input.title,
+        content: input.content,
+        schemaVersion: DEBT_CONTRACT_DRAFT_SCHEMA_VERSION,
+        version: body.saved.version,
+        updatedAt: body.saved.updatedAt,
+      };
+      setDrafts((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      return { ok: true, draft: saved };
+    } catch {
+      return {
+        ok: false,
+        message: "Enregistrement du brouillon impossible : connexion interrompue.",
+      };
+    }
+  }
+
+  async function deleteDraft(draft: FormDraft): Promise<boolean> {
+    try {
+      const response = await fetch("/api/drafts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: draft.id, expectedVersion: draft.version }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setDraftMessage(body.error ?? "Suppression du brouillon impossible");
+        return false;
+      }
+      setDrafts((current) => current.filter((item) => item.id !== draft.id));
+      setDraftMessage(null);
+      return true;
+    } catch {
+      setDraftMessage("Suppression du brouillon impossible : connexion interrompue.");
+      return false;
+    }
+  }
   const timeline = useMemo(
     () => (loan ? buildLoanTimeline(loan, state.asOfDate) : null),
     [loan, state.asOfDate],
@@ -243,13 +343,16 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
     >
       {promoting ? (
         <DebtContractForm
-          key={`promote-${promoting.id}`}
+          key={`promote-${promoting.id}-${draftFor("DEBT_CONTRACT_PROMOTION", promoting.id)?.id ?? "none"}`}
           loan={null}
           promoteFrom={promoting}
           asOfDate={state.asOfDate}
           reportingCurrency={state.reportingCurrency}
           busy={busy}
           accounts={debitAccounts}
+          draft={draftFor("DEBT_CONTRACT_PROMOTION", promoting.id)}
+          onSaveDraft={saveDraft}
+          onDiscardDraft={deleteDraft}
           onCancel={() => setPromoting(null)}
           onSave={(contract: DebtContractInput) =>
             mutate({ action: "save_debt_contract", contract })
@@ -259,22 +362,145 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
     </Modal>
   );
 
+  // Un contrat existant rouvert reprend SON brouillon s'il en a un : un seul par dette.
+  const editorDraft =
+    contractEditor === "edit"
+      ? draftFor("DEBT_CONTRACT_EDIT", loan?.id ?? null)
+      : contractEditor === "new"
+        ? resumedDraft
+        : null;
+
+  function resumeDraft(draft: FormDraft) {
+    setDraftMessage(null);
+    if (draft.kind === "DEBT_CONTRACT_NEW") {
+      setResumedDraft(draft);
+      setContractEditor("new");
+      return;
+    }
+    if (draft.kind === "DEBT_CONTRACT_EDIT") {
+      if (state.liabilities.some((item) => item.id === draft.subjectId)) {
+        setSelectedId(draft.subjectId!);
+        setContractEditor("edit");
+      } else
+        setDraftMessage(
+          "La dette de ce brouillon n’est plus disponible : vous pouvez le supprimer.",
+        );
+      return;
+    }
+    const outstanding = outstandingDebts.find((item) => item.id === draft.subjectId);
+    if (outstanding) setPromoting(outstanding);
+    else
+      setDraftMessage(
+        "Cet encours a déjà son contrat ou n’est plus disponible : vous pouvez supprimer le brouillon.",
+      );
+  }
+
+  const DRAFT_KIND_LABELS: Record<FormDraftKind, string> = {
+    DEBT_CONTRACT_NEW: "Nouvelle dette",
+    DEBT_CONTRACT_EDIT: "Modification de contrat",
+    DEBT_CONTRACT_PROMOTION: "Contrat d’un encours",
+  };
+  const draftsPanel =
+    drafts.length > 0 ? (
+      <section className="panel debt-drafts" aria-label="Brouillons">
+        <div className="panel-header">
+          <div>
+            <span className="eyebrow">Brouillons</span>
+            <h2>Saisies non validées</h2>
+          </div>
+        </div>
+        <p className="outstanding-debt-note">
+          Un brouillon n’alimente ni le patrimoine, ni les échéanciers, ni les calculs.
+        </p>
+        {draftMessage ? (
+          <p className="form-error" role="alert">
+            {draftMessage}
+          </p>
+        ) : null}
+        <ul className="debt-draft-list">
+          {drafts.map((draft) => (
+            <li key={draft.id}>
+              <div>
+                <strong>{draft.title}</strong>
+                <span>
+                  {DRAFT_KIND_LABELS[draft.kind]} · modifié le{" "}
+                  {new Date(draft.updatedAt).toLocaleString("fr-FR", {
+                    day: "numeric",
+                    month: "long",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone: "Europe/Paris",
+                  })}
+                </span>
+              </div>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => resumeDraft(draft)}
+                type="button"
+              >
+                <Edit3 size={15} /> Reprendre
+              </button>
+              {draftToDelete === draft.id ? (
+                <span className="debt-draft-confirm">
+                  <button
+                    className="button secondary"
+                    onClick={async () => {
+                      if (await deleteDraft(draft)) setDraftToDelete(null);
+                    }}
+                    type="button"
+                  >
+                    Confirmer la suppression
+                  </button>
+                  <button
+                    className="button secondary"
+                    onClick={() => setDraftToDelete(null)}
+                    type="button"
+                  >
+                    Garder
+                  </button>
+                </span>
+              ) : (
+                <button
+                  aria-label={`Supprimer le brouillon ${draft.title}`}
+                  className="button secondary"
+                  onClick={() => setDraftToDelete(draft.id)}
+                  type="button"
+                >
+                  <Archive size={15} /> Supprimer
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+    ) : null;
+
   const editorModal = (
     <Modal
       open={contractEditor !== null}
-      onClose={() => setContractEditor(null)}
+      onClose={() => {
+        setContractEditor(null);
+        setResumedDraft(null);
+      }}
       title={contractEditor === "edit" && loan ? `Modifier ${loan.name}` : "Nouvelle dette"}
       subtitle="Les termes contractuels et l’encours observé restent deux vérités distinctes."
       wide
     >
       <DebtContractForm
-        key={`${contractEditor}-${loan?.id ?? "new"}`}
+        key={`${contractEditor}-${loan?.id ?? "new"}-${editorDraft?.id ?? "none"}`}
         loan={contractEditor === "edit" ? (loan ?? null) : null}
         asOfDate={state.asOfDate}
         reportingCurrency={state.reportingCurrency}
         busy={busy}
         accounts={debitAccounts}
-        onCancel={() => setContractEditor(null)}
+        draft={editorDraft}
+        onSaveDraft={saveDraft}
+        onDiscardDraft={deleteDraft}
+        onCancel={() => {
+          setContractEditor(null);
+          setResumedDraft(null);
+        }}
         onSave={(contract: DebtContractInput) => mutate({ action: "save_debt_contract", contract })}
       />
     </Modal>
@@ -297,6 +523,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
     return (
       <div className="page-stack">
         {header}
+        {draftsPanel}
         {outstandingPanel ?? (
           <EmptyState
             title="Aucune dette enregistrée"
@@ -369,6 +596,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   return (
     <div className="page-stack">
       {header}
+      {draftsPanel}
       {outstandingPanel}
       {state.liabilities.length > 1 ? (
         <section aria-label="Dettes suivies" className="decision-case-strip">

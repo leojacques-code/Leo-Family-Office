@@ -1,0 +1,83 @@
+{
+  "date": "2026-09-25T09:35:23.897Z",
+  "app": "http://localhost:3120",
+  "utilisateurs": [
+    "recette-brouillon-a-1790328905380-676781@lfo.invalid",
+    "recette-brouillon-b-1790328905518-35324@lfo.invalid"
+  ],
+  "environnement": "pile Supabase auto-hébergée locale ; build de production",
+  "checks": [
+    {
+      "id": "D1",
+      "label": "brouillon incomplet enregistré, sans aucune dette ni observation écrite",
+      "ok": true,
+      "statut": "Brouillon enregistré le 25 septembre 2026 à 11:35. Il n’alimente ni le patrimoine ni les calculs ; « Ajouter cette dette » valide le contrat.",
+      "brouillons": 1
+    },
+    {
+      "id": "D2",
+      "label": "bilan : aucun passif issu du brouillon",
+      "ok": true,
+      "passif": 0
+    },
+    {
+      "id": "D3",
+      "label": "brouillon retrouvé après rechargement puis après déconnexion et reconnexion",
+      "ok": true
+    },
+    {
+      "id": "D4",
+      "label": "reprise fidèle (aucun champ inconnu rempli), modification enregistrée en version 2",
+      "ok": true,
+      "version": 2
+    },
+    {
+      "id": "D5",
+      "label": "conflit : refus révisable, saisie conservée à l'écran, brouillon de l'autre session intact",
+      "ok": true,
+      "version": 3
+    },
+    {
+      "id": "D5b",
+      "label": "après conflit, remplacement DÉCIDÉ : ma saisie écrite sur la version courante (4)",
+      "ok": true,
+      "version": 4,
+      "preteur": "Ma saisie"
+    },
+    {
+      "id": "D6",
+      "label": "isolation : B ne voit pas le brouillon de A et ne peut pas le supprimer",
+      "ok": true,
+      "suppressionParB": 422
+    },
+    {
+      "id": "D7",
+      "label": "suppression confirmée en deux temps ; rien n'est supprimé avant confirmation",
+      "ok": true
+    },
+    {
+      "id": "D8",
+      "label": "validation : la dette est créée et le brouillon consommé est retiré",
+      "ok": true
+    },
+    {
+      "id": "D9",
+      "label": "modification en brouillon : reprise à la réouverture, contrat enregistré inchangé",
+      "ok": true,
+      "repris": "Banque renégociée",
+      "enregistre": "Banque"
+    },
+    {
+      "id": "M1",
+      "label": "Dettes et brouillons sur mobile sans débordement horizontal",
+      "ok": true,
+      "scrollWidth": 390
+    },
+    {
+      "id": "E1",
+      "label": "aucune erreur JavaScript",
+      "ok": true,
+      "errors": []
+    }
+  ]
+}
