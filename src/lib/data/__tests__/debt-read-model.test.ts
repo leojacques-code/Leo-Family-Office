@@ -105,7 +105,16 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
     expect(queries.map((q) => q.table)).toEqual(
       expect.arrayContaining(["liabilities", "loan_schedules", "financial_accounts"]),
     );
-    expect(queries).toHaveLength(14);
+    // 14 lectures historiques + les trois tables de l'assurance séparée (B17), toutes
+    // propres au domaine Dettes et cloisonnées par propriétaire.
+    expect(queries).toHaveLength(17);
+    expect(queries.map((q) => q.table)).toEqual(
+      expect.arrayContaining([
+        "loan_insurance_policies",
+        "loan_insurance_insured",
+        "loan_insurance_periods",
+      ]),
+    );
     for (const q of queries) expect(q.filters).toContainEqual(["user_id", "owner"]);
     expect(queries.find((q) => q.table === "profiles")!.orders).toEqual([]);
     expect(mocks.rpc).not.toHaveBeenCalled();

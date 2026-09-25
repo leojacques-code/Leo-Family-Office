@@ -56,4 +56,4 @@ describe("B06 — consulter les connexions", () => {
 
 vi.mock("@/lib/auth", () => ({ requireActor: vi.fn() }));
 
-vi.mocked(requireActor).mockResolvedValue({userId: "11111111-1111-4111-8111-111111111111"});
+vi.mocked(requireActor).mockResolvedValue({ userId: "11111111-1111-4111-8111-111111111111" });

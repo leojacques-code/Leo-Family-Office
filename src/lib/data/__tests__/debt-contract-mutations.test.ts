@@ -30,6 +30,8 @@ const contract = {
   earlyRepayments: [],
   charges: [],
   providedSchedule: [],
+  insuranceMode: "UNKNOWN" as const,
+  insurancePolicies: [],
 };
 
 describe("mutations Debt Contract Input", () => {

@@ -110,7 +110,10 @@ beforeEach(() => {
 describe("repository Decision Lab rechargeable", () => {
   it("sauvegarde puis recharge une nouvelle instance du repository, sans cache client", async () => {
     const { definition, evaluation } = decisionFixture();
-    await createSupabaseRepository(mocks.user).mutateState({ action: "create_decision_case_v2", definition });
+    await createSupabaseRepository(mocks.user).mutateState({
+      action: "create_decision_case_v2",
+      definition,
+    });
     await createSupabaseRepository(mocks.user).mutateState({
       action: "save_decision_run_v2",
       caseId: definition.caseId,
@@ -129,7 +132,9 @@ describe("repository Decision Lab rechargeable", () => {
     for (const table of ["decision_cases", "decision_case_versions", "decision_runs"])
       expect(queries).toContainEqual({ table, field: "user_id", value: "owner" });
     mocks.user = "other";
-    expect((await createSupabaseRepository(mocks.user).getDashboardState()).decisionCases).toEqual([]);
+    expect((await createSupabaseRepository(mocks.user).getDashboardState()).decisionCases).toEqual(
+      [],
+    );
   });
   it("rejette les associations inter-utilisateurs même si une lecture privilégiée renvoie des lignes étrangères", () => {
     const { definition, evaluation } = decisionFixture();
@@ -231,7 +236,9 @@ describe("repository Decision Lab rechargeable", () => {
         created_at: "2026-08-01T00:00:00Z",
       },
     ];
-    expect((await createSupabaseRepository(mocks.user).getDashboardState()).monthlyCloses[0]).toMatchObject({
+    expect(
+      (await createSupabaseRepository(mocks.user).getDashboardState()).monthlyCloses[0],
+    ).toMatchObject({
       version: 3,
       reportingCurrency: "USD",
       completenessStatus: "PARTIAL",
