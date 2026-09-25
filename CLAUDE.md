@@ -15,6 +15,12 @@ Le succès ne se mesure pas au nombre d'écrans, mais à la possibilité de conf
 système une décision financière importante. Cinq exigences : fidélité, automatisation,
 explicabilité, adaptabilité, intelligence de décision.
 
+Les décisions produit d'expérience et d'interface (intitulés des métriques, aide « ? », emprise
+des Sources, formulaires progressifs, refontes Objectifs et Décisions, modèle documentaire
+commun) sont consignées dans `docs/produit/`, registre versionné par date. Une interface qui
+les contredit est un défaut ; une décision qui toucherait une convention financière de ce
+document ne s'applique pas sans nouvel arbitrage.
+
 ## 2. Architecture en couches
 
 ```text
