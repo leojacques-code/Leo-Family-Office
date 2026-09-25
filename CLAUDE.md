@@ -155,6 +155,13 @@ Corollaires appliqués dans le code existant, à préserver :
   d'un événement porte son `eventId` et n'est jamais réabsorbé dans les listes du contrat ;
   un remboursement effectué sans encours constaté laisse le bilan à l'encours observé, et
   l'écart est signalé, jamais recalculé ;
+- une projection de dette part de l'encours OBSERVÉ, à la plus tardive de la date de lecture et
+  de la date de cet encours : un encours daté d'un jour d'échéance est lu APRÈS ce prélèvement
+  (même convention que la date de lecture), et rien de ce qu'il contient déjà (échéance,
+  remboursement constaté, frais financé) n'est rejoué ; sa convention, elle, reste en vigueur
+  (« mensualité réduite »). Un remboursement PRÉVU n'est jamais « dans » l'encours : dépassé,
+  il est signalé. Un remboursement se déclare par le journal d'événements, jamais dans les
+  listes du contrat, où il serait compté deux fois ;
 - les flux immobiliers observés sont convertis par le FX Engine à la date de chaque transaction ;
   une dette future dans une autre devise reste non calculable sans courbe FX future explicite, le
   dernier spot n'étant jamais prolongé silencieusement.
@@ -192,9 +199,9 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **61 migrations** sur la branche de consolidation (gate local du 25 septembre
-2026 : 61 appliquées depuis zéro, 116 tables publiques, 477 contraintes relevées par le
-vérificateur, 123 RPC). Les seize dernières ne sont PAS en production :
+Le DÉPÔT porte **62 migrations** sur la branche de consolidation (gate local du 25 septembre
+2026 : 62 appliquées depuis zéro, 116 tables publiques, 478 contraintes relevées par le
+vérificateur, 123 RPC). Les dix-sept dernières ne sont PAS en production :
 
 - `20260914191901_verified_personal_session` : `lfo_verify_session` (B12) ;
 - `20260915064740_personal_reference_isolation` : références composites par propriétaire (B13) ;
@@ -215,7 +222,11 @@ vérificateur, 123 RPC). Les seize dernières ne sont PAS en production :
   pour un fait, écritures directes retirées sur `account_balances` ;
 - `20260925120000_form_drafts` : brouillons persistants de formulaire (Dette) ;
 - `20260925130000_debt_events` : journal d'événements de dette, annulations, versions de
-  contrat (B18).
+  contrat (B18) ;
+- `20260925140000_debt_review_versions_and_guards` : version `BASELINE` des termes en vigueur
+  avant la première correction d'un contrat antérieur au versionnement, gardes de forme
+  séquentielles de `lfo_record_debt_event` (relecture B18). Elle remplace la contrainte
+  `liability_contract_versions_kind_ck` par `liability_contract_versions_kind_v2_ck`.
 
 Avant tout push de `20260924170000` vers une base PARTAGÉE : ses contraintes
 `liabilities_payment_count_ck` et `liabilities_contract_dates_ck` sont ajoutées sans `NOT VALID`.
