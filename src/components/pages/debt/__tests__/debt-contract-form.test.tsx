@@ -127,6 +127,7 @@ describe("B16 : contrat minimal et synthèse avant enregistrement", () => {
       target: { value: "2026-01-05" },
     });
     fillMoney(/Paiement par échéance/, "100");
+    fireEvent.click(screen.getByLabelText("Inconnue (coût incomplet)"));
     const synthesis = screen.getByRole("region", { name: "Synthèse du contrat" });
     expect(synthesis).toHaveTextContent(
       "12, dont 12 amortissant du capital (durée déduite de la mensualité)",

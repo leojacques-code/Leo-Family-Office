@@ -18,6 +18,8 @@ import {
   ledgerWindowStart,
   readLedgerCoverage,
   readLoanTerms,
+  PAYMENT_FREQUENCIES,
+  INSURANCE_MODES,
 } from "@/lib/data/shared";
 import { buildFinancialDateContext, currentTaxYear, operationalToday } from "@/lib/financial-date";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
@@ -124,6 +126,8 @@ import type {
   Scenario,
   Transaction,
   TransactionCorrection,
+  InsurancePolicy,
+  InsuranceMode,
 } from "@/lib/types";
 import {
   CASH_FLOW_KINDS,
@@ -391,7 +395,45 @@ function mapDebtFacts(
   rateChangeRows: Row[],
   paymentChangeRows: Row[],
   profileRows: Row[],
+  // B17 : polices d'assurance séparée, assurés et périodes de prime.
+  insuranceRows: { policies: Row[]; insured: Row[]; periods: Row[] } = {
+    policies: [],
+    insured: [],
+    periods: [],
+  },
 ) {
+  const policiesByLiability = new Map<string, InsurancePolicy[]>();
+  for (const row of insuranceRows.policies) {
+    const policyId = str(row.id);
+    const context = `loan_insurance_policies[id=${policyId}]`;
+    const policy: InsurancePolicy = {
+      id: policyId,
+      insurer: optional(row.insurer) ?? null,
+      contractReference: optional(row.contract_reference) ?? null,
+      insured: insuranceRows.insured
+        .filter((person) => str(person.policy_id) === policyId)
+        .map((person) => ({
+          name: str(person.insured_name),
+          coverageShare: finiteNumber(person.coverage_share, `${context}.coverage_share`),
+        })),
+      periods: insuranceRows.periods
+        .filter((period) => str(period.policy_id) === policyId)
+        .map((period) => ({
+          firstDebitDate: str(period.first_debit_date),
+          lastDebitDate: period.last_debit_date ? str(period.last_debit_date) : null,
+          frequency: enumValue(
+            period.frequency,
+            PAYMENT_FREQUENCIES,
+            `${context}.frequency`,
+          ) as InsurancePolicy["periods"][number]["frequency"],
+          premiumAmount: finiteNumber(period.premium_amount, `${context}.premium_amount`),
+        }))
+        .sort((a, b) => a.firstDebitDate.localeCompare(b.firstDebitDate)),
+    };
+    const list = policiesByLiability.get(str(row.liability_id)) ?? [];
+    list.push(policy);
+    policiesByLiability.set(str(row.liability_id), list);
+  }
   const latestLiabilityObservations = latestBy(
     liabilityObservationRows,
     "liability_id",
@@ -460,6 +502,15 @@ function mapDebtFacts(
         firstPaymentDate: str(row.first_payment_date),
         maturityDate: "",
         contractNotes: optional(row.notes) ?? null,
+        // B17 : choix d'assurance déclaré, `null` pour un contrat antérieur.
+        insuranceMode: row.insurance_mode
+          ? (enumValue(
+              row.insurance_mode,
+              INSURANCE_MODES,
+              `liabilities[id=${str(row.id)}].insurance_mode`,
+            ) as InsuranceMode)
+          : null,
+        insurancePolicies: policiesByLiability.get(str(row.id)) ?? [],
         provenance: observation ? provenance(observation) : provenance(row),
       };
       // B16 : mensualité, durée et maturité sont DÉCLARÉES ou non (NULL). Le Debt Engine
@@ -617,6 +668,9 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       "loan_charges",
       "loan_rate_changes",
       "loan_payment_changes",
+      "loan_insurance_policies",
+      "loan_insurance_insured",
+      "loan_insurance_periods",
       "scenarios",
       "scenario_versions",
       "currency_rates",
@@ -701,6 +755,11 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       rows.loan_rate_changes,
       rows.loan_payment_changes,
       rows.profiles,
+      {
+        policies: rows.loan_insurance_policies,
+        insured: rows.loan_insurance_insured,
+        periods: rows.loan_insurance_periods,
+      },
     );
     const scenarios = mapScenarioFacts(rows.scenarios, rows.scenario_versions);
     // Seul immediateCash est conservé. Ce bilan intermédiaire n'est pas un bilan global.
@@ -805,6 +864,9 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       taxRuleRows,
       taxObservationRows,
       transactionCorrectionRows,
+      insurancePolicyRows,
+      insuredRows,
+      insurancePeriodRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -868,6 +930,9 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       mine("tax_rules"),
       fetchAllPages("tax_observations", "observed_date"),
       fetchAllPages("transaction_corrections", "decided_at"),
+      fetchAllPages("loan_insurance_policies", "id"),
+      fetchAllPages("loan_insurance_insured", "id"),
+      fetchAllPages("loan_insurance_periods", "id"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -1140,6 +1205,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       rateChangeRows,
       paymentChangeRows,
       profileRows,
+      { policies: insurancePolicyRows, insured: insuredRows, periods: insurancePeriodRows },
     );
 
     const incomes: IncomeSource[] = incomeRows
@@ -2797,6 +2863,21 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
               insurance_amount: contract.insuranceAmount,
               recurring_fees: contract.recurringFees,
               payment_includes_insurance: contract.paymentIncludesInsurance,
+              insurance_mode: contract.insuranceMode,
+              insurance_policies: contract.insurancePolicies.map((policy) => ({
+                insurer: policy.insurer,
+                contract_reference: policy.contractReference,
+                insured: policy.insured.map((person) => ({
+                  name: person.name,
+                  coverage_share: person.coverageShare,
+                })),
+                periods: policy.periods.map((period) => ({
+                  first_debit_date: period.firstDebitDate,
+                  last_debit_date: period.lastDebitDate,
+                  frequency: period.frequency,
+                  premium_amount: period.premiumAmount,
+                })),
+              })),
               deferral: contract.deferral
                 ? {
                     kind: contract.deferral.kind,

@@ -155,6 +155,47 @@ const debtContractSchema = z
     insuranceAmount: nullableMoney,
     recurringFees: nullableMoney,
     paymentIncludesInsurance: z.boolean().nullable(),
+    // B17 : choix initial OBLIGATOIRE pour prétendre calculer un coût complet.
+    insuranceMode: z.enum(["INCLUDED", "SEPARATE", "NONE", "UNKNOWN"]),
+    insurancePolicies: z
+      .array(
+        z
+          .object({
+            insurer: z.string().trim().max(160).nullable(),
+            contractReference: z.string().trim().max(160).nullable(),
+            insured: z
+              .array(
+                z
+                  .object({
+                    name: z.string().trim().min(1).max(160),
+                    coverageShare: finite.positive().max(1),
+                  })
+                  .strict(),
+              )
+              .max(10),
+            periods: z
+              .array(
+                z
+                  .object({
+                    firstDebitDate: realDate,
+                    lastDebitDate: realDate.nullable(),
+                    frequency: z.enum(["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL"]),
+                    premiumAmount: finite.nonnegative().max(99_999_999_999_999),
+                  })
+                  .strict()
+                  .refine(
+                    (period) =>
+                      period.lastDebitDate === null ||
+                      period.lastDebitDate >= period.firstDebitDate,
+                    "La dernière date de débit précède la première",
+                  ),
+              )
+              .min(1, "Une police exige au moins une période de prime")
+              .max(24),
+          })
+          .strict(),
+      )
+      .max(5),
     deferral: z
       .object({
         kind: z.enum(["PRINCIPAL_ONLY", "TOTAL"]),
@@ -214,6 +255,34 @@ const debtContractSchema = z
   })
   .strict()
   .superRefine((contract, context) => {
+    // Un coût, une fois (document 04, étape D) : mêmes règles que la base.
+    if (contract.insuranceMode === "SEPARATE" && contract.insurancePolicies.length === 0)
+      context.addIssue({
+        code: "custom",
+        message: "Une assurance séparée exige au moins une police",
+        path: ["insurancePolicies"],
+      });
+    if (contract.insuranceMode !== "SEPARATE" && contract.insurancePolicies.length > 0)
+      context.addIssue({
+        code: "custom",
+        message: "Des polices séparées ne se déclarent qu’avec une assurance séparée",
+        path: ["insurancePolicies"],
+      });
+    if (contract.insuranceMode === "INCLUDED" && contract.paymentIncludesInsurance !== true)
+      context.addIssue({
+        code: "custom",
+        message: "Une assurance incluse l’est dans le paiement",
+        path: ["paymentIncludesInsurance"],
+      });
+    if (
+      contract.insuranceMode !== "INCLUDED" &&
+      (contract.insuranceAmount !== null || contract.paymentIncludesInsurance === true)
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Une prime par échéance n’existe que pour une assurance incluse dans le paiement",
+        path: ["insuranceAmount"],
+      });
     if (contract.promoteOutstanding && contract.liabilityId === null) {
       context.addIssue({
         code: "custom",

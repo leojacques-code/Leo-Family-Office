@@ -235,6 +235,10 @@ export interface DebtTermsResolution {
 }
 
 export interface Liability {
+  /** Choix d'assurance déclaré (B17). Absent ou `null` : contrat antérieur à B17. */
+  insuranceMode?: InsuranceMode | null;
+  /** Polices d'une assurance SÉPARÉE, sur leur propre calendrier. */
+  insurancePolicies?: InsurancePolicy[];
   /**
    * Termes déclarés et provenance de leur résolution. Absents = tous les termes déclarés
    * (données antérieures au contrat adaptatif, fixtures, prêts synthétiques).
@@ -312,7 +316,38 @@ export interface Liability {
  * vraies sorties de trésorerie, mais ce ne sont pas des échéances : les confondre fausse
  * autant le comptage des échéances que leur omission fausserait la trésorerie.
  */
-export type ScheduleEntryKind = "PAYMENT" | "CHARGE" | "EARLY_REPAYMENT";
+export type ScheduleEntryKind = "PAYMENT" | "CHARGE" | "EARLY_REPAYMENT" | "INSURANCE";
+
+/**
+ * Choix d'assurance DÉCLARÉ (document 04, étape D). INCLUDED : dans les paiements du prêt ;
+ * SEPARATE : prélevée à part, sur son propre calendrier ; NONE : absence confirmée ;
+ * UNKNOWN : inconnue, le coût complet n'est pas calculable.
+ */
+export type InsuranceMode = "INCLUDED" | "SEPARATE" | "NONE" | "UNKNOWN";
+
+/** Assuré d'une police. La quotité décrit une couverture, jamais une part du passif. */
+export interface InsuredPerson {
+  name: string;
+  /** Fraction couverte : 1 = 100 %. */
+  coverageShare: number;
+}
+
+/** Période de prime : débits réguliers d'un montant déclaré. */
+export interface InsurancePremiumPeriod {
+  firstDebitDate: string;
+  /** `null` : jusqu'à la dernière échéance du prêt, choix déclaré. */
+  lastDebitDate: string | null;
+  frequency: PaymentFrequency;
+  premiumAmount: number;
+}
+
+export interface InsurancePolicy {
+  id: string;
+  insurer: string | null;
+  contractReference: string | null;
+  insured: InsuredPerson[];
+  periods: InsurancePremiumPeriod[];
+}
 
 export interface LoanScheduleEntry {
   liabilityId: string;

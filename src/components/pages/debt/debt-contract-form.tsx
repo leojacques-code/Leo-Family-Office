@@ -80,6 +80,9 @@ function blankContract(): DebtContractInput {
     insuranceAmount: null,
     recurringFees: null,
     paymentIncludesInsurance: null,
+    // Remplacé par le choix DÉCLARÉ avant tout enregistrement (voir `submit`).
+    insuranceMode: "UNKNOWN",
+    insurancePolicies: [],
     deferral: null,
     facilityId: null,
     notes: null,
@@ -121,6 +124,13 @@ function fromLiability(loan: Liability): DebtContractInput {
     insuranceAmount: loan.monthlyInsurance,
     recurringFees: loan.recurringFees,
     paymentIncludesInsurance: loan.paymentIncludesInsurance,
+    insuranceMode: loan.insuranceMode ?? "UNKNOWN",
+    insurancePolicies: (loan.insurancePolicies ?? []).map((policy) => ({
+      insurer: policy.insurer,
+      contractReference: policy.contractReference,
+      insured: policy.insured.map((person) => ({ ...person })),
+      periods: policy.periods.map((period) => ({ ...period })),
+    })),
     deferral: loan.deferral
       ? {
           kind: loan.deferral.kind === "NONE" ? "PRINCIPAL_ONLY" : loan.deferral.kind,
@@ -149,6 +159,59 @@ function fromLiability(loan: Liability): DebtContractInput {
     providedSchedule: loan.providedSchedule.map((row) => ({ ...row })),
   };
 }
+
+type InsuranceChoice = "" | DebtContractInput["insuranceMode"];
+
+/**
+ * Choix d'assurance d'un contrat existant. Un contrat antérieur à B17 n'a pas de choix
+ * DÉCLARÉ : une prime « en sus » est reprise en police séparée, VISIBLE et modifiable avant
+ * enregistrement ; une convention inconnue laisse le choix à faire.
+ */
+function initialInsurance(loan: Liability | null): {
+  choice: InsuranceChoice;
+  policies: DebtContractInput["insurancePolicies"];
+} {
+  if (!loan) return { choice: "", policies: [] };
+  if (loan.insuranceMode)
+    return {
+      choice: loan.insuranceMode,
+      policies: (loan.insurancePolicies ?? []).map((policy) => ({
+        insurer: policy.insurer,
+        contractReference: policy.contractReference,
+        insured: policy.insured.map((person) => ({ ...person })),
+        periods: policy.periods.map((period) => ({ ...period })),
+      })),
+    };
+  if (loan.monthlyInsurance !== null && loan.paymentIncludesInsurance === true)
+    return { choice: "INCLUDED", policies: [] };
+  if (loan.monthlyInsurance !== null && loan.paymentIncludesInsurance === false)
+    return {
+      choice: "SEPARATE",
+      policies: [
+        {
+          insurer: null,
+          contractReference: null,
+          insured: [],
+          periods: [
+            {
+              firstDebitDate: loan.firstPaymentDate,
+              lastDebitDate: null,
+              frequency: loan.paymentFrequency,
+              premiumAmount: loan.monthlyInsurance,
+            },
+          ],
+        },
+      ],
+    };
+  return { choice: "", policies: [] };
+}
+
+const INSURANCE_CHOICES: Array<{ value: Exclude<InsuranceChoice, "">; label: string }> = [
+  { value: "INCLUDED", label: "Incluse dans les paiements du prêt" },
+  { value: "SEPARATE", label: "Prélevée séparément" },
+  { value: "NONE", label: "Absence d’assurance confirmée" },
+  { value: "UNKNOWN", label: "Inconnue (coût incomplet)" },
+];
 
 const number = (value: string) => Number(value.replace(",", "."));
 const nullableNumber = (value: string) => (value === "" ? null : number(value));
@@ -215,6 +278,7 @@ export function DebtContractForm({
     initialBalance: null as number | null,
     annualRate: loan?.annualRate ?? null,
   }));
+  const [insurance, setInsurance] = useState(() => initialInsurance(loan));
   const [formError, setFormError] = useState<string | null>(null);
   const mode = structure.mode;
   const structureComplete =
@@ -244,8 +308,20 @@ export function DebtContractForm({
       // l'intérêt de la période, que le moteur calcule.
       paymentAmount: mode === "INTEREST_ONLY" || mode === "BULLET" ? null : contract.paymentAmount,
       balloonAmount: mode === "BALLOON" ? contract.balloonAmount : null,
+      // Un coût, une fois : seule une assurance INCLUSE a une prime par échéance, et seules
+      // des polices SÉPARÉES ont leur propre calendrier. Sans choix, l'assurance est inconnue
+      // pour la synthèse, et l'enregistrement est refusé.
+      insuranceMode: insurance.choice === "" ? "UNKNOWN" : insurance.choice,
+      insuranceAmount: insurance.choice === "INCLUDED" ? contract.insuranceAmount : null,
+      paymentIncludesInsurance:
+        insurance.choice === "INCLUDED"
+          ? true
+          : insurance.choice === "SEPARATE" || insurance.choice === "NONE"
+            ? false
+            : null,
+      insurancePolicies: insurance.choice === "SEPARATE" ? insurance.policies : [],
     };
-  }, [contract, structure, mode, structureComplete, requiredValues, existing]);
+  }, [contract, structure, mode, structureComplete, requiredValues, existing, insurance]);
 
   const synthesis = useMemo(
     () =>
@@ -311,6 +387,43 @@ export function DebtContractForm({
           ? "Indiquez ce que vous connaissez : la mensualité, le nombre d’échéances ou la maturité."
           : "Indiquez le nombre d’échéances ou la maturité.",
       );
+      return;
+    }
+    if (insurance.choice === "") {
+      setFormError(
+        "Indiquez le traitement de l’assurance : incluse, séparée, absente ou inconnue.",
+      );
+      return;
+    }
+    if (
+      insurance.choice === "SEPARATE" &&
+      (insurance.policies.length === 0 ||
+        insurance.policies.some(
+          (policy) =>
+            policy.periods.length === 0 ||
+            policy.periods.some(
+              (period) => !period.firstDebitDate || !Number.isFinite(period.premiumAmount),
+            ),
+        ))
+    ) {
+      setFormError(
+        "Une assurance séparée exige une police avec au moins une période : première date de débit et prime.",
+      );
+      return;
+    }
+    if (
+      insurance.choice === "SEPARATE" &&
+      insurance.policies.some((policy) =>
+        policy.insured.some(
+          (person) =>
+            person.name.trim() === "" ||
+            !Number.isFinite(person.coverageShare) ||
+            person.coverageShare <= 0 ||
+            person.coverageShare > 1,
+        ),
+      )
+    ) {
+      setFormError("Chaque assuré a un nom et une quotité entre 0 et 100 %.");
       return;
     }
     if (mode === "BALLOON" && candidate.balloonAmount === null) {
@@ -574,6 +687,60 @@ export function DebtContractForm({
         </>
       ) : null}
 
+      {mode ? (
+        <fieldset className="full debt-terms">
+          <legend>Assurance emprunteur</legend>
+          <div className="radio-row full" role="radiogroup" aria-label="Traitement de l’assurance">
+            {INSURANCE_CHOICES.map((item) => (
+              <label className="checkbox-row" key={item.value}>
+                <input
+                  checked={insurance.choice === item.value}
+                  name="insurance-choice"
+                  onChange={() =>
+                    setInsurance({
+                      choice: item.value,
+                      policies:
+                        item.value === "SEPARATE" && insurance.policies.length === 0
+                          ? [emptyPolicy()]
+                          : insurance.policies,
+                    })
+                  }
+                  type="radio"
+                />
+                {item.label}
+              </label>
+            ))}
+          </div>
+          {insurance.choice === "INCLUDED" ? (
+            <MoneyInput
+              id="debt-insurance-included"
+              label="Part d’assurance dans chaque paiement (vide = montant inconnu)"
+              currency={currencyLabel}
+              value={contract.insuranceAmount}
+              onChange={(draft) =>
+                setContract({
+                  ...contract,
+                  insuranceAmount: draft.state === "VALID" ? draft.value : null,
+                })
+              }
+            />
+          ) : null}
+          {insurance.choice === "SEPARATE" ? (
+            <InsurancePoliciesEditor
+              currency={currencyLabel}
+              policies={insurance.policies}
+              onChange={(policies) => setInsurance({ ...insurance, policies })}
+            />
+          ) : null}
+          {insurance.choice === "UNKNOWN" ? (
+            <p className="full muted-copy">
+              Le coût complet du crédit ne sera pas calculé : l’assurance reste inconnue, jamais
+              comptée zéro.
+            </p>
+          ) : null}
+        </fieldset>
+      ) : null}
+
       {synthesis ? (
         <section aria-label="Synthèse du contrat" className="full debt-synthesis">
           <strong>Synthèse avant enregistrement</strong>
@@ -688,19 +855,6 @@ export function DebtContractForm({
         <summary>Conditions avancées et événements</summary>
         <div className="form-grid">
           <label>
-            Assurance par échéance (vide = inconnue)
-            <input
-              className="text-input"
-              type="number"
-              min="0"
-              step="0.01"
-              value={contract.insuranceAmount ?? ""}
-              onChange={(event) =>
-                setContract({ ...contract, insuranceAmount: nullableNumber(event.target.value) })
-              }
-            />
-          </label>
-          <label>
             Frais récurrents (vide = inconnus)
             <input
               className="text-input"
@@ -712,30 +866,6 @@ export function DebtContractForm({
                 setContract({ ...contract, recurringFees: nullableNumber(event.target.value) })
               }
             />
-          </label>
-          <label>
-            Assurance dans le paiement
-            <select
-              className="text-input"
-              value={
-                contract.paymentIncludesInsurance === null
-                  ? "UNKNOWN"
-                  : contract.paymentIncludesInsurance
-                    ? "YES"
-                    : "NO"
-              }
-              onChange={(event) =>
-                setContract({
-                  ...contract,
-                  paymentIncludesInsurance:
-                    event.target.value === "UNKNOWN" ? null : event.target.value === "YES",
-                })
-              }
-            >
-              <option value="UNKNOWN">Non renseigné</option>
-              <option value="YES">Incluse</option>
-              <option value="NO">En sus</option>
-            </select>
           </label>
           <label>
             Différé
@@ -1229,5 +1359,253 @@ function RemoveButton({ onClick }: { onClick: () => void }) {
     <button type="button" className="icon-button" onClick={onClick} aria-label="Supprimer la ligne">
       <Trash2 size={14} />
     </button>
+  );
+}
+
+function emptyPolicy(): DebtContractInput["insurancePolicies"][number] {
+  return {
+    insurer: null,
+    contractReference: null,
+    insured: [],
+    periods: [
+      { firstDebitDate: "", lastDebitDate: null, frequency: "MONTHLY", premiumAmount: Number.NaN },
+    ],
+  };
+}
+
+/**
+ * Polices d'une assurance SÉPARÉE (document 04, étape D) : assureur, contrat, assurés et
+ * quotités, périodes de prime. Plusieurs assurés et plusieurs périodes sont permis ; la
+ * quotité décrit une couverture et n'entre dans aucun calcul de passif.
+ */
+function InsurancePoliciesEditor({
+  currency,
+  policies,
+  onChange,
+}: {
+  currency: string;
+  policies: DebtContractInput["insurancePolicies"];
+  onChange: (policies: DebtContractInput["insurancePolicies"]) => void;
+}) {
+  const update = (index: number, policy: DebtContractInput["insurancePolicies"][number]) =>
+    onChange(policies.map((item, row) => (row === index ? policy : item)));
+  return (
+    <div className="full debt-insurance-policies">
+      {policies.map((policy, index) => (
+        <section className="debt-nested-editor" key={index} aria-label={`Police ${index + 1}`}>
+          <header>
+            <strong>Police {index + 1}</strong>
+            <RemoveButton onClick={() => onChange(policies.filter((_, row) => row !== index))} />
+          </header>
+          <div className="form-grid">
+            <label>
+              Assureur (facultatif)
+              <input
+                className="text-input"
+                maxLength={160}
+                value={policy.insurer ?? ""}
+                onChange={(event) =>
+                  update(index, { ...policy, insurer: event.target.value || null })
+                }
+              />
+            </label>
+            <label>
+              Référence du contrat (facultative)
+              <input
+                className="text-input"
+                maxLength={160}
+                value={policy.contractReference ?? ""}
+                onChange={(event) =>
+                  update(index, { ...policy, contractReference: event.target.value || null })
+                }
+              />
+            </label>
+          </div>
+          <strong>Assurés et quotités</strong>
+          {policy.insured.map((person, personIndex) => (
+            <div className="debt-editor-row" key={personIndex}>
+              <input
+                aria-label={`Nom de l’assuré ${personIndex + 1}`}
+                className="text-input"
+                maxLength={160}
+                placeholder="Nom de l’assuré"
+                value={person.name}
+                onChange={(event) =>
+                  update(index, {
+                    ...policy,
+                    insured: policy.insured.map((item, row) =>
+                      row === personIndex ? { ...item, name: event.target.value } : item,
+                    ),
+                  })
+                }
+              />
+              <input
+                aria-label={`Quotité de l’assuré ${personIndex + 1}, en pourcentage`}
+                className="text-input"
+                inputMode="decimal"
+                placeholder="Quotité %"
+                value={
+                  Number.isFinite(person.coverageShare) ? String(person.coverageShare * 100) : ""
+                }
+                onChange={(event) =>
+                  update(index, {
+                    ...policy,
+                    insured: policy.insured.map((item, row) =>
+                      row === personIndex
+                        ? { ...item, coverageShare: number(event.target.value) / 100 }
+                        : item,
+                    ),
+                  })
+                }
+              />
+              <RemoveButton
+                onClick={() =>
+                  update(index, {
+                    ...policy,
+                    insured: policy.insured.filter((_, row) => row !== personIndex),
+                  })
+                }
+              />
+            </div>
+          ))}
+          <button
+            className="button secondary compact"
+            onClick={() =>
+              update(index, {
+                ...policy,
+                insured: [...policy.insured, { name: "", coverageShare: Number.NaN }],
+              })
+            }
+            type="button"
+          >
+            <Plus size={13} /> Ajouter un assuré
+          </button>
+          <strong>Périodes de prime</strong>
+          {policy.periods.map((period, periodIndex) => (
+            <div className="debt-insurance-period" key={periodIndex}>
+              <label>
+                Premier débit
+                <input
+                  className="text-input"
+                  type="date"
+                  value={period.firstDebitDate}
+                  onChange={(event) =>
+                    update(index, {
+                      ...policy,
+                      periods: policy.periods.map((item, row) =>
+                        row === periodIndex
+                          ? { ...item, firstDebitDate: event.target.value }
+                          : item,
+                      ),
+                    })
+                  }
+                  required
+                />
+              </label>
+              <label>
+                Dernier débit (vide = jusqu’à la dernière échéance du prêt)
+                <input
+                  className="text-input"
+                  type="date"
+                  value={period.lastDebitDate ?? ""}
+                  onChange={(event) =>
+                    update(index, {
+                      ...policy,
+                      periods: policy.periods.map((item, row) =>
+                        row === periodIndex
+                          ? { ...item, lastDebitDate: event.target.value || null }
+                          : item,
+                      ),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Fréquence des débits
+                <select
+                  className="text-input"
+                  value={period.frequency}
+                  onChange={(event) =>
+                    update(index, {
+                      ...policy,
+                      periods: policy.periods.map((item, row) =>
+                        row === periodIndex
+                          ? {
+                              ...item,
+                              frequency: event.target.value as typeof period.frequency,
+                            }
+                          : item,
+                      ),
+                    })
+                  }
+                >
+                  <option value="MONTHLY">Mensuelle</option>
+                  <option value="QUARTERLY">Trimestrielle</option>
+                  <option value="SEMIANNUAL">Semestrielle</option>
+                  <option value="ANNUAL">Annuelle</option>
+                </select>
+              </label>
+              <MoneyInput
+                id={`debt-insurance-premium-${index}-${periodIndex}`}
+                label="Prime par débit"
+                currency={currency}
+                value={Number.isFinite(period.premiumAmount) ? period.premiumAmount : null}
+                onChange={(draft) =>
+                  update(index, {
+                    ...policy,
+                    periods: policy.periods.map((item, row) =>
+                      row === periodIndex
+                        ? {
+                            ...item,
+                            premiumAmount: draft.state === "VALID" ? draft.value : Number.NaN,
+                          }
+                        : item,
+                    ),
+                  })
+                }
+                required
+              />
+              {policy.periods.length > 1 ? (
+                <RemoveButton
+                  onClick={() =>
+                    update(index, {
+                      ...policy,
+                      periods: policy.periods.filter((_, row) => row !== periodIndex),
+                    })
+                  }
+                />
+              ) : null}
+            </div>
+          ))}
+          <button
+            className="button secondary compact"
+            onClick={() =>
+              update(index, {
+                ...policy,
+                periods: [
+                  ...policy.periods,
+                  {
+                    firstDebitDate: "",
+                    lastDebitDate: null,
+                    frequency: "MONTHLY",
+                    premiumAmount: Number.NaN,
+                  },
+                ],
+              })
+            }
+            type="button"
+          >
+            <Plus size={13} /> Ajouter une période (variation de prime)
+          </button>
+        </section>
+      ))}
+      <button
+        className="button secondary"
+        onClick={() => onChange([...policies, emptyPolicy()])}
+        type="button"
+      >
+        <Plus size={15} /> Ajouter une police
+      </button>
+    </div>
   );
 }

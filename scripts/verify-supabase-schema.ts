@@ -66,6 +66,7 @@ const canonicalMigrations = [
   "20260924150000",
   "20260924160000",
   "20260924170000",
+  "20260924180000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -1137,6 +1138,9 @@ const userOwnedTables = [
   "position_snapshot_corrections",
   "transaction_corrections",
   "liability_terms_transitions",
+  "loan_insurance_policies",
+  "loan_insurance_insured",
+  "loan_insurance_periods",
   "liabilities",
   "loan_schedules",
   "income_sources",
@@ -1653,6 +1657,14 @@ const requiredConstraints = [
   "liabilities_terms_status_ck",
   "liabilities_terms_completeness_v2_ck",
   "liabilities_contract_dates_ck",
+  "liabilities_insurance_mode_ck",
+  "liabilities_insurance_consistency_ck",
+  "loan_insurance_policies_liability_fk",
+  "loan_insurance_insured_policy_fk",
+  "loan_insurance_insured_share_ck",
+  "loan_insurance_periods_policy_fk",
+  "loan_insurance_periods_amount_ck",
+  "loan_insurance_periods_dates_ck",
   "liabilities_payment_count_ck",
   "loan_rate_changes_kind_ck",
   "loan_payment_changes_kind_ck",
@@ -2352,6 +2364,10 @@ const readOnlyAuditTables = [
   // Les opérations ne s'écrivent que par le serveur : sans quoi la piste des corrections
   // pourrait être contournée par une réécriture directe (`20260924160000`).
   "transactions",
+  // Assurance séparée (B17) : seule la RPC du contrat écrit polices, assurés et périodes.
+  "loan_insurance_policies",
+  "loan_insurance_insured",
+  "loan_insurance_periods",
 ] as const;
 
 const storagePolicies = [

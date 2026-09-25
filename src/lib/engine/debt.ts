@@ -122,7 +122,8 @@ export type LoanFlagCode =
   | "RATE_ASSUMPTION_APPLIED"
   | "BALLOON_AMOUNT_MISSING"
   | "TERMS_DERIVED"
-  | "TERMS_UNRESOLVED";
+  | "TERMS_UNRESOLVED"
+  | "INSURANCE_PERIOD_UNBOUNDED";
 
 export interface LoanScheduleFlag {
   code: LoanFlagCode;
@@ -310,7 +311,19 @@ function periodInterest(
 
 /** Assurance par échéance, 0 quand la donnée n'existe pas (l'absence n'est pas une valeur). */
 function insurancePerPayment(liability: Liability): number {
+  // Une assurance séparée a son propre calendrier : la compter aussi par échéance la
+  // compterait deux fois. Absente ou inconnue : aucune prime par échéance.
+  const mode = liability.insuranceMode;
+  if (mode === "SEPARATE" || mode === "NONE" || mode === "UNKNOWN") return 0;
   return liability.monthlyInsurance ?? 0;
+}
+
+/** L'assurance future est-elle connue, y compris déclarée nulle ? */
+export function insuranceKnown(liability: Liability): boolean {
+  const mode = liability.insuranceMode;
+  if (mode === "NONE" || mode === "SEPARATE") return true;
+  if (mode === "UNKNOWN") return false;
+  return liability.monthlyInsurance !== null;
 }
 
 function feesPerPayment(liability: Liability): number {
@@ -906,7 +919,7 @@ function repaymentEvents(liability: Liability): LoanEvent[] {
  *
  * C. Si un échéancier bancaire est fourni, il tient lieu de contrat et prime sans recalcul.
  */
-export function buildContractualSchedule(liability: Liability): LoanSchedule {
+function contractualScheduleCore(liability: Liability): LoanSchedule {
   if (hasProvidedSchedule(liability)) {
     return summarise(liability.id, fromProvided(liability, liability.providedSchedule), "ACTUAL");
   }
@@ -928,6 +941,18 @@ export function buildContractualSchedule(liability: Liability): LoanSchedule {
   );
 }
 
+/**
+ * A. Échéancier contractuel, assurance séparée comprise sur son propre calendrier (B17).
+ * Un échéancier MISSING le reste : des débits d'assurance seuls ne le rendraient pas projetable.
+ */
+export function buildContractualSchedule(liability: Liability): LoanSchedule {
+  const core = contractualScheduleCore(liability);
+  if (core.kind === "MISSING") return core;
+  const opening = core.entries[0]?.openingBalance ?? liability.principal;
+  const merged = withSeparateInsurance(liability, core.entries, opening, null);
+  return summarise(liability.id, merged.entries, core.kind, [...core.flags, ...merged.flags]);
+}
+
 /** Nombre d'échéances contractuelles dont la date d'exigibilité est passée à `asOfDate`. */
 export function elapsedPaymentsAt(liability: Liability, asOfDate: string): number {
   if (hasProvidedSchedule(liability)) {
@@ -943,6 +968,82 @@ export function elapsedPaymentsAt(liability: Liability, asOfDate: string): numbe
   return elapsed;
 }
 
+/** B. Échéancier forward, assurance séparée comprise, débits postérieurs à `asOfDate`. */
+export function buildForwardSchedule(liability: Liability, asOfDate: string): LoanSchedule {
+  const core = forwardScheduleCore(liability, asOfDate);
+  if (core.kind === "MISSING") return core;
+  const merged = withSeparateInsurance(liability, core.entries, liability.currentBalance, asOfDate);
+  return summarise(liability.id, merged.entries, core.kind, [...core.flags, ...merged.flags]);
+}
+
+// ─── Assurance séparée (B17) ─────────────────────────────────────────────────────────
+
+/** Dernière date contractuelle du prêt : borne des périodes « jusqu'à la fin du prêt ». */
+function loanEndDate(liability: Liability): string | null {
+  if (hasProvidedSchedule(liability))
+    return (
+      [...liability.providedSchedule].sort((a, b) => a.dueDate.localeCompare(b.dueDate)).at(-1)
+        ?.dueDate ?? null
+    );
+  if (!isUsable(liability)) return null;
+  return dueDateOf(liability, Math.trunc(liability.paymentCount));
+}
+
+/**
+ * Débits d'une assurance SÉPARÉE, à leurs propres dates. Chaque ligne ne porte que
+ * l'assurance : elle ne rembourse rien et ne change pas l'encours, qu'elle reprend de la
+ * ligne d'amortissement qui la précède pour que le solde tracé reste juste.
+ */
+function withSeparateInsurance(
+  liability: Liability,
+  entries: LoanScheduleEntry[],
+  startingBalance: number,
+  after: string | null,
+): { entries: LoanScheduleEntry[]; flags: LoanScheduleFlag[] } {
+  if (liability.insuranceMode !== "SEPARATE") return { entries, flags: [] };
+  const flags: LoanScheduleFlag[] = [];
+  const end = loanEndDate(liability);
+  const debits: Array<{ date: string; amount: number }> = [];
+  for (const policy of liability.insurancePolicies ?? []) {
+    for (const period of policy.periods) {
+      const last = period.lastDebitDate ?? end;
+      if (last === null) {
+        flags.push({
+          code: "INSURANCE_PERIOD_UNBOUNDED",
+          detail:
+            "Période d'assurance « jusqu'à la fin du prêt » alors que la fin du prêt n'est pas calculable : ses débits ne sont pas projetés.",
+        });
+        continue;
+      }
+      const step = MONTHS_PER_PERIOD[period.frequency];
+      for (let index = 0; index < 1200; index += 1) {
+        const date = addMonths(period.firstDebitDate, index * step);
+        if (date > last) break;
+        if (after === null || date > after) debits.push({ date, amount: period.premiumAmount });
+      }
+    }
+  }
+  if (debits.length === 0) return { entries, flags };
+  const amortisation = [...entries].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const balanceAt = (date: string) =>
+    amortisation.filter((row) => row.dueDate <= date).at(-1)?.closingBalance ?? startingBalance;
+  const insurance = debits.map((debit) =>
+    entry(liability, {
+      paymentNumber: 0,
+      entryKind: "INSURANCE",
+      dueDate: debit.date,
+      openingBalance: balanceAt(debit.date),
+      interest: 0,
+      capitalisedInterest: 0,
+      principal: 0,
+      insurance: debit.amount,
+      fees: 0,
+      kind: "DERIVED",
+    }),
+  );
+  return { entries: [...entries, ...insurance], flags };
+}
+
 /**
  * B. Échéancier forward : projection depuis l'encours réellement observé à `asOfDate`,
  * sur les seules échéances restantes. Les mensualités déjà passées ne sont jamais rejouées
@@ -955,7 +1056,7 @@ export function elapsedPaymentsAt(liability: Liability, asOfDate: string): numbe
  * C. Un échéancier bancaire fourni prime : ses lignes futures sont ce que la banque
  * prélèvera, quelle que soit la projection que nous aurions faite.
  */
-export function buildForwardSchedule(liability: Liability, asOfDate: string): LoanSchedule {
+function forwardScheduleCore(liability: Liability, asOfDate: string): LoanSchedule {
   if (hasProvidedSchedule(liability)) {
     const future = fromProvided(liability, liability.providedSchedule).filter(
       (row) => row.dueDate > asOfDate,
@@ -1333,15 +1434,15 @@ export function summariseContract(liability: Liability, asOfDate: string): Contr
   const payments = rows.filter((row) => row.entryKind === "PAYMENT");
   const sum = (pick: (row: LoanScheduleEntry) => number) =>
     rows.reduce((total, row) => total + pick(row), 0);
-  const insuranceKnown = liability.monthlyInsurance !== null;
+  const insuranceIsKnown = insuranceKnown(liability);
   const feesKnown = liability.recurringFees !== null;
   const futurePrincipal = sum((row) => row.principal);
   const futureInterest = sum((row) => row.interest);
-  const futureInsurance = insuranceKnown ? sum((row) => row.insurance) : null;
+  const futureInsurance = insuranceIsKnown ? sum((row) => row.insurance) : null;
   const futureFees =
     feesKnown || liability.oneOffCharges.length > 0 ? sum((row) => row.fees) : null;
   const unknowns = [
-    ...(insuranceKnown ? [] : ["assurance"]),
+    ...(insuranceIsKnown ? [] : ["assurance"]),
     ...(feesKnown ? [] : ["frais récurrents"]),
     ...(timeline.forward.kind === "MISSING" ? ["échéancier"] : []),
   ];

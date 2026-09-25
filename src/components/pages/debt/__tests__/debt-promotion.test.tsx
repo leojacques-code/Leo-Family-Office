@@ -59,6 +59,7 @@ describe("B16 : décrire le contrat d'une dette connue par son seul encours", ()
       target: { value: "2026-02-05" },
     });
     fireEvent.change(screen.getByLabelText("Prêteur"), { target: { value: "Famille" } });
+    fireEvent.click(screen.getByLabelText("Inconnue (coût incomplet)"));
     fill(/Capital initial emprunté/, "2000");
     fill(/Taux annuel/, "1");
     fill(/Paiement par échéance/, "100");
@@ -105,6 +106,8 @@ describe("B16 : décrire le contrat d'une dette connue par son seul encours", ()
       earlyRepayments: [],
       charges: [],
       providedSchedule: [],
+      insuranceMode: "UNKNOWN",
+      insurancePolicies: [],
     };
     const parse = (contract: object) =>
       mutationSchema.safeParse({ action: "save_debt_contract", contract }).success;

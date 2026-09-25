@@ -46,6 +46,17 @@ export function draftLiability(
     monthlyInsurance: contract.insuranceAmount,
     recurringFees: contract.recurringFees,
     paymentIncludesInsurance: contract.paymentIncludesInsurance,
+    insuranceMode: contract.insuranceMode,
+    // Une police sans prime lisible n'est pas projetée : aucune prime n'est supposée.
+    insurancePolicies: contract.insurancePolicies.map((policy, index) => ({
+      id: `draft-policy-${index}`,
+      insurer: policy.insurer,
+      contractReference: policy.contractReference,
+      insured: policy.insured,
+      periods: policy.periods.filter(
+        (period) => period.firstDebitDate !== "" && Number.isFinite(period.premiumAmount),
+      ),
+    })),
     deferral: contract.deferral,
     amortisationProfile: contract.amortisationProfile,
     balloonAmount: contract.balloonAmount,

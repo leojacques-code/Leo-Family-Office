@@ -73,6 +73,20 @@ export interface DebtContractInput {
   insuranceAmount: number | null;
   recurringFees: number | null;
   paymentIncludesInsurance: boolean | null;
+  /** B17 : choix d'assurance DÉCLARÉ (document 04, étape D). */
+  insuranceMode: "INCLUDED" | "SEPARATE" | "NONE" | "UNKNOWN";
+  /** Polices d'une assurance séparée ; vide hors mode SEPARATE. */
+  insurancePolicies: Array<{
+    insurer: string | null;
+    contractReference: string | null;
+    insured: Array<{ name: string; coverageShare: number }>;
+    periods: Array<{
+      firstDebitDate: string;
+      lastDebitDate: string | null;
+      frequency: "MONTHLY" | "QUARTERLY" | "SEMIANNUAL" | "ANNUAL";
+      premiumAmount: number;
+    }>;
+  }>;
   deferral: {
     kind: Exclude<DeferralKind, "NONE">;
     months: number;
