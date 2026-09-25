@@ -1,4 +1,4 @@
-import { debtServiceBreakdownForPeriod, nextDebtEvent } from "@/lib/engine/debt";
+import { debtServiceBreakdownForPeriod, insuranceKnown, nextDebtEvent } from "@/lib/engine/debt";
 import {
   OUTSTANDING_DEBT_CATEGORY,
   type CanonicalAggregate,
@@ -169,8 +169,27 @@ export function deriveCanonicalBalanceSheetMetrics(input: {
       : unscheduledDebt
         ? partialDebt(scope)
         : complete(value, scope);
+  // Assurance et frais récurrents INCONNUS sur une dette active : leur somme sur 12 mois
+  // n'est que celle des dettes où ils sont connus. La présenter comme complète compterait
+  // l'inconnu à zéro. Le montant connu reste lisible, marqué PARTIAL et nommé.
+  const activeDebts = input.liabilities.filter((liability) => liability.currentBalance > 0);
+  const insuranceGap = activeDebts.some((liability) => !insuranceKnown(liability));
+  const feesGap = activeDebts.some((liability) => liability.recurringFees === null);
+  // Seule une assurance dont même le TRAITEMENT est inconnu peut ajouter des sorties : une
+  // part inconnue d'une assurance incluse est déjà dans le paiement.
+  const cashOutInsuranceGap = activeDebts.some(
+    (liability) => liability.insuranceMode === "UNKNOWN",
+  );
+  const withGaps = (metric: MetricValue, gaps: [boolean, string][]): MetricValue => {
+    const blockers = gaps.filter(([gap]) => gap).map(([, code]) => code);
+    return metric.status === "COMPLETE" && blockers.length
+      ? { ...metric, status: "PARTIAL", blockers }
+      : metric;
+  };
   const debtQuality = (breakdown: typeof debt30, scope: string): MetricValue =>
-    debtAmount(breakdown, breakdown.totalCashOut, scope);
+    withGaps(debtAmount(breakdown, breakdown.totalCashOut, scope), [
+      [cashOutInsuranceGap, "DEBT_INSURANCE_UNKNOWN"],
+    ]);
   const essential = input.expenses.filter((expense) => expense.essential);
   const missingEssential = essential.some((expense) => expense.monthlyAmount === null);
   const knownEssential = essential.reduce((sum, expense) => sum + (expense.monthlyAmount ?? 0), 0);
@@ -284,9 +303,16 @@ export function deriveCanonicalBalanceSheetMetrics(input: {
       service12m: debtQuality(debt12, "exact due entries in 12 months"),
       principal12m: debtAmount(debt12, debt12.principal),
       interest12m: debtAmount(debt12, debt12.interest + debt12.capitalisedInterest),
-      insurance12m: debtAmount(debt12, debt12.insurance),
-      fees12m: debtAmount(debt12, debt12.fees + debt12.capitalisedCharges),
-      economicCost12m: debtAmount(debt12, debt12.economicCost),
+      insurance12m: withGaps(debtAmount(debt12, debt12.insurance), [
+        [insuranceGap, "DEBT_INSURANCE_UNKNOWN"],
+      ]),
+      fees12m: withGaps(debtAmount(debt12, debt12.fees + debt12.capitalisedCharges), [
+        [feesGap, "DEBT_RECURRING_FEES_UNKNOWN"],
+      ]),
+      economicCost12m: withGaps(debtAmount(debt12, debt12.economicCost), [
+        [insuranceGap, "DEBT_INSURANCE_UNKNOWN"],
+        [feesGap, "DEBT_RECURRING_FEES_UNKNOWN"],
+      ]),
       // Zéro n'est affirmé que si AUCUNE dette n'est active : une dette sans échéancier peut
       // sortir avant la prochaine échéance connue.
       nextCashOut: unscheduledDebt

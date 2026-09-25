@@ -1,7 +1,7 @@
 {
-  "date": "2026-09-25T08:15:35.188Z",
+  "date": "2026-09-25T08:23:58.914Z",
   "app": "http://localhost:3120",
-  "utilisateur": "recette-3b-1790324110429@lfo.invalid",
+  "utilisateur": "recette-3b-1790324614441@lfo.invalid",
   "environnement": "pile Supabase auto-hébergée locale ; build de production",
   "checks": [
     {
@@ -44,7 +44,7 @@
       "extrait": "PASSIF Dettes Échéanciers datés, coût du crédit et arbitrage remboursement vs investissement. Modifier le contrat Nouvel encours Encours seul Nouvelle dette Capital restant dû 1 500,50 € Prêt familial · Famille Taux 1,0 % Service de dette du mois 100 € Paiement mensuelle annoncé 100 € Profil contrac"
     },
     {
-      "id": "a49cb6c3-e5c9-47b0-a5f7-27abcf9c85bb",
+      "id": "4fee4430-5845-4bea-a371-ee7798af099d",
       "label": "base : même ligne passée à CONTRACT, une seule dette, encours et historique intacts, décision tracée, durée et maturité non persistées",
       "ok": true,
       "terms_status": "CONTRACT",
@@ -123,7 +123,7 @@
       "synthese": "Synthèse avant enregistrement Capital d’origine 1 200 € Encours observé 1 200 € au 25 septembre 2026 Prochaine sortie 100 € le 5 octobre 2026 Premier remboursement de capital 5 octobre 2026 Dernière échéance 5 septembre 2027 (maturité déduite de la durée) Prélèvements à venir 12, dont 12 amortissant du capital (durée déduite de la mensualité) Capital futur remboursé 1 200 € Intérêts futurs 0 € Assurance future 60 € Frais futurs 20 € Total des sorties futures 1 280 € Termes non déclarés, calculés par le moteur : la durée, déduite de la mensualité ; la maturité, date de la dernière échéance."
     },
     {
-      "id": "48c1c05a-5d43-4fdf-96c6-847346277412",
+      "id": "ea22bd08-9fe4-435c-98f1-f7d842d50471",
       "label": "base : mode SEPARATE, aucune prime par échéance, une police, un assuré à 100 %, une période ouverte",
       "ok": true,
       "insurance_mode": "SEPARATE",
@@ -156,6 +156,16 @@
       "label": "bilan : l'assurance n'ajoute aucun passif (1 500,50 + 10 000 + 1 200)",
       "ok": true,
       "passif": 12700.5
+    },
+    {
+      "id": "A9",
+      "label": "métriques 12 mois : assurance 60 € connue une seule fois, PARTIELLE car celle du prêt familial est inconnue",
+      "ok": true,
+      "value": 60,
+      "status": "PARTIAL",
+      "blockers": [
+        "DEBT_INSURANCE_UNKNOWN"
+      ]
     },
     {
       "id": "Z1",

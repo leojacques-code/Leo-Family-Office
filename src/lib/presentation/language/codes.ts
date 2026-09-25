@@ -97,6 +97,8 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
   LIABILITY_ATTRIBUTION_MISSING: { label: "Dette non rattachée à un bien", state: A },
   LIABILITY_PROJECTION_TERMS_MISSING: { label: "Termes du prêt à compléter", state: A },
   DEBT_TERMS_UNDECLARED: { label: "Termes de la dette non déclarés", state: A },
+  DEBT_INSURANCE_UNKNOWN: { label: "Assurance d’une dette inconnue", state: A },
+  DEBT_RECURRING_FEES_UNKNOWN: { label: "Frais récurrents d’une dette non déclarés", state: A },
   DEBT_DECLARED_NOT_LINKED: { label: "Dette déclarée mais non rattachée", state: A },
   DEBT_FREE_DECLARED: { label: "Aucune dette déclarée sur ce bien", state: N },
   DEBT_OVER_ALLOCATED: { label: "Dette rattachée au-delà de 100 %", state: C },

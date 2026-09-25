@@ -422,6 +422,15 @@ try {
     stateThree.balanceSheet.totalLiabilities.value === 12700.5,
     { passif: stateThree.balanceSheet.totalLiabilities.value },
   );
+  const insurance12m = stateThree.balanceSheetMetrics?.debt?.insurance12m;
+  check(
+    "A9",
+    "métriques 12 mois : assurance 60 € connue une seule fois, PARTIELLE car celle du prêt familial est inconnue",
+    insurance12m?.value === 60 &&
+      insurance12m?.status === "PARTIAL" &&
+      (insurance12m?.blockers ?? []).includes("DEBT_INSURANCE_UNKNOWN"),
+    insurance12m ?? {},
+  );
 
   // ---------- Zoom 200 % (viewport CSS 640 px) et thème sombre ----------
   const zoom = await browser.newContext({

@@ -189,3 +189,90 @@ describe("dette connue par son seul encours au bilan canonique", () => {
     expect(translateCode("DEBT_TERMS_UNDECLARED")?.label).toBe("Termes de la dette non déclarés");
   });
 });
+
+describe("B17 : assurance et frais inconnus dans les métriques de dette à 12 mois", () => {
+  const metricsFor = (liabilities: Liability[]) =>
+    deriveCanonicalBalanceSheetMetrics({
+      balanceSheet: build({ accounts: [cash], liabilities }),
+      liabilities,
+      expenses: [],
+      positions: [],
+    }).debt;
+  const insured: Liability = {
+    ...contract,
+    id: "insured",
+    recurringFees: 0,
+    paymentIncludesInsurance: false,
+    insuranceMode: "SEPARATE",
+    insurancePolicies: [
+      {
+        id: "p",
+        insurer: null,
+        contractReference: null,
+        insured: [],
+        periods: [
+          {
+            firstDebitDate: "2026-10-05",
+            lastDebitDate: null,
+            frequency: "MONTHLY",
+            premiumAmount: 5,
+          },
+        ],
+      },
+    ],
+  };
+
+  it("est complet quand l'assurance et les frais de chaque dette sont déclarés", () => {
+    const debt = metricsFor([insured]);
+    // O03 : 12 débits de 5 € ; aucun intérêt ; frais récurrents déclarés nuls.
+    expect(debt.insurance12m).toMatchObject({ value: 60, status: "COMPLETE" });
+    expect(debt.economicCost12m).toMatchObject({ value: 60, status: "COMPLETE" });
+    expect(debt.service12m).toMatchObject({ value: 1260, status: "COMPLETE" });
+  });
+
+  it("devient partiel, montant connu conservé, quand une autre dette a une assurance inconnue", () => {
+    const unknown: Liability = {
+      ...contract,
+      id: "unknown",
+      insuranceMode: "UNKNOWN",
+      recurringFees: 0,
+    };
+    const debt = metricsFor([insured, unknown]);
+    expect(debt.insurance12m).toMatchObject({
+      value: 60,
+      status: "PARTIAL",
+      blockers: ["DEBT_INSURANCE_UNKNOWN"],
+    });
+    expect(debt.economicCost12m.status).toBe("PARTIAL");
+    // Traitement inconnu : une assurance séparée peut exister, les sorties sont partielles.
+    expect(debt.service12m).toMatchObject({
+      status: "PARTIAL",
+      blockers: ["DEBT_INSURANCE_UNKNOWN"],
+    });
+    expect(translateCode("DEBT_INSURANCE_UNKNOWN")?.label).toBe("Assurance d’une dette inconnue");
+  });
+
+  it("garde les sorties complètes quand seule la part d'une assurance INCLUSE est inconnue", () => {
+    const included: Liability = {
+      ...contract,
+      id: "included",
+      insuranceMode: "INCLUDED",
+      paymentIncludesInsurance: true,
+      monthlyInsurance: null,
+      recurringFees: 0,
+    };
+    const debt = metricsFor([included]);
+    expect(debt.service12m.status).toBe("COMPLETE");
+    expect(debt.insurance12m.status).toBe("PARTIAL");
+  });
+
+  it("rend les frais et le coût économique partiels si des frais récurrents ne sont pas déclarés", () => {
+    const debt = metricsFor([{ ...insured, recurringFees: null }]);
+    expect(debt.fees12m).toMatchObject({
+      status: "PARTIAL",
+      blockers: ["DEBT_RECURRING_FEES_UNKNOWN"],
+    });
+    expect(debt.economicCost12m.blockers).toEqual(["DEBT_RECURRING_FEES_UNKNOWN"]);
+    expect(debt.insurance12m.status).toBe("COMPLETE");
+  });
+});
