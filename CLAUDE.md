@@ -139,6 +139,22 @@ Corollaires appliqués dans le code existant, à préserver :
   celle de lecture est exclue des totaux, comptée et nommée ; seuls les agrégats qui dépendent
   de SA nature deviennent non calculables (`aggregateBlocked`), et un mois qui en contient ne
   se clôture pas, tant que la conversion des flux (phase Flux) n'existe pas ;
+- DATE D'OBSERVATION ≠ DATE D'EFFET ≠ ÉCHÉANCE CONTRACTUELLE ≠ DATE DE PAIEMENT : un fait
+  observé (opération, revenu, solde de compte, encours de dette, remboursement effectué) n'est
+  jamais daté après aujourd'hui (Europe/Paris), refus `LF425` en base sur toutes les tables
+  d'observation ; une prévision, une échéance, un remboursement PRÉVU ou une hypothèse
+  peuvent l'être. Une échéance passée au calendrier est ÉCHUE, pas PAYÉE, tant qu'aucune
+  opération ne la rapproche ;
+- BROUILLON ≠ OBSERVATION ≠ CONTRAT : `form_drafts` garde une saisie même incomplète, sous
+  version attendue ; aucun moteur ni aucune table canonique ne le lit, et valider le
+  formulaire le consomme ;
+- ÉVÉNEMENT ≠ CORRECTION ≠ SIMULATION : un changement réel d'un prêt (révision, palier,
+  report, avenant, remboursement) est un événement daté du journal immuable
+  `liability_events`, qui s'annule par une trace motivée et ne s'efface jamais ; corriger
+  une saisie crée une version de contrat ; une simulation n'est jamais écrite. Un terme issu
+  d'un événement porte son `eventId` et n'est jamais réabsorbé dans les listes du contrat ;
+  un remboursement effectué sans encours constaté laisse le bilan à l'encours observé, et
+  l'écart est signalé, jamais recalculé ;
 - les flux immobiliers observés sont convertis par le FX Engine à la date de chaque transaction ;
   une dette future dans une autre devise reste non calculable sans courbe FX future explicite, le
   dernier spot n'étant jamais prolongé silencieusement.
@@ -176,9 +192,9 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **58 migrations** sur la branche de consolidation (gate local du 25 septembre
-2026 : 58 appliquées depuis zéro, 112 tables publiques, 467 contraintes relevées par le
-vérificateur, 119 RPC). Les treize dernières ne sont PAS en production :
+Le DÉPÔT porte **61 migrations** sur la branche de consolidation (gate local du 25 septembre
+2026 : 61 appliquées depuis zéro, 116 tables publiques, 477 contraintes relevées par le
+vérificateur, 123 RPC). Les seize dernières ne sont PAS en production :
 
 - `20260914191901_verified_personal_session` : `lfo_verify_session` (B12) ;
 - `20260915064740_personal_reference_isolation` : références composites par propriétaire (B13) ;
@@ -194,7 +210,12 @@ vérificateur, 119 RPC). Les treize dernières ne sont PAS en production :
 - `20260924180000_debt_separate_insurance` : assurance emprunteur séparée (B17) ;
 - `20260925090000_debt_insurance_policy_details` : couverture, base assurée, compte débité (B17) ;
 - `20260925100000_debt_review_hardening` : écritures directes retirées sur les tables de
-  dette, périodes de prime sans chevauchement (relecture B16/B17).
+  dette, périodes de prime sans chevauchement (relecture B16/B17) ;
+- `20260925110000_observation_dates_and_balance_rights` : date d'observation jamais future
+  pour un fait, écritures directes retirées sur `account_balances` ;
+- `20260925120000_form_drafts` : brouillons persistants de formulaire (Dette) ;
+- `20260925130000_debt_events` : journal d'événements de dette, annulations, versions de
+  contrat (B18).
 
 Avant tout push de `20260924170000` vers une base PARTAGÉE : ses contraintes
 `liabilities_payment_count_ck` et `liabilities_contract_dates_ck` sont ajoutées sans `NOT VALID`.
