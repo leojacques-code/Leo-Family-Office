@@ -52,6 +52,10 @@ export function draftLiability(
       id: `draft-policy-${index}`,
       insurer: policy.insurer,
       contractReference: policy.contractReference,
+      effectiveDate: policy.effectiveDate,
+      endDate: policy.endDate,
+      insuredBase: policy.insuredBase,
+      debitAccountId: policy.debitAccountId,
       insured: policy.insured,
       periods: policy.periods.filter(
         (period) =>

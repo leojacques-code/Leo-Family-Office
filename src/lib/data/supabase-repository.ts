@@ -410,6 +410,10 @@ function mapDebtFacts(
       id: policyId,
       insurer: optional(row.insurer) ?? null,
       contractReference: optional(row.contract_reference) ?? null,
+      effectiveDate: optional(row.effective_date) ?? null,
+      endDate: optional(row.end_date) ?? null,
+      insuredBase: (optional(row.insured_base) as InsurancePolicy["insuredBase"]) ?? null,
+      debitAccountId: optional(row.debit_account_id) ?? null,
       insured: insuranceRows.insured
         .filter((person) => str(person.policy_id) === policyId)
         .map((person) => ({
@@ -781,6 +785,11 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       metrics: { bankCash: cashQuality.value },
       cashQuality,
       cashObservationPresent: accounts.length > 0,
+      debitAccounts: accounts.map((account) => ({
+        id: account.id,
+        name: account.name,
+        institution: account.institution,
+      })),
       railSources: railSourcesFor(
         PAGE_REGISTRY.debt,
         { liabilities, outstandingDebts },
@@ -2867,6 +2876,10 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
               insurance_policies: contract.insurancePolicies.map((policy) => ({
                 insurer: policy.insurer,
                 contract_reference: policy.contractReference,
+                effective_date: policy.effectiveDate,
+                end_date: policy.endDate,
+                insured_base: policy.insuredBase,
+                debit_account_id: policy.debitAccountId,
                 insured: policy.insured.map((person) => ({
                   name: person.name,
                   coverage_share: person.coverageShare,

@@ -125,12 +125,7 @@ function fromLiability(loan: Liability): DebtContractInput {
     recurringFees: loan.recurringFees,
     paymentIncludesInsurance: loan.paymentIncludesInsurance,
     insuranceMode: loan.insuranceMode ?? "UNKNOWN",
-    insurancePolicies: (loan.insurancePolicies ?? []).map((policy) => ({
-      insurer: policy.insurer,
-      contractReference: policy.contractReference,
-      insured: policy.insured.map((person) => ({ ...person })),
-      periods: policy.periods.map((period) => ({ ...period })),
-    })),
+    insurancePolicies: (loan.insurancePolicies ?? []).map(policyDraft),
     deferral: loan.deferral
       ? {
           kind: loan.deferral.kind === "NONE" ? "PRINCIPAL_ONLY" : loan.deferral.kind,
@@ -162,6 +157,22 @@ function fromLiability(loan: Liability): DebtContractInput {
 
 type InsuranceChoice = "" | DebtContractInput["insuranceMode"];
 
+/** Police persistée → brouillon : chaque détail inconnu reste inconnu (`null`). */
+function policyDraft(
+  policy: NonNullable<Liability["insurancePolicies"]>[number],
+): DebtContractInput["insurancePolicies"][number] {
+  return {
+    insurer: policy.insurer,
+    contractReference: policy.contractReference,
+    effectiveDate: policy.effectiveDate ?? null,
+    endDate: policy.endDate ?? null,
+    insuredBase: policy.insuredBase ?? null,
+    debitAccountId: policy.debitAccountId ?? null,
+    insured: policy.insured.map((person) => ({ ...person })),
+    periods: policy.periods.map((period) => ({ ...period })),
+  };
+}
+
 /**
  * Choix d'assurance d'un contrat existant. Un contrat antérieur à B17 n'a pas de choix
  * DÉCLARÉ : une prime « en sus » est reprise en police séparée, VISIBLE et modifiable avant
@@ -175,12 +186,7 @@ function initialInsurance(loan: Liability | null): {
   if (loan.insuranceMode)
     return {
       choice: loan.insuranceMode,
-      policies: (loan.insurancePolicies ?? []).map((policy) => ({
-        insurer: policy.insurer,
-        contractReference: policy.contractReference,
-        insured: policy.insured.map((person) => ({ ...person })),
-        periods: policy.periods.map((period) => ({ ...period })),
-      })),
+      policies: (loan.insurancePolicies ?? []).map(policyDraft),
     };
   if (loan.monthlyInsurance !== null && loan.paymentIncludesInsurance === true)
     return { choice: "INCLUDED", policies: [] };
@@ -191,6 +197,10 @@ function initialInsurance(loan: Liability | null): {
         {
           insurer: null,
           contractReference: null,
+          effectiveDate: null,
+          endDate: null,
+          insuredBase: null,
+          debitAccountId: null,
           insured: [],
           periods: [
             {
@@ -246,6 +256,7 @@ export function DebtContractForm({
   asOfDate,
   reportingCurrency,
   busy,
+  accounts = [],
   onSave,
   onCancel,
 }: {
@@ -255,6 +266,8 @@ export function DebtContractForm({
   asOfDate: string;
   reportingCurrency: string;
   busy: boolean;
+  /** Comptes proposés comme compte débité d'une assurance séparée (facultatif). */
+  accounts?: ReadonlyArray<{ id: string; name: string; institution: string }>;
   onSave: (contract: DebtContractInput) => Promise<boolean>;
   onCancel: () => void;
 }) {
@@ -427,6 +440,18 @@ export function DebtContractForm({
       )
     ) {
       setFormError("Chaque assuré a un nom et une quotité entre 0 et 100 %.");
+      return;
+    }
+    if (
+      insurance.choice === "SEPARATE" &&
+      insurance.policies.some(
+        (policy) =>
+          policy.effectiveDate !== null &&
+          policy.endDate !== null &&
+          policy.endDate < policy.effectiveDate,
+      )
+    ) {
+      setFormError("La fin de couverture d’une police précède sa date d’effet.");
       return;
     }
     if (
@@ -742,6 +767,7 @@ export function DebtContractForm({
           ) : null}
           {insurance.choice === "SEPARATE" ? (
             <InsurancePoliciesEditor
+              accounts={accounts}
               currency={currencyLabel}
               policies={insurance.policies}
               onChange={(policies) => setInsurance({ ...insurance, policies })}
@@ -1414,6 +1440,10 @@ function emptyPolicy(): DebtContractInput["insurancePolicies"][number] {
   return {
     insurer: null,
     contractReference: null,
+    effectiveDate: null,
+    endDate: null,
+    insuredBase: null,
+    debitAccountId: null,
     insured: [],
     periods: [
       { firstDebitDate: "", lastDebitDate: null, frequency: UNCHOSEN, premiumAmount: Number.NaN },
@@ -1427,10 +1457,12 @@ function emptyPolicy(): DebtContractInput["insurancePolicies"][number] {
  * quotité décrit une couverture et n'entre dans aucun calcul de passif.
  */
 function InsurancePoliciesEditor({
+  accounts,
   currency,
   policies,
   onChange,
 }: {
+  accounts: ReadonlyArray<{ id: string; name: string; institution: string }>;
   currency: string;
   policies: DebtContractInput["insurancePolicies"];
   onChange: (policies: DebtContractInput["insurancePolicies"]) => void;
@@ -1467,6 +1499,70 @@ function InsurancePoliciesEditor({
                   update(index, { ...policy, contractReference: event.target.value || null })
                 }
               />
+            </label>
+            <label>
+              Début de couverture (facultatif)
+              <input
+                className="text-input"
+                type="date"
+                value={policy.effectiveDate ?? ""}
+                onChange={(event) =>
+                  update(index, { ...policy, effectiveDate: event.target.value || null })
+                }
+              />
+            </label>
+            <label>
+              Fin de couverture (facultative)
+              <input
+                className="text-input"
+                type="date"
+                value={policy.endDate ?? ""}
+                onChange={(event) =>
+                  update(index, { ...policy, endDate: event.target.value || null })
+                }
+              />
+            </label>
+            <div className="field-with-hint">
+              <label>
+                Base assurée (facultative)
+                <select
+                  aria-describedby={`insured-base-hint-${index}`}
+                  className="text-input"
+                  value={policy.insuredBase ?? ""}
+                  onChange={(event) =>
+                    update(index, {
+                      ...policy,
+                      insuredBase:
+                        (event.target.value as NonNullable<typeof policy.insuredBase>) || null,
+                    })
+                  }
+                >
+                  <option value="">Inconnue</option>
+                  <option value="INITIAL_CAPITAL">Capital initial</option>
+                  <option value="OUTSTANDING_CAPITAL">Capital restant dû</option>
+                  <option value="OTHER">Autre</option>
+                </select>
+              </label>
+              <small id={`insured-base-hint-${index}`}>
+                Information seulement : les primes restent celles des périodes déclarées.
+              </small>
+            </div>
+            <label>
+              Compte débité (facultatif)
+              <select
+                className="text-input"
+                value={policy.debitAccountId ?? ""}
+                onChange={(event) =>
+                  update(index, { ...policy, debitAccountId: event.target.value || null })
+                }
+              >
+                <option value="">Non renseigné</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name} · {account.institution}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
           <strong>Assurés et quotités</strong>

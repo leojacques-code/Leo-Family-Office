@@ -247,10 +247,7 @@ export function evaluateGlobalDecisionCase(
         ...option.provenance,
         engines: [...new Set([GLOBAL_FINANCIAL_MODEL_VERSION, ...option.provenance.engines])],
         methodologyVersions: [
-          ...new Set([
-            GLOBAL_FINANCIAL_MODEL_VERSION,
-            ...option.provenance.methodologyVersions,
-          ]),
+          ...new Set([GLOBAL_FINANCIAL_MODEL_VERSION, ...option.provenance.methodologyVersions]),
         ],
       },
     })),

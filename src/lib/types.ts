@@ -341,10 +341,19 @@ export interface InsurancePremiumPeriod {
   premiumAmount: number;
 }
 
+/** Base sur laquelle l'assureur dit calculer la prime : descriptive, aucune prime n'en dérive. */
+export type InsuredBase = "INITIAL_CAPITAL" | "OUTSTANDING_CAPITAL" | "OTHER";
+
 export interface InsurancePolicy {
   id: string;
   insurer: string | null;
   contractReference: string | null;
+  /** Période de COUVERTURE, distincte des dates de débit ; `null` = inconnue. */
+  effectiveDate?: string | null;
+  endDate?: string | null;
+  insuredBase?: InsuredBase | null;
+  /** Compte prélevé, si connu : sert au rapprochement, ne prouve aucun paiement. */
+  debitAccountId?: string | null;
   insured: InsuredPerson[];
   periods: InsurancePremiumPeriod[];
 }

@@ -163,6 +163,10 @@ const debtContractSchema = z
           .object({
             insurer: z.string().trim().max(160).nullable(),
             contractReference: z.string().trim().max(160).nullable(),
+            effectiveDate: realDate.nullable(),
+            endDate: realDate.nullable(),
+            insuredBase: z.enum(["INITIAL_CAPITAL", "OUTSTANDING_CAPITAL", "OTHER"]).nullable(),
+            debitAccountId: z.uuid().nullable(),
             insured: z
               .array(
                 z
@@ -193,7 +197,14 @@ const debtContractSchema = z
               .min(1, "Une police exige au moins une période de prime")
               .max(24),
           })
-          .strict(),
+          .strict()
+          .refine(
+            (policy) =>
+              policy.effectiveDate === null ||
+              policy.endDate === null ||
+              policy.endDate >= policy.effectiveDate,
+            "La fin de couverture précède sa date d’effet",
+          ),
       )
       .max(5),
     deferral: z

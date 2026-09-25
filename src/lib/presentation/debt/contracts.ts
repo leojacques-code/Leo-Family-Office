@@ -14,6 +14,11 @@ export interface DebtReadModel {
   readonly scenarios: Scenario[];
   readonly metrics: { readonly bankCash: number | null };
   readonly cashObservationPresent: boolean;
+  /**
+   * Comptes de cash actifs, proposés comme compte débité d'une assurance séparée. Une
+   * référence à un compte absent de cette liste reste affichée comme « non visible ».
+   */
+  readonly debitAccounts: ReadonlyArray<{ id: string; name: string; institution: string }>;
   readonly cashQuality: CanonicalAggregate;
   readonly railSources: DerivedRailSource[];
   readonly readAt: string;

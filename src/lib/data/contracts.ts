@@ -79,6 +79,10 @@ export interface DebtContractInput {
   insurancePolicies: Array<{
     insurer: string | null;
     contractReference: string | null;
+    effectiveDate: string | null;
+    endDate: string | null;
+    insuredBase: "INITIAL_CAPITAL" | "OUTSTANDING_CAPITAL" | "OTHER" | null;
+    debitAccountId: string | null;
     insured: Array<{ name: string; coverageShare: number }>;
     periods: Array<{
       firstDebitDate: string;

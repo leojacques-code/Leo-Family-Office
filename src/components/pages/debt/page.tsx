@@ -70,7 +70,7 @@ type DebtPageProps = Pick<SectionProps, "mutate" | "busy" | "setExplanation"> & 
     DebtReadModel,
     "asOfDate" | "liabilities" | "scenarios" | "metrics" | "reportingCurrency"
   > &
-    Partial<Pick<DebtReadModel, "outstandingDebts" | "dates">>;
+    Partial<Pick<DebtReadModel, "outstandingDebts" | "dates" | "debitAccounts">>;
 };
 
 function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
@@ -88,6 +88,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   } | null>(null);
   const outstandingDebts = state.outstandingDebts ?? [];
   const loan = state.liabilities.find((item) => item.id === selectedId) ?? state.liabilities[0];
+  const debitAccounts = state.debitAccounts ?? [];
   const timeline = useMemo(
     () => (loan ? buildLoanTimeline(loan, state.asOfDate) : null),
     [loan, state.asOfDate],
@@ -247,6 +248,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           asOfDate={state.asOfDate}
           reportingCurrency={state.reportingCurrency}
           busy={busy}
+          accounts={debitAccounts}
           onCancel={() => setPromoting(null)}
           onSave={(contract: DebtContractInput) =>
             mutate({ action: "save_debt_contract", contract })
@@ -270,6 +272,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
         asOfDate={state.asOfDate}
         reportingCurrency={state.reportingCurrency}
         busy={busy}
+        accounts={debitAccounts}
         onCancel={() => setContractEditor(null)}
         onSave={(contract: DebtContractInput) => mutate({ action: "save_debt_contract", contract })}
       />
@@ -675,6 +678,14 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           <InsuranceFacts
             loan={loan}
             currency={currency}
+            accountNames={
+              new Map(
+                debitAccounts.map((account) => [
+                  account.id,
+                  `${account.name} · ${account.institution}`,
+                ]),
+              )
+            }
             nextDebit={nextInsuranceDebit}
             debitCount={insuranceDebits.length}
           />
@@ -949,6 +960,12 @@ function PaymentComposition({
   );
 }
 
+const INSURED_BASE_LABELS: Record<string, string> = {
+  INITIAL_CAPITAL: "capital initial",
+  OUTSTANDING_CAPITAL: "capital restant dû",
+  OTHER: "autre",
+};
+
 const INSURANCE_MODE_LABELS: Record<string, string> = {
   INCLUDED: "Incluse dans les paiements",
   SEPARATE: "Prélevée séparément",
@@ -966,7 +983,9 @@ function InsuranceFacts({
   currency,
   nextDebit,
   debitCount,
+  accountNames,
 }: {
+  accountNames: ReadonlyMap<string, string>;
   loan: Liability;
   currency: string | null;
   nextDebit: { dueDate: string; insurance: number } | null;
@@ -1020,6 +1039,24 @@ function InsuranceFacts({
                 {policy.insurer ?? "Assureur non renseigné"}
                 {policy.contractReference ? ` · contrat ${policy.contractReference}` : ""}
               </strong>
+              {policy.effectiveDate || policy.endDate ? (
+                <p>
+                  Couverture{" "}
+                  {policy.effectiveDate
+                    ? `du ${formatDate(policy.effectiveDate)}`
+                    : "début inconnu"}{" "}
+                  {policy.endDate ? `au ${formatDate(policy.endDate)}` : "· fin inconnue"}
+                </p>
+              ) : null}
+              {policy.insuredBase ? (
+                <p>Base assurée : {INSURED_BASE_LABELS[policy.insuredBase]}</p>
+              ) : null}
+              <p>
+                Compte débité :{" "}
+                {policy.debitAccountId
+                  ? (accountNames.get(policy.debitAccountId) ?? "compte non visible")
+                  : "non renseigné"}
+              </p>
               {policy.insured.length ? (
                 <p>
                   Assurés :{" "}

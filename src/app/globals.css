@@ -3704,3 +3704,12 @@ dd {
   align-items: end;
   margin-bottom: 8px;
 }
+/* Champ suivi d'une aide hors libellé : l'aide décrit le champ sans entrer dans son nom. */
+.field-with-hint {
+  display: grid;
+  gap: 4px;
+}
+.field-with-hint small {
+  color: var(--text-muted);
+  font-size: 12px;
+}

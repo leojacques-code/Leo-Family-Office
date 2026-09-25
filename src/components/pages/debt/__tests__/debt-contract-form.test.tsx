@@ -349,6 +349,76 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     expect(screen.getByRole("alert")).toHaveTextContent("date, un libellé et un montant positif");
   });
 
+  it("laisse les détails de police inconnus par défaut et transmet ceux déclarés", async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    const accountId = "8f7c3a52-6a44-4c4e-9d7e-3f0b1c2d4e5f";
+    render(
+      <DebtContractForm
+        accounts={[{ id: accountId, name: "Compte courant", institution: "Banque" }]}
+        asOfDate="2026-01-01"
+        reportingCurrency="EUR"
+        busy={false}
+        loan={null}
+        onCancel={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+    fillO03();
+    fireEvent.click(screen.getByLabelText("Prélevée séparément"));
+    expect(screen.getByLabelText("Début de couverture (facultatif)")).toHaveValue("");
+    expect(screen.getByLabelText("Base assurée (facultative)")).toHaveValue("");
+    expect(screen.getByLabelText("Compte débité (facultatif)")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Premier débit"), { target: { value: "2026-01-05" } });
+    fireEvent.change(screen.getByLabelText("Fréquence des débits"), {
+      target: { value: "MONTHLY" },
+    });
+    fillMoney(/Prime par débit/, "5");
+    fireEvent.change(screen.getByLabelText("Base assurée (facultative)"), {
+      target: { value: "INITIAL_CAPITAL" },
+    });
+    fireEvent.change(screen.getByLabelText("Compte débité (facultatif)"), {
+      target: { value: accountId },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: "Ajouter cette dette" }).closest("form")!);
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0]![0].insurancePolicies[0]).toMatchObject({
+      effectiveDate: null,
+      endDate: null,
+      insuredBase: "INITIAL_CAPITAL",
+      debitAccountId: accountId,
+    });
+  });
+
+  it("refuse une couverture qui finit avant de commencer", () => {
+    const onSave = vi.fn();
+    render(
+      <DebtContractForm
+        asOfDate="2026-01-01"
+        reportingCurrency="EUR"
+        busy={false}
+        loan={null}
+        onCancel={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+    fillO03();
+    fireEvent.click(screen.getByLabelText("Prélevée séparément"));
+    fireEvent.change(screen.getByLabelText("Premier débit"), { target: { value: "2026-01-05" } });
+    fireEvent.change(screen.getByLabelText("Fréquence des débits"), {
+      target: { value: "MONTHLY" },
+    });
+    fillMoney(/Prime par débit/, "5");
+    fireEvent.change(screen.getByLabelText("Début de couverture (facultatif)"), {
+      target: { value: "2026-12-31" },
+    });
+    fireEvent.change(screen.getByLabelText("Fin de couverture (facultative)"), {
+      target: { value: "2026-01-01" },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: "Ajouter cette dette" }).closest("form")!);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("fin de couverture");
+  });
+
   it("refuse une période d'assurance dont la fréquence n'a pas été choisie", () => {
     const onSave = vi.fn();
     render(

@@ -10,6 +10,9 @@
  *     SEPARATE sans police, polices hors SEPARATE, prime par échéance en mode SEPARATE,
  *     INCLUDED sans assurance dans le paiement, quotité hors ]0 ; 1], dates inversées ;
  *   * une réédition remplace les polices en bloc, sans en laisser d'orpheline ;
+ *   * les détails de police (couverture, base assurée, compte débité) sont facultatifs,
+ *     persistés tels que déclarés, et la base refuse une couverture inversée, une base hors
+ *     liste, une chaîne vide et le compte d'un autre propriétaire ;
  *   * les tables sont en lecture seule pour `authenticated`, et cloisonnées.
  */
 import { randomUUID } from "node:crypto";
@@ -110,6 +113,15 @@ try {
     otherUser,
     `smoke-insurance-${otherUser}@invalid`,
   ]);
+  const accountId = randomUUID();
+  const foreignAccountId = randomUUID();
+  await client.query(
+    `insert into public.financial_accounts
+       (id, user_id, name, account_type, currency, liquidity, status, data_kind, confidence)
+     values ($1, $2, 'Compte smoke', 'CHECKING', 'EUR', 'LIQUID', 'ACTIVE', 'ACTUAL', 'HIGH'),
+            ($3, $4, 'Compte d''un autre', 'CHECKING', 'EUR', 'LIQUID', 'ACTIVE', 'ACTUAL', 'HIGH')`,
+    [accountId, userId, foreignAccountId, otherUser],
+  );
   await client.query("set local role service_role");
   const save = "select public.lfo_save_debt_contract($1::uuid, $2::jsonb)::text as id";
 
@@ -197,6 +209,72 @@ try {
     contract({ insurance_policies: [{ ...policy, periods: [] }] }),
     "Police sans période acceptée",
     "au moins une période",
+  );
+
+  // Détails de police : absents = inconnus ; déclarés = persistés tels quels.
+  const detailed = await client.query<{ id: string }>(save, [
+    userId,
+    JSON.stringify(
+      contract({
+        name: "Prêt détaillé",
+        insurance_policies: [
+          {
+            ...policy,
+            effective_date: "2026-01-01",
+            end_date: "2026-12-31",
+            insured_base: "OUTSTANDING_CAPITAL",
+            debit_account_id: accountId,
+          },
+        ],
+      }),
+    ),
+  ]);
+  const details = (
+    await client.query<Record<string, string | null>>(
+      `select effective_date::text, end_date::text, insured_base, debit_account_id::text
+         from public.loan_insurance_policies where liability_id = $1`,
+      [detailed.rows[0]!.id],
+    )
+  ).rows[0]!;
+  assert(
+    details.effective_date === "2026-01-01" &&
+      details.end_date === "2026-12-31" &&
+      details.insured_base === "OUTSTANDING_CAPITAL" &&
+      details.debit_account_id === accountId,
+    `Détails de police non persistés tels que déclarés : ${JSON.stringify(details)}`,
+  );
+  const unknownDetails = (
+    await client.query<Record<string, string | null>>(
+      `select effective_date::text, end_date::text, insured_base, debit_account_id::text
+         from public.loan_insurance_policies where liability_id = $1`,
+      [debtId],
+    )
+  ).rows[0]!;
+  assert(
+    Object.values(unknownDetails).every((value) => value === null),
+    "Un détail de police absent a reçu une valeur",
+  );
+  await refuse(
+    contract({
+      insurance_policies: [{ ...policy, effective_date: "2026-12-31", end_date: "2026-01-01" }],
+    }),
+    "Couverture inversée acceptée",
+    "loan_insurance_policies_coverage_dates_ck",
+  );
+  await refuse(
+    contract({ insurance_policies: [{ ...policy, insured_base: "PRIME" }] }),
+    "Base assurée hors liste acceptée",
+    "loan_insurance_policies_insured_base_ck",
+  );
+  await refuse(
+    contract({ insurance_policies: [{ ...policy, end_date: "" }] }),
+    "Date de fin vide acceptée comme inconnue",
+    "valeur vide",
+  );
+  await refuse(
+    contract({ insurance_policies: [{ ...policy, debit_account_id: foreignAccountId }] }),
+    "Compte d'un autre propriétaire accepté comme compte débité",
+    "loan_insurance_policies_debit_account_fk",
   );
 
   // Réédition : remplacement en bloc, aucune police orpheline.
