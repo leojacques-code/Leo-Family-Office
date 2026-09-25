@@ -62,9 +62,7 @@ export const FEC_FIELDS = [
  */
 export const FEC_AMOUNT_ALTERNATIVE_FIELDS = ["Montant", "Sens"] as const;
 
-export type FecField =
-  | (typeof FEC_FIELDS)[number]
-  | (typeof FEC_AMOUNT_ALTERNATIVE_FIELDS)[number];
+export type FecField = (typeof FEC_FIELDS)[number] | (typeof FEC_AMOUNT_ALTERNATIVE_FIELDS)[number];
 
 /** Représentation des montants réellement portée par le fichier. */
 export type FecAmountSchema = "DEBIT_CREDIT" | "MONTANT_SENS";
@@ -141,10 +139,7 @@ export const FEC_REGULATORY_DELIMITERS = ["\t", "|"] as const;
 export const FEC_TOLERATED_DELIMITERS = [";", ","] as const;
 
 /** Tous les séparateurs essayés, les conformes d'abord. */
-export const FEC_DELIMITERS = [
-  ...FEC_REGULATORY_DELIMITERS,
-  ...FEC_TOLERATED_DELIMITERS,
-] as const;
+export const FEC_DELIMITERS = [...FEC_REGULATORY_DELIMITERS, ...FEC_TOLERATED_DELIMITERS] as const;
 
 export function isRegulatoryDelimiter(delimiter: string): boolean {
   return (FEC_REGULATORY_DELIMITERS as readonly string[]).includes(delimiter);

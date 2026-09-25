@@ -24,6 +24,7 @@ import type {
   FinancialAccount,
   AmortisationProfile,
   DatedTermKind,
+  DebtEventContent,
   DeferredInterestTreatment,
   DeferralKind,
   EarlyRepaymentOutcome,
@@ -51,6 +52,8 @@ import type {
 
 export interface DebtContractInput {
   liabilityId: string | null;
+  /** B16 : `true` pour décrire le contrat d'une dette encours seul (même ligne, tracé). */
+  promoteOutstanding?: true;
   name: string;
   lender: string;
   principal: number;
@@ -58,10 +61,11 @@ export interface DebtContractInput {
   initialBalance: number | null;
   balanceDate: string | null;
   annualRate: number;
-  paymentAmount: number;
-  paymentCount: number;
+  /** `null` = non déclaré (document 04 : montant OU durée selon la donnée connue). */
+  paymentAmount: number | null;
+  paymentCount: number | null;
   firstPaymentDate: string;
-  maturityDate: string;
+  maturityDate: string | null;
   amortisationProfile: AmortisationProfile;
   balloonAmount: number | null;
   paymentFrequency: PaymentFrequency;
@@ -70,6 +74,24 @@ export interface DebtContractInput {
   insuranceAmount: number | null;
   recurringFees: number | null;
   paymentIncludesInsurance: boolean | null;
+  /** B17 : choix d'assurance DÉCLARÉ (document 04, étape D). */
+  insuranceMode: "INCLUDED" | "SEPARATE" | "NONE" | "UNKNOWN";
+  /** Polices d'une assurance séparée ; vide hors mode SEPARATE. */
+  insurancePolicies: Array<{
+    insurer: string | null;
+    contractReference: string | null;
+    effectiveDate: string | null;
+    endDate: string | null;
+    insuredBase: "INITIAL_CAPITAL" | "OUTSTANDING_CAPITAL" | "OTHER" | null;
+    debitAccountId: string | null;
+    insured: Array<{ name: string; coverageShare: number }>;
+    periods: Array<{
+      firstDebitDate: string;
+      lastDebitDate: string | null;
+      frequency: "MONTHLY" | "QUARTERLY" | "SEMIANNUAL" | "ANNUAL";
+      premiumAmount: number;
+    }>;
+  }>;
   deferral: {
     kind: Exclude<DeferralKind, "NONE">;
     months: number;
@@ -574,7 +596,21 @@ export type Mutation =
   | { action: "set_tax_profile"; profile: TaxProfileInput }
   | { action: "save_tax_rule_set"; ruleSet: TaxRuleSetInput }
   | { action: "record_tax_observation"; observation: TaxObservationInput }
-  | { action: "save_debt_contract"; contract: DebtContractInput }
+  | {
+      action: "save_debt_contract";
+      contract: DebtContractInput;
+      /** B18 : motif d'une CORRECTION de saisie ; un avenant daté est un événement. */
+      changeReason?: string | null;
+    }
+  | {
+      action: "record_debt_event";
+      liabilityId: string;
+      nature: "OBSERVED" | "CONTRACTUAL" | "PLANNED";
+      effectiveDate: string;
+      source: string;
+      content: DebtEventContent;
+    }
+  | { action: "cancel_debt_event"; eventId: string; reason: string }
   | {
       action: "record_debt_balance";
       liabilityId: string;
@@ -583,6 +619,32 @@ export type Mutation =
       notes: string | null;
     }
   | { action: "archive_debt"; liabilityId: string }
+  | {
+      action: "correct_net_income";
+      transactionId: string;
+      reason: string;
+      /** État AFFICHÉ au moment de la décision : un état périmé fait échouer la correction. */
+      /** Montant en TEXTE décimal, tel que lu en base : jamais un flottant réécrit. */
+      expected: { amount: string; receivedOn: string; label: string };
+      corrected: { amount?: number; receivedOn?: string; label?: string };
+    }
+  | {
+      action: "record_net_income";
+      accountId: string;
+      receivedOn: string;
+      amount: number;
+      label: string;
+      notes: string | null;
+    }
+  | {
+      action: "record_outstanding_debt";
+      name: string;
+      lender: string | null;
+      balance: number;
+      currency: string;
+      observedAt: string;
+      notes: string | null;
+    }
   | { action: "update_account"; accountId: string; balance: number; balanceDate: string }
   | {
       action: "add_account";
@@ -590,12 +652,14 @@ export type Mutation =
       name: string;
       accountType: FinancialAccount["type"];
       balance: number;
+      balanceDate: string;
       currency: string;
     }
   | {
       action: "add_transaction";
       accountId: string;
-      categoryId: string;
+      /** `null` = opération non classée : aucune catégorie n'est supposée. */
+      categoryId: string | null;
       date: string;
       label: string;
       amount: number;

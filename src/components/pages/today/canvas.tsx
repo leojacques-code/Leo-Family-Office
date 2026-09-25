@@ -181,7 +181,12 @@ function Ribbon({
               // Les largeurs sont proportionnelles au REVENU, qui est la seule référence
               // commune des quatre postes. Un solde libre négatif rend une largeur nulle : une
               // barre ne représente pas un manque, elle le laisse voir par son absence.
-              const width = share(Math.max(0, value), Math.max(1, flow.income));
+              // Un poste non calculable (devise non convertie) n'a pas de barre, et le revenu
+              // inconnu ne sert pas de référence : aucune largeur n'est inventée.
+              const width =
+                value === null || flow.income === null
+                  ? 0
+                  : share(Math.max(0, value), Math.max(1, flow.income));
               return (
                 <li className="today-flow-segment" data-kind={segment.key} key={segment.key}>
                   <span
@@ -192,11 +197,15 @@ function Ribbon({
                     }}
                   />
                   <span className="today-flow-label">{segment.label}</span>
-                  <Amount
-                    currency={currency}
-                    signed={segment.key === "freeCashFlow"}
-                    value={value}
-                  />
+                  {value === null ? (
+                    <span className="metric-unknown">Non calculable</span>
+                  ) : (
+                    <Amount
+                      currency={currency}
+                      signed={segment.key === "freeCashFlow"}
+                      value={value}
+                    />
+                  )}
                 </li>
               );
             })}

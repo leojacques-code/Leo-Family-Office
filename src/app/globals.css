@@ -410,6 +410,14 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Une page peut porter cinq actions (Dettes avec un contrat) : elles passent à la ligne
+     plutôt que de faire défiler la page horizontalement, à toute largeur. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  /* Élément flex de l'en-tête : sans largeur minimale nulle, il ne rétrécirait jamais et
+     le retour à la ligne ne se déclencherait pas. */
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .button {
@@ -1273,6 +1281,11 @@ button {
   color: var(--text-muted);
   font-size: 8px;
 }
+.debt-nested-editor > small.debt-nested-hint {
+  margin-bottom: 8px;
+  display: block;
+  line-height: 1.45;
+}
 .button.compact {
   min-height: 28px;
   padding: 0 9px;
@@ -1400,6 +1413,12 @@ button {
 .holdings-table .table-head,
 .holdings-table .table-row {
   grid-template-columns: 1.7fr 0.8fr 0.8fr 0.7fr 0.7fr 0.65fr;
+}
+/* Ledger Flux : sept colonnes, la dernière porte l'action « Corriger » d'un revenu saisi. */
+.cash-ledger-table .table-head,
+.cash-ledger-table .table-row {
+  min-width: 860px;
+  grid-template-columns: 90px 1.5fr 0.9fr 0.9fr 0.9fr 1fr 96px;
 }
 .assumption-table .table-head,
 .assumption-table .table-row {
@@ -3185,9 +3204,12 @@ dd {
   }
   .header-actions {
     width: 100%;
+    /* Quatre actions ne tiennent pas sur 390 px : elles passent à la ligne au lieu de
+       déborder de l'écran (page Dettes avec un contrat). */
+    flex-wrap: wrap;
   }
   .header-actions .button {
-    flex: 1;
+    flex: 1 1 calc(50% - 4px);
   }
   .metrics-grid.four,
   .metrics-grid.two,
@@ -3470,4 +3492,380 @@ dd {
 .logout-button:focus-visible,
 .sidebar .icon-button:focus-visible {
   outline-color: var(--sidebar-text);
+}
+
+/* Dettes connues par leur seul encours (B14) : liste plate, lisible sur mobile. */
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.outstanding-debt-note {
+  margin: 0 0 4px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+.outstanding-debt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+.outstanding-debt-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.outstanding-debt-list li > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.outstanding-debt-list li span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.outstanding-debt-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 640px) {
+  .outstanding-debt-list li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .outstanding-debt-list li > button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+/* Grandeur non observée : texte, jamais un zéro typographié comme un montant. */
+.metric-unknown {
+  color: var(--text-muted);
+  font-size: 0.72em;
+  font-weight: 600;
+}
+
+/* Contrat de dette adaptatif (B16) : termes connus et synthèse avant enregistrement. */
+.debt-terms {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+.debt-terms legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+.debt-synthesis {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+}
+.debt-synthesis dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.debt-synthesis dt {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.debt-synthesis dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Dettes (B17) : échéancier avec colonne d'assurance, bande de composition des sorties,
+   inspecteur d'assurance. Couleurs sémantiques V10 : capital acier, intérêts corail,
+   assurance ambre, frais or. */
+.debt-schedule-table .table-head,
+.debt-schedule-table .table-row {
+  grid-template-columns: 110px 1.6fr 0.8fr 0.8fr 0.8fr 0.9fr;
+}
+/* Écran étroit, tablette ou zoom 200 % : six colonnes tronqueraient l'assurance et le solde.
+   Chaque ligne s'empile, et chaque montant porte l'intitulé de sa colonne. */
+@media (max-width: 900px) {
+  .debt-schedule-table .table-head {
+    display: none;
+  }
+  .debt-schedule-table .table-row {
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 12px;
+  }
+  .debt-schedule-table .table-row > :nth-child(2) {
+    grid-column: 1 / -1;
+    order: -1;
+  }
+  .debt-schedule-table .table-row > :first-child {
+    grid-column: 1 / -1;
+    order: -2;
+    color: var(--text-muted);
+  }
+  .debt-schedule-table [data-label]::before {
+    content: attr(data-label) " : ";
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+}
+.payment-composition {
+  margin: 14px 0 0;
+  display: grid;
+  gap: 8px;
+}
+.payment-composition-bar {
+  display: flex;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--border-soft);
+}
+.payment-composition-bar span {
+  flex-basis: 0;
+  min-width: 3px;
+}
+.payment-composition [data-part="principal"] {
+  --part: var(--blue);
+}
+.payment-composition [data-part="interest"] {
+  --part: var(--red);
+}
+.payment-composition [data-part="insurance"] {
+  --part: #b7852f;
+}
+.payment-composition [data-part="fees"] {
+  --part: var(--gold);
+}
+.payment-composition [data-part="unknown"] {
+  --part: transparent;
+}
+.payment-composition-bar span {
+  background: var(--part);
+}
+.payment-composition figcaption {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.payment-composition-title {
+  font-weight: 600;
+}
+.payment-composition ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-soft);
+}
+.payment-composition li::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 2px;
+  background: var(--part);
+}
+.payment-composition li[data-part="unknown"]::before {
+  border: 1px dashed var(--text-muted);
+}
+.payment-composition li strong {
+  color: var(--text);
+}
+.insurance-facts {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 12px;
+  padding-top: 12px;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+.insurance-facts h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.insurance-policy {
+  display: grid;
+  gap: 4px;
+}
+.insurance-policy p,
+.insurance-policy ul {
+  margin: 0;
+  color: var(--text-soft);
+}
+.insurance-policy ul {
+  padding-left: 18px;
+}
+.debt-insurance-period {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  align-items: end;
+  margin-bottom: 8px;
+}
+/* Champ suivi d'une aide hors libellé : l'aide décrit le champ sans entrer dans son nom. */
+.field-with-hint {
+  display: grid;
+  gap: 4px;
+}
+.field-with-hint small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+/* Brouillons (document 03 §8) : liste sobre, même grille que les encours sans contrat. */
+.debt-draft-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.debt-draft-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px 12px;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.debt-draft-list li > div {
+  display: grid;
+  gap: 2px;
+}
+.debt-draft-list li span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.debt-draft-confirm {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.draft-status {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+@media (max-width: 640px) {
+  .debt-draft-list li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* B18 : historique des événements et conséquences avant enregistrement. */
+.debt-event-choice {
+  display: grid;
+  gap: 2px;
+}
+.debt-event-form .debt-event-choice .checkbox-row {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.debt-event-form .debt-event-choice small {
+  padding-left: 26px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.debt-event-form .radio-row small {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.debt-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.debt-history-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: start;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.debt-history-list li > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+.debt-history-date {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.debt-history-list li.cancelled strong {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+.debt-history-cancelled {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.debt-history-cancel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+}
+.debt-history-versions {
+  margin-top: 12px;
+}
+.debt-history-versions ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.debt-consequence-table {
+  display: grid;
+  gap: 6px;
+}
+.debt-consequence-table > div,
+.debt-consequence-table > dl {
+  display: grid;
+  grid-template-columns: 140px repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  align-items: baseline;
+}
+.debt-consequence-head span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.debt-consequence-table dt {
+  font-weight: 600;
+}
+.debt-consequence-table dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 720px) {
+  .debt-consequence-head {
+    display: none !important;
+  }
+  .debt-consequence-table > dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .debt-consequence-table dt {
+    grid-column: 1 / -1;
+  }
+  .debt-history-list li {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

@@ -125,10 +125,7 @@ function point(date: string, netWorth: number): ScenarioPathMetric {
   };
 }
 
-function path(
-  rows: Array<[string, number]>,
-  overrides: Partial<ScenarioPath> = {},
-): ScenarioPath {
+function path(rows: Array<[string, number]>, overrides: Partial<ScenarioPath> = {}): ScenarioPath {
   return {
     scenarioId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     scenarioVersion: 7,
@@ -272,11 +269,26 @@ describe("Goals V2", () => {
   });
 
   it("11. classe AT_RISK une trajectoire partielle qui atteint la cible", () => {
-    const partial = path(trajectory().monthly.map((item) => [item.date, item.netWorth]), {
-      completeness: "PARTIAL",
-      blockers: [{ code: "MISSING_TAX_RULES", message: "Taxe manquante", eventId: null, assumptionKey: null, blocking: false }],
+    const partial = path(
+      trajectory().monthly.map((item) => [item.date, item.netWorth]),
+      {
+        completeness: "PARTIAL",
+        blockers: [
+          {
+            code: "MISSING_TAX_RULES",
+            message: "Taxe manquante",
+            eventId: null,
+            assumptionKey: null,
+            blocking: false,
+          },
+        ],
+      },
+    );
+    const result = evaluateGoalAgainstTrajectory({
+      goal: goal(),
+      trajectory: partial,
+      reportingCurrency: "EUR",
     });
-    const result = evaluateGoalAgainstTrajectory({ goal: goal(), trajectory: partial, reportingCurrency: "EUR" });
     expect(result.status).toBe("AT_RISK");
     expect(result.blockers.some((item) => item.code === "TRAJECTORY_PARTIAL")).toBe(true);
   });
@@ -346,7 +358,12 @@ describe("Goals V2", () => {
   it("18. évalue plusieurs goals indépendamment", () => {
     const goals = [goal(), goal({ goalId: "second", target: target("NET_WORTH", 200_000) })];
     const results = goals.map((definition) =>
-      evaluateGoalCurrent({ goal: definition, balanceSheet: currentSheet, reportingCurrency: "EUR", asOfDate: AS_OF }),
+      evaluateGoalCurrent({
+        goal: definition,
+        balanceSheet: currentSheet,
+        reportingCurrency: "EUR",
+        asOfDate: AS_OF,
+      }),
     );
     expect(results.map((item) => item.status)).toEqual(["OFF_TRACK", "ACHIEVED"]);
   });
@@ -372,7 +389,11 @@ describe("Goals V2", () => {
   });
 
   it("21. conserve la version exacte du scénario", () => {
-    const result = evaluateGoalAgainstTrajectory({ goal: goal(), trajectory: trajectory(), reportingCurrency: "EUR" });
+    const result = evaluateGoalAgainstTrajectory({
+      goal: goal(),
+      trajectory: trajectory(),
+      reportingCurrency: "EUR",
+    });
     expect(result.trajectory.scenarioVersion).toBe(7);
     expect(result.goalVersion).toBe(1);
   });
@@ -396,7 +417,12 @@ describe("Goals V2", () => {
 
   it("24. ne mute pas le canonical state", () => {
     const before = structuredClone(currentSheet);
-    evaluateGoalCurrent({ goal: goal(), balanceSheet: currentSheet, reportingCurrency: "EUR", asOfDate: AS_OF });
+    evaluateGoalCurrent({
+      goal: goal(),
+      balanceSheet: currentSheet,
+      reportingCurrency: "EUR",
+      asOfDate: AS_OF,
+    });
     expect(currentSheet).toEqual(before);
   });
 
@@ -507,7 +533,10 @@ describe("Goals V2", () => {
 
   it("36. satisfait une target window dès qu'un point de la fenêtre atteint la cible", () => {
     const result = evaluateGoalAgainstTrajectory({
-      goal: goal({ targetDate: null, targetWindow: { startDate: "2027-01-01", endDate: "2028-12-31" } }),
+      goal: goal({
+        targetDate: null,
+        targetWindow: { startDate: "2027-01-01", endDate: "2028-12-31" },
+      }),
       trajectory: trajectory(),
       reportingCurrency: "EUR",
     });
@@ -517,7 +546,12 @@ describe("Goals V2", () => {
   it("37. refuse de projeter une dette spécifique non exposée par ScenarioPath", () => {
     const result = evaluateGoalAgainstTrajectory({
       goal: goal({
-        target: target("SPECIFIC_DEBT_BALANCE", 0, "AT_MOST", "11111111-1111-4111-8111-111111111111"),
+        target: target(
+          "SPECIFIC_DEBT_BALANCE",
+          0,
+          "AT_MOST",
+          "11111111-1111-4111-8111-111111111111",
+        ),
       }),
       trajectory: trajectory(),
       reportingCurrency: "EUR",
@@ -545,9 +579,20 @@ describe("Goals V2", () => {
     const result = evaluateGoalAttainmentProbability({
       goal: goal(),
       reportingCurrency: "EUR",
-      samplePaths: [trajectory(), path([[AS_OF, 300_000], ["2028-12-31", 400_000]])],
+      samplePaths: [
+        trajectory(),
+        path([
+          [AS_OF, 300_000],
+          ["2028-12-31", 400_000],
+        ]),
+      ],
     });
-    expect(result).toMatchObject({ status: "COMPUTABLE", probability: 0.5, successfulSamples: 1, totalSamples: 2 });
+    expect(result).toMatchObject({
+      status: "COMPUTABLE",
+      probability: 0.5,
+      successfulSamples: 1,
+      totalSamples: 2,
+    });
   });
 
   it("42. cherche la première atteinte d'une target window uniquement dans sa fenêtre", () => {
@@ -571,4 +616,88 @@ describe("Goals V2", () => {
       }),
     ).toBe(false);
   });
+});
+
+describe("B04 — réserve de sécurité", () => {
+  const reserve = () =>
+    createGoalVersion({
+      purpose: "SAFETY_RESERVE",
+      goalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      name: "Réserve",
+      target: target("IMMEDIATE_CASH", 5130),
+    });
+  it("8,7 M€ de patrimoine ne comblent pas 3 335,59 € de cash manquant", () => {
+    const result = evaluateGoalCurrent({
+      goal: reserve(),
+      balanceSheet: {
+        ...currentSheet,
+        netWorth: aggregate(8722666.82),
+        immediateCash: aggregate(1794.41),
+      },
+      reportingCurrency: "EUR",
+      asOfDate: AS_OF,
+    });
+    expect(result.satisfiedNow).toBe(false);
+    expect(result.observation.value).toBe(1794.41);
+    expect(result.gap?.shortfall).toBeCloseTo(3335.59, 2);
+  });
+  it("ne transforme pas une trésorerie inconnue en réserve à zéro", () => {
+    const result = evaluateGoalCurrent({
+      goal: reserve(),
+      balanceSheet: {
+        ...currentSheet,
+        immediateCash: aggregate(null),
+      },
+      reportingCurrency: "EUR",
+      asOfDate: AS_OF,
+    });
+    expect(result.status).toBe("NOT_COMPUTABLE");
+    expect(result.satisfiedNow).toBeNull();
+  });
+  it("refuse une réserve mesurée en patrimoine même si le navigateur contourne le formulaire", () => {
+    const invalid = { ...reserve(), target: target("NET_WORTH", 5130) };
+    expect(isGoalVersionDefinition(invalid)).toBe(false);
+    expect(
+      evaluateGoalCurrent({
+        goal: invalid,
+        balanceSheet: currentSheet,
+        reportingCurrency: "EUR",
+        asOfDate: AS_OF,
+      }).status,
+    ).toBe("NOT_COMPUTABLE");
+    expect(
+      evaluateGoalAgainstTrajectory({
+        goal: invalid,
+        trajectory: path([[AS_OF, 1000000]]),
+        reportingCurrency: "EUR",
+      }).status,
+    ).toBe("NOT_COMPUTABLE");
+  });
+  it.each([true, false])(
+    "une cible sans type exige confirmation (legacyCompatibility=%s)",
+    (legacyCompatibility) => {
+      const legacy = {
+        ...goal(),
+        purpose: undefined,
+        legacyCompatibility,
+        target: target("NET_WORTH", 5130),
+      };
+      const result = evaluateGoalCurrent({
+        goal: legacy,
+        balanceSheet: currentSheet,
+        reportingCurrency: "EUR",
+        asOfDate: AS_OF,
+      });
+      expect(result.status).toBe("NOT_COMPUTABLE");
+      expect(result.blockers[0].code).toBe("GOAL_PURPOSE_UNCONFIRMED");
+      expect(
+        evaluateGoalAgainstTrajectory({
+          goal: legacy,
+          trajectory: path([[AS_OF, 1000000]]),
+          reportingCurrency: "EUR",
+        }).satisfiedAtTargetDate,
+      ).toBeNull();
+      expect(legacy.target.metric).toBe("NET_WORTH");
+    },
+  );
 });

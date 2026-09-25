@@ -56,10 +56,53 @@ const canonicalMigrations = [
   "20260904093000",
   "20260905090000",
   "20260909190841",
+  "20260914191901",
+  "20260915064740",
+  "20260915180426",
+  "20260917071520",
+  "20260924081000",
+  "20260924091000",
+  "20260924120000",
+  "20260924150000",
+  "20260924160000",
+  "20260924170000",
+  "20260924180000",
+  "20260925090000",
+  "20260925100000",
+  "20260925110000",
+  "20260925120000",
+  "20260925130000",
+  "20260925140000",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
-  profiles: ["user_id", "ledger_coverage_start", "ledger_coverage_source"],
+  liability_terms_transitions: [
+    "liability_id",
+    "actor_user_id",
+    "executed_by",
+    "from_status",
+    "to_status",
+    "decided_at",
+  ],
+  transaction_corrections: [
+    "transaction_id",
+    "actor_user_id",
+    "executed_by",
+    "reason",
+    "before_values",
+    "after_values",
+    "changed_fields",
+    "decided_at",
+  ],
+  profiles: [
+    "residence_country",
+    "context_date",
+    "reporting_currency",
+    "first_intent",
+    "user_id",
+    "ledger_coverage_start",
+    "ledger_coverage_source",
+  ],
   scenarios: [
     "id",
     "scenario_status",
@@ -147,6 +190,7 @@ const requiredColumns: Record<string, string[]> = {
     "facility_id",
     "archived",
     "currency",
+    "terms_status",
   ],
   loan_schedules: ["id", "insurance", "fees"],
   loan_early_repayments: ["id", "liability_id", "amount", "penalty", "outcome"],
@@ -1087,6 +1131,12 @@ const requiredColumns: Record<string, string[]> = {
 
 const userOwnedTables = [
   "profiles",
+  // Brouillons de formulaire : état de saisie, jamais lu par un moteur (`20260925120000`).
+  "form_drafts",
+  // B18 : journal d'événements, annulations et versions de contrat (`20260925130000`).
+  "liability_events",
+  "liability_event_cancellations",
+  "liability_contract_versions",
   "user_domain_declarations",
   "institutions",
   "asset_classes",
@@ -1098,6 +1148,11 @@ const userOwnedTables = [
   "positions",
   "position_snapshots",
   "position_snapshot_corrections",
+  "transaction_corrections",
+  "liability_terms_transitions",
+  "loan_insurance_policies",
+  "loan_insurance_insured",
+  "loan_insurance_periods",
   "liabilities",
   "loan_schedules",
   "income_sources",
@@ -1202,6 +1257,12 @@ const userOwnedTables = [
 ] as const;
 
 const requiredIndexes = [
+  // Lecture de la piste d'une transaction, par propriétaire, et index de clé étrangère.
+  "transaction_corrections_transaction_idx",
+  "transaction_corrections_user_idx",
+  "transaction_corrections_actor_idx",
+  "liability_terms_transitions_liability_idx",
+  "liability_terms_transitions_actor_idx",
   // Lecture de la déclaration COURANTE d'un domaine : la plus récente par domaine.
   "user_domain_declarations_current_idx",
   // Un rang par domaine : sans elle, deux écritures concurrentes partageraient un rang et
@@ -1492,6 +1553,15 @@ const requiredTriggers = [
   "bank_observed_transactions_frozen",
   "position_snapshot_corrections_immutable",
   "user_domain_declarations_immutable",
+  "transaction_corrections_immutable",
+  "liability_terms_transitions_immutable",
+  // Un fait observé n'est pas daté après aujourd'hui (`20260925110000`).
+  "transactions_observation_date_guard",
+  "account_balances_observation_date_guard",
+  "liability_balance_observations_date_guard",
+  "liability_events_immutable",
+  "liability_event_cancellations_immutable",
+  "liability_contract_versions_immutable",
 ] as const;
 const requiredTriggerFunctions = [
   "real_estate_allocation_guard",
@@ -1510,9 +1580,31 @@ const requiredTriggerFunctions = [
   "bank_sync_raw_page_immutable",
   "bank_observed_transaction_frozen",
   "user_domain_declaration_immutable",
+  "transaction_correction_immutable",
+  "liability_terms_transition_immutable",
+  "lfo_guard_observation_date",
+  "lfo_debt_history_immutable",
 ] as const;
 
 const requiredConstraints = [
+  // Passage encours seul → contrat : la trace ne perd ni la dette, ni son auteur.
+  "liability_terms_transitions_liability_fk",
+  "liability_terms_transitions_owner_fk",
+  "liability_terms_transitions_actor_fk",
+  "liability_terms_transitions_actor_is_owner_ck",
+  "liability_terms_transitions_direction_ck",
+  // Correction de revenu net saisi : la piste ne perd ni l'ancienne valeur, ni son auteur.
+  "transaction_corrections_transaction_fk",
+  "transaction_corrections_owner_fk",
+  "transaction_corrections_actor_fk",
+  "transaction_corrections_before_ck",
+  "transaction_corrections_after_ck",
+  "transaction_corrections_actor_is_owner_ck",
+  "transaction_corrections_reason_ck",
+  "transaction_corrections_changed_ck",
+  "profiles_first_intent_ck",
+  "profiles_residence_country_ck",
+  "profiles_context_date_ck",
   // ── Corrections d'observations de position ─────────────────────────────────────────
   // Les cinq contrôles qui empêchent la piste d'audit de mentir : un motif vide, un auteur
   // vide, un avant ou un après qui ne serait pas un objet, et une correction ne nommant
@@ -1583,6 +1675,32 @@ const requiredConstraints = [
   "liabilities_payment_frequency_ck",
   "liabilities_interest_convention_ck",
   "liabilities_rate_type_ck",
+  "liabilities_terms_status_ck",
+  "liabilities_terms_completeness_v2_ck",
+  "liabilities_contract_dates_ck",
+  "liabilities_insurance_mode_ck",
+  "liabilities_insurance_consistency_ck",
+  "loan_insurance_policies_liability_fk",
+  "loan_insurance_insured_policy_fk",
+  "loan_insurance_insured_share_ck",
+  "loan_insurance_periods_policy_fk",
+  "loan_insurance_periods_amount_ck",
+  "loan_insurance_periods_dates_ck",
+  "loan_insurance_policies_coverage_dates_ck",
+  "loan_insurance_policies_insured_base_ck",
+  "loan_insurance_policies_debit_account_fk",
+  "form_drafts_domain_ck",
+  "form_drafts_kind_ck",
+  "form_drafts_subject_ck",
+  "form_drafts_content_ck",
+  "form_drafts_subject_fk",
+  "liability_events_liability_fk",
+  "liability_events_nature_ck",
+  "liability_events_owner_actor_ck",
+  "liability_event_cancellations_event_fk",
+  "liability_contract_versions_liability_fk",
+  "liability_contract_versions_kind_v2_ck",
+  "liabilities_payment_count_ck",
   "loan_rate_changes_kind_ck",
   "loan_payment_changes_kind_ck",
   "loan_payment_changes_amount_ck",
@@ -2007,6 +2125,14 @@ const requiredConstraints = [
 ] as const;
 
 const requiredRpcs: Record<string, string> = {
+  lfo_verify_session: "p_user_id uuid, p_session_id uuid",
+  lfo_record_outstanding_debt: "p_user_id uuid, p_payload jsonb",
+  lfo_save_form_draft: "p_user_id uuid, p_payload jsonb",
+  lfo_record_debt_event: "p_user_id uuid, p_payload jsonb",
+  lfo_cancel_debt_event: "p_user_id uuid, p_event_id uuid, p_reason text",
+  lfo_delete_form_draft: "p_user_id uuid, p_draft_id uuid, p_expected_version integer",
+  lfo_record_net_income: "p_user_id uuid, p_payload jsonb",
+  lfo_correct_net_income: "p_user_id uuid, p_payload jsonb",
   lfo_declare_domain_applicability: "p_user_id uuid, p_payload jsonb",
   lfo_add_account:
     "p_user_id uuid, p_institution text, p_name text, p_account_type text, p_balance numeric, p_currency text, p_as_of_date date",
@@ -2162,6 +2288,11 @@ const requiredRpcs: Record<string, string> = {
  * l'information utile à l'appelant, davantage que l'identifiant de la ligne créée.
  */
 const declaredReturnTypeRpcs: Record<string, string> = {
+  lfo_verify_session: "boolean",
+  // Rend l'identifiant ET la nouvelle version : sans elle, l'enregistrement suivant ne
+  // saurait pas quelle version il a lue.
+  lfo_save_form_draft: "jsonb",
+  lfo_delete_form_draft: "void",
   // Rend `null` quand la déclaration courante est déjà celle-là : rendre un identifiant
   // fabriqué laisserait croire à une écriture qui n'a pas eu lieu.
   lfo_declare_domain_applicability: "uuid",
@@ -2269,6 +2400,34 @@ const readOnlyAuditTables = [
   // Une déclaration d'applicabilité est append-only : un client capable de la réécrire
   // pourrait faire disparaître le jour où un domaine a cessé d'être « non concerné ».
   "user_domain_declarations",
+  // Une correction de revenu saisi est la seule trace de la valeur remplacée.
+  "transaction_corrections",
+  // Le passage au contrat est la seule trace du statut « encours seul » antérieur.
+  "liability_terms_transitions",
+  // Les opérations ne s'écrivent que par le serveur : sans quoi la piste des corrections
+  // pourrait être contournée par une réécriture directe (`20260924160000`).
+  "transactions",
+  // Assurance séparée (B17) : seule la RPC du contrat écrit polices, assurés et périodes.
+  "loan_insurance_policies",
+  "loan_insurance_insured",
+  "loan_insurance_periods",
+  // Dette : seules les RPC `lfo_*` écrivent le contrat et ses listes, sans quoi une écriture
+  // directe contournerait la piste de passage au contrat (`20260925100000`).
+  "liabilities",
+  "liability_balance_observations",
+  "loan_charges",
+  "loan_early_repayments",
+  "loan_payment_changes",
+  "loan_rate_changes",
+  "loan_schedules",
+  // Soldes observés : écrits par le serveur et les RPC seulement (`20260925110000`).
+  "account_balances",
+  // Brouillons : écrits par leurs deux RPC, sous version attendue (`20260925120000`).
+  "form_drafts",
+  // Historique de la dette : immuable, écrit par ses RPC seulement (`20260925130000`).
+  "liability_events",
+  "liability_event_cancellations",
+  "liability_contract_versions",
 ] as const;
 
 const storagePolicies = [
@@ -2539,6 +2698,65 @@ try {
     if (rpc.authenticated_execute) failures.push(`RPC exécutable par authenticated : ${rpc.name}`);
     if (!rpc.service_role_execute)
       failures.push(`RPC non exécutable par service_role : ${rpc.name}`);
+  }
+
+  // Toute FK simple entre tables par propriétaire doit être couverte par une FK avec user_id.
+  // Détecte les oublis historiques et les futurs liens ajoutés sans isolation.
+  const unscopedReferences = await client.query<{ name: string }>(`
+    select con.conname as name from pg_constraint con
+    join pg_namespace ns on ns.oid = con.connamespace
+    where ns.nspname = 'public' and con.contype = 'f' and cardinality(con.conkey) = 1
+      and exists(select 1 from pg_attribute a where a.attrelid = con.conrelid and a.attname = 'user_id' and not a.attisdropped)
+      and exists(select 1 from pg_attribute a where a.attrelid = con.confrelid and a.attname = 'user_id' and not a.attisdropped)
+      and not exists (
+        select 1 from pg_constraint scoped
+        where scoped.contype = 'f' and scoped.conrelid = con.conrelid and scoped.confrelid = con.confrelid
+          and con.conkey <@ scoped.conkey
+          and exists (
+            select 1 from unnest(scoped.conkey, scoped.confkey) pair(child_key, parent_key)
+            join pg_attribute ca on ca.attrelid = scoped.conrelid and ca.attnum = pair.child_key
+            join pg_attribute pa on pa.attrelid = scoped.confrelid and pa.attnum = pair.parent_key
+            where ca.attname = 'user_id' and pa.attname = 'user_id'
+          )
+      )`);
+  for (const reference of unscopedReferences.rows)
+    failures.push(`Référence sans isolation du propriétaire : ${reference.name}`);
+
+  // Le seul lecteur Auth privilégié est privé et réservé au serveur.
+  const sessionReader = await client.query<{
+    security_definer: boolean;
+    settings: string[] | null;
+    result_type: string;
+    arguments: string;
+    anon_execute: boolean;
+    authenticated_execute: boolean;
+    service_role_execute: boolean;
+    anon_usage: boolean;
+    authenticated_usage: boolean;
+  }>(`select p.prosecdef as security_definer, p.proconfig as settings,
+      pg_get_function_result(p.oid) as result_type,
+      pg_get_function_identity_arguments(p.oid) as arguments,
+      has_function_privilege('anon', p.oid, 'execute') as anon_execute,
+      has_function_privilege('authenticated', p.oid, 'execute') as authenticated_execute,
+      has_function_privilege('service_role', p.oid, 'execute') as service_role_execute,
+      has_schema_privilege('anon', n.oid, 'usage') as anon_usage,
+      has_schema_privilege('authenticated', n.oid, 'usage') as authenticated_usage
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'lfo_private' and p.proname = 'verify_session'`);
+  const sessionGuard = sessionReader.rows[0];
+  if (
+    sessionReader.rows.length !== 1 ||
+    !sessionGuard?.security_definer ||
+    sessionGuard.result_type !== "boolean" ||
+    sessionGuard.arguments !== "p_user_id uuid, p_session_id uuid" ||
+    !sessionGuard.settings?.includes('search_path=""') ||
+    sessionGuard.anon_execute ||
+    sessionGuard.authenticated_execute ||
+    !sessionGuard.service_role_execute ||
+    sessionGuard.anon_usage ||
+    sessionGuard.authenticated_usage
+  ) {
+    failures.push("Lecteur privé de révocation Auth absent ou privilèges/signature non conformes");
   }
 
   // ── Garde-fous SECURITY DEFINER ──────────────────────────────────────────────────────

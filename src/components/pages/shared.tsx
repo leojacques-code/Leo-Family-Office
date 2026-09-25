@@ -28,7 +28,14 @@ import { Callout, Currency, DataBadge } from "@/components/ui";
 import { ChevronRight } from "lucide-react";
 import type { FinancialAccount } from "@/lib/types";
 
-export type Mutate = (mutation: Mutation) => Promise<boolean>;
+/**
+ * `onError` reçoit le message de refus RÉDIGÉ PAR LE SERVEUR (jamais le texte d'une base) :
+ * un tiroir modal masque le bandeau d'erreur global, il doit donc pouvoir l'afficher.
+ */
+export type Mutate = (
+  mutation: Mutation,
+  options?: { onError?: (message: string) => void },
+) => Promise<boolean>;
 
 export interface SectionProps {
   section: string;
@@ -122,13 +129,15 @@ export function OptionalCurrency({
   value,
   sign = false,
   fallback = NOT_COMPUTABLE,
+  currency = "EUR",
 }: {
   value: number | null;
   sign?: boolean;
   fallback?: string;
+  currency?: string | null;
 }) {
   if (value === null) return <span className="warning-text">{fallback}</span>;
-  return <Currency value={value} sign={sign} />;
+  return <Currency value={value} sign={sign} currency={currency} />;
 }
 
 const nativeFormatter = (currency: string) =>
@@ -159,6 +168,8 @@ export function canonicalLineLabel(state: DashboardState, line: ConvertedBalance
   if (position) return position.securityName;
   const liability = state.liabilities.find((item) => item.id === line.entityId);
   if (liability) return liability.name;
+  const outstanding = (state.outstandingDebts ?? []).find((item) => item.id === line.entityId);
+  if (outstanding) return outstanding.name;
   return line.entityId;
 }
 
@@ -508,6 +519,9 @@ export function liquidityExplanation(state: DashboardState): Explanation {
 }
 export function cashFlowExplanation(state: DashboardState): Explanation {
   const upcoming = nextDebtEvent(state.liabilities, state.asOfDate);
+  // Une dette connue par son seul encours n'a pas d'échéance connue : le service affiché ne
+  // couvre alors que les contrats, et « aucune échéance » serait faux.
+  const unscheduled = (state.outstandingDebts ?? []).filter((debt) => debt.currentBalance > 0);
   return {
     title: "Cash flow mensuel connu",
     formula:
@@ -526,13 +540,17 @@ export function cashFlowExplanation(state: DashboardState): Explanation {
         date: state.asOfDate,
       },
       {
-        label: "Service de dette exigible",
-        value: formatEur(state.metrics.monthlyDebtService),
+        label: unscheduled.length
+          ? "Service de dette exigible (contrats seulement)"
+          : "Service de dette exigible",
+        value: unscheduled.length
+          ? `Partiel : ${formatEur(state.metrics.monthlyDebtService)} hors ${unscheduled.length} dette(s) sans échéancier`
+          : formatEur(state.metrics.monthlyDebtService),
         kind: "DERIVED",
         date: state.asOfDate,
       },
     ],
-    note: `${upcoming ? `Prochaine échéance le ${formatDate(upcoming.entry.dueDate)} pour ${formatEur(upcoming.entry.totalCashOut)}. ` : "Aucune échéance de dette à venir. "}La majorité des dépenses n’est pas encore renseignée : ce cash flow est une borne haute, avant impôt sur le revenu.`,
+    note: `${upcoming ? `Prochaine échéance connue le ${formatDate(upcoming.entry.dueDate)} pour ${formatEur(upcoming.entry.totalCashOut)}. ` : unscheduled.length ? "Aucune échéance contractuelle connue ; les dettes sans échéancier ont des sorties inconnues. " : "Aucune échéance de dette à venir. "}La majorité des dépenses n’est pas encore renseignée : ce cash flow est une borne haute, avant impôt sur le revenu.`,
   };
 }
 

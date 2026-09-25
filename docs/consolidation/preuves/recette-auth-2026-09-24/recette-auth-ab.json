@@ -1,0 +1,227 @@
+{
+  "date": "2026-09-24T08:42:45.530Z",
+  "app": "http://localhost:3120",
+  "migrations": 51,
+  "environnement": "pile Supabase auto-hébergée locale (GoTrue v2.196.0, PostgREST v14.17, Storage v1.74.0, Kong 3.9.3, PostgreSQL 16)",
+  "nonProuve": [
+    "projet Supabase hébergé",
+    "preview Vercel",
+    "envoi réel de mails"
+  ],
+  "utilisateurs": {
+    "A": "recette-a-1790239237547@lfo.invalid",
+    "B": "recette-b-1790239237547@lfo.invalid"
+  },
+  "checks": [
+    {
+      "id": "A1",
+      "label": "création A : confirmation d'adresse demandée",
+      "ok": true
+    },
+    {
+      "id": "A2",
+      "label": "A existe dans auth.users, adresse non confirmée, aucun profil",
+      "ok": true
+    },
+    {
+      "id": "A3",
+      "label": "connexion refusée avant confirmation",
+      "ok": true,
+      "status": 401
+    },
+    {
+      "id": "A4",
+      "label": "lien de confirmation émis par Auth vers /auth/confirm",
+      "ok": true
+    },
+    {
+      "id": "A5",
+      "label": "lien suivi : session ouverte et accueil personnel",
+      "ok": true,
+      "url": "/setup"
+    },
+    {
+      "id": "A6",
+      "label": "profil vide unique créé à la confirmation",
+      "ok": true,
+      "display_name": "Espace personnel",
+      "reporting_currency": "EUR"
+    },
+    {
+      "id": "A7",
+      "label": "nom de l'espace enregistré puis relu après rechargement",
+      "ok": true
+    },
+    {
+      "id": "A8",
+      "label": "A crée un compte par l'API applicative",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "id": "A9",
+      "label": "A dépose un document au coffre privé",
+      "ok": true,
+      "status": 201
+    },
+    {
+      "id": "S1",
+      "label": "session conservée dans un nouvel onglet",
+      "ok": true
+    },
+    {
+      "id": "S2",
+      "label": "JWT expiré : session renouvelée sans reconnexion, même session",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "id": "B1",
+      "label": "B confirmé, accueil personnel",
+      "ok": true
+    },
+    {
+      "id": "B2",
+      "label": "accueil mobile sans débordement horizontal",
+      "ok": true,
+      "scrollWidth": 390
+    },
+    {
+      "id": "B3",
+      "label": "B : aucun objet de A dans l'état applicatif",
+      "ok": true
+    },
+    {
+      "id": "B4",
+      "label": "B : espace vierge en base (aucun compte, dette, document, objectif)",
+      "ok": true,
+      "total": "0"
+    },
+    {
+      "id": "B5",
+      "label": "PostgREST sous le JWT de B : compte de A invisible (RLS)",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "id": "B6",
+      "label": "contrôle positif : A lit bien son compte sous son JWT",
+      "ok": true
+    },
+    {
+      "id": "B7",
+      "label": "PostgREST : B ne peut pas écrire une ligne au nom de A (RLS)",
+      "ok": true,
+      "status": 403,
+      "code": "42501"
+    },
+    {
+      "id": "B8",
+      "label": "PostgREST : B ne peut pas modifier le compte de A",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "id": "B9",
+      "label": "RPC de session réservée au serveur : refusée sous le JWT de B",
+      "ok": true,
+      "status": 403,
+      "code": "42501"
+    },
+    {
+      "id": "B10",
+      "label": "API applicative : B ne peut pas corriger le solde du compte de A",
+      "ok": true,
+      "status": 500,
+      "observationsAvant": 1,
+      "observationsApres": 1
+    },
+    {
+      "id": "B11",
+      "label": "Storage : B ne peut pas télécharger le document de A",
+      "ok": true,
+      "status": 400,
+      "motif": "Object not found"
+    },
+    {
+      "id": "B12",
+      "label": "contrôle positif Storage : A télécharge son document",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "id": "B13",
+      "label": "Storage : B ne peut pas signer d'URL sur l'objet de A",
+      "ok": true,
+      "status": 400,
+      "motif": "Object not found"
+    },
+    {
+      "id": "B14",
+      "label": "Storage : B ne peut pas déposer dans le dossier de A",
+      "ok": true,
+      "status": 400,
+      "motif": "new row violates row-level security policy"
+    },
+    {
+      "id": "B15",
+      "label": "Storage : B ne liste aucun objet du dossier de A, que A liste bien",
+      "ok": true,
+      "statusB": 200,
+      "objetsVusParA": 1
+    },
+    {
+      "id": "R1",
+      "label": "déconnexion de A : retour à la connexion",
+      "ok": true
+    },
+    {
+      "id": "R2",
+      "label": "session de A supprimée côté Auth",
+      "ok": true
+    },
+    {
+      "id": "R3",
+      "label": "rejeu des anciens cookies de A après déconnexion : refusé",
+      "ok": true,
+      "status": 401
+    },
+    {
+      "id": "R4",
+      "label": "reconnexion de A par mot de passe",
+      "ok": true,
+      "status": 200
+    },
+    {
+      "id": "R5",
+      "label": "session révoquée côté Auth : JWT encore valide mais accès refusé",
+      "ok": true,
+      "status": 401
+    },
+    {
+      "id": "R6",
+      "label": "session expirée par not_after : lfo_verify_session la refuse sur le vrai schéma Auth",
+      "ok": true,
+      "avant": true,
+      "apres": false
+    },
+    {
+      "id": "R7",
+      "label": "l'application refuse la session expirée même si GoTrue l'accepte encore",
+      "ok": true,
+      "app": 401,
+      "gotrueUser": 200
+    },
+    {
+      "id": "D1",
+      "label": "aucune donnée de démonstration en base de recette",
+      "ok": true
+    },
+    {
+      "id": "E1",
+      "label": "aucune erreur JavaScript dans la page de A",
+      "ok": true,
+      "errors": []
+    }
+  ]
+}

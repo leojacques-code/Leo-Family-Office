@@ -271,14 +271,32 @@ try {
   );
 
   // ── 8. Lecture seule pour `authenticated`, et cloisonnement ────────────────────────
-  await client.query("set local role authenticated");
-  await client.query("select set_config('request.jwt.claims', $1, true)", [
-    JSON.stringify({ sub: otherUser, role: "authenticated" }),
-  ]);
-  const foreign = await client.query<{ count: string }>(
-    "select count(*)::text as count from public.user_domain_declarations where user_id = $1",
-    [userId],
+  // Les DEUX réglages : `auth.uid()` du shim local lit `request.jwt.claim.sub`, celui de la
+  // plateforme `request.jwt.claims`. Sans le premier, `auth.uid()` vaut NULL et toute
+  // assertion d'invisibilité serait vraie par construction.
+  const actAs = async (subject: string) => {
+    await client.query("reset role");
+    await client.query(
+      "select set_config('request.jwt.claim.sub', $1, true), set_config('request.jwt.claims', $2, true)",
+      [subject, JSON.stringify({ sub: subject, role: "authenticated" })],
+    );
+    await client.query("set local role authenticated");
+  };
+  const declarationCount = async () =>
+    (
+      await client.query<{ count: string }>(
+        "select count(*)::text as count from public.user_domain_declarations where user_id = $1",
+        [userId],
+      )
+    ).rows[0];
+  // Contrôle POSITIF d'abord : le propriétaire voit ses déclarations.
+  await actAs(userId);
+  assert(
+    Number((await declarationCount()).count) > 0,
+    "Le propriétaire doit voir ses propres déclarations",
   );
+  await actAs(otherUser);
+  const foreign = { rows: [await declarationCount()] };
   assert(
     foreign.rows[0].count === "0",
     "Les déclarations d'un autre propriétaire doivent rester invisibles",

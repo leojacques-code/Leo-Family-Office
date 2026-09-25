@@ -34,7 +34,7 @@ describe("écritures critiques Supabase", () => {
 
   it("persiste une simulation par un unique RPC transactionnel", async () => {
     mocks.rpc.mockResolvedValue({ data: "run-id", error: null });
-    const repository = createSupabaseRepository();
+    const repository = createSupabaseRepository("11111111-1111-4111-8111-111111111111");
     await expect(repository.saveSimulation(run)).resolves.toBe("run-id");
     expect(mocks.rpc).toHaveBeenCalledWith("lfo_save_simulation", expect.any(Object));
     expect(mocks.from).not.toHaveBeenCalled();
@@ -42,7 +42,7 @@ describe("écritures critiques Supabase", () => {
 
   it("ne tente aucune écriture séparée si le RPC de simulation échoue", async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: "results rejected" } });
-    const repository = createSupabaseRepository();
+    const repository = createSupabaseRepository("11111111-1111-4111-8111-111111111111");
     await expect(repository.saveSimulation(run)).rejects.toThrow(/results rejected/);
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
     expect(mocks.from).not.toHaveBeenCalled();
@@ -57,7 +57,7 @@ describe("écritures critiques Supabase", () => {
     const insert = vi.fn().mockReturnValue({ select });
     mocks.from.mockReturnValue({ insert });
 
-    const repository = createSupabaseRepository();
+    const repository = createSupabaseRepository("11111111-1111-4111-8111-111111111111");
     await expect(
       repository.storeDocument({
         name: "preuve.pdf",

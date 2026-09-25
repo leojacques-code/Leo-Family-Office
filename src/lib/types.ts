@@ -1,3 +1,5 @@
+import type { FinancialDateContext } from "@/lib/financial-date";
+
 export type DataKind =
   "ACTUAL" | "USER_ASSUMPTION" | "MODEL_ASSUMPTION" | "EXTERNAL_DATA" | "DERIVED" | "MISSING";
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
@@ -109,6 +111,8 @@ export interface RateChange {
   effectiveFrom: string;
   annualRate: number;
   kind: DatedTermKind;
+  /** Présent quand le terme vient d'un événement du journal (B18), jamais du contrat. */
+  eventId?: string;
 }
 
 export interface PaymentChange {
@@ -116,6 +120,8 @@ export interface PaymentChange {
   /** Paiement contractuel par échéance à partir de cette date. */
   amount: number;
   kind: DatedTermKind;
+  /** Présent quand le palier vient d'un événement du journal (B18), jamais du contrat. */
+  eventId?: string;
 }
 
 /** Nature d'un différé de remboursement. */
@@ -151,6 +157,90 @@ export interface EarlyRepayment {
   /** Indemnité de remboursement anticipé. `null` = inconnue, jamais supposée nulle. */
   penalty: number | null;
   outcome: EarlyRepaymentOutcome;
+  /** Présent quand le remboursement vient d'un événement du journal (B18). */
+  eventId?: string;
+  /** Remboursement PRÉVU (annoncé, futur) : une intention, jamais un fait. */
+  planned?: boolean;
+}
+
+/**
+ * B18 : événement de la vie d'un prêt (document 04 §6). OBSERVÉ : un fait constaté, jamais
+ * daté après aujourd'hui. CONTRACTUEL : une modification du contrat (révision notifiée,
+ * palier, report, avenant). PRÉVU : un remboursement annoncé, futur. Une simulation n'est
+ * jamais un événement.
+ */
+export type DebtEventKind =
+  | "RATE_CHANGE"
+  | "PAYMENT_CHANGE"
+  | "DEFERRAL"
+  | "AMENDMENT"
+  | "EARLY_REPAYMENT"
+  | "FULL_REPAYMENT";
+export type DebtEventNature = "OBSERVED" | "CONTRACTUAL" | "PLANNED";
+
+/** Effet d'un report sur la durée : déclaré, jamais supposé. */
+export type DeferralTermEffect = "EXTEND_TERM" | "RECALCULATE_PAYMENT" | "UNKNOWN";
+
+export type DebtEventContent =
+  | { kind: "RATE_CHANGE"; annualRate: number }
+  | { kind: "PAYMENT_CHANGE"; paymentAmount: number }
+  | {
+      kind: "DEFERRAL";
+      months: number;
+      deferralKind: Exclude<DeferralKind, "NONE">;
+      interestTreatment: DeferredInterestTreatment;
+      termEffect: DeferralTermEffect;
+    }
+  | {
+      kind: "AMENDMENT";
+      annualRate: number | null;
+      paymentAmount: number | null;
+      /** Nouvelle date de dernière échéance, si l'avenant change la durée. */
+      maturityDate: string | null;
+      note: string | null;
+    }
+  | {
+      kind: "EARLY_REPAYMENT";
+      amount: number;
+      penalty: number | null;
+      outcome: EarlyRepaymentOutcome;
+      /** Capital restant dû constaté par le prêteur, s'il a été fourni. */
+      balanceAfter: number | null;
+    }
+  | { kind: "FULL_REPAYMENT"; amount: number; penalty: number | null };
+
+export interface DebtEvent {
+  id: string;
+  liabilityId: string;
+  nature: DebtEventNature;
+  effectiveDate: string;
+  source: string;
+  content: DebtEventContent;
+  /** Observation d'encours écrite avec l'événement ; `null` s'il n'en a pas écrit. */
+  observationId: string | null;
+  recordedAt: string;
+  /** Annulation motivée ; l'événement annulé reste lisible et ne produit plus rien. */
+  cancellation: { reason: string; cancelledAt: string } | null;
+}
+
+/** Version immuable des termes DÉCLARÉS du contrat (B18). */
+export interface ContractVersion {
+  id: string;
+  versionNo: number;
+  changeKind: "BASELINE" | "INITIAL" | "PROMOTION" | "CORRECTION";
+  changeReason: string | null;
+  recordedAt: string;
+  terms: Record<string, unknown>;
+}
+
+/** Report d'échéances en cours de vie, traduit d'un événement actif. */
+export interface DeferralPeriod {
+  eventId: string;
+  startDate: string;
+  months: number;
+  kind: Exclude<DeferralKind, "NONE">;
+  interestTreatment: DeferredInterestTreatment;
+  termEffect: DeferralTermEffect;
 }
 
 /** Frais ponctuel daté, hors échéancier : frais de dossier, garantie, avenant. */
@@ -185,7 +275,73 @@ export interface ProvidedScheduleEntry {
   closingBalance: number;
 }
 
+/**
+ * Dette dont seul l'encours est connu (`terms_status = 'OUTSTANDING_ONLY'`).
+ *
+ * Aucun taux, paiement, durée ni date d'échéance : ils ne sont pas à zéro, ils sont
+ * INCONNUS, et ce type ne porte donc aucun champ pour eux. Le bilan en fait un passif daté ;
+ * le service de dette et le cash-flow libre qui en dépendent deviennent partiels.
+ */
+export interface OutstandingDebt {
+  id: string;
+  name: string;
+  /** Créancier s'il est connu ; `null` n'est pas un créancier vide. */
+  lender: string | null;
+  currentBalance: number;
+  currency: string;
+  /** Date de la dernière observation d'encours ; absente si aucune n'est datée. */
+  balanceDate?: string;
+  notes: string | null;
+  provenance: Provenance;
+}
+
+/**
+ * Termes du contrat tels que DÉCLARÉS (document 04, étape C : « montant ou durée selon la
+ * donnée connue »). `null` = non déclaré, jamais zéro. Les champs de `Liability` portent les
+ * valeurs RÉSOLUES par le Debt Engine ; ceux-ci sont ce qu'un formulaire réédite.
+ */
+export interface DeclaredDebtTerms {
+  monthlyPayment: number | null;
+  paymentCount: number | null;
+  maturityDate: string | null;
+}
+
+/** Provenance d'un terme résolu. `UNRESOLVED` : non déductible, l'échéancier est MISSING. */
+export type DebtTermResolution =
+  | "DECLARED"
+  | "DERIVED_FROM_MATURITY"
+  | "DERIVED_FROM_PAYMENT"
+  | "DERIVED_FROM_COUNT"
+  | "UNRESOLVED";
+
+export interface DebtTermsResolution {
+  monthlyPayment: DebtTermResolution;
+  paymentCount: DebtTermResolution;
+  maturityDate: DebtTermResolution;
+  /** Raison d'une résolution impossible, en code fermé. */
+  blocker:
+    | "TERMS_INSUFFICIENT"
+    | "MATURITY_NOT_ON_SCHEDULE"
+    | "PAYMENT_DOES_NOT_AMORTISE"
+    /** Assurance incluse dans la mensualité pour un montant inconnu : la part qui amortit
+     *  est inconnue, aucune durée n'en est déduite. */
+    | "INCLUDED_INSURANCE_UNKNOWN"
+    | null;
+}
+
 export interface Liability {
+  /** Choix d'assurance déclaré (B17). Absent ou `null` : contrat antérieur à B17. */
+  insuranceMode?: InsuranceMode | null;
+  /** Polices d'une assurance SÉPARÉE, sur leur propre calendrier. */
+  insurancePolicies?: InsurancePolicy[];
+  /**
+   * Termes déclarés et provenance de leur résolution. Absents = tous les termes déclarés
+   * (données antérieures au contrat adaptatif, fixtures, prêts synthétiques).
+   */
+  declaredTerms?: DeclaredDebtTerms;
+  termsResolution?: DebtTermsResolution;
+  /** Notes du contrat, distinctes de la provenance du dernier encours observé. */
+  contractNotes?: string | null;
   id: string;
   name: string;
   lender: string;
@@ -220,6 +376,19 @@ export interface Liability {
    */
   paymentIncludesInsurance: boolean | null;
   deferral: LoanDeferral | null;
+  /** B18 : reports d'échéances en cours de vie, traduits des événements actifs. */
+  deferralPeriods?: DeferralPeriod[];
+  /**
+   * B18 : dates à partir desquelles la mensualité est recalculée sur la durée restante
+   * (avenant qui change la durée sans déclarer de nouvelle mensualité).
+   */
+  paymentRecalculations?: Array<{ eventId: string; date: string }>;
+  /** B18 : avenants dont la nouvelle dernière échéance ne tombe sur aucune échéance. */
+  unresolvedAmendments?: Array<{ eventId: string; date: string; maturityDate: string }>;
+  /** B18 : journal des événements, annulés compris, pour l'historique. */
+  events?: DebtEvent[];
+  /** B18 : versions immuables des termes déclarés. */
+  contractVersions?: ContractVersion[];
   /** Forme du remboursement du capital. `AMORTIZING` reproduit le comportement historique. */
   amortisationProfile: AmortisationProfile;
   /**
@@ -255,7 +424,47 @@ export interface Liability {
  * vraies sorties de trésorerie, mais ce ne sont pas des échéances : les confondre fausse
  * autant le comptage des échéances que leur omission fausserait la trésorerie.
  */
-export type ScheduleEntryKind = "PAYMENT" | "CHARGE" | "EARLY_REPAYMENT";
+export type ScheduleEntryKind = "PAYMENT" | "CHARGE" | "EARLY_REPAYMENT" | "INSURANCE";
+
+/**
+ * Choix d'assurance DÉCLARÉ (document 04, étape D). INCLUDED : dans les paiements du prêt ;
+ * SEPARATE : prélevée à part, sur son propre calendrier ; NONE : absence confirmée ;
+ * UNKNOWN : inconnue, le coût complet n'est pas calculable.
+ */
+export type InsuranceMode = "INCLUDED" | "SEPARATE" | "NONE" | "UNKNOWN";
+
+/** Assuré d'une police. La quotité décrit une couverture, jamais une part du passif. */
+export interface InsuredPerson {
+  name: string;
+  /** Fraction couverte : 1 = 100 %. */
+  coverageShare: number;
+}
+
+/** Période de prime : débits réguliers d'un montant déclaré. */
+export interface InsurancePremiumPeriod {
+  firstDebitDate: string;
+  /** `null` : jusqu'à la dernière échéance du prêt, choix déclaré. */
+  lastDebitDate: string | null;
+  frequency: PaymentFrequency;
+  premiumAmount: number;
+}
+
+/** Base sur laquelle l'assureur dit calculer la prime : descriptive, aucune prime n'en dérive. */
+export type InsuredBase = "INITIAL_CAPITAL" | "OUTSTANDING_CAPITAL" | "OTHER";
+
+export interface InsurancePolicy {
+  id: string;
+  insurer: string | null;
+  contractReference: string | null;
+  /** Période de COUVERTURE, distincte des dates de débit ; `null` = inconnue. */
+  effectiveDate?: string | null;
+  endDate?: string | null;
+  insuredBase?: InsuredBase | null;
+  /** Compte prélevé, si connu : sert au rapprochement, ne prouve aucun paiement. */
+  debitAccountId?: string | null;
+  insured: InsuredPerson[];
+  periods: InsurancePremiumPeriod[];
+}
 
 export interface LoanScheduleEntry {
   liabilityId: string;
@@ -355,6 +564,8 @@ export interface Transaction {
   categoryName: string;
   /** Montant signé : négatif pour une sortie. Le signe ne détermine jamais la nature. */
   amount: number;
+  /** Le même montant en TEXTE, tel que la base l'a écrit : l'état attendu d'une correction. */
+  amountText?: string;
   currency: string;
   /**
    * Nature imposée à cette transaction seule, prioritaire sur celle de sa catégorie.
@@ -371,7 +582,26 @@ export interface Transaction {
   propertyId: string | null;
   notes: string | null;
   provenance: Provenance;
+  /**
+   * Corrections décidées sur cette transaction, de la plus ancienne à la plus récente. Seul
+   * un revenu net SAISI se corrige (`lfo_correct_net_income`) : la valeur ci-dessus est la
+   * valeur corrigée, l'avant et le motif vivent ici. Absent = aucune correction.
+   */
+  corrections?: TransactionCorrection[];
 }
+
+/** Entrée de la piste immuable `transaction_corrections`. Montants en texte décimal. */
+export interface TransactionCorrection {
+  id: string;
+  decidedAt: string;
+  reason: string;
+  changedFields: ("amount" | "transaction_date" | "label")[];
+  before: { amount: string; date: string; label: string };
+  after: { amount: string; date: string; label: string };
+}
+
+/** Source écrite par `lfo_record_net_income` : seule forme de revenu corrigible ici. */
+export const NET_INCOME_SOURCE = "Saisie revenu net observé";
 
 export type RecurrenceFrequency = "MONTHLY" | "QUARTERLY" | "ANNUAL";
 
@@ -817,6 +1047,8 @@ export interface RealEstateFinancingLink {
 
 export interface DashboardState {
   asOfDate: string;
+  /** Contexte serveur ; absent seulement des anciennes fixtures. */
+  dates?: FinancialDateContext;
   reportingCurrency: string;
   /**
    * Date à partir de laquelle l'ensemble du ledger actuellement considéré par LFO est
@@ -881,6 +1113,12 @@ export interface DashboardState {
   /** Projection unifiée, dérivée en lecture : aucune conséquence n'est persistée. */
   eventTimeline?: import("@/lib/engine/event-contracts").CanonicalTimeline;
   liabilities: Liability[];
+  /**
+   * Dettes connues par leur SEUL encours. Jamais mêlées à `liabilities` : les moteurs
+   * d'échéancier en déduiraient un service de dette nul, alors qu'il est inconnu. Optionnel
+   * pour les états construits à la main ; un consommateur lit `?? []`.
+   */
+  outstandingDebts?: OutstandingDebt[];
   incomes: IncomeSource[];
   expenseCategories: ExpenseCategory[];
   transactions: Transaction[];

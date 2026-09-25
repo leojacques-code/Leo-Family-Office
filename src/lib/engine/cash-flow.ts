@@ -83,6 +83,13 @@ export interface CoverageOptions {
   ledgerCoverageStart?: string | null;
   /** Date d'observation. Détermine quel mois calendaire est révolu. */
   asOfDate?: string;
+  /**
+   * Devise des agrégats. Une opération dans une AUTRE devise n'est jamais additionnée sans
+   * conversion (FX ABSENT ≠ FX ÉGAL À 1) : elle est exclue des sommes, comptée et nommée, et
+   * la qualité devient INCOMPLETE. Sans cette option, un mélange de devises dans la période
+   * est seulement signalé, faute de savoir laquelle fait foi.
+   */
+  reportingCurrency?: string;
 }
 
 export interface PeriodCoverage {
@@ -105,12 +112,55 @@ export interface DataQuality {
   reasons: string[];
   unclassifiedTransactionCount: number;
   unmatchedTransferCount: number;
+  /**
+   * Opérations de la période dans une devise autre que celle des agrégats, EXCLUES des
+   * sommes faute de conversion. Toute grandeur qui en dépend est incomplète.
+   */
+  foreignCurrencyTransactionCount: number;
+  /**
+   * Natures des opérations exclues pour devise. Un garde-fou se pose au niveau où
+   * l'information manque : une dépense en CHF rend la consommation incalculable, pas le
+   * revenu en euros du même mois.
+   */
+  foreignCurrencyKinds: CashFlowKind[];
+  /** Devises rencontrées dans la période, triées. Plus d'une = agrégats non homogènes. */
+  currencies: string[];
+}
+
+/** Natures dont dépend chaque agrégat observé. */
+export const AGGREGATE_DEPENDENCIES = {
+  income: ["INCOME"],
+  consumerExpenses: ["EXPENSE"],
+  operatingCashFlowBeforeDebt: ["INCOME", "EXPENSE", "TAX"],
+  cashFlowAfterDebt: ["INCOME", "EXPENSE", "TAX", "DEBT_SERVICE"],
+  debtServicePaid: ["DEBT_SERVICE"],
+  observedSavingsRate: ["INCOME", "SAVING", "INVESTMENT"],
+  observedInvestmentRate: ["INCOME", "INVESTMENT"],
+} as const satisfies Record<string, readonly CashFlowKind[]>;
+
+/**
+ * Vrai si l'agrégat dépend d'une opération exclue faute de conversion, ou si la période
+ * mélange des devises sans devise de lecture déclarée : il n'a alors pas de valeur.
+ */
+export function aggregateBlocked(
+  quality: Pick<
+    DataQuality,
+    "foreignCurrencyKinds" | "foreignCurrencyTransactionCount" | "currencies"
+  >,
+  aggregate: keyof typeof AGGREGATE_DEPENDENCIES,
+  reportingCurrencyDeclared = true,
+): boolean {
+  if (!reportingCurrencyDeclared && quality.currencies.length > 1) return true;
+  const kinds = quality.foreignCurrencyKinds as readonly CashFlowKind[];
+  return AGGREGATE_DEPENDENCIES[aggregate].some((kind) => kinds.includes(kind as CashFlowKind));
 }
 
 export interface ObservedCashFlow {
   periodStart: string;
   periodEnd: string;
   transactionCount: number;
+  /** Opérations de consommation agrégées : zéro = aucune dépense OBSERVÉE, pas une dépense nulle. */
+  consumerExpenseCount: number;
 
   income: number;
   consumerExpenses: number;
@@ -253,9 +303,38 @@ export function computeObservedCashFlow(
 ): ObservedCashFlow {
   const index = categoryIndex(categories);
   const breakdown = emptyBreakdown();
-  const inPeriod = transactions.filter(
+  const periodTransactions = transactions.filter(
     (transaction) => transaction.date >= periodStart && transaction.date <= periodEnd,
   );
+  const currencies = [...new Set(periodTransactions.map((item) => item.currency))].sort();
+  const reportingCurrency = options.reportingCurrency;
+  // Une opération dans une autre devise ne s'additionne pas : elle est EXCLUE et comptée.
+  const inPeriod =
+    reportingCurrency === undefined
+      ? periodTransactions
+      : periodTransactions.filter((item) => item.currency === reportingCurrency);
+  const foreignCurrencyTransactionCount = periodTransactions.length - inPeriod.length;
+  const mixedCurrencies = reportingCurrency === undefined && currencies.length > 1;
+  const currencyIncomplete = foreignCurrencyTransactionCount > 0 || mixedCurrencies;
+  const foreignTransactions =
+    reportingCurrency === undefined
+      ? []
+      : periodTransactions.filter((item) => item.currency !== reportingCurrency);
+  const foreignCurrencyKinds = [
+    ...new Set(foreignTransactions.map((item) => effectiveCashFlowKind(item, index))),
+  ].sort();
+  // Un transfert dont une jambe est exclue pour devise ne peut pas s'annuler : il n'est pas
+  // « non rapproché », il est non convertible, et c'est déjà dit.
+  const foreignTransferGroups = new Set(
+    foreignTransactions
+      .map((item) => item.transferGroupId)
+      .filter((group): group is string => group !== null),
+  );
+  const blocked = (aggregate: keyof typeof AGGREGATE_DEPENDENCIES) =>
+    mixedCurrencies ||
+    AGGREGATE_DEPENDENCIES[aggregate].some((kind) =>
+      (foreignCurrencyKinds as CashFlowKind[]).includes(kind),
+    );
 
   let income = 0;
   let consumerExpenses = 0;
@@ -270,6 +349,7 @@ export function computeObservedCashFlow(
   let otherOutflows = 0;
   let unclassifiedFlows = 0;
   let unclassifiedTransactionCount = 0;
+  let consumerExpenseCount = 0;
   const transferGroups = new Map<string, number>();
   let unmatchedTransferCount = 0;
 
@@ -282,6 +362,7 @@ export function computeObservedCashFlow(
         break;
       case "EXPENSE": {
         consumerExpenses += outflow;
+        consumerExpenseCount += 1;
         const category = index.get(transaction.categoryId);
         const essentiality = category?.essentiality ?? "UNKNOWN";
         const behavior = category?.behavior ?? "UNKNOWN";
@@ -333,7 +414,8 @@ export function computeObservedCashFlow(
     }
   }
 
-  for (const [, net] of transferGroups) {
+  for (const [group, net] of transferGroups) {
+    if (foreignTransferGroups.has(group)) continue;
     // Un groupe dont les deux jambes ne s'annulent pas est un rapprochement incomplet.
     if (Math.abs(net) > 0.01) unmatchedTransferCount += 1;
   }
@@ -360,10 +442,23 @@ export function computeObservedCashFlow(
   if (unmatchedTransferCount > 0) {
     reasons.push(`${unmatchedTransferCount} transfert(s) interne(s) non rapproché(s)`);
   }
+  if (foreignCurrencyTransactionCount > 0) {
+    reasons.push(
+      `${foreignCurrencyTransactionCount} opération(s) dans une autre devise que ${reportingCurrency} : non converties, elles sont exclues des totaux`,
+    );
+  }
+  if (mixedCurrencies) {
+    reasons.push(
+      `opérations en ${currencies.join(", ")} : des montants de devises différentes ne s’additionnent pas sans conversion`,
+    );
+  }
   if (income <= 0) reasons.push("aucun revenu encaissé observé sur la période");
-  if (inPeriod.length === 0) reasons.push("aucune transaction sur la période");
+  if (periodTransactions.length === 0) reasons.push("aucune transaction sur la période");
   const status: DataQualityStatus =
-    inPeriod.length === 0 || income <= 0 || coverage.status === "INSUFFICIENT"
+    periodTransactions.length === 0 ||
+    income <= 0 ||
+    coverage.status === "INSUFFICIENT" ||
+    currencyIncomplete
       ? "INCOMPLETE"
       : reasons.length > 0
         ? "PARTIAL"
@@ -373,6 +468,7 @@ export function computeObservedCashFlow(
     periodStart,
     periodEnd,
     transactionCount: inPeriod.length,
+    consumerExpenseCount,
     income,
     consumerExpenses,
     essentialExpenses: breakdown.essential,
@@ -392,16 +488,27 @@ export function computeObservedCashFlow(
     operatingCashFlowBeforeDebt,
     cashFlowAfterDebt,
     observedSavings,
-    // Sans revenu encaissé observé, aucun taux n'est calculable. Aucun proxy.
-    observedSavingsRate: income > 0 ? observedSavings / income : null,
-    observedInvestmentRate: income > 0 ? investmentFlows / income : null,
+    // Sans revenu encaissé observé, aucun taux n'est calculable. Aucun proxy. Un taux
+    // calculé sur des totaux amputés d'une devise ne serait pas un taux : il reste inconnu.
+    observedSavingsRate:
+      income > 0 && !blocked("observedSavingsRate") ? observedSavings / income : null,
+    observedInvestmentRate:
+      income > 0 && !blocked("observedInvestmentRate") ? investmentFlows / income : null,
     breakdown,
-    dataQuality: { status, reasons, unclassifiedTransactionCount, unmatchedTransferCount },
+    dataQuality: {
+      status,
+      reasons,
+      unclassifiedTransactionCount,
+      unmatchedTransferCount,
+      foreignCurrencyTransactionCount,
+      foreignCurrencyKinds,
+      currencies,
+    },
     coverage,
     // Une moyenne mensuelle n'a de sens que sur une fenêtre réellement couverte : diviser
     // par des mois inconnus reviendrait à affirmer qu'ils valent zéro.
     monthlyAverageOperatingSurplus:
-      coverage.status === "COMPLETE"
+      coverage.status === "COMPLETE" && !blocked("operatingCashFlowBeforeDebt")
         ? operatingCashFlowBeforeDebt / coverage.requestedMonths
         : null,
   };
@@ -617,7 +724,10 @@ export interface BudgetLine {
   categoryName: string;
   groupName: string;
   budget: number | null;
-  actual: number;
+  /** `null` = réalisé non calculable : une opération de la catégorie est dans une autre devise. */
+  actual: number | null;
+  /** Dépenses observées dans la catégorie : zéro = rien d'observé, pas un réalisé nul certifié. */
+  observedCount: number;
   forecast: number;
   variance: number | null;
   variancePercentage: number | null;
@@ -634,12 +744,25 @@ export function compareBudgets(
   periodStart: string,
   periodEnd: string,
   forecastOccurrences: ForecastOccurrence[] = [],
+  // Devise du réalisé : une dépense dans une autre devise rend le réalisé de SA catégorie
+  // non calculable, sans effacer celui des autres catégories.
+  reportingCurrency?: string,
 ): BudgetLine[] {
   const index = categoryIndex(categories);
   const actualByCategory = new Map<string, number>();
+  const countByCategory = new Map<string, number>();
+  const foreignCategories = new Set<string>();
   for (const transaction of transactions) {
     if (transaction.date < periodStart || transaction.date > periodEnd) continue;
     if (effectiveCashFlowKind(transaction, index) !== "EXPENSE") continue;
+    if (reportingCurrency !== undefined && transaction.currency !== reportingCurrency) {
+      foreignCategories.add(transaction.categoryId);
+      continue;
+    }
+    countByCategory.set(
+      transaction.categoryId,
+      (countByCategory.get(transaction.categoryId) ?? 0) + 1,
+    );
     actualByCategory.set(
       transaction.categoryId,
       (actualByCategory.get(transaction.categoryId) ?? 0) + -transaction.amount,
@@ -655,18 +778,22 @@ export function compareBudgets(
   return categories
     .filter((category) => !category.archived && category.cashFlowKind === "EXPENSE")
     .map((category) => {
-      const actual = actualByCategory.get(category.id) ?? 0;
+      const actual = foreignCategories.has(category.id)
+        ? null
+        : (actualByCategory.get(category.id) ?? 0);
       const budget = category.monthlyAmount;
-      const variance = budget === null ? null : actual - budget;
+      const variance = budget === null || actual === null ? null : actual - budget;
       return {
         categoryId: category.id,
         categoryName: category.name,
         groupName: category.groupName,
         budget,
         actual,
+        observedCount: countByCategory.get(category.id) ?? 0,
         forecast: forecastByCategory.get(category.id) ?? 0,
         variance,
-        variancePercentage: budget === null || budget === 0 ? null : (actual - budget) / budget,
+        variancePercentage:
+          budget === null || budget === 0 || actual === null ? null : (actual - budget) / budget,
         overBudget: variance !== null && variance > 0,
       };
     });
@@ -678,8 +805,15 @@ export function compareBudgets(
 
 export interface SurplusComparison {
   scenarioAssumption: number;
-  /** Mois en cours à date. Partiel par nature : jamais une moyenne mensuelle. */
-  monthToDate: number;
+  /**
+   * Mois en cours à date. Partiel par nature : jamais une moyenne mensuelle. `null` quand
+   * une opération dont il dépend est dans une autre devise, non convertie.
+   */
+  monthToDate: number | null;
+  /** Vrai si une moyenne ou le mois à date est bloqué par une devise non convertie. */
+  currencyBlockedMonthToDate: boolean;
+  currencyBlockedT3M: boolean;
+  currencyBlockedT12M: boolean;
   /** Période réellement observée pour le MTD. */
   monthToDateStart: string;
   monthToDateEnd: string;
@@ -711,8 +845,9 @@ export function compareSurplusToScenario(
   asOfDate: string,
   scenarioAssumption: number,
   ledgerCoverageStart?: string | null,
+  reportingCurrency?: string,
 ): SurplusComparison {
-  const options: CoverageOptions = { ledgerCoverageStart, asOfDate };
+  const options: CoverageOptions = { ledgerCoverageStart, asOfDate, reportingCurrency };
   const month = monthPeriod(asOfDate);
   const mtdStart =
     ledgerCoverageStart && ledgerCoverageStart > month.start ? ledgerCoverageStart : month.start;
@@ -728,7 +863,15 @@ export function compareSurplusToScenario(
 
   return {
     scenarioAssumption,
-    monthToDate: monthly.operatingCashFlowBeforeDebt,
+    monthToDate: aggregateBlocked(monthly.dataQuality, "operatingCashFlowBeforeDebt")
+      ? null
+      : monthly.operatingCashFlowBeforeDebt,
+    currencyBlockedMonthToDate: aggregateBlocked(
+      monthly.dataQuality,
+      "operatingCashFlowBeforeDebt",
+    ),
+    currencyBlockedT3M: aggregateBlocked(observed3.dataQuality, "operatingCashFlowBeforeDebt"),
+    currencyBlockedT12M: aggregateBlocked(observed12.dataQuality, "operatingCashFlowBeforeDebt"),
     monthToDateStart: mtdStart,
     monthToDateEnd: mtdEnd,
     monthToDatePartialCoverage: mtdStart > month.start,

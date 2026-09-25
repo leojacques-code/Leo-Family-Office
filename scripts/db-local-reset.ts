@@ -15,7 +15,7 @@ import { diffExactInventory } from "./schema-diff.ts";
 const { Client } = pg;
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
-const MANAGED_SCHEMAS = ["public", "auth", "storage", "supabase_migrations"];
+const MANAGED_SCHEMAS = ["lfo_private", "public", "auth", "storage", "supabase_migrations"];
 /** UUID fixe : les smokes ont besoin d'un propriétaire stable, jamais d'une donnée métier. */
 const LOCAL_OWNER_ID = "00000000-0000-4000-8000-000000000001";
 

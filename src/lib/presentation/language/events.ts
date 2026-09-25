@@ -68,6 +68,8 @@ export const CANONICAL_EVENT_TYPE_LABELS: Readonly<Record<CanonicalEventType, st
   EARLY_REPAYMENT: "Remboursement anticipé",
   REFINANCE: "Renégociation",
   LOAN_PAYMENT: "Échéance de prêt",
+  LOAN_INSURANCE_DEBIT: "Prélèvement d’assurance emprunteur",
+  LOAN_CHARGE: "Frais de prêt",
   LOAN_END: "Fin de prêt",
 
   // ── Placements ─────────────────────────────────────────────────────────────────────

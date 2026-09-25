@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -41,7 +42,7 @@ import type {
   RegistrySearchResponse,
 } from "@/lib/data/registry-contracts";
 import { nullableFiniteNumber } from "@/lib/data/row-validation";
-import { ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { supabaseAdmin } from "@/lib/data/supabase-client";
 
 /**
  * ACQUISITION DU REGISTRE — PERSISTANCE
@@ -158,7 +159,7 @@ export interface RegistryRepository {
 }
 
 class SupabaseRegistryRepository implements RegistryRepository {
-  private readonly user = ownerId();
+  constructor(private readonly user: string) {}
 
   private client() {
     return supabaseAdmin();
@@ -200,25 +201,25 @@ class SupabaseRegistryRepository implements RegistryRepository {
   async describeConnections(): Promise<RegistryConnectionSummary[]> {
     const catalog = enrichableFieldCatalog();
     const summaries: RegistryConnectionSummary[] = [];
+    // Le catalogue se consulte sans provisionner : seules search/lookup (POST) le font.
+    const rows = unwrap(
+      await this.client()
+        .from("external_sources")
+        .select("provider, status, last_checked_at, last_success_at, last_error")
+        .eq("user_id", this.user)
+        .eq("domain", DOMAIN),
+      "external_sources",
+    ) as Row[];
 
     for (const provider of REGISTRY_PROVIDERS) {
       const adapter = adapterFor(provider);
-      const sourceId = await this.ensureConnection(adapter);
-      const row = unwrap(
-        await this.client()
-          .from("external_sources")
-          .select("status, last_checked_at, last_success_at, last_error")
-          .eq("id", sourceId)
-          .eq("user_id", this.user)
-          .maybeSingle(),
-        "external_sources",
-      ) as Row;
+      const row = rows.find((item) => item.provider === provider);
 
       const capabilities = [...adapter.capabilities];
       summaries.push({
         provider: adapter.provider,
         label: adapter.label,
-        status: requireText(row.status, "external_sources.status"),
+        status: row ? requireText(row.status, "external_sources.status") : "NOT_CONFIGURED",
         authMode: adapter.authMode,
         credentialEnvVar: adapter.credentialEnvVar,
         credentialPresent: credentialFor(adapter) !== null,
@@ -231,9 +232,9 @@ class SupabaseRegistryRepository implements RegistryRepository {
         baseUrl: adapter.baseUrl,
         snapshotTtlMinutes: adapter.snapshotTtlMinutes,
         rateLimitPerMinute: adapter.rateLimitPerMinute,
-        lastCheckedAt: text(row.last_checked_at),
-        lastSuccessAt: text(row.last_success_at),
-        lastError: text(row.last_error),
+        lastCheckedAt: text(row?.last_checked_at),
+        lastSuccessAt: text(row?.last_success_at),
+        lastError: text(row?.last_error),
       });
     }
 
@@ -807,11 +808,9 @@ class SupabaseRegistryRepository implements RegistryRepository {
   }
 }
 
-let repository: RegistryRepository | undefined;
-
-export function getRegistryRepository(): RegistryRepository {
-  repository ??= new SupabaseRegistryRepository();
-  return repository;
+export async function getRegistryRepository(): Promise<RegistryRepository> {
+  const actor = await requireActor();
+  return new SupabaseRegistryRepository(actor.userId);
 }
 
 function isEnrichableField(value: unknown): value is EnrichableField {

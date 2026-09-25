@@ -36,12 +36,13 @@ import { type Explanation } from "@/components/ui";
 import { SectionContent } from "@/components/pages";
 import { formatDate } from "@/components/pages/shared";
 import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
-import type { RealityMode } from "@/lib/presentation/registry/contracts";
 import { WorkspaceShell } from "@/components/workstation/workspace-shell";
 import { Inspector, type InspectorFact } from "@/components/workstation/inspector";
 import { SourceRail, type RailSource } from "@/components/workstation/source-rail";
 import { railSourcesFor } from "@/lib/presentation/rail-sources";
 import { PrimaryActionProvider } from "@/components/workstation/primary-action";
+import DebtPage from "@/components/pages/debt/page";
+import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
 import TodayPage from "@/components/pages/today/page";
 import type { TodayReadModel } from "@/lib/presentation/today/contracts";
 
@@ -90,10 +91,19 @@ const SECONDARY_ICONS: Record<string, LucideIcon> = {
  * referme, et personne ne s'en apercevrait avant la mesure technique du §13.
  */
 export type AppShellSource =
+  | { readonly kind: "DEBT"; readonly model: DebtReadModel }
   | { readonly kind: "TODAY"; readonly model: TodayReadModel }
   | { readonly kind: "SECTION"; readonly state: DashboardState };
 
-export function AppShell({ source, section }: { source: AppShellSource; section: string }) {
+export function AppShell({
+  source,
+  section,
+  personalSetup,
+}: {
+  source: AppShellSource;
+  section: string;
+  personalSetup?: import("@/lib/personal-setup").PersonalSetup;
+}) {
   const router = useRouter();
   // L'état global n'existe que pour les sections qui en dépendent encore. `null` sur
   // Aujourd'hui n'est pas un cas dégradé : c'est le contrat.
@@ -103,6 +113,10 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
   const [todayModel, setTodayModel] = useState<TodayReadModel | null>(
     source.kind === "TODAY" ? source.model : null,
   );
+  const [debtModel, setDebtModel] = useState<DebtReadModel | null>(
+    source.kind === "DEBT" ? source.model : null,
+  );
+  const [debtNeedsRefresh, setDebtNeedsRefresh] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -110,14 +124,7 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [explanation, setExplanation] = useState<Explanation | null>(null);
   const [projection, setProjection] = useState<ProjectionEnvelope | null>(null);
-  /**
-   * Mode d'affichage, §6.4 du plan de refonte.
-   *
-   * Il vit dans le SHELL et non dans une page : le plan le veut « global et persistant », de
-   * sorte que passer d'un domaine à l'autre ne fasse pas oublier qu'on regardait une
-   * simulation.
-   */
-  const [mode, setMode] = useState<RealityMode>("REAL");
+  // B03 : aucun mode global tant que les commandes ne portent pas de contexte isolé.
   /**
    * Source sélectionnée dans le rail, ET la section où elle l'a été.
    *
@@ -139,21 +146,34 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
    */
   const [primaryAction, setPrimaryAction] = useState<{ run: () => void } | null>(null);
 
-  async function mutate(mutation: Mutation) {
+  async function mutate(mutation: Mutation, options?: { onError?: (message: string) => void }) {
+    if (debtNeedsRefresh) return false;
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/state", {
+      const response = await fetch(debtModel ? "/api/debt" : "/api/state", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(mutation),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Modification impossible");
-      setState(body);
+      if (debtModel) {
+        try {
+          const refreshed = await fetch("/api/debt", { cache: "no-store" });
+          if (!refreshed.ok) throw new Error("Lecture impossible");
+          setDebtModel(await refreshed.json());
+          setDebtNeedsRefresh(false);
+        } catch {
+          setDebtNeedsRefresh(true);
+        }
+      } else setState(body);
       return true;
     } catch (mutationError) {
-      setError(mutationError instanceof Error ? mutationError.message : "Modification impossible");
+      const message =
+        mutationError instanceof Error ? mutationError.message : "Modification impossible";
+      setError(message);
+      options?.onError?.(message);
       return false;
     } finally {
       setBusy(false);
@@ -172,11 +192,17 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
     setError("");
     try {
       const isToday = todayModel !== null;
-      const response = await fetch(isToday ? "/api/today" : "/api/state", { cache: "no-store" });
+      const response = await fetch(
+        isToday ? "/api/today" : debtModel ? "/api/debt" : "/api/state",
+        { cache: "no-store" },
+      );
       if (!response.ok) throw new Error("Actualisation impossible");
       const body = await response.json();
       if (isToday) setTodayModel(body as TodayReadModel);
-      else setState(body as DashboardState);
+      else if (debtModel) {
+        setDebtModel(body as DebtReadModel);
+        setDebtNeedsRefresh(false);
+      } else setState(body as DashboardState);
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "Actualisation impossible");
     } finally {
@@ -219,17 +245,32 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
   }
 
   async function logout() {
-    await fetch("/api/auth", { method: "DELETE" });
+    try {
+      const response = await fetch("/api/auth", { method: "DELETE" });
+      if (!response.ok) {
+        setError("Déconnexion non confirmée. Réessayez.");
+        return;
+      }
+    } catch {
+      setError("Déconnexion non confirmée. Réessayez.");
+      return;
+    }
     router.replace("/login");
     router.refresh();
   }
+
+  const visibleError = debtNeedsRefresh
+    ? "Dette enregistrée. L’affichage reste antérieur à la modification ; utilisez Actualiser pour le recharger."
+    : error;
 
   const manifest = PAGE_REGISTRY[section] ?? null;
   const activeGroup = groupOfSection(section);
   const secondary = secondarySection(section);
   // La date d'arrêté vient de la source servie, quelle qu'elle soit. Les deux la portent, et
   // aucune n'est supposée : une date de repli inventée ici s'afficherait comme un fait.
-  const asOfLabel = formatDate(todayModel?.asOfDate ?? state?.asOfDate ?? "");
+  const asOfLabel = formatDate(
+    todayModel?.asOfDate ?? debtModel?.asOfDate ?? state?.asOfDate ?? "",
+  );
 
   /**
    * L'explication devient les faits de l'inspecteur.
@@ -268,6 +309,14 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
         hint: source.hint ? `Au ${formatDate(source.hint, SHORT_DATE)}` : undefined,
       }));
     }
+    if (debtModel)
+      return debtModel.railSources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        category: source.category,
+        status: source.status,
+        hint: source.latestDate ? `Au ${formatDate(source.latestDate, SHORT_DATE)}` : undefined,
+      }));
     if (!state) return [];
     return railSourcesFor(manifest, state).map((source) => ({
       id: source.id,
@@ -276,7 +325,7 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
       status: source.status,
       hint: source.latestDate ? `Au ${formatDate(source.latestDate, SHORT_DATE)}` : undefined,
     }));
-  }, [manifest, state, todayModel]);
+  }, [manifest, state, todayModel, debtModel]);
 
   return (
     <div className="app-shell">
@@ -309,10 +358,22 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
           onClick={() => setProfileOpen((open) => !open)}
           type="button"
         >
-          <span className="avatar">LC</span>
+          <span className="avatar" aria-hidden="true">
+            LF
+          </span>
           <span>
-            <strong>Patrimoine personnel</strong>
-            <small>EUR · France</small>
+            <strong>{personalSetup?.displayName ?? "Mon espace"}</strong>
+            <small>{personalSetup?.reportingCurrency ?? "Devise non renseignée"}</small>
+            <small>
+              {personalSetup?.residenceCountry
+                ? `Résidence déclarée : ${personalSetup.residenceCountry}`
+                : "Résidence non renseignée"}
+            </small>
+            {personalSetup?.contextDate ? (
+              <small>Contexte au {personalSetup.contextDate.split("-").reverse().join("/")}</small>
+            ) : (
+              <small>Date du contexte non renseignée</small>
+            )}
           </span>
           <ChevronDown size={14} />
         </button>
@@ -399,6 +460,9 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
               <small>Lecture financière</small>
             </span>
           </div>
+          <Link className="logout-button" href="/setup?edit=1">
+            Mon espace
+          </Link>
           <button className="logout-button" onClick={logout}>
             <LogOut size={16} />
             Déconnexion
@@ -475,12 +539,14 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
           </div>
         </header>
 
-        {error ? (
+        {visibleError ? (
           <div className="global-error" role="alert">
-            <span>{error}</span>
-            <button aria-label="Masquer l’erreur" onClick={() => setError("")}>
-              <X size={15} />
-            </button>
+            <span>{visibleError}</span>
+            {!debtNeedsRefresh ? (
+              <button aria-label="Masquer l’erreur" onClick={() => setError("")}>
+                <X size={15} />
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -514,8 +580,6 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
               ) : undefined
             }
             manifest={manifest}
-            mode={mode}
-            onModeChange={setMode}
             primaryAction={
               // Le libellé vient du MANIFESTE, jamais du code de la page : le §17 autorise
               // une action primaire au plus, et le §16 interdit à un agent de choisir son
@@ -549,6 +613,13 @@ export function AppShell({ source, section }: { source: AppShellSource; section:
             <PrimaryActionProvider onChange={setPrimaryAction}>
               {todayModel ? (
                 <TodayPage model={todayModel} onModelChange={setTodayModel} />
+              ) : debtModel ? (
+                <DebtPage
+                  state={debtModel}
+                  mutate={mutate}
+                  busy={busy || debtNeedsRefresh}
+                  setExplanation={setExplanation}
+                />
               ) : state ? (
                 <SectionContent
                   busy={busy}

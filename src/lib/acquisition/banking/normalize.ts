@@ -123,6 +123,11 @@ export interface NormalizeInput {
   mappedAccountId: string | null;
   /** Plusieurs comptes canoniques revendiquent-ils ce compte fournisseur ? */
   accountAmbiguous: boolean;
+  /**
+   * Date civile du jour (Europe/Paris) : une opération OBSERVÉE n'est jamais datée après
+   * elle. Passée par l'appelant, jamais lue ici, pour que la fonction reste pure.
+   */
+  today: string;
 }
 
 /**
@@ -160,6 +165,21 @@ export function normalizeObservation(input: NormalizeInput): NormalizedObservati
         "Aucune date d'opération. Sans elle, la période d'un flux n'est pas connue, et se replier sur une autre date déplacerait la dépense d'un mois.",
         "operationDate",
         null,
+      ),
+    );
+  }
+
+  if (operationDate !== null && operationDate > input.today) {
+    // Une opération lue à la banque est un fait observé : datée après aujourd'hui, elle
+    // serait refusée par la base (LF425) au moment de la décision. Elle est donc bloquée dès
+    // la lecture, nommée, et jamais écrite.
+    issues.push(
+      issue(
+        "BANK_OPERATION_DATE_IN_FUTURE",
+        "ERROR",
+        "Date d'opération postérieure à aujourd'hui. Une opération observée ne peut pas être datée dans le futur : elle est bloquée, pas redatée.",
+        "operationDate",
+        tx.operationDate,
       ),
     );
   }

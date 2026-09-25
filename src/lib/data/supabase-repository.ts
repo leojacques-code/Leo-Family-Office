@@ -1,8 +1,22 @@
 import "server-only";
+import {
+  MutationConflictError,
+  MutationRejectedError,
+  MutationNotFoundError,
+} from "@/lib/data/mutation-errors";
+import { reportReadFailure } from "@/lib/data/read-failure";
+import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
+import type {
+  FormDraft,
+  FormDraftSaveInput,
+  FormDraftSaved,
+} from "@/lib/presentation/drafts/contracts";
+import { railSourcesFor } from "@/lib/presentation/rail-sources";
+import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
 import { mapDecisionCases } from "@/lib/data/decision-snapshots";
 
 import type { PostgrestError } from "@supabase/supabase-js";
-import { DOCUMENTS_BUCKET, ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { DOCUMENTS_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
 import {
   ACCOUNT_TYPE_ORDER,
   ALERT_SEVERITY_ORDER,
@@ -13,10 +27,12 @@ import {
   ledgerWindowStart,
   readLedgerCoverage,
   readLoanTerms,
+  PAYMENT_FREQUENCIES,
+  INSURANCE_MODES,
 } from "@/lib/data/shared";
 import { buildFinancialDateContext, currentTaxYear, operationalToday } from "@/lib/financial-date";
 import { computeObservedCashFlow } from "@/lib/engine/cash-flow";
-import { debtCashOut, monthBounds } from "@/lib/engine/debt";
+import { debtCashOut, monthBounds, resolveContractTerms } from "@/lib/engine/debt";
 import { buildCanonicalBalanceSheet } from "@/lib/engine/balance-sheet";
 import {
   BUSINESS_AMOUNT_SCOPES,
@@ -53,6 +69,7 @@ import {
   realEstateBalanceSheetContributions,
 } from "@/lib/engine/real-estate";
 import { deriveCanonicalBalanceSheetMetrics } from "@/lib/engine/balance-sheet-metrics";
+import { monthlyCloseReadiness } from "@/lib/engine/balance-sheet-view";
 import type { CurrencyRate } from "@/lib/engine/fx";
 import {
   buildCareerAnalytics,
@@ -87,6 +104,7 @@ import {
   requiredString,
 } from "@/lib/data/row-validation";
 import { readAllPages } from "@/lib/data/pagination";
+import { withDebtEvents } from "@/lib/engine/debt-events";
 import type { DomainDeclarationInput, FamilyOfficeRepository } from "@/lib/data/repository";
 import type { DomainDeclaration } from "@/lib/presentation/today/contracts";
 import { DOMAIN_IDS } from "@/lib/presentation/today/domains";
@@ -102,6 +120,7 @@ import type {
   Goal,
   IncomeSource,
   Liability,
+  OutstandingDebt,
   MonthlyClose,
   NetWorthSnapshot,
   PortfolioEnvelopePolicy,
@@ -116,6 +135,13 @@ import type {
   RecurringCashFlowRule,
   Scenario,
   Transaction,
+  TransactionCorrection,
+  InsurancePolicy,
+  DebtEvent,
+  DebtEventContent,
+  DebtEventNature,
+  ContractVersion,
+  InsuranceMode,
 } from "@/lib/types";
 import {
   CASH_FLOW_KINDS,
@@ -130,7 +156,18 @@ import {
 type Row = Record<string, unknown>;
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
-  if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
+  if (result.error) {
+    // Refus d'une date d'observation future par la base (`20260925110000`), quel que soit le
+    // chemin d'écriture : routé sur le SQLSTATE, jamais sur le texte.
+    if (result.error.code === "LF425")
+      throw new MutationRejectedError(
+        "Date d’observation future : un fait observé ne peut pas être daté après aujourd’hui.",
+      );
+    if (context.startsWith("lecture ") || /JWT issued at future/i.test(result.error.message)) {
+      throw reportReadFailure(result.error, context);
+    }
+    throw new Error(`Supabase ${context} : ${result.error.message}`);
+  }
   if (result.data === null) throw new Error(`Supabase ${context} : réponse vide`);
   return result.data;
 }
@@ -302,9 +339,394 @@ export function validateSimulationRun(run: SimulationRun): void {
   }
 }
 
-export function createSupabaseRepository(): FamilyOfficeRepository {
+function mapAccountFacts(institutionRows: Row[], accountRows: Row[], balanceRows: Row[]) {
+  const institutionNames = new Map(institutionRows.map((row) => [str(row.id), str(row.name)]));
+  const latestBalances = latestBy(balanceRows, "account_id", "balance_date");
+  const accountBalanceHistory: AccountBalanceObservation[] = balanceRows
+    .map((row) => {
+      const context = `account_balances[id=${str(row.id)}]`;
+      return {
+        id: str(row.id),
+        accountId: str(row.account_id),
+        balance: finiteNumber(row.balance, `${context}.balance`),
+        balanceDate: str(row.balance_date),
+        createdAt: str(row.created_at),
+        provenance: provenance(row),
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.balanceDate.localeCompare(right.balanceDate) ||
+        left.createdAt.localeCompare(right.createdAt),
+    );
+  const accounts: FinancialAccount[] = accountRows
+    .filter((row) => str(row.status) === "ACTIVE")
+    .map((row) => {
+      const balance = latestBalances.get(str(row.id));
+      // Un compte sans observation de solde datée n'existe pas : `finiteNumber` refusait
+      // déjà la ligne juste en dessous. Les deux replis qui suivaient (`AS_OF_DATE` pour
+      // la date, la provenance de la ligne de compte) étaient donc du CODE MORT écrit
+      // comme un repli, ce qui est plus dangereux qu'un refus : une relecture y voit une
+      // tolérance, et la première fois que la branche devient atteignable elle fabrique
+      // une date. Le refus est rendu explicite et les branches sont supprimées.
+      if (!balance) {
+        throw new Error(
+          `Supabase donnée invalide (financial_accounts[id=${str(row.id)}]) : ` +
+            "aucune observation de solde datée",
+        );
+      }
+      return {
+        id: str(row.id),
+        institutionId: str(row.institution_id),
+        institution: institutionNames.get(str(row.institution_id)) ?? "",
+        name: str(row.name),
+        type: str(row.account_type) as FinancialAccount["type"],
+        currency: str(row.currency),
+        balance: finiteNumber(
+          balance.balance,
+          `account_balances[account_id=${str(row.id)}].balance`,
+        ),
+        balanceDate: str(balance.balance_date),
+        liquidity: str(row.liquidity) as FinancialAccount["liquidity"],
+        provenance: provenance(balance),
+      };
+    })
+    .sort(
+      (a, b) =>
+        (ACCOUNT_TYPE_ORDER[a.type] ?? 4) - (ACCOUNT_TYPE_ORDER[b.type] ?? 4) ||
+        a.name.localeCompare(b.name),
+    );
+
+  return { accounts, accountBalanceHistory };
+}
+
+/** Décimal en notation simple, six décimales au plus, sans zéros superflus. */
+function decimalText(value: number): string {
+  if (!Number.isFinite(value) || value < 0) throw new Error("Montant invalide");
+  return value.toFixed(6).replace(/\.?0+$/, "");
+}
+
+const DEBT_EVENT_NATURES = ["OBSERVED", "CONTRACTUAL", "PLANNED"] as const;
+const CONTRACT_CHANGE_KINDS = ["BASELINE", "INITIAL", "PROMOTION", "CORRECTION"] as const;
+
+/**
+ * Contenu d'un événement relu tel que la RPC l'a contrôlé : montants en texte décimal,
+ * valeurs fermées. Une forme inattendue est une donnée invalide, nommée, jamais complétée.
+ */
+function readDebtEventContent(row: Row): DebtEventContent {
+  const context = `liability_events[id=${str(row.id)}].payload`;
+  const payload = (row.payload ?? {}) as Record<string, unknown>;
+  const amount = (key: string) => finiteNumber(payload[key], `${context}.${key}`);
+  const optionalAmount = (key: string) =>
+    payload[key] === undefined || payload[key] === null ? null : amount(key);
+  switch (str(row.event_kind)) {
+    case "RATE_CHANGE":
+      return { kind: "RATE_CHANGE", annualRate: amount("annual_rate") };
+    case "PAYMENT_CHANGE":
+      return { kind: "PAYMENT_CHANGE", paymentAmount: amount("payment_amount") };
+    case "AMENDMENT":
+      return {
+        kind: "AMENDMENT",
+        annualRate: optionalAmount("annual_rate"),
+        paymentAmount: optionalAmount("payment_amount"),
+        maturityDate: optional(payload.maturity_date) ?? null,
+        note: optional(payload.note) ?? null,
+      };
+    case "DEFERRAL":
+      return {
+        kind: "DEFERRAL",
+        months: amount("months"),
+        deferralKind: enumValue(
+          payload.deferral_kind,
+          ["PRINCIPAL_ONLY", "TOTAL"] as const,
+          `${context}.deferral_kind`,
+        ) as "PRINCIPAL_ONLY" | "TOTAL",
+        interestTreatment: enumValue(
+          payload.interest_treatment,
+          ["PAID", "CAPITALISED", "UNKNOWN"] as const,
+          `${context}.interest_treatment`,
+        ) as "PAID" | "CAPITALISED" | "UNKNOWN",
+        termEffect: enumValue(
+          payload.term_effect,
+          ["EXTEND_TERM", "RECALCULATE_PAYMENT", "UNKNOWN"] as const,
+          `${context}.term_effect`,
+        ) as "EXTEND_TERM" | "RECALCULATE_PAYMENT" | "UNKNOWN",
+      };
+    case "EARLY_REPAYMENT":
+      return {
+        kind: "EARLY_REPAYMENT",
+        amount: amount("amount"),
+        penalty: optionalAmount("penalty"),
+        outcome: enumValue(
+          payload.outcome,
+          ["SHORTEN_TERM", "REDUCE_PAYMENT", "UNKNOWN"] as const,
+          `${context}.outcome`,
+        ) as "SHORTEN_TERM" | "REDUCE_PAYMENT" | "UNKNOWN",
+        balanceAfter: optionalAmount("balance_after"),
+      };
+    case "FULL_REPAYMENT":
+      return {
+        kind: "FULL_REPAYMENT",
+        amount: amount("amount"),
+        penalty: optionalAmount("penalty"),
+      };
+    default:
+      throw new Error(`Supabase donnée invalide (${context}) : nature d'événement inconnue`);
+  }
+}
+
+function mapDebtFacts(
+  liabilityRows: Row[],
+  liabilityObservationRows: Row[],
+  loanScheduleRows: Row[],
+  earlyRepaymentRows: Row[],
+  loanChargeRows: Row[],
+  rateChangeRows: Row[],
+  paymentChangeRows: Row[],
+  profileRows: Row[],
+  // B17 : polices d'assurance séparée, assurés et périodes de prime.
+  insuranceRows: { policies: Row[]; insured: Row[]; periods: Row[] } = {
+    policies: [],
+    insured: [],
+    periods: [],
+  },
+  // B18 : journal d'événements, annulations et versions de contrat.
+  historyRows: { events: Row[]; cancellations: Row[]; versions: Row[] } = {
+    events: [],
+    cancellations: [],
+    versions: [],
+  },
+) {
+  const cancellations = new Map(historyRows.cancellations.map((row) => [str(row.event_id), row]));
+  const debtEvents: DebtEvent[] = historyRows.events.map((row) => {
+    const cancellation = cancellations.get(str(row.id));
+    return {
+      id: str(row.id),
+      liabilityId: str(row.liability_id),
+      nature: enumValue(
+        row.nature,
+        DEBT_EVENT_NATURES,
+        `liability_events[id=${str(row.id)}].nature`,
+      ) as DebtEventNature,
+      effectiveDate: str(row.effective_date),
+      source: str(row.source),
+      content: readDebtEventContent(row),
+      observationId: optional(row.observation_id) ?? null,
+      recordedAt: str(row.recorded_at),
+      cancellation: cancellation
+        ? { reason: str(cancellation.reason), cancelledAt: str(cancellation.cancelled_at) }
+        : null,
+    };
+  });
+  const versionsByLiability = new Map<string, ContractVersion[]>();
+  for (const row of historyRows.versions) {
+    const list = versionsByLiability.get(str(row.liability_id)) ?? [];
+    list.push({
+      id: str(row.id),
+      versionNo: finiteNumber(
+        row.version_no,
+        `liability_contract_versions[id=${str(row.id)}].version_no`,
+      ),
+      changeKind: enumValue(
+        row.change_kind,
+        CONTRACT_CHANGE_KINDS,
+        `liability_contract_versions[id=${str(row.id)}].change_kind`,
+      ) as ContractVersion["changeKind"],
+      changeReason: optional(row.change_reason) ?? null,
+      recordedAt: str(row.recorded_at),
+      terms:
+        typeof row.terms === "object" && row.terms !== null && !Array.isArray(row.terms)
+          ? (row.terms as Record<string, unknown>)
+          : {},
+    });
+    versionsByLiability.set(str(row.liability_id), list);
+  }
+  const policiesByLiability = new Map<string, InsurancePolicy[]>();
+  for (const row of insuranceRows.policies) {
+    const policyId = str(row.id);
+    const context = `loan_insurance_policies[id=${policyId}]`;
+    const policy: InsurancePolicy = {
+      id: policyId,
+      insurer: optional(row.insurer) ?? null,
+      contractReference: optional(row.contract_reference) ?? null,
+      effectiveDate: optional(row.effective_date) ?? null,
+      endDate: optional(row.end_date) ?? null,
+      insuredBase: (optional(row.insured_base) as InsurancePolicy["insuredBase"]) ?? null,
+      debitAccountId: optional(row.debit_account_id) ?? null,
+      insured: insuranceRows.insured
+        .filter((person) => str(person.policy_id) === policyId)
+        .map((person) => ({
+          name: str(person.insured_name),
+          coverageShare: finiteNumber(person.coverage_share, `${context}.coverage_share`),
+        })),
+      periods: insuranceRows.periods
+        .filter((period) => str(period.policy_id) === policyId)
+        .map((period) => ({
+          firstDebitDate: str(period.first_debit_date),
+          lastDebitDate: period.last_debit_date ? str(period.last_debit_date) : null,
+          frequency: enumValue(
+            period.frequency,
+            PAYMENT_FREQUENCIES,
+            `${context}.frequency`,
+          ) as InsurancePolicy["periods"][number]["frequency"],
+          premiumAmount: finiteNumber(period.premium_amount, `${context}.premium_amount`),
+        }))
+        .sort((a, b) => a.firstDebitDate.localeCompare(b.firstDebitDate)),
+    };
+    const list = policiesByLiability.get(str(row.liability_id)) ?? [];
+    list.push(policy);
+    policiesByLiability.set(str(row.liability_id), list);
+  }
+  const latestLiabilityObservations = latestBy(
+    liabilityObservationRows,
+    "liability_id",
+    "observed_at",
+  );
+  // Une dette connue par son SEUL encours n'a aucun terme : elle est séparée AVANT
+  // `readLoanTerms`, dont les parseurs stricts lèveraient sur ses colonnes NULL et feraient
+  // tomber toute la lecture. Une base sans la colonne `terms_status` (antérieure à la migration
+  // 20260924081000) ne porte que des contrats : l'absence vaut donc CONTRACT.
+  const active = liabilityRows.filter((row) => row.archived !== true);
+  const isOutstandingOnly = (row: Row) => row.terms_status === "OUTSTANDING_ONLY";
+  const outstandingDebts: OutstandingDebt[] = active.filter(isOutstandingOnly).map((row) => {
+    const observation = latestLiabilityObservations.get(str(row.id));
+    return {
+      id: str(row.id),
+      name: str(row.name),
+      lender: optional(row.lender) ?? null,
+      currentBalance: finiteNumber(
+        observation?.balance ?? row.current_balance,
+        `liability_balance_observations[liability_id=${str(row.id)}].balance`,
+      ),
+      // La RPC exige une devise déclarée : aucun repli sur la devise de lecture.
+      currency: requiredString(row.currency, `liabilities[id=${str(row.id)}].currency`),
+      ...(observation ? { balanceDate: str(observation.observed_at) } : {}),
+      notes: optional(row.notes) ?? null,
+      provenance: observation ? provenance(observation) : provenance(row),
+    };
+  });
+  const liabilities: Liability[] = active
+    .filter((row) => !isOutstandingOnly(row))
+    .map((row) => {
+      const observation = latestLiabilityObservations.get(str(row.id));
+      const mapped: Liability = {
+        ...readLoanTerms(row, {
+          schedules: loanScheduleRows,
+          earlyRepayments: earlyRepaymentRows,
+          charges: loanChargeRows,
+          rateChanges: rateChangeRows,
+          paymentChanges: paymentChangeRows,
+        }),
+        id: str(row.id),
+        name: str(row.name),
+        lender: str(row.lender),
+        principal: finiteNumber(row.principal, `liabilities[id=${str(row.id)}].principal`),
+        currentBalance: finiteNumber(
+          observation?.balance ?? row.current_balance,
+          `liability_balance_observations[liability_id=${str(row.id)}].balance`,
+        ),
+        currency: str(row.currency || profileRows[0]?.reporting_currency || REPORTING_CURRENCY),
+        // `liabilities.current_balance` est `not null` mais
+        // `liability_balance_observations` est une table ARRIVÉE PLUS TARD : un prêt saisi
+        // avant elle porte donc un encours SANS observation datée. Ce cas est le seul des
+        // quatre replis de date qui soit réellement atteignable, et il fabriquait une date
+        // d'arrêté : l'encours se présentait comme observé le 19 août 2026, indistinguable
+        // d'une vraie observation, et sa fraîcheur en était déduite.
+        //
+        // `Liability.balanceDate` est OPTIONNEL : la date inconnue est donc simplement
+        // absente, sans qu'aucun typage ne change. Les moteurs qui en ont besoin décident
+        // eux-mêmes de leur convention (`balance-sheet.ts` retombe sur la date d'arrêté du
+        // bilan, ce qui est SA décision et non un fait inventé par la couche de données).
+        ...(observation ? { balanceDate: str(observation.observed_at) } : {}),
+        annualRate: finiteNumber(row.annual_rate, `liabilities[id=${str(row.id)}].annual_rate`),
+        // Termes RÉSOLUS ci-dessous par le Debt Engine : aucune valeur n'est lue ici.
+        monthlyPayment: 0,
+        paymentCount: 0,
+        firstPaymentDate: str(row.first_payment_date),
+        maturityDate: "",
+        contractNotes: optional(row.notes) ?? null,
+        // B17 : choix d'assurance déclaré, `null` pour un contrat antérieur.
+        insuranceMode: row.insurance_mode
+          ? (enumValue(
+              row.insurance_mode,
+              INSURANCE_MODES,
+              `liabilities[id=${str(row.id)}].insurance_mode`,
+            ) as InsuranceMode)
+          : null,
+        insurancePolicies: policiesByLiability.get(str(row.id)) ?? [],
+        provenance: observation ? provenance(observation) : provenance(row),
+      };
+      // B16 : mensualité, durée et maturité sont DÉCLARÉES ou non (NULL). Le Debt Engine
+      // déduit les termes manquants et nomme leur provenance ; rien de déduit n'est persisté.
+      const resolved = resolveContractTerms(mapped, {
+        monthlyPayment: nullableFiniteNumber(
+          row.monthly_payment,
+          `liabilities[id=${str(row.id)}].monthly_payment`,
+        ),
+        paymentCount: nullableFiniteNumber(
+          row.payment_count,
+          `liabilities[id=${str(row.id)}].payment_count`,
+        ),
+        maturityDate: row.maturity_date ? str(row.maturity_date) : null,
+      });
+      // B18 : les événements actifs s'appliquent APRÈS la résolution des termes déclarés.
+      return {
+        ...withDebtEvents(resolved, debtEvents),
+        contractVersions: (versionsByLiability.get(str(row.id)) ?? []).sort(
+          (a, b) => b.versionNo - a.versionNo,
+        ),
+      };
+    });
+
+  return { liabilities, outstandingDebts };
+}
+
+function mapScenarioFacts(scenarioRows: Row[], scenarioVersionRows: Row[]) {
+  const currentScenarioVersions = new Map<string, ScenarioVersionDefinition>();
+  for (const row of scenarioVersionRows) {
+    const scenario = scenarioRows.find((item) => str(item.id) === str(row.scenario_id));
+    if (
+      scenario &&
+      finiteNumber(row.version, `scenario_versions[id=${str(row.id)}].version`) ===
+        finiteNumber(
+          scenario.current_version,
+          `scenarios[id=${str(scenario.id)}].current_version`,
+        ) &&
+      isScenarioVersionDefinition(row.payload)
+    ) {
+      currentScenarioVersions.set(str(row.scenario_id), row.payload);
+    }
+  }
+  const scenarios: Scenario[] = scenarioRows
+    .filter((row) => str(row.scenario_status) !== "ARCHIVED")
+    .map((row) => mapScenario(row, currentScenarioVersions.get(str(row.id))))
+    .sort((a, b) => (SCENARIO_NAME_ORDER[a.name] ?? 5) - (SCENARIO_NAME_ORDER[b.name] ?? 5));
+
+  return scenarios;
+}
+
+function mapCurrencyFacts(currencyRateRows: Row[]) {
+  const currencyRates: CurrencyRate[] = currencyRateRows
+    .map((row) => ({
+      id: str(row.id),
+      baseCurrency: str(row.base_currency),
+      quoteCurrency: str(row.quote_currency),
+      rate: finiteNumber(row.rate, `currency_rates[id=${str(row.id)}].rate`),
+      rateDate: str(row.rate_date),
+      provenance: {
+        kind: str(row.data_kind) as Provenance["kind"],
+        confidence: "HIGH" as const,
+        source: optional(row.source),
+        effectiveDate: str(row.rate_date),
+      },
+    }))
+    .sort((a, b) => b.rateDate.localeCompare(a.rateDate));
+
+  return currencyRates;
+}
+
+export function createSupabaseRepository(user: string): FamilyOfficeRepository {
   const db = supabaseAdmin();
-  const user = ownerId();
   const mine = (table: string) => db.from(table).select("*").eq("user_id", user);
   const optionalMine = async (table: string) => {
     const result = await mine(table);
@@ -370,7 +792,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     return readAllPages<Row, PostgrestError>(`transactions depuis ${since}`, async (from, to) => {
       const result = await db
         .from("transactions")
-        .select("*")
+        // `amount_text` : le montant tel que la base l'a écrit, en TEXTE. Il sert d'état
+        // attendu à une correction : un aller-retour par un flottant perdrait la précision
+        // d'un `numeric(20,6)` au-delà d'environ 1e10, et le revenu deviendrait incorrigible.
+        .select("*, amount_text:amount::text")
         .eq("user_id", user)
         .gte("transaction_date", since)
         .order("transaction_date", { ascending: false })
@@ -382,7 +807,175 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     });
   }
 
-  async function getDashboardState(): Promise<DashboardState> {
+  async function getDebtReadModel(): Promise<DebtReadModel> {
+    const now = new Date();
+    const today = operationalToday(now);
+    const tables = [
+      "liabilities",
+      "liability_balance_observations",
+      "loan_schedules",
+      "loan_early_repayments",
+      "loan_charges",
+      "loan_rate_changes",
+      "loan_payment_changes",
+      "loan_insurance_policies",
+      "loan_insurance_insured",
+      "loan_insurance_periods",
+      "scenarios",
+      "scenario_versions",
+      "currency_rates",
+      "form_drafts",
+      "liability_events",
+      "liability_event_cancellations",
+      "liability_contract_versions",
+      "profiles",
+    ] as const;
+    const [results, cashResult, closeResult, transactionResult] = await Promise.all([
+      Promise.all(
+        tables.map((table) =>
+          table === "profiles"
+            ? db.from("profiles").select("reporting_currency").eq("user_id", user).limit(1)
+            : fetchAllPages(table, "id"),
+        ),
+      ),
+      readAllPages<Row, PostgrestError>("comptes de cash", async (from, to) => {
+        const result = await db
+          .from("financial_accounts")
+          .select("*")
+          .eq("user_id", user)
+          .eq("status", "ACTIVE")
+          .eq("liquidity", "IMMEDIATE")
+          .in("account_type", ["BANK", "SAVINGS"])
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data: result.data as Row[] | null, error: result.error };
+      }),
+      db
+        .from("monthly_closes")
+        .select("close_date")
+        .eq("user_id", user)
+        .lte("close_date", today)
+        .order("close_date", { ascending: false })
+        .limit(1),
+      // Le rail déclare BANK_TRANSACTIONS : présence/date suffisent, pas le ledger entier.
+      db
+        .from("transactions")
+        .select("transaction_date")
+        .eq("user_id", user)
+        .order("transaction_date", { ascending: false })
+        .limit(1),
+    ]);
+    const rows = Object.fromEntries(
+      results.map((result, index) => [
+        tables[index]!,
+        unwrap(result, `lecture #${index}`) as Row[],
+      ]),
+    ) as Record<(typeof tables)[number], Row[]>;
+    const cashRows = unwrap(cashResult, "lecture #11") as Row[];
+    const closeRows = unwrap(closeResult, "lecture #12") as Row[];
+    const transactionRows = unwrap(transactionResult, "lecture #13") as Row[];
+    // Un placement sans valorisation n'est pas une dépendance du cash immédiat.
+    // Lire aussi ses historiques réintroduirait cette dépendance (et son coût) par le mapping.
+    const balanceResult =
+      cashRows.length === 0
+        ? { data: [], error: null }
+        : await readAllPages<Row, PostgrestError>("observations du cash", async (from, to) => {
+            const result = await db
+              .from("account_balances")
+              .select("*")
+              .eq("user_id", user)
+              .in(
+                "account_id",
+                cashRows.map((row) => str(row.id)),
+              )
+              .order("balance_date", { ascending: true })
+              .order("id", { ascending: true })
+              .range(from, to);
+            return { data: result.data as Row[] | null, error: result.error };
+          });
+    const balanceRows = unwrap(balanceResult, "lecture #14") as Row[];
+    const dates = buildFinancialDateContext({
+      closeDates: closeRows.map((row) => str(row.close_date)),
+      now,
+    });
+    const reportingCurrency = str(rows.profiles[0]?.reporting_currency || REPORTING_CURRENCY);
+    const { accounts } = mapAccountFacts([], cashRows, balanceRows);
+    const { liabilities, outstandingDebts } = mapDebtFacts(
+      rows.liabilities,
+      rows.liability_balance_observations,
+      rows.loan_schedules,
+      rows.loan_early_repayments,
+      rows.loan_charges,
+      rows.loan_rate_changes,
+      rows.loan_payment_changes,
+      rows.profiles,
+      {
+        policies: rows.loan_insurance_policies,
+        insured: rows.loan_insurance_insured,
+        periods: rows.loan_insurance_periods,
+      },
+      {
+        events: rows.liability_events,
+        cancellations: rows.liability_event_cancellations,
+        versions: rows.liability_contract_versions,
+      },
+    );
+    const scenarios = mapScenarioFacts(rows.scenarios, rows.scenario_versions);
+    // Seul immediateCash est conservé. Ce bilan intermédiaire n'est pas un bilan global.
+    const cashQuality = buildCanonicalBalanceSheet({
+      asOfDate: dates.asOfDate,
+      reportingCurrency,
+      accounts,
+      positions: [],
+      liabilities: [],
+      currencyRates: mapCurrencyFacts(rows.currency_rates),
+    }).immediateCash;
+    return {
+      asOfDate: dates.asOfDate,
+      dates,
+      reportingCurrency,
+      liabilities,
+      outstandingDebts,
+      scenarios,
+      metrics: { bankCash: cashQuality.value },
+      cashQuality,
+      cashObservationPresent: accounts.length > 0,
+      drafts: rows.form_drafts
+        .filter((row) => str(row.domain) === "DEBT")
+        .map((row) => ({
+          id: str(row.id),
+          kind: str(row.kind) as FormDraft["kind"],
+          subjectId: optional(row.subject_id) ?? null,
+          title: str(row.title),
+          content:
+            typeof row.content === "object" && row.content !== null && !Array.isArray(row.content)
+              ? (row.content as Record<string, unknown>)
+              : {},
+          schemaVersion: Number(row.schema_version),
+          version: Number(row.version),
+          updatedAt: str(row.updated_at),
+        }))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      debitAccounts: accounts.map((account) => ({
+        id: account.id,
+        name: account.name,
+        institution: account.institution,
+      })),
+      railSources: railSourcesFor(
+        PAGE_REGISTRY.debt,
+        { liabilities, outstandingDebts },
+        {
+          BANK_TRANSACTIONS: {
+            count: transactionRows.length,
+            latestDate: transactionRows[0] ? str(transactionRows[0].transaction_date) : null,
+          },
+        },
+      ),
+      readAt: now.toISOString(),
+    };
+  }
+
+  async function getDashboardState(forCurrentClose = false): Promise<DashboardState> {
     // UNE seule lecture d'horloge pour toute la construction de l'état. Deux appels
     // encadrant minuit produiraient une fenêtre de ledger et une date d'arrêté
     // incohérentes entre elles, un soir sur mille et sans rien signaler.
@@ -450,6 +1043,13 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       taxRuleSetRows,
       taxRuleRows,
       taxObservationRows,
+      transactionCorrectionRows,
+      insurancePolicyRows,
+      insuredRows,
+      insurancePeriodRows,
+      debtEventRows,
+      debtEventCancellationRows,
+      contractVersionRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -512,66 +1112,22 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       fetchAllPages("tax_rule_sets", "effective_from"),
       mine("tax_rules"),
       fetchAllPages("tax_observations", "observed_date"),
+      fetchAllPages("transaction_corrections", "decided_at"),
+      fetchAllPages("loan_insurance_policies", "id"),
+      fetchAllPages("loan_insurance_insured", "id"),
+      fetchAllPages("loan_insurance_periods", "id"),
+      fetchAllPages("liability_events", "effective_date"),
+      fetchAllPages("liability_event_cancellations", "cancelled_at"),
+      fetchAllPages("liability_contract_versions", "version_no"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
 
-    const institutionNames = new Map(institutionRows.map((row) => [str(row.id), str(row.name)]));
-    const latestBalances = latestBy(balanceRows, "account_id", "balance_date");
-    const accountBalanceHistory: AccountBalanceObservation[] = balanceRows
-      .map((row) => {
-        const context = `account_balances[id=${str(row.id)}]`;
-        return {
-          id: str(row.id),
-          accountId: str(row.account_id),
-          balance: finiteNumber(row.balance, `${context}.balance`),
-          balanceDate: str(row.balance_date),
-          createdAt: str(row.created_at),
-          provenance: provenance(row),
-        };
-      })
-      .sort(
-        (left, right) =>
-          left.balanceDate.localeCompare(right.balanceDate) ||
-          left.createdAt.localeCompare(right.createdAt),
-      );
-    const accounts: FinancialAccount[] = accountRows
-      .filter((row) => str(row.status) === "ACTIVE")
-      .map((row) => {
-        const balance = latestBalances.get(str(row.id));
-        // Un compte sans observation de solde datée n'existe pas : `finiteNumber` refusait
-        // déjà la ligne juste en dessous. Les deux replis qui suivaient (`AS_OF_DATE` pour
-        // la date, la provenance de la ligne de compte) étaient donc du CODE MORT écrit
-        // comme un repli, ce qui est plus dangereux qu'un refus : une relecture y voit une
-        // tolérance, et la première fois que la branche devient atteignable elle fabrique
-        // une date. Le refus est rendu explicite et les branches sont supprimées.
-        if (!balance) {
-          throw new Error(
-            `Supabase donnée invalide (financial_accounts[id=${str(row.id)}]) : ` +
-              "aucune observation de solde datée",
-          );
-        }
-        return {
-          id: str(row.id),
-          institutionId: str(row.institution_id),
-          institution: institutionNames.get(str(row.institution_id)) ?? "",
-          name: str(row.name),
-          type: str(row.account_type) as FinancialAccount["type"],
-          currency: str(row.currency),
-          balance: finiteNumber(
-            balance.balance,
-            `account_balances[account_id=${str(row.id)}].balance`,
-          ),
-          balanceDate: str(balance.balance_date),
-          liquidity: str(row.liquidity) as FinancialAccount["liquidity"],
-          provenance: provenance(balance),
-        };
-      })
-      .sort(
-        (a, b) =>
-          (ACCOUNT_TYPE_ORDER[a.type] ?? 4) - (ACCOUNT_TYPE_ORDER[b.type] ?? 4) ||
-          a.name.localeCompare(b.name),
-      );
+    const { accounts, accountBalanceHistory } = mapAccountFacts(
+      institutionRows,
+      accountRows,
+      balanceRows,
+    );
 
     const assetClassNames = new Map(assetClassRows.map((row) => [str(row.id), str(row.name)]));
     const securities = new Map(securityRows.map((row) => [str(row.id), row]));
@@ -826,58 +1382,22 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         };
       });
 
-    const latestLiabilityObservations = latestBy(
+    const { liabilities, outstandingDebts } = mapDebtFacts(
+      liabilityRows,
       liabilityObservationRows,
-      "liability_id",
-      "observed_at",
+      loanScheduleRows,
+      earlyRepaymentRows,
+      loanChargeRows,
+      rateChangeRows,
+      paymentChangeRows,
+      profileRows,
+      { policies: insurancePolicyRows, insured: insuredRows, periods: insurancePeriodRows },
+      {
+        events: debtEventRows,
+        cancellations: debtEventCancellationRows,
+        versions: contractVersionRows,
+      },
     );
-    const liabilities: Liability[] = liabilityRows
-      .filter((row) => row.archived !== true)
-      .map((row) => {
-        const observation = latestLiabilityObservations.get(str(row.id));
-        return {
-          ...readLoanTerms(row, {
-            schedules: loanScheduleRows,
-            earlyRepayments: earlyRepaymentRows,
-            charges: loanChargeRows,
-            rateChanges: rateChangeRows,
-            paymentChanges: paymentChangeRows,
-          }),
-          id: str(row.id),
-          name: str(row.name),
-          lender: str(row.lender),
-          principal: finiteNumber(row.principal, `liabilities[id=${str(row.id)}].principal`),
-          currentBalance: finiteNumber(
-            observation?.balance ?? row.current_balance,
-            `liability_balance_observations[liability_id=${str(row.id)}].balance`,
-          ),
-          currency: str(row.currency || profileRows[0]?.reporting_currency || REPORTING_CURRENCY),
-          // `liabilities.current_balance` est `not null` mais
-          // `liability_balance_observations` est une table ARRIVÉE PLUS TARD : un prêt saisi
-          // avant elle porte donc un encours SANS observation datée. Ce cas est le seul des
-          // quatre replis de date qui soit réellement atteignable, et il fabriquait une date
-          // d'arrêté : l'encours se présentait comme observé le 19 août 2026, indistinguable
-          // d'une vraie observation, et sa fraîcheur en était déduite.
-          //
-          // `Liability.balanceDate` est OPTIONNEL : la date inconnue est donc simplement
-          // absente, sans qu'aucun typage ne change. Les moteurs qui en ont besoin décident
-          // eux-mêmes de leur convention (`balance-sheet.ts` retombe sur la date d'arrêté du
-          // bilan, ce qui est SA décision et non un fait inventé par la couche de données).
-          ...(observation ? { balanceDate: str(observation.observed_at) } : {}),
-          annualRate: finiteNumber(row.annual_rate, `liabilities[id=${str(row.id)}].annual_rate`),
-          monthlyPayment: finiteNumber(
-            row.monthly_payment,
-            `liabilities[id=${str(row.id)}].monthly_payment`,
-          ),
-          paymentCount: finiteNumber(
-            row.payment_count,
-            `liabilities[id=${str(row.id)}].payment_count`,
-          ),
-          firstPaymentDate: str(row.first_payment_date),
-          maturityDate: str(row.maturity_date),
-          provenance: observation ? provenance(observation) : provenance(row),
-        };
-      });
 
     const incomes: IncomeSource[] = incomeRows
       .map((row) => ({
@@ -1016,6 +1536,32 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
 
     const accountNames = new Map(accountRows.map((row) => [str(row.id), str(row.name)]));
     const categoryNames = new Map(categoryRows.map((row) => [str(row.id), str(row.name)]));
+    const correctionsByTransaction = new Map<string, TransactionCorrection[]>();
+    for (const row of transactionCorrectionRows) {
+      const before = (row.before_values ?? {}) as Record<string, unknown>;
+      const after = (row.after_values ?? {}) as Record<string, unknown>;
+      const entry: TransactionCorrection = {
+        id: str(row.id),
+        decidedAt: str(row.decided_at),
+        reason: str(row.reason),
+        changedFields: (Array.isArray(row.changed_fields) ? row.changed_fields : []).map(
+          (field) => str(field) as TransactionCorrection["changedFields"][number],
+        ),
+        before: {
+          amount: str(before.amount),
+          date: str(before.transaction_date),
+          label: str(before.label),
+        },
+        after: {
+          amount: str(after.amount),
+          date: str(after.transaction_date),
+          label: str(after.label),
+        },
+      };
+      const list = correctionsByTransaction.get(str(row.transaction_id)) ?? [];
+      list.push(entry);
+      correctionsByTransaction.set(str(row.transaction_id), list);
+    }
     const transactions: Transaction[] = transactionRows.map((row) => ({
       id: str(row.id),
       accountId: str(row.account_id),
@@ -1025,6 +1571,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       categoryId: str(row.category_id),
       categoryName: categoryNames.get(str(row.category_id)) ?? "",
       amount: finiteNumber(row.amount, `transactions[id=${str(row.id)}].amount`),
+      ...(typeof row.amount_text === "string" ? { amountText: row.amount_text } : {}),
       currency: str(row.currency),
       kindOverride: row.kind_override
         ? (str(row.kind_override) as Transaction["kindOverride"])
@@ -1037,27 +1584,12 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         : null,
       notes: row.notes ? str(row.notes) : null,
       provenance: provenance(row),
+      ...(correctionsByTransaction.has(str(row.id))
+        ? { corrections: correctionsByTransaction.get(str(row.id)) }
+        : {}),
     }));
 
-    const currentScenarioVersions = new Map<string, ScenarioVersionDefinition>();
-    for (const row of scenarioVersionRows) {
-      const scenario = scenarioRows.find((item) => str(item.id) === str(row.scenario_id));
-      if (
-        scenario &&
-        finiteNumber(row.version, `scenario_versions[id=${str(row.id)}].version`) ===
-          finiteNumber(
-            scenario.current_version,
-            `scenarios[id=${str(scenario.id)}].current_version`,
-          ) &&
-        isScenarioVersionDefinition(row.payload)
-      ) {
-        currentScenarioVersions.set(str(row.scenario_id), row.payload);
-      }
-    }
-    const scenarios: Scenario[] = scenarioRows
-      .filter((row) => str(row.scenario_status) !== "ARCHIVED")
-      .map((row) => mapScenario(row, currentScenarioVersions.get(str(row.id))))
-      .sort((a, b) => (SCENARIO_NAME_ORDER[a.name] ?? 5) - (SCENARIO_NAME_ORDER[b.name] ?? 5));
+    const scenarios = mapScenarioFacts(scenarioRows, scenarioVersionRows);
 
     const profileCurrency = str(profileRows[0]?.reporting_currency || REPORTING_CURRENCY);
     const currentGoalVersions = new Map<string, GoalVersionDefinition>();
@@ -1148,7 +1680,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
      * cette date reposent donc sur la même lecture d'horloge.
      */
     const dates = buildFinancialDateContext({
-      closeDates: monthlyCloses.map((close) => close.closeDate),
+      closeDates: forCurrentClose ? [] : monthlyCloses.map((close) => close.closeDate),
       now,
     });
 
@@ -1178,21 +1710,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    const currencyRates: CurrencyRate[] = currencyRateRows
-      .map((row) => ({
-        id: str(row.id),
-        baseCurrency: str(row.base_currency),
-        quoteCurrency: str(row.quote_currency),
-        rate: finiteNumber(row.rate, `currency_rates[id=${str(row.id)}].rate`),
-        rateDate: str(row.rate_date),
-        provenance: {
-          kind: str(row.data_kind) as Provenance["kind"],
-          confidence: "HIGH" as const,
-          source: optional(row.source),
-          effectiveDate: str(row.rate_date),
-        },
-      }))
-      .sort((a, b) => b.rateDate.localeCompare(a.rateDate));
+    const currencyRates = mapCurrencyFacts(currencyRateRows);
 
     const netWorthSnapshots: NetWorthSnapshot[] = netWorthSnapshotRows
       .map((row) => ({
@@ -1774,6 +2292,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       tax: taxCalculation.monthly,
       transactions,
       categories: expenseCategories,
+      reportingCurrency,
     });
     // Le domaine immobilier est dérivé AVANT le bilan : il en produit les lignes d'actif.
     // Il ne produit AUCUNE ligne de passif : la dette immobilière est déjà portée par
@@ -1816,6 +2335,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       accounts,
       positions,
       liabilities,
+      outstandingDebts,
       contributions: [
         ...realEstateBalanceSheetContributions(realEstate),
         ...businessEquityBalanceSheetContributions(businessEquity),
@@ -1857,9 +2377,12 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       expenseCategories,
       transactions,
       dates.asOfDate,
+      outstandingDebts,
+      reportingCurrency,
     );
     const dashboardState: DashboardState = {
       asOfDate: dates.asOfDate,
+      dates,
       reportingCurrency,
       ledgerCoverageStart: coverage.start,
       ledgerCoverageSource: coverage.source,
@@ -1897,6 +2420,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
       taxCalculation,
       careerTaxMonthly,
       liabilities,
+      outstandingDebts,
       incomes,
       expenseCategories,
       transactions,
@@ -1928,7 +2452,7 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
     return dashboardState;
   }
 
-  async function mutateState(mutation: Mutation): Promise<DashboardState> {
+  async function executeMutation(mutation: Mutation): Promise<void> {
     const now = new Date().toISOString();
     switch (mutation.action) {
       case "save_career_package": {
@@ -2502,13 +3026,88 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         );
         break;
       }
+      case "record_debt_event": {
+        const content = mutation.content;
+        const text = (value: number | null) => (value === null ? null : decimalText(value));
+        const payload =
+          content.kind === "RATE_CHANGE"
+            ? { annual_rate: text(content.annualRate) }
+            : content.kind === "PAYMENT_CHANGE"
+              ? { payment_amount: text(content.paymentAmount) }
+              : content.kind === "AMENDMENT"
+                ? {
+                    ...(content.annualRate !== null
+                      ? { annual_rate: text(content.annualRate) }
+                      : {}),
+                    ...(content.paymentAmount !== null
+                      ? { payment_amount: text(content.paymentAmount) }
+                      : {}),
+                    ...(content.maturityDate !== null
+                      ? { maturity_date: content.maturityDate }
+                      : {}),
+                    note: content.note,
+                  }
+                : content.kind === "DEFERRAL"
+                  ? {
+                      months: content.months,
+                      deferral_kind: content.deferralKind,
+                      interest_treatment: content.interestTreatment,
+                      term_effect: content.termEffect,
+                    }
+                  : content.kind === "EARLY_REPAYMENT"
+                    ? {
+                        amount: text(content.amount),
+                        penalty: text(content.penalty),
+                        outcome: content.outcome,
+                        ...(content.balanceAfter !== null
+                          ? { balance_after: text(content.balanceAfter) }
+                          : {}),
+                      }
+                    : { amount: text(content.amount), penalty: text(content.penalty) };
+        const result = await db.rpc("lfo_record_debt_event", {
+          p_user_id: user,
+          p_payload: {
+            liability_id: mutation.liabilityId,
+            event_kind: content.kind,
+            nature: mutation.nature,
+            effective_date: mutation.effectiveDate,
+            source: mutation.source,
+            content: payload,
+          },
+        });
+        if (result.error?.code === "LF404")
+          throw new MutationRejectedError("Cette dette n’existe plus ou a été archivée.");
+        if (result.error?.code === "LF422")
+          throw new MutationRejectedError(
+            "Événement refusé : sa forme n’est pas valide pour cette dette (une dette connue par son seul encours se met à jour par un nouvel encours).",
+          );
+        unwrap(result, "enregistrement de l'événement de dette");
+        break;
+      }
+      case "cancel_debt_event": {
+        const result = await db.rpc("lfo_cancel_debt_event", {
+          p_user_id: user,
+          p_event_id: mutation.eventId,
+          p_reason: mutation.reason,
+        });
+        if (result.error?.code === "LF409")
+          throw new MutationConflictError("Cet événement a déjà été annulé.");
+        if (result.error?.code === "LF404")
+          throw new MutationRejectedError("Cet événement n’existe plus.");
+        unwrap(result, "annulation de l'événement de dette");
+        break;
+      }
       case "save_debt_contract": {
         const contract = mutation.contract;
         unwrap(
           await db.rpc("lfo_save_debt_contract", {
             p_user_id: user,
             p_payload: {
+              ...(mutation.changeReason ? { change_reason: mutation.changeReason } : {}),
               liability_id: contract.liabilityId,
+              // Clé présente seulement quand elle est décidée : son absence signifie « pas de
+              // promotion », et la base refuse toute autre forme.
+              ...(contract.promoteOutstanding ? { promote_outstanding: true } : {}),
               name: contract.name,
               lender: contract.lender,
               principal: contract.principal,
@@ -2527,6 +3126,25 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
               insurance_amount: contract.insuranceAmount,
               recurring_fees: contract.recurringFees,
               payment_includes_insurance: contract.paymentIncludesInsurance,
+              insurance_mode: contract.insuranceMode,
+              insurance_policies: contract.insurancePolicies.map((policy) => ({
+                insurer: policy.insurer,
+                contract_reference: policy.contractReference,
+                effective_date: policy.effectiveDate,
+                end_date: policy.endDate,
+                insured_base: policy.insuredBase,
+                debit_account_id: policy.debitAccountId,
+                insured: policy.insured.map((person) => ({
+                  name: person.name,
+                  coverage_share: person.coverageShare,
+                })),
+                periods: policy.periods.map((period) => ({
+                  first_debit_date: period.firstDebitDate,
+                  last_debit_date: period.lastDebitDate,
+                  frequency: period.frequency,
+                  premium_amount: period.premiumAmount,
+                })),
+              })),
               deferral: contract.deferral
                 ? {
                     kind: contract.deferral.kind,
@@ -2578,6 +3196,87 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         );
         break;
       }
+      case "correct_net_income": {
+        const result = await db.rpc("lfo_correct_net_income", {
+          p_user_id: user,
+          p_payload: {
+            transaction_id: mutation.transactionId,
+            reason: mutation.reason,
+            // L'état attendu voyage en TEXTE, comme le montant corrigé : la base compare en
+            // `numeric`, un flottant perdrait la précision d'un `numeric(20,6)`.
+            expected: {
+              amount: mutation.expected.amount,
+              received_on: mutation.expected.receivedOn,
+              label: mutation.expected.label,
+            },
+            corrected: {
+              ...(mutation.corrected.amount !== undefined
+                ? { amount: decimalText(mutation.corrected.amount) }
+                : {}),
+              ...(mutation.corrected.receivedOn !== undefined
+                ? { received_on: mutation.corrected.receivedOn }
+                : {}),
+              ...(mutation.corrected.label !== undefined
+                ? { label: mutation.corrected.label }
+                : {}),
+            },
+          },
+        });
+        if (result.error) {
+          // Routage sur le SQLSTATE dédié (`20260924160000`), jamais sur le texte de la base.
+          const code = result.error.code;
+          if (code === "LF409")
+            throw new MutationConflictError(
+              "Ce revenu a changé depuis son affichage : rechargez la page avant de le corriger.",
+            );
+          if (code === "LF422")
+            throw new MutationRejectedError(
+              "Aucune valeur n’a changé : ce n’est pas une correction.",
+            );
+          if (code === "LF403")
+            throw new MutationRejectedError(
+              "Seul un revenu net saisi à la main se corrige ici. Une opération importée se corrige par son import.",
+            );
+        }
+        unwrap(result, "correction du revenu net observé");
+        break;
+      }
+      case "record_net_income": {
+        unwrap(
+          await db.rpc("lfo_record_net_income", {
+            p_user_id: user,
+            p_payload: {
+              account_id: mutation.accountId,
+              received_on: mutation.receivedOn,
+              amount: decimalText(mutation.amount),
+              label: mutation.label,
+              notes: mutation.notes,
+            },
+          }),
+          "enregistrement du revenu net observé",
+        );
+        break;
+      }
+      case "record_outstanding_debt": {
+        unwrap(
+          await db.rpc("lfo_record_outstanding_debt", {
+            p_user_id: user,
+            p_payload: {
+              name: mutation.name,
+              lender: mutation.lender,
+              // Le montant voyage en TEXTE décimal simple : la RPC refuse l'exponentielle
+              // qu'un `String(nombre)` produirait au-delà de 1e21, et le plafond du schéma
+              // l'exclut déjà.
+              balance: decimalText(mutation.balance),
+              currency: mutation.currency,
+              observed_at: mutation.observedAt,
+              notes: mutation.notes,
+            },
+          }),
+          "enregistrement atomique de la dette connue par son encours",
+        );
+        break;
+      }
       case "archive_debt": {
         unwrap(
           await db.rpc("lfo_archive_debt", {
@@ -2615,26 +3314,30 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
             p_account_type: mutation.accountType,
             p_balance: finiteNumber(mutation.balance, "add_account.balance"),
             p_currency: mutation.currency,
-            p_as_of_date: operationalToday(),
+            p_as_of_date: mutation.balanceDate,
           }),
           "création atomique de compte",
         );
         break;
       }
       case "add_transaction": {
-        unwrap(
-          await db.rpc("lfo_add_transaction", {
-            p_user_id: user,
-            p_account_id: mutation.accountId,
-            p_category_id: mutation.categoryId,
-            p_transaction_date: mutation.date,
-            p_label: mutation.label,
-            p_amount: finiteNumber(mutation.amount, "add_transaction.amount"),
-            p_currency: REPORTING_CURRENCY,
-            p_update_balance: mutation.updateBalance,
-          }),
-          "insertion atomique de transaction",
-        );
+        // La DEVISE est déterminée PAR LA BASE (`20260924160000`) : celle du compte, lue chez
+        // son propriétaire dans la même transaction que l'insertion. `null` la laisse décider.
+        const result = await db.rpc("lfo_add_transaction", {
+          p_user_id: user,
+          p_account_id: mutation.accountId,
+          p_category_id: mutation.categoryId,
+          p_transaction_date: mutation.date,
+          p_label: mutation.label,
+          p_amount: finiteNumber(mutation.amount, "add_transaction.amount"),
+          p_currency: null,
+          p_update_balance: mutation.updateBalance,
+        });
+        if (result.error?.code === "LF403")
+          throw new MutationRejectedError(
+            "Ce compte est introuvable : l’opération n’est pas enregistrée.",
+          );
+        unwrap(result, "insertion atomique de transaction");
         break;
       }
       case "update_expense": {
@@ -2724,27 +3427,27 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         break;
       }
       case "create_monthly_close": {
-        const state = await getDashboardState();
-        if (
-          state.metrics.grossAssets === null ||
-          state.metrics.debt === null ||
-          state.metrics.netWorth === null
-        ) {
+        // Les observations courantes ne permettent pas de reconstruire un arrêté historique.
+        const state = await getDashboardState(true);
+        if (mutation.closeDate !== state.dates?.today) {
           throw new Error(
-            "Clôture impossible : le bilan canonique est incomplet (FX ou valorisation manquante)",
+            "Clôture impossible : choisissez le jour opérationnel courant ; la reconstruction historique n’est pas disponible.",
           );
         }
         const sheet = state.balanceSheet;
-        if (
-          !sheet ||
-          sheet.financialAssets.value === null ||
-          sheet.liquidAssets.value === null ||
-          sheet.accountOverdraftLiabilities.value === null ||
-          sheet.contractualDebt.value === null ||
-          sheet.otherLiabilities.value === null ||
-          sheet.totalLiabilities.value === null
-        ) {
-          throw new Error("Clôture impossible : ventilation du bilan canonique incomplète");
+        if (!sheet) throw new Error("Clôture impossible : aucun bilan canonique disponible");
+        // La condition de clôture est DÉCLARÉE une seule fois, dans les vues du bilan
+        // canonique, et l'écran lit la même. Elle vivait ici en deux `throw` que la surface
+        // ne pouvait que deviner : un bouton actif sur un bilan incomplet
+        // provoquait une erreur au clic au lieu de dire ce qui manquait.
+        const readiness = monthlyCloseReadiness(sheet);
+        if (!readiness.ready) {
+          throw new Error(
+            `Clôture impossible : agrégats non calculables (${readiness.missing.join(", ")})`,
+          );
+        }
+        if (state.metrics.grossAssets === null || state.metrics.netWorth === null) {
+          throw new Error("Clôture impossible : agrégats de bilan absents de l’état");
         }
         const prior = state.monthlyCloses[0];
         const forecast = prior?.netWorth ?? null;
@@ -3265,7 +3968,15 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
           state.expenseCategories,
           bounds.start,
           bounds.end,
+          { reportingCurrency: state.reportingCurrency },
         );
+        // Une clôture est une photographie DÉCIDÉE : figer des totaux amputés des opérations
+        // dans une autre devise les ferait passer pour complets. Refus nommé plutôt que
+        // clôture partielle.
+        if (observed.dataQuality.foreignCurrencyTransactionCount > 0)
+          throw new MutationRejectedError(
+            `Ce mois contient ${observed.dataQuality.foreignCurrencyTransactionCount} opération(s) dans une autre devise que ${state.reportingCurrency}, non converties : il ne peut pas être clôturé.`,
+          );
         unwrap(
           await db.rpc("lfo_close_cash_flow_month", {
             p_user_id: user,
@@ -3286,6 +3997,51 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
         break;
       }
     }
+  }
+
+  /** Refus d'un brouillon routé sur son SQLSTATE, jamais sur le texte de la base. */
+  function draftFailure(error: PostgrestError): never {
+    if (error.code === "LF409")
+      throw new MutationConflictError(
+        "Ce brouillon a été enregistré ailleurs depuis son ouverture, ou un brouillon existe déjà pour cette dette.",
+      );
+    if (error.code === "LF404") throw new MutationNotFoundError("Ce brouillon n’existe plus.");
+    if (error.code === "LF422" || error.code === "23514" || error.code === "23503")
+      throw new MutationRejectedError("Brouillon refusé : sa forme n’est pas valide.");
+    throw new Error(`Supabase brouillon : ${error.code}`);
+  }
+
+  async function saveFormDraft(input: FormDraftSaveInput): Promise<FormDraftSaved> {
+    const result = await db.rpc("lfo_save_form_draft", {
+      p_user_id: user,
+      p_payload: {
+        draft_id: input.draftId,
+        ...(input.draftId !== null ? { expected_version: input.expectedVersion } : {}),
+        domain: "DEBT",
+        kind: input.kind,
+        subject_id: input.subjectId,
+        title: input.title,
+        content: input.content,
+        schema_version: input.schemaVersion,
+      },
+    });
+    if (result.error) draftFailure(result.error);
+    const saved = result.data as { id: string; version: number; updated_at: string } | null;
+    if (!saved) throw new Error("Supabase brouillon : réponse vide");
+    return { id: saved.id, version: saved.version, updatedAt: saved.updated_at };
+  }
+
+  async function deleteFormDraft(draftId: string, expectedVersion: number): Promise<void> {
+    const result = await db.rpc("lfo_delete_form_draft", {
+      p_user_id: user,
+      p_draft_id: draftId,
+      p_expected_version: expectedVersion,
+    });
+    if (result.error) draftFailure(result.error);
+  }
+
+  async function mutateState(mutation: Mutation): Promise<DashboardState> {
+    await executeMutation(mutation);
     return getDashboardState();
   }
 
@@ -3451,6 +4207,10 @@ export function createSupabaseRepository(): FamilyOfficeRepository {
   return {
     adapter: "supabase",
     getDashboardState,
+    getDebtReadModel,
+    executeMutation,
+    saveFormDraft,
+    deleteFormDraft,
     mutateState,
     storeDocument,
     saveSimulation,

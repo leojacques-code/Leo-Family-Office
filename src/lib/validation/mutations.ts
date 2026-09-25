@@ -1,3 +1,4 @@
+import { contractTermsBlocker, insurancePeriodsOverlap } from "@/lib/engine/debt";
 import { z } from "zod";
 
 import {
@@ -62,6 +63,11 @@ const essentiality = z.enum(["ESSENTIAL", "NON_ESSENTIAL", "UNKNOWN"]);
 const expenseBehavior = z.enum(["FIXED", "VARIABLE", "DISCRETIONARY", "UNKNOWN"]);
 
 const realDate = date.refine(isRealCalendarDate, "Date inexistante au calendrier");
+/** Date d'observation d'un fait : jamais postérieure au jour opérationnel (Europe/Paris). */
+const observedFactDate = realDate.refine(
+  (value) => value <= operationalToday(),
+  "Date postérieure au jour courant : un fait futur n’est pas un fait",
+);
 const scenarioDefinitionSchema = z
   .custom<ScenarioVersionDefinition>(
     isScenarioVersionDefinition,
@@ -87,10 +93,15 @@ const scenarioDefinitionSchema = z
       });
     }
   });
-const goalDefinitionSchema = z.custom<GoalVersionDefinition>(
-  isGoalVersionDefinition,
-  "Définition Goals V2 invalide",
-);
+const goalDefinitionSchema = z
+  .custom<GoalVersionDefinition>(
+    (value) => isGoalVersionDefinition(value) && value.purpose !== undefined,
+    "Choisissez le type d’objectif et une métrique compatible",
+  )
+  .refine((definition) => typeof definition?.target?.currency === "string", {
+    message: "La devise de la cible doit être déclarée avant l’enregistrement",
+    path: ["target", "currency"],
+  });
 const decisionCaseVersionSchema = z.custom<DecisionCaseVersion>(
   isDecisionCaseVersion,
   "Définition Decision Lab V2 invalide",
@@ -112,7 +123,12 @@ const decisionEvaluationSchema = z.custom<DecisionEvaluation>(
       value &&
       typeof value === "object" &&
       ["READY", "PARTIAL", "NOT_COMPUTABLE"].includes((value as DecisionEvaluation).completeness) &&
-      Array.isArray((value as DecisionEvaluation).options),
+      Array.isArray((value as DecisionEvaluation).options) &&
+      z
+        .string()
+        .regex(/^[A-Z]{3}$/)
+        .nullish()
+        .safeParse((value as DecisionEvaluation).reportingCurrency).success,
     ),
   "Résultat Decision Lab V2 invalide",
 );
@@ -121,16 +137,22 @@ const datedTermKind = z.enum(["CONTRACTUAL", "ASSUMPTION"]);
 const debtContractSchema = z
   .object({
     liabilityId: z.uuid().nullable(),
+    // B16 : décrire le contrat d'une dette connue par son seul encours est une DÉCISION
+    // explicite. Seul `true` est accepté ; la base refuse la clé hors de ce cas.
+    promoteOutstanding: z.literal(true).optional(),
     name: z.string().trim().min(1).max(160),
     lender: z.string().trim().min(1).max(160),
     principal: finite.nonnegative(),
     initialBalance: nullableMoney,
-    balanceDate: realDate.nullable(),
+    // L'encours initial est une OBSERVATION : les dates du contrat, elles, peuvent être futures.
+    balanceDate: observedFactDate.nullable(),
     annualRate: finite.min(0).max(10),
-    paymentAmount: finite.nonnegative(),
-    paymentCount: z.number().int().positive().max(1200),
+    // Document 04, étape C : « montant OU durée selon la donnée connue ». `null` = non
+    // déclaré ; un paiement à zéro n'est pas un paiement. Le Debt Engine déduit le reste.
+    paymentAmount: finite.positive().nullable(),
+    paymentCount: z.number().int().positive().max(1200).nullable(),
     firstPaymentDate: realDate,
-    maturityDate: realDate,
+    maturityDate: realDate.nullable(),
     amortisationProfile: z.enum(["AMORTIZING", "INTEREST_ONLY", "BULLET", "BALLOON"]),
     balloonAmount: nullableMoney,
     paymentFrequency: z.enum(["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL"]),
@@ -139,6 +161,69 @@ const debtContractSchema = z
     insuranceAmount: nullableMoney,
     recurringFees: nullableMoney,
     paymentIncludesInsurance: z.boolean().nullable(),
+    // B17 : choix initial OBLIGATOIRE pour prétendre calculer un coût complet.
+    insuranceMode: z.enum(["INCLUDED", "SEPARATE", "NONE", "UNKNOWN"]),
+    insurancePolicies: z
+      .array(
+        z
+          .object({
+            insurer: z.string().trim().max(160).nullable(),
+            contractReference: z.string().trim().max(160).nullable(),
+            effectiveDate: realDate.nullable(),
+            endDate: realDate.nullable(),
+            insuredBase: z.enum(["INITIAL_CAPITAL", "OUTSTANDING_CAPITAL", "OTHER"]).nullable(),
+            debitAccountId: z.uuid().nullable(),
+            insured: z
+              .array(
+                z
+                  .object({
+                    name: z.string().trim().min(1).max(160),
+                    // numeric(7,6) : au-delà de six décimales, la base arrondirait en silence.
+                    coverageShare: finite
+                      .positive()
+                      .max(1)
+                      .refine(
+                        (share) => Math.abs(share * 1e6 - Math.round(share * 1e6)) < 1e-6,
+                        "Quotité : quatre décimales au plus en pourcentage",
+                      ),
+                  })
+                  .strict(),
+              )
+              .max(10),
+            periods: z
+              .array(
+                z
+                  .object({
+                    firstDebitDate: realDate,
+                    lastDebitDate: realDate.nullable(),
+                    frequency: z.enum(["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL"]),
+                    premiumAmount: finite.nonnegative().max(99_999_999_999_999),
+                  })
+                  .strict()
+                  .refine(
+                    (period) =>
+                      period.lastDebitDate === null ||
+                      period.lastDebitDate >= period.firstDebitDate,
+                    "La dernière date de débit précède la première",
+                  ),
+              )
+              .min(1, "Une police exige au moins une période de prime")
+              .max(24),
+          })
+          .strict()
+          .refine(
+            (policy) =>
+              policy.effectiveDate === null ||
+              policy.endDate === null ||
+              policy.endDate >= policy.effectiveDate,
+            "La fin de couverture précède sa date d’effet",
+          )
+          .refine(
+            (policy) => !insurancePeriodsOverlap(policy.periods),
+            "Deux périodes de prime d’une même police se chevauchent : la prime serait comptée deux fois",
+          ),
+      )
+      .max(5),
     deferral: z
       .object({
         kind: z.enum(["PRINCIPAL_ONLY", "TOTAL"]),
@@ -198,6 +283,41 @@ const debtContractSchema = z
   })
   .strict()
   .superRefine((contract, context) => {
+    // Un coût, une fois (document 04, étape D) : mêmes règles que la base.
+    if (contract.insuranceMode === "SEPARATE" && contract.insurancePolicies.length === 0)
+      context.addIssue({
+        code: "custom",
+        message: "Une assurance séparée exige au moins une police",
+        path: ["insurancePolicies"],
+      });
+    if (contract.insuranceMode !== "SEPARATE" && contract.insurancePolicies.length > 0)
+      context.addIssue({
+        code: "custom",
+        message: "Des polices séparées ne se déclarent qu’avec une assurance séparée",
+        path: ["insurancePolicies"],
+      });
+    if (contract.insuranceMode === "INCLUDED" && contract.paymentIncludesInsurance !== true)
+      context.addIssue({
+        code: "custom",
+        message: "Une assurance incluse l’est dans le paiement",
+        path: ["paymentIncludesInsurance"],
+      });
+    if (
+      contract.insuranceMode !== "INCLUDED" &&
+      (contract.insuranceAmount !== null || contract.paymentIncludesInsurance === true)
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Une prime par échéance n’existe que pour une assurance incluse dans le paiement",
+        path: ["insuranceAmount"],
+      });
+    if (contract.promoteOutstanding && contract.liabilityId === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Seule une dette existante connue par son seul encours se décrit par promotion",
+        path: ["promoteOutstanding"],
+      });
+    }
     if (
       contract.liabilityId === null &&
       (contract.initialBalance === null || contract.balanceDate === null)
@@ -215,7 +335,60 @@ const debtContractSchema = z
         path: ["balloonAmount"],
       });
     }
-    if (contract.maturityDate < contract.firstPaymentDate) {
+    const fixesTerm =
+      contract.paymentCount !== null ||
+      contract.maturityDate !== null ||
+      (contract.amortisationProfile === "AMORTIZING" && contract.paymentAmount !== null);
+    if (!fixesTerm) {
+      context.addIssue({
+        code: "custom",
+        message:
+          contract.amortisationProfile === "AMORTIZING"
+            ? "Indiquez la mensualité, le nombre d’échéances ou la maturité"
+            : "Indiquez le nombre d’échéances ou la maturité",
+        path: ["paymentCount"],
+      });
+    } else if (contract.providedSchedule.length === 0) {
+      const blocker = contractTermsBlocker({
+        principal: contract.principal,
+        annualRate: contract.annualRate,
+        amortisationProfile: contract.amortisationProfile,
+        balloonAmount: contract.balloonAmount,
+        paymentFrequency: contract.paymentFrequency,
+        interestConvention: contract.interestConvention,
+        firstPaymentDate: contract.firstPaymentDate,
+        monthlyInsurance: contract.insuranceAmount,
+        paymentIncludesInsurance: contract.paymentIncludesInsurance,
+        deferral: contract.deferral,
+        rateSchedule: contract.rateSchedule,
+        paymentSchedule: contract.paymentSchedule,
+        declared: {
+          monthlyPayment: contract.paymentAmount,
+          paymentCount: contract.paymentCount,
+          maturityDate: contract.maturityDate,
+        },
+      });
+      if (blocker === "MATURITY_NOT_ON_SCHEDULE")
+        context.addIssue({
+          code: "custom",
+          message: "La maturité ne tombe sur aucune échéance du calendrier déclaré",
+          path: ["maturityDate"],
+        });
+      if (blocker === "INCLUDED_INSURANCE_UNKNOWN")
+        context.addIssue({
+          code: "custom",
+          message:
+            "Assurance incluse de montant inconnu : indiquez sa part, ou la durée ou la maturité",
+          path: ["insuranceAmount"],
+        });
+      if (blocker === "PAYMENT_DOES_NOT_AMORTISE")
+        context.addIssue({
+          code: "custom",
+          message: "Cette mensualité ne rembourse pas le capital : la durée n’est pas calculable",
+          path: ["paymentAmount"],
+        });
+    }
+    if (contract.maturityDate !== null && contract.maturityDate < contract.firstPaymentDate) {
       context.addIssue({
         code: "custom",
         message: "La maturité doit être postérieure à la première échéance",
@@ -481,6 +654,116 @@ const businessDate = realDate.refine(
   "Date postérieure au jour courant : un fait futur n’est pas un fait",
 );
 const ownershipRate = finite.min(0).max(1);
+
+/** Montant positif d'un événement de dette : même plafond que la colonne `numeric(20,6)`. */
+const eventAmount = finite.positive().max(99_999_999_999_999);
+/**
+ * B18 : événement de la vie d'un prêt. La nature se DÉDUIT de l'événement et se contrôle :
+ * une révision, un palier, un report ou un avenant sont contractuels ; un remboursement est
+ * effectué (jamais daté après aujourd'hui) ou prévu (daté après aujourd'hui).
+ */
+const debtEventSchema = z
+  .object({
+    action: z.literal("record_debt_event"),
+    liabilityId: z.uuid(),
+    nature: z.enum(["OBSERVED", "CONTRACTUAL", "PLANNED"]),
+    effectiveDate: realDate,
+    source: z.string().trim().min(1, "Source requise").max(200),
+    content: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("RATE_CHANGE"), annualRate: finite.min(0).max(10) }).strict(),
+      z.object({ kind: z.literal("PAYMENT_CHANGE"), paymentAmount: eventAmount }).strict(),
+      z
+        .object({
+          kind: z.literal("DEFERRAL"),
+          months: z.number().int().min(1).max(120),
+          deferralKind: z.enum(["PRINCIPAL_ONLY", "TOTAL"]),
+          interestTreatment: z.enum(["PAID", "CAPITALISED", "UNKNOWN"]),
+          termEffect: z.enum(["EXTEND_TERM", "RECALCULATE_PAYMENT", "UNKNOWN"]),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("AMENDMENT"),
+          annualRate: finite.min(0).max(10).nullable(),
+          paymentAmount: eventAmount.nullable(),
+          maturityDate: realDate.nullable(),
+          note: z.string().trim().max(500).nullable(),
+        })
+        .strict()
+        .refine(
+          (content) =>
+            content.annualRate !== null ||
+            content.paymentAmount !== null ||
+            content.maturityDate !== null,
+          "Un avenant change au moins le taux, la mensualité ou la durée",
+        ),
+      z
+        .object({
+          kind: z.literal("EARLY_REPAYMENT"),
+          amount: eventAmount,
+          penalty: finite.nonnegative().max(99_999_999_999_999).nullable(),
+          outcome: z.enum(["SHORTEN_TERM", "REDUCE_PAYMENT", "UNKNOWN"]),
+          balanceAfter: finite.nonnegative().max(99_999_999_999_999).nullable(),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("FULL_REPAYMENT"),
+          amount: eventAmount,
+          penalty: finite.nonnegative().max(99_999_999_999_999).nullable(),
+        })
+        .strict(),
+    ]),
+  })
+  .strict()
+  .superRefine((event, context) => {
+    const kind = event.content.kind;
+    const expected =
+      kind === "EARLY_REPAYMENT"
+        ? ["OBSERVED", "PLANNED"]
+        : kind === "FULL_REPAYMENT"
+          ? ["OBSERVED"]
+          : ["CONTRACTUAL"];
+    if (!expected.includes(event.nature))
+      context.addIssue({
+        code: "custom",
+        message: "Nature incompatible avec l’événement",
+        path: ["nature"],
+      });
+    const today = operationalToday();
+    if (event.nature === "OBSERVED" && event.effectiveDate > today)
+      context.addIssue({
+        code: "custom",
+        message: "Un remboursement effectué n’est pas daté après aujourd’hui",
+        path: ["effectiveDate"],
+      });
+    if (event.nature === "PLANNED" && event.effectiveDate <= today)
+      context.addIssue({
+        code: "custom",
+        message: "Un remboursement prévu est daté après aujourd’hui",
+        path: ["effectiveDate"],
+      });
+    if (
+      event.content.kind === "AMENDMENT" &&
+      event.content.maturityDate !== null &&
+      event.content.maturityDate <= event.effectiveDate
+    )
+      context.addIssue({
+        code: "custom",
+        message: "La nouvelle dernière échéance suit la date d’effet de l’avenant",
+        path: ["content", "maturityDate"],
+      });
+    if (
+      event.content.kind === "EARLY_REPAYMENT" &&
+      event.content.balanceAfter !== null &&
+      event.nature !== "OBSERVED"
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Seul un remboursement effectué porte un encours constaté",
+        path: ["content", "balanceAfter"],
+      });
+  });
 const shareCount = finite.positive().nullable();
 
 const businessSchema = z
@@ -1173,20 +1456,50 @@ export const mutationSchema = z.discriminatedUnion("action", [
       round: businessFundingRoundSchema,
     })
     .strict(),
-  z.object({ action: z.literal("save_debt_contract"), contract: debtContractSchema }),
+  z
+    .object({
+      action: z.literal("save_debt_contract"),
+      contract: debtContractSchema,
+      changeReason: z.string().trim().max(500).nullable().optional(),
+    })
+    .strict(),
+  debtEventSchema,
+  z
+    .object({
+      action: z.literal("cancel_debt_event"),
+      eventId: z.uuid(),
+      reason: z.string().trim().min(1, "Motif d’annulation requis").max(500),
+    })
+    .strict(),
   z.object({
     action: z.literal("record_debt_balance"),
     liabilityId: z.uuid(),
-    observedAt: realDate,
+    // Un encours observé dans le futur deviendrait l'encours COURANT et changerait la lecture
+    // présente : refusé côté serveur, pas seulement par le formulaire.
+    observedAt: businessDate,
     balance: finite.nonnegative(),
     notes: z.string().trim().max(500).nullable(),
   }),
   z.object({ action: z.literal("archive_debt"), liabilityId: z.uuid() }),
+  // Dette connue par son SEUL encours : aucun terme n'est demandé, et aucun n'est accepté.
+  // Stricte : une clé d'acteur ou un terme glissé dans la charge est REFUSÉ, pas ignoré.
+  z
+    .object({
+      action: z.literal("record_outstanding_debt"),
+      name: z.string().trim().min(1).max(160),
+      lender: z.string().trim().min(1).max(160).nullable(),
+      // Précision de la colonne : numeric(20,6), soit 14 chiffres entiers.
+      balance: finite.nonnegative().max(99_999_999_999_999),
+      currency: z.string().regex(/^[A-Z]{3}$/, "Devise ISO à trois lettres"),
+      observedAt: businessDate,
+      notes: z.string().trim().max(500).nullable(),
+    })
+    .strict(),
   z.object({
     action: z.literal("update_account"),
     accountId: z.string().min(1),
     balance: finite,
-    balanceDate: date,
+    balanceDate: businessDate,
   }),
   z.object({
     action: z.literal("add_account"),
@@ -1194,15 +1507,62 @@ export const mutationSchema = z.discriminatedUnion("action", [
     name: z.string().min(1).max(120),
     accountType: z.enum(["BANK", "PEA", "CTO", "SAVINGS", "OTHER"]),
     balance: finite,
+    balanceDate: businessDate,
     currency: z.string().length(3),
   }),
+  // Premier revenu net OBSERVÉ : aucune catégorie, aucune devise reçue (celle du compte fait
+  // foi, lue en base), aucun solde dérivé. Stricte : clé d'acteur ou devise glissée = refus.
+  z
+    .object({
+      action: z.literal("record_net_income"),
+      accountId: z.uuid(),
+      receivedOn: businessDate,
+      amount: finite.positive().max(99_999_999_999_999),
+      label: z.string().trim().min(1).max(180),
+      notes: z.string().trim().max(500).nullable(),
+    })
+    .strict(),
+  // Correction NON DESTRUCTIVE d'un revenu saisi : l'état attendu est COMPLET (les trois
+  // champs affichés), la correction porte au moins un champ, et rien d'autre n'est accepté :
+  // ni acteur, ni compte, ni devise.
+  z
+    .object({
+      action: z.literal("correct_net_income"),
+      transactionId: z.uuid(),
+      reason: z.string().trim().min(1).max(500),
+      expected: z
+        .object({
+          // Texte décimal simple, tel que lu en base (`numeric(20,6)`) : aucun flottant.
+          amount: z
+            .string()
+            .regex(/^[0-9]{1,14}(\.[0-9]{1,6})?$/, "Montant attendu en texte décimal"),
+          receivedOn: realDate,
+          label: z.string().min(1).max(180),
+        })
+        .strict(),
+      corrected: z
+        .object({
+          amount: finite.positive().max(99_999_999_999_999).optional(),
+          receivedOn: businessDate.optional(),
+          label: z.string().trim().min(1).max(180).optional(),
+        })
+        .strict()
+        .refine(
+          (value) => Object.values(value).some((field) => field !== undefined),
+          "Aucune valeur corrigée",
+        ),
+    })
+    .strict(),
+  // Opération saisie : la catégorie est FACULTATIVE (`null` = non classée, que le Cash Flow
+  // Engine compte comme telle), la devise n'est pas reçue (celle du compte fait foi) et une
+  // date future est refusée, comme pour tout fait observé.
   z.object({
     action: z.literal("add_transaction"),
     accountId: z.string().min(1),
-    categoryId: z.string().min(1),
-    date,
-    label: z.string().min(1).max(180),
-    amount: finite,
+    categoryId: z.string().min(1).nullable(),
+    date: businessDate,
+    label: z.string().trim().min(1).max(180),
+    amount: finite.refine((value) => value !== 0, "Une opération à zéro n’est pas un flux"),
     updateBalance: z.boolean(),
   }),
   z.object({

@@ -1,0 +1,23 @@
+{
+  "mobile": {
+    "width": 390,
+    "scrollWidth": 390,
+    "eurInDebt": false,
+    "usdInDebt": true
+  },
+  "bureau": {
+    "width": 1280,
+    "scrollWidth": 1280,
+    "eurInDebt": false,
+    "usdInDebt": true
+  },
+  "errors": "",
+  "date": "2026-09-22",
+  "environment": "localhost:3110 / lfo_auth_gate, fixture Auth",
+  "import": "CSV USD prévisualisé sans enregistrement ; synthèse et lignes USD, aucun euro",
+  "scope": "Contrôle des libellés et du rendu uniquement ; aucun résultat financier validé",
+  "fixtureCleanup": {
+    "liabilitiesRemaining": 0
+  },
+  "chart": "Tracé complet bureau/mobile inspecté après stabilisation ; animation d’entrée désactivée, axe 88 px."
+}

@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -11,6 +12,7 @@ import {
   MAX_ROWS_PER_SESSION,
 } from "@/lib/acquisition/bank-csv";
 import { civilDateIn, resolveTimeZone } from "@/lib/acquisition/clock";
+import { operationalToday } from "@/lib/financial-date";
 import type {
   BankCsvAnalysis,
   ExistingIdentity,
@@ -29,7 +31,7 @@ import type {
 } from "@/lib/data/import-contracts";
 import { readAllPages } from "@/lib/data/pagination";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
-import { DOCUMENTS_BUCKET, ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { DOCUMENTS_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
 
 type Row = Record<string, unknown>;
 
@@ -63,7 +65,12 @@ const PREVIEW_READY_LIMIT = 200;
  * Lue ici, jamais dans le moteur : les fonctions pures reçoivent la date en paramètre.
  */
 function observationDate(): string {
-  return civilDateIn(new Date(), resolveTimeZone(process.env.LFO_TIME_ZONE));
+  const local = civilDateIn(new Date(), resolveTimeZone(process.env.LFO_TIME_ZONE));
+  // Le garde-fou de base (`LF425`) juge « aujourd'hui » à Paris. Un fuseau produit en avance
+  // sur Paris laisserait passer à la lecture une opération que la base refuserait à la
+  // validation : la date retenue est la plus ancienne des deux.
+  const paris = operationalToday();
+  return local < paris ? local : paris;
 }
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
@@ -128,9 +135,8 @@ export interface ImportFileInput {
   bytes: Uint8Array;
 }
 
-export function createImportRepository(): ImportRepository {
+export function createImportRepository(user: string): ImportRepository {
   const db = supabaseAdmin();
-  const user = ownerId();
 
   /** Comptes du propriétaire : sert à valider la cible et à nommer la source. */
   async function accountOf(
@@ -730,9 +736,7 @@ export function createImportRepository(): ImportRepository {
   return { adapter: "supabase", analyze, commit, discard, listSessions, getSessionRows };
 }
 
-let cached: ImportRepository | undefined;
-
-export function getImportRepository(): ImportRepository {
-  if (!cached) cached = createImportRepository();
-  return cached;
+export async function getImportRepository(): Promise<ImportRepository> {
+  const actor = await requireActor();
+  return createImportRepository(actor.userId);
 }

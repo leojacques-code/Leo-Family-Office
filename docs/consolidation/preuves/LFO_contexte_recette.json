@@ -1,0 +1,44 @@
+{
+  "environment": "localhost lfo_auth_gate, authentification fictive",
+  "date": "2026-09-22",
+  "profile": {
+    "display_name": "Famille recette B14",
+    "reporting_currency": "EUR",
+    "first_intent": "PROJECT",
+    "residence_country": "Suisse",
+    "context_date": "2026-09-01"
+  },
+  "financial_table_counts": {
+    "liabilities": 0,
+    "businesses": 0,
+    "goals": 0,
+    "documents": 0,
+    "financial_accounts": 0,
+    "account_balances": 0,
+    "income_sources": 0
+  },
+  "route_after_save": "/setup?next=%2F",
+  "acknowledgement_visible": true,
+  "reloaded_edit_retains_context": true,
+  "home_profile_shows_declared_context": true,
+  "viewport": {
+    "width": 390,
+    "scrollWidth": 390
+  },
+  "browser_errors": [],
+  "checks": {
+    "targeted_tests": 48,
+    "test_files": 5,
+    "lint": "passed",
+    "typescript": "passed",
+    "build": "passed",
+    "schema": {
+      "migrations": 49,
+      "tables": 107,
+      "constraints": 439,
+      "rpcs": 116
+    }
+  },
+  "financial_calculation_tests": "reportés à la demande utilisateur",
+  "real_supabase_auth": "non validée"
+}

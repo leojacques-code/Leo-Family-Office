@@ -16,6 +16,8 @@ import { compareDebtVsInvest } from "@/lib/engine/decision";
 import {
   buildLoanTimeline,
   debtServiceBreakdownForPeriod,
+  debtServiceNextTwelveMonths,
+  insuranceKnown,
   monthBounds,
   monthlyDebtServiceAt,
   nextDebtEvent,
@@ -30,16 +32,24 @@ import {
   Percent,
   SectionHeader,
 } from "@/components/ui";
-import {
-  type SectionProps,
-  OptionalCurrency,
-  chartCurrency,
-  formatDate,
-  formatEur,
-} from "@/components/pages/shared";
+import { type SectionProps, OptionalCurrency, formatDate } from "@/components/pages/shared";
+import { formatCurrency } from "@/lib/presentation/currency";
 import type { DebtContractInput } from "@/lib/data/contracts";
+import type { DebtReadModel } from "@/lib/presentation/debt/contracts";
+import { balancePath } from "@/lib/presentation/debt/balance-path";
+import {
+  DEBT_CONTRACT_DRAFT_SCHEMA_VERSION,
+  type FormDraft,
+  type FormDraftKind,
+} from "@/lib/presentation/drafts/contracts";
+import { operationalToday } from "@/lib/financial-date";
 import type { Liability } from "@/lib/types";
+import { useRegisterPrimaryAction } from "@/components/workstation/primary-action";
 import { DebtContractForm } from "@/components/pages/debt/debt-contract-form";
+import { DebtEventForm } from "@/components/pages/debt/debt-event-form";
+import { DebtHistory } from "@/components/pages/debt/debt-history";
+import { OutstandingDebtDrawer } from "@/components/pages/debt/outstanding-debt-drawer";
+import type { OutstandingDebt } from "@/lib/types";
 
 const PROFILE_LABELS: Record<Liability["amortisationProfile"], string> = {
   AMORTIZING: "Amortissable",
@@ -63,45 +73,190 @@ function interestFormula(loan: Liability): string {
   return `Intérêt = solde × taux annuel × ${period}/12`;
 }
 
-function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
+type DebtPageProps = Pick<SectionProps, "mutate" | "busy" | "setExplanation"> & {
+  state: { cashObservationPresent?: boolean } & Pick<
+    DebtReadModel,
+    "asOfDate" | "liabilities" | "scenarios" | "metrics" | "reportingCurrency"
+  > &
+    Partial<Pick<DebtReadModel, "outstandingDebts" | "dates" | "debitAccounts" | "drafts">>;
+};
+
+function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const [selectedId, setSelectedId] = useState(state.liabilities[0]?.id ?? "");
   const [investmentReturn, setInvestmentReturn] = useState(5.5);
   const [contractEditor, setContractEditor] = useState<"new" | "edit" | null>(null);
+  // B18 : événement ou avenant daté, distinct d'une correction de saisie du contrat.
+  const [eventEditor, setEventEditor] = useState(false);
+  // B16 : dette encours seul dont on décrit le contrat (même ligne, décision tracée).
+  const [promoting, setPromoting] = useState<OutstandingDebt | null>(null);
+  useRegisterPrimaryAction(busy ? null : () => setContractEditor(loan ? "edit" : "new"));
   const [balanceEditor, setBalanceEditor] = useState(false);
   const [balance, setBalance] = useState({ value: "", date: state.asOfDate, notes: "" });
+  // Tiroir « encours seul » : création (`debt: null`) ou correction d'une dette existante.
+  const [outstandingEditor, setOutstandingEditor] = useState<{
+    debt: OutstandingDebt | null;
+  } | null>(null);
+  const outstandingDebts = state.outstandingDebts ?? [];
   const loan = state.liabilities.find((item) => item.id === selectedId) ?? state.liabilities[0];
+  const debitAccounts = state.debitAccounts ?? [];
+  // Brouillons (document 03 §8) : liste locale, tenue à jour par les réponses de la route
+  // dédiée, et resynchronisée à chaque relecture du modèle Dette.
+  const [drafts, setDrafts] = useState<FormDraft[]>(state.drafts ?? []);
+  const [draftsSource, setDraftsSource] = useState(state.drafts);
+  if (draftsSource !== state.drafts) {
+    setDraftsSource(state.drafts);
+    setDrafts(state.drafts ?? []);
+  }
+  const [resumedDraft, setResumedDraft] = useState<FormDraft | null>(null);
+  const [draftToDelete, setDraftToDelete] = useState<string | null>(null);
+  const [draftMessage, setDraftMessage] = useState<string | null>(null);
+  const draftFor = (kind: FormDraftKind, subjectId: string | null) =>
+    subjectId === null
+      ? null
+      : (drafts.find((item) => item.kind === kind && item.subjectId === subjectId) ?? null);
+
+  async function saveDraft(input: {
+    draftId: string | null;
+    expectedVersion: number | null;
+    kind: FormDraftKind;
+    subjectId: string | null;
+    title: string;
+    content: Record<string, unknown>;
+    replaceLatest?: boolean;
+  }): Promise<{ ok: true; draft: FormDraft } | { ok: false; message: string; conflict?: boolean }> {
+    try {
+      const { replaceLatest, ...payload } = input;
+      if (replaceLatest && (payload.draftId || payload.subjectId)) {
+        // Remplacement DÉCIDÉ après un conflit : la version courante est relue, puis écrite
+        // sous cette version. Un nouveau conflit entre-temps échoue encore, sans écraser.
+        // Sans identifiant (premier enregistrement alors qu'un brouillon de la même dette a
+        // été créé ailleurs), le brouillon courant se retrouve par sa nature et sa dette :
+        // il n'y en a qu'un par dette.
+        const latest = await fetch("/api/debt", { cache: "no-store" });
+        const model = latest.ok ? await latest.json() : null;
+        const current = (model?.drafts ?? []).find((item: FormDraft) =>
+          payload.draftId
+            ? item.id === payload.draftId
+            : item.kind === payload.kind && item.subjectId === payload.subjectId,
+        );
+        if (!current)
+          return {
+            ok: false,
+            message:
+              "Ce brouillon n’existe plus : enregistrez votre saisie comme nouveau brouillon.",
+          };
+        payload.draftId = current.id;
+        payload.expectedVersion = current.version;
+      }
+      const post = (draft: typeof payload) =>
+        fetch("/api/drafts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...draft, schemaVersion: DEBT_CONTRACT_DRAFT_SCHEMA_VERSION }),
+        });
+      let response = await post(payload);
+      // Brouillon supprimé ailleurs (autre onglet, validation) : la saisie affichée est
+      // enregistrée comme un nouveau brouillon, sans quoi chaque enregistrement répondrait
+      // « introuvable » sans issue. Une dette existante déjà pourvue d'un brouillon répond
+      // alors un conflit, traité comme tel.
+      if (response.status === 404 && payload.draftId)
+        response = await post({ ...payload, draftId: null, expectedVersion: null });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok)
+        return {
+          ok: false,
+          conflict: response.status === 409,
+          message: body.error ?? "Enregistrement du brouillon impossible",
+        };
+      const saved: FormDraft = {
+        id: body.saved.id,
+        kind: input.kind,
+        subjectId: input.subjectId,
+        title: input.title,
+        content: input.content,
+        schemaVersion: DEBT_CONTRACT_DRAFT_SCHEMA_VERSION,
+        version: body.saved.version,
+        updatedAt: body.saved.updatedAt,
+      };
+      setDrafts((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      return { ok: true, draft: saved };
+    } catch {
+      return {
+        ok: false,
+        message: "Enregistrement du brouillon impossible : connexion interrompue.",
+      };
+    }
+  }
+
+  async function deleteDraft(draft: FormDraft): Promise<boolean> {
+    try {
+      const response = await fetch("/api/drafts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: draft.id, expectedVersion: draft.version }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setDraftMessage(body.error ?? "Suppression du brouillon impossible");
+        return false;
+      }
+      setDrafts((current) => current.filter((item) => item.id !== draft.id));
+      setDraftMessage(null);
+      return true;
+    } catch {
+      setDraftMessage("Suppression du brouillon impossible : connexion interrompue.");
+      return false;
+    }
+  }
   const timeline = useMemo(
     () => (loan ? buildLoanTimeline(loan, state.asOfDate) : null),
     [loan, state.asOfDate],
   );
   const scenario =
     state.scenarios.find((item) => item.name === "Central") ?? state.scenarios[0] ?? null;
-  const comparison = loan
-    ? compareDebtVsInvest({
-        availableCash: state.metrics.bankCash ?? 0,
-        debtBalance: loan.currentBalance,
-        debtRate: loan.annualRate,
-        investmentReturn: investmentReturn / 100,
-        volatility: scenario?.annualVolatility ?? 0,
-        inflation: scenario?.annualInflation ?? 0,
-        years: 5,
-      })
-    : null;
+  const comparison =
+    loan &&
+    state.cashObservationPresent !== false &&
+    state.metrics.bankCash !== null &&
+    scenario &&
+    loan.currency === state.reportingCurrency
+      ? compareDebtVsInvest({
+          availableCash: state.metrics.bankCash,
+          debtBalance: loan.currentBalance,
+          debtRate: loan.annualRate,
+          investmentReturn: investmentReturn / 100,
+          volatility: scenario.annualVolatility,
+          inflation: scenario.annualInflation,
+          years: 5,
+        })
+      : null;
 
   const header = (
     <SectionHeader
-      eyebrow="Liabilities"
-      title="Debt"
+      eyebrow="Passif"
+      title="Dettes"
       description="Échéanciers datés, coût du crédit et arbitrage remboursement vs investissement."
       actions={
         <>
           {loan ? (
             <>
-              <button className="button secondary" onClick={() => setContractEditor("edit")}>
-                <Edit3 size={15} /> Modifier le contrat
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => setEventEditor(true)}
+              >
+                <Plus size={15} /> Événement ou avenant
               </button>
               <button
                 className="button secondary"
+                disabled={busy}
+                onClick={() => setContractEditor("edit")}
+              >
+                <Edit3 size={15} /> Corriger le contrat
+              </button>
+              <button
+                className="button secondary"
+                disabled={busy}
                 onClick={() => {
                   setBalance({
                     value: String(loan.currentBalance),
@@ -115,7 +270,18 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
               </button>
             </>
           ) : null}
-          <button className="button primary" onClick={() => setContractEditor("new")}>
+          <button
+            className="button secondary"
+            disabled={busy}
+            onClick={() => setOutstandingEditor({ debt: null })}
+          >
+            <WalletCards size={15} /> Encours seul
+          </button>
+          <button
+            className="button primary"
+            disabled={busy}
+            onClick={() => setContractEditor("new")}
+          >
             <Plus size={15} /> Nouvelle dette
           </button>
         </>
@@ -123,24 +289,280 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
     />
   );
 
+  const outstandingDrawer = outstandingEditor ? (
+    <OutstandingDebtDrawer
+      key={outstandingEditor.debt?.id ?? "new"}
+      open
+      debt={outstandingEditor.debt}
+      defaultCurrency={state.reportingCurrency}
+      maxDate={state.dates?.today}
+      busy={busy}
+      onClose={() => setOutstandingEditor(null)}
+      onSubmit={(draft) =>
+        outstandingEditor.debt
+          ? mutate({
+              action: "record_debt_balance",
+              liabilityId: outstandingEditor.debt.id,
+              observedAt: draft.observedAt,
+              balance: draft.balance,
+              notes: draft.notes,
+            })
+          : mutate({ action: "record_outstanding_debt", ...draft })
+      }
+    />
+  ) : null;
+
+  const outstandingPanel =
+    outstandingDebts.length > 0 ? (
+      <section className="panel outstanding-debts" aria-label="Encours déclarés sans contrat">
+        <div className="panel-header">
+          <div>
+            <span className="eyebrow">Encours déclarés</span>
+            <h2>Sans contrat détaillé</h2>
+          </div>
+        </div>
+        <p className="outstanding-debt-note">
+          Aucun échéancier, coût ni prochaine échéance n’est calculé tant que les termes sont
+          inconnus.
+        </p>
+        <ul className="outstanding-debt-list">
+          {outstandingDebts.map((debt) => (
+            <li key={debt.id}>
+              <div>
+                <strong>{debt.name}</strong>
+                <span>{debt.lender ?? "Créancier non renseigné"}</span>
+              </div>
+              <div className="outstanding-debt-value">
+                <Currency currency={debt.currency} value={debt.currentBalance} />
+                <span>
+                  {debt.balanceDate ? `Au ${formatDate(debt.balanceDate)}` : "Date non renseignée"}
+                </span>
+              </div>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => setOutstandingEditor({ debt })}
+              >
+                <Edit3 size={15} /> Corriger l’encours
+              </button>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => setPromoting(debt)}
+              >
+                <Plus size={15} /> Décrire le contrat
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ) : null;
+
+  const promotionModal = (
+    <Modal
+      open={promoting !== null}
+      onClose={() => setPromoting(null)}
+      title={promoting ? `Décrire le contrat de ${promoting.name}` : "Décrire le contrat"}
+      subtitle="La même dette devient contractuelle : l’encours observé et son historique sont conservés."
+      wide
+    >
+      {promoting ? (
+        <DebtContractForm
+          // Le brouillon ne sert qu'au montage : l'enregistrer ne doit pas remonter le
+          // formulaire, sans quoi le motif et l'état non sérialisé seraient perdus.
+          key={`promote-${promoting.id}`}
+          loan={null}
+          promoteFrom={promoting}
+          asOfDate={state.asOfDate}
+          reportingCurrency={state.reportingCurrency}
+          busy={busy}
+          accounts={debitAccounts}
+          draft={draftFor("DEBT_CONTRACT_PROMOTION", promoting.id)}
+          onSaveDraft={saveDraft}
+          onDiscardDraft={deleteDraft}
+          onCancel={() => setPromoting(null)}
+          onSave={(contract: DebtContractInput) =>
+            mutate({ action: "save_debt_contract", contract })
+          }
+        />
+      ) : null}
+    </Modal>
+  );
+
+  // Un contrat existant rouvert reprend SON brouillon s'il en a un : un seul par dette.
+  const editorDraft =
+    contractEditor === "edit"
+      ? draftFor("DEBT_CONTRACT_EDIT", loan?.id ?? null)
+      : contractEditor === "new"
+        ? resumedDraft
+        : null;
+
+  function resumeDraft(draft: FormDraft) {
+    setDraftMessage(null);
+    if (draft.kind === "DEBT_CONTRACT_NEW") {
+      setResumedDraft(draft);
+      setContractEditor("new");
+      return;
+    }
+    if (draft.kind === "DEBT_CONTRACT_EDIT") {
+      if (state.liabilities.some((item) => item.id === draft.subjectId)) {
+        setSelectedId(draft.subjectId!);
+        setContractEditor("edit");
+      } else
+        setDraftMessage(
+          "La dette de ce brouillon n’est plus disponible : vous pouvez le supprimer.",
+        );
+      return;
+    }
+    const outstanding = outstandingDebts.find((item) => item.id === draft.subjectId);
+    if (outstanding) setPromoting(outstanding);
+    else
+      setDraftMessage(
+        "Cet encours a déjà son contrat ou n’est plus disponible : vous pouvez supprimer le brouillon.",
+      );
+  }
+
+  const DRAFT_KIND_LABELS: Record<FormDraftKind, string> = {
+    DEBT_CONTRACT_NEW: "Nouvelle dette",
+    DEBT_CONTRACT_EDIT: "Modification de contrat",
+    DEBT_CONTRACT_PROMOTION: "Contrat d’un encours",
+  };
+  const draftsPanel =
+    drafts.length > 0 ? (
+      <section className="panel debt-drafts" aria-label="Brouillons">
+        <div className="panel-header">
+          <div>
+            <span className="eyebrow">Brouillons</span>
+            <h2>Saisies non validées</h2>
+          </div>
+        </div>
+        <p className="outstanding-debt-note">
+          Un brouillon n’alimente ni le patrimoine, ni les échéanciers, ni les calculs.
+        </p>
+        {draftMessage ? (
+          <p className="form-error" role="alert">
+            {draftMessage}
+          </p>
+        ) : null}
+        <ul className="debt-draft-list">
+          {drafts.map((draft) => (
+            <li key={draft.id}>
+              <div>
+                <strong>{draft.title}</strong>
+                <span>
+                  {DRAFT_KIND_LABELS[draft.kind]} · modifié le{" "}
+                  {new Date(draft.updatedAt).toLocaleString("fr-FR", {
+                    day: "numeric",
+                    month: "long",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone: "Europe/Paris",
+                  })}
+                </span>
+              </div>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => resumeDraft(draft)}
+                type="button"
+              >
+                <Edit3 size={15} /> Reprendre
+              </button>
+              {draftToDelete === draft.id ? (
+                <span className="debt-draft-confirm">
+                  <button
+                    className="button secondary"
+                    onClick={async () => {
+                      if (await deleteDraft(draft)) setDraftToDelete(null);
+                    }}
+                    type="button"
+                  >
+                    Confirmer la suppression
+                  </button>
+                  <button
+                    className="button secondary"
+                    onClick={() => setDraftToDelete(null)}
+                    type="button"
+                  >
+                    Garder
+                  </button>
+                </span>
+              ) : (
+                <button
+                  aria-label={`Supprimer le brouillon ${draft.title}`}
+                  className="button secondary"
+                  onClick={() => setDraftToDelete(draft.id)}
+                  type="button"
+                >
+                  <Archive size={15} /> Supprimer
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+    ) : null;
+
   const editorModal = (
     <Modal
       open={contractEditor !== null}
-      onClose={() => setContractEditor(null)}
-      title={contractEditor === "edit" && loan ? `Modifier ${loan.name}` : "Nouvelle dette"}
-      subtitle="Les termes contractuels et l’encours observé restent deux vérités distinctes."
+      onClose={() => {
+        setContractEditor(null);
+        setResumedDraft(null);
+      }}
+      title={contractEditor === "edit" && loan ? `Corriger ${loan.name}` : "Nouvelle dette"}
+      subtitle={
+        contractEditor === "edit"
+          ? "Corriger une erreur de saisie. Un changement réel du contrat s’enregistre comme événement daté."
+          : "Les termes contractuels et l’encours observé restent deux vérités distinctes."
+      }
       wide
     >
       <DebtContractForm
-        key={`${contractEditor}-${loan?.id ?? "new"}`}
+        key={`${contractEditor}-${loan?.id ?? "new"}-${contractEditor === "new" ? (resumedDraft?.id ?? "none") : "own"}`}
         loan={contractEditor === "edit" ? (loan ?? null) : null}
         asOfDate={state.asOfDate}
+        reportingCurrency={state.reportingCurrency}
         busy={busy}
-        onCancel={() => setContractEditor(null)}
-        onSave={(contract: DebtContractInput) => mutate({ action: "save_debt_contract", contract })}
+        accounts={debitAccounts}
+        draft={editorDraft}
+        onSaveDraft={saveDraft}
+        onDiscardDraft={deleteDraft}
+        onCancel={() => {
+          setContractEditor(null);
+          setResumedDraft(null);
+        }}
+        onSave={(contract: DebtContractInput, changeReason?: string | null) =>
+          mutate({
+            action: "save_debt_contract",
+            contract,
+            ...(changeReason ? { changeReason } : {}),
+          })
+        }
       />
     </Modal>
   );
+
+  const eventModal = loan ? (
+    <Modal
+      open={eventEditor}
+      onClose={() => setEventEditor(false)}
+      title={`Événement ou avenant · ${loan.name}`}
+      subtitle="L’événement s’ajoute à l’historique ; le contrat et les événements antérieurs sont conservés."
+      wide
+    >
+      <DebtEventForm
+        key={`event-${loan.id}-${eventEditor}`}
+        loan={loan}
+        asOfDate={state.asOfDate}
+        busy={busy}
+        onCancel={() => setEventEditor(false)}
+        onSubmit={(event) =>
+          mutate({ action: "record_debt_event", liabilityId: loan.id, ...event })
+        }
+      />
+    </Modal>
+  ) : null;
 
   async function recordBalance(event: FormEvent) {
     event.preventDefault();
@@ -159,23 +581,49 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
     return (
       <div className="page-stack">
         {header}
-        <EmptyState
-          title="Aucune dette enregistrée"
-          detail="Le service de dette mensuel vaut 0 € et aucun échéancier n’est projeté tant qu’aucun passif n’est saisi."
-          action={
-            <button className="button primary" onClick={() => setContractEditor("new")}>
-              <Plus size={15} /> Enregistrer une dette
-            </button>
-          }
-        />
+        {draftsPanel}
+        {outstandingPanel ?? (
+          <EmptyState
+            title="Aucune dette enregistrée"
+            detail="Une absence de saisie ne signifie pas une absence de dette."
+            action={
+              <div className="empty-actions">
+                <button
+                  className="button primary"
+                  disabled={busy}
+                  onClick={() => setOutstandingEditor({ debt: null })}
+                >
+                  <WalletCards size={15} /> Je connais l’encours
+                </button>
+                <button
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={() => setContractEditor("new")}
+                >
+                  <Plus size={15} /> Décrire le contrat
+                </button>
+              </div>
+            }
+          />
+        )}
         {editorModal}
+        {promotionModal}
+        {outstandingDrawer}
       </div>
     );
   }
 
+  const currency = loan.currency ?? null;
+  const formatLoanAmount = (value: number | null) =>
+    value === null ? "Non calculable" : formatCurrency(value, currency);
   const { contractual, forward } = timeline;
   const currentDebtService = monthlyDebtServiceAt([loan], state.asOfDate);
   const monthWindow = monthBounds(state.asOfDate);
+  // Composition des sorties des 12 prochains mois, lue dans le Debt Engine (V10 §12).
+  const yearBreakdown = debtServiceNextTwelveMonths([loan], state.asOfDate);
+  const insuranceIsKnown = insuranceKnown(loan);
+  const insuranceDebits = forward.entries.filter((row) => row.entryKind === "INSURANCE");
+  const nextInsuranceDebit = insuranceDebits[0] ?? null;
   const monthBreakdown = debtServiceBreakdownForPeriod(
     [loan],
     state.asOfDate,
@@ -183,7 +631,21 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
     monthWindow.end,
   );
   const upcoming = nextDebtEvent([loan], state.asOfDate);
-  const contractualTotal = loan.monthlyPayment * loan.paymentCount;
+  // B16 : l'écart « paiement × durée − capital » n'a de sens que si paiement ET durée sont
+  // DÉCLARÉS. Un terme déduit par le moteur boucle par construction : l'écart serait un
+  // artefact du calcul, présenté comme une anomalie du contrat.
+  const termsDeclared =
+    !loan.termsResolution ||
+    (loan.termsResolution.monthlyPayment === "DECLARED" &&
+      loan.termsResolution.paymentCount === "DECLARED");
+  const paymentDeclared =
+    !loan.termsResolution || loan.termsResolution.monthlyPayment === "DECLARED";
+  const countDeclared = !loan.termsResolution || loan.termsResolution.paymentCount === "DECLARED";
+  const maturityDeclared =
+    !loan.termsResolution || loan.termsResolution.maturityDate === "DECLARED";
+  // Les lignes d'assurance séparée, de frais et de remboursement anticipé ne sont pas des
+  // échéances du prêt : les compter gonflerait le nombre d'échéances restantes.
+  const remainingPayments = forward.entries.filter((entry) => entry.entryKind === "PAYMENT").length;
   // Un échéancier bancaire utilisé est une bonne nouvelle, pas une anomalie : le mélanger
   // aux écarts de réconciliation ferait passer une information pour un problème.
   const providedNotice = timeline.flags.find((flag) => flag.code === "PROVIDED_SCHEDULE_USED");
@@ -192,13 +654,17 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
   return (
     <div className="page-stack">
       {header}
+      {draftsPanel}
+      {outstandingPanel}
       {state.liabilities.length > 1 ? (
-        <section className="decision-case-strip">
+        <section aria-label="Dettes suivies" className="decision-case-strip">
           {state.liabilities.map((item) => (
             <button
+              aria-pressed={item.id === loan.id}
               key={item.id}
               className={item.id === loan.id ? "active" : ""}
               onClick={() => setSelectedId(item.id)}
+              type="button"
             >
               {item.name}
               <span>{item.lender}</span>
@@ -209,20 +675,22 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
       <section className="metrics-grid four">
         <MetricCard
           label="Capital restant dû"
-          value={<Currency value={loan.currentBalance} />}
+          value={<Currency currency={currency} value={loan.currentBalance} />}
           detail={`${loan.name} · ${loan.lender}`}
         />
         <MetricCard label="Taux" value={<Percent value={loan.annualRate} />} tone="positive" />
         <MetricCard
           label="Service de dette du mois"
-          value={<Currency value={currentDebtService} />}
+          value={<Currency currency={currency} value={currentDebtService} />}
           tone={currentDebtService > 0 ? "warning" : "neutral"}
           detail={
             currentDebtService === 0
               ? upcoming
                 ? `Aucune échéance exigible ce mois · prochaine le ${formatDate(upcoming.entry.dueDate)}`
                 : "Aucune échéance exigible ce mois"
-              : `Paiement ${FREQUENCY_LABELS[loan.paymentFrequency]} annoncé ${formatEur(loan.monthlyPayment)}`
+              : paymentDeclared
+                ? `Échéance ${FREQUENCY_LABELS[loan.paymentFrequency]} annoncée : ${formatLoanAmount(loan.monthlyPayment)}`
+                : `Échéance ${FREQUENCY_LABELS[loan.paymentFrequency]} non déclarée, dérivée par le moteur`
           }
           onExplain={() =>
             setExplanation({
@@ -253,14 +721,14 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
                   date: state.asOfDate,
                 },
               ],
-              note: `Avant la première échéance et après la dernière, aucune ligne n’est exigible : le service de dette vaut 0 sans cas particulier. Décomposition du mois : ${formatEur(monthBreakdown.principal)} de capital, ${formatEur(monthBreakdown.interest)} d’intérêts, ${formatEur(monthBreakdown.insurance)} d’assurance, ${formatEur(monthBreakdown.fees)} de frais. Seuls ${formatEur(monthBreakdown.economicCost)} appauvrissent : le capital remboursé éteint un passif, il ne détruit pas de patrimoine.`,
+              note: `Avant la première échéance et après la dernière, aucune ligne n’est exigible : le service de dette vaut 0 sans cas particulier. Décomposition du mois : ${formatLoanAmount(monthBreakdown.principal)} de capital, ${formatLoanAmount(monthBreakdown.interest)} d’intérêts, ${formatLoanAmount(monthBreakdown.insurance)} d’assurance, ${formatLoanAmount(monthBreakdown.fees)} de frais. Seuls ${formatLoanAmount(monthBreakdown.economicCost)} appauvrissent : le capital remboursé éteint un passif, il ne détruit pas de patrimoine.`,
             })
           }
         />
-        {loan.amortisationProfile === "AMORTIZING" ? (
+        {loan.amortisationProfile === "AMORTIZING" && termsDeclared ? (
           <MetricCard
             label="Écart du paiement contractuel"
-            value={<Currency value={timeline.contractualGap} />}
+            value={<Currency currency={currency} value={timeline.contractualGap} />}
             tone={Math.abs(timeline.contractualGap) > 0.01 ? "warning" : "neutral"}
             onExplain={() =>
               setExplanation({
@@ -269,7 +737,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
                 inputs: [
                   {
                     label: "Paiement par échéance",
-                    value: formatEur(loan.monthlyPayment),
+                    value: formatLoanAmount(loan.monthlyPayment),
                     kind: loan.provenance.kind,
                     date: loan.provenance.effectiveDate ?? state.asOfDate,
                     source: loan.provenance.source,
@@ -282,12 +750,12 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
                   },
                   {
                     label: "Capital",
-                    value: formatEur(loan.principal),
+                    value: formatLoanAmount(loan.principal),
                     kind: loan.provenance.kind,
                     source: loan.provenance.source,
                   },
                 ],
-                note: `${formatEur(contractualTotal)} − ${formatEur(loan.principal)} = ${formatEur(timeline.contractualGap)}. Aucune explication n’est supposée.`,
+                note: `Écart calculé par le moteur : ${formatLoanAmount(timeline.contractualGap)}. Aucune explication n’est supposée.`,
               })
             }
           />
@@ -295,7 +763,11 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
           <MetricCard
             label="Profil contractuel"
             value={PROFILE_LABELS[loan.amortisationProfile]}
-            detail={`${loan.paymentCount} échéances · fréquence ${FREQUENCY_LABELS[loan.paymentFrequency]}`}
+            detail={`${loan.paymentCount} échéances${
+              loan.termsResolution && loan.termsResolution.paymentCount !== "DECLARED"
+                ? " (durée calculée, non déclarée)"
+                : ""
+            } · fréquence ${FREQUENCY_LABELS[loan.paymentFrequency]}`}
           />
         )}
       </section>
@@ -336,7 +808,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
                   inputs: [
                     {
                       label: `Encours observé au ${formatDate(state.asOfDate)}`,
-                      value: formatEur(loan.currentBalance),
+                      value: formatLoanAmount(loan.currentBalance),
                       kind: loan.provenance.kind,
                       source: loan.provenance.source,
                     },
@@ -347,7 +819,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
                     },
                     {
                       label: "Paiement contractuel par échéance",
-                      value: formatEur(loan.monthlyPayment),
+                      value: formatLoanAmount(loan.monthlyPayment),
                       kind: loan.provenance.kind,
                     },
                     {
@@ -363,7 +835,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
                     },
                     {
                       label: "Intérêts restant à payer",
-                      value: formatEur(forward.totalInterest),
+                      value: formatLoanAmount(forward.totalInterest),
                       kind: "DERIVED",
                     },
                   ],
@@ -371,18 +843,18 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
                 })
               }
             >
-              Explain calculation
+              Comprendre l’échéancier
             </button>
           </div>
           <div className="medium-chart">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={forward.entries
-                  .filter((_, index) => index % 6 === 0 || index === forward.entries.length - 1)
-                  .map((entry) => ({
-                    date: entry.dueDate.slice(0, 7),
-                    balance: entry.closingBalance,
-                  }))}
+                data={balancePath(
+                  forward.entries,
+                  loan.balanceDate
+                    ? { date: loan.balanceDate, balance: loan.currentBalance }
+                    : null,
+                )}
               >
                 <defs>
                   <linearGradient id="debtArea" x1="0" y1="0" x2="0" y2="1">
@@ -391,13 +863,47 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
                   </linearGradient>
                 </defs>
                 <CartesianGrid vertical={false} stroke="var(--border-soft)" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={chartCurrency} axisLine={false} tickLine={false} />
-                <Tooltip />
-                <Area dataKey="balance" stroke="#ab5a4e" fill="url(#debtArea)" />
+                <XAxis
+                  dataKey="date"
+                  axisLine={false}
+                  tickFormatter={(value: string) => value.slice(0, 7)}
+                  tickLine={false}
+                />
+                <YAxis
+                  width={88}
+                  tickFormatter={(value: number) => formatCurrency(value, currency, true)}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  formatter={(value) =>
+                    typeof value === "number" ? formatLoanAmount(value) : "Non calculable"
+                  }
+                />
+                {/* Escalier : l'encours ne change qu'aux dates d'échéance, jamais entre deux. */}
+                <Area
+                  isAnimationActive={false}
+                  name="Solde restant"
+                  type="stepAfter"
+                  dataKey="balance"
+                  stroke="#ab5a4e"
+                  fill="url(#debtArea)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>
+          <PaymentComposition
+            breakdown={yearBreakdown}
+            currency={currency}
+            insuranceLabel={
+              loan.insuranceMode === "SEPARATE"
+                ? "Assurance séparée"
+                : loan.insuranceMode === "INCLUDED"
+                  ? "Assurance incluse"
+                  : "Assurance"
+            }
+            insuranceKnown={insuranceIsKnown}
+          />
         </article>
         <article className="panel loan-facts">
           <div className="panel-header">
@@ -413,36 +919,63 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
               <dd>{formatDate(loan.firstPaymentDate)}</dd>
             </div>
             <div>
-              <dt>Dernière échéance annoncée</dt>
-              <dd>{formatDate(loan.maturityDate)}</dd>
+              <dt>
+                {maturityDeclared ? "Dernière échéance annoncée" : "Dernière échéance calculée"}
+              </dt>
+              <dd>{loan.maturityDate ? formatDate(loan.maturityDate) : "Non calculable"}</dd>
             </div>
+            {/* Contre-lecture utile seulement face à une maturité DÉCLARÉE : calculée, elle
+                répéterait la ligne précédente, issue du même échéancier. */}
+            {maturityDeclared ? (
+              <div>
+                <dt>Dernière échéance dérivée</dt>
+                <dd>
+                  {contractual.lastDueDate ? formatDate(contractual.lastDueDate) : "Non calculable"}
+                </dd>
+              </div>
+            ) : null}
             <div>
-              <dt>Dernière échéance dérivée</dt>
-              <dd>{contractual.lastDueDate ? formatDate(contractual.lastDueDate) : "—"}</dd>
-            </div>
-            <div>
-              <dt>Nombre annoncé</dt>
+              <dt>{countDeclared ? "Nombre annoncé" : "Nombre calculé"}</dt>
               <dd>
                 {loan.paymentCount} échéances · fréquence {FREQUENCY_LABELS[loan.paymentFrequency]}
               </dd>
             </div>
             <div>
-              <dt>Échéances payées à ce jour</dt>
-              <dd>{timeline.elapsedPayments}</dd>
+              {/* ÉCHUE ≠ PAYÉE : une échéance passée au calendrier n'est pas une preuve de
+                  paiement tant qu'aucune opération ne la rapproche (document 04 §5, B21). */}
+              <dt>Échéances échues à ce jour</dt>
+              <dd>
+                {timeline.elapsedPayments}
+                {timeline.elapsedPayments > 0 ? " · paiement non rapproché" : ""}
+              </dd>
             </div>
             <div>
               <dt>Intérêts du contrat, durée complète</dt>
               <dd>
-                <Currency value={contractual.totalInterest} />
+                <Currency currency={currency} value={contractual.totalInterest} />
               </dd>
             </div>
             <div>
               <dt>Intérêts restant à payer</dt>
               <dd>
-                <Currency value={forward.totalInterest} />
+                <Currency currency={currency} value={forward.totalInterest} />
               </dd>
             </div>
           </dl>
+          <InsuranceFacts
+            loan={loan}
+            currency={currency}
+            accountNames={
+              new Map(
+                debitAccounts.map((account) => [
+                  account.id,
+                  `${account.name} · ${account.institution}`,
+                ]),
+              )
+            }
+            nextDebit={nextInsuranceDebit}
+            debitCount={insuranceDebits.length}
+          />
           {loan.currentBalance <= 0.01 ? (
             <button
               className="button secondary debt-archive"
@@ -461,39 +994,76 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
             <h2>Prochaines échéances</h2>
           </div>
           <span className="panel-note">
-            {forward.entries.length} restantes sur {loan.paymentCount} annoncées
+            {remainingPayments} échéances restantes sur {loan.paymentCount}{" "}
+            {countDeclared ? "annoncées" : "calculées"}
           </span>
         </div>
-        <div className="simple-table">
-          <div className="table-head">
-            <span>Date</span>
-            <span>Échéance</span>
-            <span>Intérêt</span>
-            <span>Principal</span>
-            <span>Solde</span>
+        <div
+          aria-label="Prochaines échéances"
+          className="simple-table debt-schedule-table"
+          role="table"
+        >
+          <div className="table-head" role="row">
+            <span role="columnheader">Date</span>
+            <span role="columnheader">Sortie</span>
+            <span role="columnheader">Intérêt</span>
+            <span role="columnheader">Principal</span>
+            <span role="columnheader">Assurance</span>
+            <span role="columnheader">Solde</span>
           </div>
-          {forward.entries.slice(0, 6).map((entry, index) => (
+          {forward.entries.slice(0, 8).map((entry, index) => (
             <div
               className="table-row"
               key={`${entry.entryKind}-${entry.paymentNumber}-${entry.dueDate}-${index}`}
+              role="row"
             >
-              <span>{formatDate(entry.dueDate)}</span>
-              <strong>
-                n° {entry.paymentNumber} · <Currency value={entry.totalCashOut} />
+              <span role="cell">{formatDate(entry.dueDate)}</span>
+              <strong role="cell">
+                {entry.entryKind === "INSURANCE"
+                  ? "Assurance (prélèvement séparé)"
+                  : entry.entryKind === "CHARGE"
+                    ? "Frais"
+                    : entry.entryKind === "EARLY_REPAYMENT"
+                      ? "Remboursement anticipé"
+                      : `Échéance n° ${entry.paymentNumber}`}{" "}
+                · <Currency currency={currency} value={entry.totalCashOut} />
               </strong>
-              <span>
-                <Currency value={entry.interest} />
+              <span data-label="Intérêt" role="cell">
+                <Currency currency={currency} value={entry.interest} />
               </span>
-              <span>
-                <Currency value={entry.principal} />
+              <span data-label="Principal" role="cell">
+                <Currency currency={currency} value={entry.principal} />
               </span>
-              <strong>
-                <Currency value={entry.closingBalance} />
+              <span data-label="Assurance" role="cell">
+                {insuranceIsKnown || entry.insurance > 0 ? (
+                  <Currency currency={currency} value={entry.insurance} />
+                ) : (
+                  "Inconnue"
+                )}
+              </span>
+              <strong data-label="Solde" role="cell">
+                <Currency currency={currency} value={entry.closingBalance} />
               </strong>
             </div>
           ))}
         </div>
       </section>
+      <DebtHistory
+        loan={loan}
+        busy={busy}
+        onCancelEvent={(eventId, reason) =>
+          mutate({ action: "cancel_debt_event", eventId, reason })
+        }
+      />
+      {!comparison ? (
+        <Callout title="Comparaison à compléter">
+          {state.cashObservationPresent === false || state.metrics.bankCash === null
+            ? "Renseignez une observation de cash et ses éventuels taux de change avant de comparer remboursement et placement."
+            : !scenario
+              ? "Renseignez les hypothèses du scénario avant de comparer remboursement et placement."
+              : "La comparaison attend une dette dans la devise de reporting. Les montants de devises différentes ne sont pas comparés directement."}
+        </Callout>
+      ) : null}
       {comparison ? (
         <section className="panel decision-preview">
           <div className="panel-header">
@@ -523,10 +1093,10 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
           <div className="comparison-cards">
             <div>
               <span>
-                Rembourser <Currency value={comparison.capital} />
+                Rembourser <Currency currency={currency} value={comparison.capital} />
               </span>
               <strong>
-                <OptionalCurrency value={comparison.repay.interestAvoided} />
+                <OptionalCurrency currency={currency} value={comparison.repay.interestAvoided} />
               </strong>
               <small>
                 {comparison.repay.interestAvoided === null
@@ -536,10 +1106,10 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
             </div>
             <div>
               <span>
-                Investir <Currency value={comparison.capital} />
+                Investir <Currency currency={currency} value={comparison.capital} />
               </span>
               <strong>
-                <Currency value={comparison.invest.expectedGain} sign />
+                <Currency currency={currency} value={comparison.invest.expectedGain} sign />
               </strong>
               <small>Gain espéré non garanti, dette conservée</small>
             </div>
@@ -552,18 +1122,20 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
           ) : null}
           <Callout title="Lecture">
             Le capital arbitrable est borné par le cash bancaire réellement disponible (
-            <Currency value={state.metrics.bankCash} />
+            <Currency currency={state.reportingCurrency} value={state.metrics.bankCash} />
             ), pas par le montant de la dette. Les deux colonnes sont des grandeurs objectives :
             aucune option n’est recommandée ici.
           </Callout>
         </section>
       ) : null}
       {editorModal}
+      {eventModal}
+      {promotionModal}
       <Modal
         open={balanceEditor}
         onClose={() => setBalanceEditor(false)}
         title={`Nouvel encours observé · ${loan.name}`}
-        subtitle="Cette observation n’altère aucun terme contractuel."
+        subtitle={`Montant en ${currency ?? "devise non renseignée"}. Cette observation n’altère aucun terme contractuel.`}
       >
         <form className="form-grid" onSubmit={recordBalance}>
           <label>
@@ -583,6 +1155,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
             <input
               className="text-input"
               type="date"
+              max={state.dates?.today ?? operationalToday()}
               value={balance.date}
               onChange={(event) => setBalance({ ...balance, date: event.target.value })}
               required
@@ -610,8 +1183,203 @@ function DebtPage({ state, mutate, busy, setExplanation }: SectionProps) {
           </div>
         </form>
       </Modal>
+      {outstandingDrawer}
     </div>
   );
 }
 
 export default DebtPage;
+
+/**
+ * Bande de composition des sorties (V10 §12) : capital, intérêts, assurance et frais des
+ * douze prochains mois, en largeurs proportionnelles aux montants du Debt Engine. Une
+ * assurance inconnue n'est pas un segment nul : elle est nommée à part.
+ */
+function PaymentComposition({
+  breakdown,
+  currency,
+  insuranceLabel,
+  insuranceKnown,
+}: {
+  breakdown: {
+    principal: number;
+    interest: number;
+    insurance: number;
+    fees: number;
+    totalCashOut: number;
+  };
+  currency: string | null;
+  insuranceLabel: string;
+  insuranceKnown: boolean;
+}) {
+  const parts = [
+    { key: "principal", label: "Capital", value: breakdown.principal },
+    { key: "interest", label: "Intérêts", value: breakdown.interest },
+    ...(insuranceKnown || breakdown.insurance > 0
+      ? [{ key: "insurance", label: insuranceLabel, value: breakdown.insurance }]
+      : []),
+    { key: "fees", label: "Frais", value: breakdown.fees },
+  ];
+  if (breakdown.totalCashOut <= 0) return null;
+  return (
+    <figure className="payment-composition" aria-label="Composition des sorties sur 12 mois">
+      <div className="payment-composition-bar" aria-hidden="true">
+        {parts
+          .filter((part) => part.value > 0)
+          .map((part) => (
+            <span
+              data-part={part.key}
+              key={part.key}
+              style={{ flexGrow: part.value }}
+              title={`${part.label} : ${formatCurrency(part.value, currency)}`}
+            />
+          ))}
+      </div>
+      <figcaption>
+        <span className="payment-composition-title">
+          Sorties des 12 prochains mois · {formatCurrency(breakdown.totalCashOut, currency)}
+        </span>
+        <ul>
+          {parts.map((part) => (
+            <li data-part={part.key} key={part.key}>
+              {part.label} <strong>{formatCurrency(part.value, currency)}</strong>
+            </li>
+          ))}
+          {!insuranceKnown && breakdown.insurance === 0 ? (
+            <li data-part="unknown">
+              Assurance <strong>inconnue</strong>
+            </li>
+          ) : null}
+        </ul>
+      </figcaption>
+    </figure>
+  );
+}
+
+const INSURED_BASE_LABELS: Record<string, string> = {
+  INITIAL_CAPITAL: "capital initial",
+  OUTSTANDING_CAPITAL: "capital restant dû",
+  OTHER: "autre",
+};
+
+const INSURANCE_MODE_LABELS: Record<string, string> = {
+  INCLUDED: "Incluse dans les paiements",
+  SEPARATE: "Prélevée séparément",
+  NONE: "Absence confirmée",
+  UNKNOWN: "Inconnue",
+};
+
+/**
+ * Inspecteur de l'assurance (B17) : choix déclaré, polices, assurés et quotités, périodes
+ * de prime et prochain prélèvement à SA date. La quotité décrit une couverture, pas une
+ * part du passif : elle n'est rapprochée d'aucun montant de dette.
+ */
+function InsuranceFacts({
+  loan,
+  currency,
+  nextDebit,
+  debitCount,
+  accountNames,
+}: {
+  accountNames: ReadonlyMap<string, string>;
+  loan: Liability;
+  currency: string | null;
+  nextDebit: { dueDate: string; insurance: number } | null;
+  debitCount: number;
+}) {
+  const mode = loan.insuranceMode;
+  return (
+    <section className="insurance-facts" aria-label="Assurance emprunteur">
+      <h3>Assurance emprunteur</h3>
+      <dl>
+        <div>
+          <dt>Traitement</dt>
+          <dd>
+            {mode
+              ? INSURANCE_MODE_LABELS[mode]
+              : loan.monthlyInsurance === null
+                ? "Non renseigné"
+                : loan.paymentIncludesInsurance === true
+                  ? "Incluse dans les paiements"
+                  : loan.paymentIncludesInsurance === false
+                    ? "En sus de chaque paiement"
+                    : "Convention inconnue"}
+          </dd>
+        </div>
+        {mode === "INCLUDED" || (!mode && loan.monthlyInsurance !== null) ? (
+          <div>
+            <dt>Part par échéance</dt>
+            <dd>
+              {loan.monthlyInsurance === null
+                ? "Montant inconnu"
+                : formatCurrency(loan.monthlyInsurance, currency)}
+            </dd>
+          </div>
+        ) : null}
+        {mode === "SEPARATE" ? (
+          <div>
+            <dt>Prochain prélèvement</dt>
+            <dd>
+              {nextDebit
+                ? `${formatCurrency(nextDebit.insurance, currency)} le ${formatDate(nextDebit.dueDate)}`
+                : "Aucun à venir"}
+              {debitCount > 1 ? ` · ${debitCount} prélèvements à venir` : ""}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+      {mode === "SEPARATE"
+        ? (loan.insurancePolicies ?? []).map((policy) => (
+            <div className="insurance-policy" key={policy.id}>
+              <strong>
+                {policy.insurer ?? "Assureur non renseigné"}
+                {policy.contractReference ? ` · contrat ${policy.contractReference}` : ""}
+              </strong>
+              {policy.effectiveDate || policy.endDate ? (
+                <p>
+                  Couverture{" "}
+                  {policy.effectiveDate
+                    ? `du ${formatDate(policy.effectiveDate)}`
+                    : "début inconnu"}{" "}
+                  {policy.endDate ? `au ${formatDate(policy.endDate)}` : "· fin inconnue"}
+                </p>
+              ) : null}
+              {policy.insuredBase ? (
+                <p>Base assurée : {INSURED_BASE_LABELS[policy.insuredBase]}</p>
+              ) : null}
+              <p>
+                Compte débité :{" "}
+                {policy.debitAccountId
+                  ? (accountNames.get(policy.debitAccountId) ?? "compte non visible")
+                  : "non renseigné"}
+              </p>
+              {policy.insured.length ? (
+                <p>
+                  Assurés :{" "}
+                  {policy.insured
+                    .map(
+                      (person) =>
+                        `${person.name} (${(person.coverageShare * 100).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}\u00a0%)`,
+                    )
+                    .join(", ")}
+                </p>
+              ) : (
+                <p>Assurés non renseignés</p>
+              )}
+              <ul>
+                {policy.periods.map((period, index) => (
+                  <li key={index}>
+                    {formatCurrency(period.premiumAmount, currency)} ·{" "}
+                    {FREQUENCY_LABELS[period.frequency]} · du {formatDate(period.firstDebitDate)}{" "}
+                    {period.lastDebitDate
+                      ? `au ${formatDate(period.lastDebitDate)}`
+                      : "à la dernière échéance du prêt"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        : null}
+    </section>
+  );
+}

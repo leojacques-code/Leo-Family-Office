@@ -204,7 +204,7 @@ export const PAGE_REGISTRY = manifests([
         planRef: "§21 canvas : « bilan visuel actifs / passifs »",
       },
     ],
-    primaryAction: "Ajouter un actif ou un passif",
+    primaryAction: "Ajouter un compte",
     essentialKpis: [
       "net_worth",
       "gross_assets",
@@ -303,7 +303,7 @@ export const PAGE_REGISTRY = manifests([
       "SOURCE_CONFLICT",
       "SYSTEM_ERROR",
     ],
-    realityModes: ["REAL", "SIMULATION"],
+    realityModes: ["REAL"],
     viewport: "ALL_VIEWPORTS",
     deferred: [
       "Catégories vides : elles sont masquées plutôt qu’affichées à zéro",
@@ -369,7 +369,7 @@ export const PAGE_REGISTRY = manifests([
       "SOURCE_CONFLICT",
       "SYSTEM_ERROR",
     ],
-    realityModes: ["REAL", "SIMULATION"],
+    realityModes: ["REAL"],
     viewport: "DESKTOP_AND_TABLET",
     deferred: [
       "TWR, XIRR, drawdown, volatilité et tracking error tant que les données requises manquent",
@@ -414,6 +414,15 @@ export const PAGE_REGISTRY = manifests([
         planRef:
           "§6.2 : « compte débité » ; §24 : « le rapprochement compare service contractuel et débit bancaire »",
       },
+      {
+        // Document 04 §2 : « Enregistrer une somme que je dois » produit un passif daté sans
+        // calendrier. Source distincte du contrat : un encours déclaré ne prouve aucun contrat.
+        id: "outstanding",
+        category: "SAISIE_MANUELLE",
+        name: "Encours",
+        evidence: "OUTSTANDING_DEBTS",
+        planRef: "Document 04 §2 : « passif daté ; aucun calendrier inventé »",
+      },
     ],
     // Section 24 : « la règle document-first ». L'action primaire est l'import de
     // l'échéancier, pas l'ouverture d'un formulaire de contrat.
@@ -442,7 +451,7 @@ export const PAGE_REGISTRY = manifests([
       "SOURCE_CONFLICT",
       "SYSTEM_ERROR",
     ],
-    realityModes: ["REAL", "SIMULATION"],
+    realityModes: ["REAL"],
     viewport: "DESKTOP_AND_TABLET",
     deferred: [
       "Modèle de contrat complet au premier écran : il s’ouvre après l’import ou en mode avancé",
@@ -516,7 +525,7 @@ export const PAGE_REGISTRY = manifests([
       "SOURCE_CONFLICT",
       "SYSTEM_ERROR",
     ],
-    realityModes: ["REAL", "SIMULATION"],
+    realityModes: ["REAL"],
     viewport: "DESKTOP_AND_TABLET",
     deferred: [
       "Projet d’acquisition mélangé au bien détenu : la bifurcation est obligatoire et première",
@@ -574,7 +583,7 @@ export const PAGE_REGISTRY = manifests([
       "SOURCE_CONFLICT",
       "SYSTEM_ERROR",
     ],
-    realityModes: ["REAL", "SIMULATION"],
+    realityModes: ["REAL"],
     viewport: "ALL_VIEWPORTS",
     deferred: [
       "Écran vide sans action : un profil sans activité déclarée reçoit un parcours, pas un vide",
@@ -633,7 +642,7 @@ export const PAGE_REGISTRY = manifests([
       "SOURCE_CONFLICT",
       "SYSTEM_ERROR",
     ],
-    realityModes: ["REAL", "SIMULATION"],
+    realityModes: ["REAL"],
     viewport: "DESKTOP_ONLY",
     deferred: [
       "Codes de qualité et réserves en liste brute : ils sont traduits et regroupés",
@@ -687,7 +696,7 @@ export const PAGE_REGISTRY = manifests([
       "SOURCE_CONFLICT",
       "SYSTEM_ERROR",
     ],
-    realityModes: ["REAL", "SIMULATION"],
+    realityModes: ["REAL"],
     viewport: "ALL_VIEWPORTS",
     deferred: [
       "Zéro apparent lorsque la règle manque : une règle absente ne produit jamais 0 €",
@@ -739,7 +748,7 @@ export const PAGE_REGISTRY = manifests([
       "SOURCE_CONFLICT",
       "SYSTEM_ERROR",
     ],
-    realityModes: ["REAL", "SIMULATION"],
+    realityModes: ["REAL"],
     viewport: "ALL_VIEWPORTS",
     deferred: [
       "États internes et noms de métriques : ils sont traduits",
@@ -784,7 +793,7 @@ export const PAGE_REGISTRY = manifests([
     ],
     // Le scénario réel de référence n'est pas modifiable : il est la BORNE du mode réel dans
     // une page de simulation, et c'est à lui que les trajectoires se comparent.
-    realityModes: ["REAL", "SIMULATION"],
+    realityModes: ["REAL"],
     viewport: "DESKTOP_AND_TABLET",
     deferred: [
       "Cinq cartes de scénarios équivalentes au-dessus du résultat : l’éventail vient d’abord",
@@ -835,7 +844,7 @@ export const PAGE_REGISTRY = manifests([
       "SOURCE_CONFLICT",
       "SYSTEM_ERROR",
     ],
-    realityModes: ["SIMULATION"],
+    realityModes: ["REAL"],
     // Deux ou trois options côte à côte ne tiennent pas sur un téléphone. En produire une
     // version tronquée ferait croire à une comparaison complète.
     viewport: "DESKTOP_ONLY",

@@ -96,6 +96,9 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
   // ─── Dette ──────────────────────────────────────────────────────────────────────────
   LIABILITY_ATTRIBUTION_MISSING: { label: "Dette non rattachée à un bien", state: A },
   LIABILITY_PROJECTION_TERMS_MISSING: { label: "Termes du prêt à compléter", state: A },
+  DEBT_TERMS_UNDECLARED: { label: "Termes de la dette non déclarés", state: A },
+  DEBT_INSURANCE_UNKNOWN: { label: "Assurance d’une dette inconnue", state: A },
+  DEBT_RECURRING_FEES_UNKNOWN: { label: "Frais récurrents d’une dette non déclarés", state: A },
   DEBT_DECLARED_NOT_LINKED: { label: "Dette déclarée mais non rattachée", state: A },
   DEBT_FREE_DECLARED: { label: "Aucune dette déclarée sur ce bien", state: N },
   DEBT_OVER_ALLOCATED: { label: "Dette rattachée au-delà de 100 %", state: C },
@@ -116,7 +119,41 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
     state: A,
   },
   INSURANCE_TREATMENT_UNKNOWN: { label: "Traitement de l’assurance emprunteur inconnu", state: A },
+  INCLUDED_INSURANCE_UNKNOWN: { label: "Assurance incluse de montant non déclaré", state: A },
+  DEFERRAL_TERM_EFFECT_UNKNOWN: { label: "Effet du report sur la durée non déclaré", state: A },
+  EARLY_REPAYMENT_PLANNED: { label: "Remboursement anticipé prévu, non constaté", state: A },
+  RATE_REVISION_PAYMENT_KEPT: {
+    label: "Révision de taux sans nouvelle mensualité déclarée",
+    state: A,
+  },
+  BALANCE_PREDATES_REPAYMENT: {
+    label: "Encours observé antérieur à un remboursement effectué",
+    state: A,
+  },
+  AMENDMENT_MATURITY_NOT_ON_SCHEDULE: {
+    label: "Nouvelle échéance d’avenant hors calendrier",
+    state: A,
+  },
+  EVENTS_NOT_APPLIED_TO_PROVIDED_SCHEDULE: {
+    label: "Événements non reportés sur l’échéancier fourni",
+    state: A,
+  },
+  PLANNED_REPAYMENT_OVERDUE: {
+    label: "Remboursement prévu à date passée, non constaté",
+    state: A,
+  },
+  CONTRACT_STEP_AFTER_AMENDMENT: {
+    label: "Palier du contrat postérieur à un avenant",
+    state: A,
+  },
+  TERM_ENDED_WITH_BALANCE: {
+    label: "Terme échu avec un capital restant",
+    state: A,
+  },
   MATURITY_MISMATCH: { label: "Maturité incohérente avec l’échéancier", state: C },
+  TERMS_DERIVED: { label: "Termes du contrat calculés, non déclarés", state: "AVAILABLE" },
+  TERMS_UNRESOLVED: { label: "Échéancier non calculable avec les termes déclarés", state: P },
+  INSURANCE_PERIOD_UNBOUNDED: { label: "Période d’assurance sans fin calculable", state: P },
   NEGATIVE_AMORTISATION: { label: "Amortissement négatif : l’encours augmente", state: C },
   PAYMENT_EXCEEDS_AMORTISATION: { label: "Échéance supérieure à l’amortissement", state: C },
   PROVIDED_SCHEDULE_USED: { label: "Échéancier fourni par la banque", state: "AVAILABLE" },
@@ -262,6 +299,10 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
     label: "Opération constatée retenue",
     state: "AVAILABLE",
   },
+  OBSERVED_INCOME_FOREIGN_CURRENCY: {
+    label: "Revenu constaté dans une autre devise, non converti",
+    state: P,
+  },
   CASH_INCLUDED_IN_CAREER_TAX_MONTH: {
     label: "Encaissement déjà compté au mois de paie",
     state: P,
@@ -329,6 +370,11 @@ export const CODE_TRANSLATIONS: Readonly<Record<string, CodeTranslation>> = {
   // ─── Business Equity : détention, holding, capital ──────────────────────────────────
 
   // ─── Objectifs ──────────────────────────────────────────────────────────────────────
+  GOAL_PURPOSE_UNCONFIRMED: { label: "Type d’objectif et métrique à confirmer", state: A },
+  GOAL_RESERVE_METRIC_INCOMPATIBLE: {
+    label: "Une réserve exige une métrique de trésorerie",
+    state: A,
+  },
   GOAL_INACTIVE: { label: "Objectif inactif", state: N },
   METRIC_NOT_SUPPORTED: { label: "Indicateur non pris en charge", state: A },
   METRIC_NOT_AVAILABLE_CURRENT: { label: "Indicateur indisponible aujourd’hui", state: A },

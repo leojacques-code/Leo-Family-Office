@@ -1,7 +1,24 @@
+import { usesLocalFixtureAuth } from "@/lib/auth-config";
 import Link from "next/link";
 import { LoginForm } from "@/components/login-form";
 
-export default function LoginPage() {
+const CONFIRMATION_MESSAGES: Record<string, string> = {
+  "sign-in": "Si votre adresse est confirmée, connectez-vous avec votre mot de passe.",
+  expired:
+    "Ce lien de confirmation a expiré ou a déjà servi. Si votre adresse est confirmée, connectez-vous avec votre mot de passe.",
+  invalid: "Ce lien de confirmation est incomplet.",
+  unavailable:
+    "Confirmation momentanément indisponible. Connectez-vous avec votre mot de passe ; si l’erreur persiste, réessayez plus tard.",
+};
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const confirmation = (await searchParams).confirmation;
+  const notice =
+    typeof confirmation === "string" ? (CONFIRMATION_MESSAGES[confirmation] ?? null) : null;
   return (
     <main className="login-page">
       <section className="login-panel">
@@ -38,7 +55,7 @@ export default function LoginPage() {
         </Link>
       </section>
       <section className="login-form-wrap">
-        <LoginForm />
+        <LoginForm localFixture={usesLocalFixtureAuth()} notice={notice} />
       </section>
     </main>
   );

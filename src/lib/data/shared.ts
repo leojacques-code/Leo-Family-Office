@@ -24,6 +24,7 @@ import type {
   InterestConvention,
   LedgerCoverageSource,
   Liability,
+  OutstandingDebt,
   LoanCharge,
   LoanDeferral,
   PaymentChange,
@@ -68,7 +69,8 @@ type Row = Record<string, unknown>;
 const DEFERRAL_KINDS = ["NONE", "PRINCIPAL_ONLY", "TOTAL"] as const;
 const DEFERRED_INTEREST_TREATMENTS = ["PAID", "CAPITALISED", "UNKNOWN"] as const;
 const AMORTISATION_PROFILES = ["AMORTIZING", "INTEREST_ONLY", "BULLET", "BALLOON"] as const;
-const PAYMENT_FREQUENCIES = ["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL"] as const;
+export const PAYMENT_FREQUENCIES = ["MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL"] as const;
+export const INSURANCE_MODES = ["INCLUDED", "SEPARATE", "NONE", "UNKNOWN"] as const;
 const INTEREST_CONVENTIONS = ["PROPORTIONAL", "ACTUAL_365"] as const;
 const RATE_TYPES = ["FIXED", "VARIABLE"] as const;
 const EARLY_REPAYMENT_OUTCOMES = ["SHORTEN_TERM", "REDUCE_PAYMENT", "UNKNOWN"] as const;
@@ -306,8 +308,11 @@ export function computeFlowRates(
   expenses: ExpenseCategory[],
   periodStart: string,
   periodEnd: string,
+  reportingCurrency?: string,
 ): { savingsRate: number | null; investmentRate: number | null } {
-  const observed = computeObservedCashFlow(transactions, expenses, periodStart, periodEnd);
+  const observed = computeObservedCashFlow(transactions, expenses, periodStart, periodEnd, {
+    reportingCurrency,
+  });
   return {
     savingsRate: observed.observedSavingsRate,
     investmentRate: observed.observedInvestmentRate,
@@ -333,6 +338,10 @@ export function deriveFlowMetrics(
   transactions: Transaction[] = [],
   // Aucun défaut : la date d'arrêté est une donnée de l'appel, pas une constante du module.
   asOfDate: string,
+  // Dettes connues par leur seul encours : leur service est INCONNU, pas nul.
+  outstandingDebts: OutstandingDebt[] = [],
+  // Devise des taux constatés : une opération dans une autre devise les rend inconnus.
+  reportingCurrency?: string,
 ): DeclaredFlowMetrics {
   const activeIncomes = incomes.filter((income) => income.active);
   const monthlyIncome =
@@ -345,8 +354,13 @@ export function deriveFlowMetrics(
     0,
   );
   const monthlyDebtService = monthlyDebtServiceAt(liabilities, asOfDate);
+  // `monthlyDebtService` ne couvre que les contrats : avec une dette sans échéancier active,
+  // soustraire ce seul service surestimerait le cash-flow libre sans le dire.
+  const unscheduledDebt = outstandingDebts.some((debt) => debt.currentBalance > 0);
   const freeCashFlow =
-    monthlyIncome === null ? null : monthlyIncome - monthlyExpenses - monthlyDebtService;
+    monthlyIncome === null || unscheduledDebt
+      ? null
+      : monthlyIncome - monthlyExpenses - monthlyDebtService;
   const completeFields = knownExpenses.length;
   const period = monthBounds(asOfDate);
   const { savingsRate, investmentRate } = computeFlowRates(
@@ -354,6 +368,7 @@ export function deriveFlowMetrics(
     expenses,
     period.start,
     period.end,
+    reportingCurrency,
   );
   return {
     monthlyIncome,

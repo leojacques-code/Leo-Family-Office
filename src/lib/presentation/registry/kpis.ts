@@ -198,7 +198,13 @@ export const KPI_REGISTRY = definitions([
     label: "Évolution depuis la clôture",
     question: "Ma situation s’améliore-t-elle ou se dégrade-t-elle ?",
     formula: "Patrimoine net de la clôture courante − patrimoine net de la clôture comparable",
-    engine: "balance-sheet-metrics.deriveCanonicalBalanceSheetMetrics().history",
+    // `presentation/today/flow.buildCloseChange`, et non l'historique des instantanés de
+    // `balance-sheet-metrics`, qui était déclaré ici et n'a jamais servi ce KPI. Les deux
+    // lisent des lignes écrites par la même RPC de clôture, mais seul le premier vérifie la
+    // COMPARABILITÉ que la convention ci-dessous exige : version, devise de reporting,
+    // méthodologie de composition et complétude. L'historique ne filtre que la complétude, et
+    // rendrait donc une variation à travers un changement de devise de reporting.
+    engine: "presentation/today/flow.buildCloseChange",
     conventions: [
       "N’afficher une variation QUE si deux clôtures comparables existent (section 9).",
       "Deux clôtures dont le périmètre ou la devise de reporting diffèrent ne sont pas comparables.",
@@ -216,7 +222,7 @@ export const KPI_REGISTRY = definitions([
     userExplanation:
       "L’écart avec votre dernière situation arrêtée. Il n’apparaît que si les deux arrêtés sont réellement comparables.",
     technicalDetail:
-      "`history` porte mtd, m1, m3 et m12, chacun avec sa propre disponibilité de référence.",
+      "Comparaison des DEUX dernières clôtures persistées, avec ses causes poste à poste lues sur la composition persistée. Un poste absent d’une des deux clôtures n’est pas compté comme une variation de son montant.",
     visualisation: "VALUE_WITH_DELTA",
     pinnable: true,
     hideable: false,
