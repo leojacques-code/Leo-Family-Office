@@ -351,6 +351,50 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     expect(screen.getByRole("alert")).toHaveTextContent("date, un libellé et un montant positif");
   });
 
+  it("n'invente ni date ni taux pour une révision, ni date ni montant pour un palier", () => {
+    const onSave = vi.fn();
+    render(
+      <DebtContractForm
+        asOfDate="2026-01-01"
+        reportingCurrency="EUR"
+        busy={false}
+        loan={null}
+        onCancel={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+    fillO03();
+    fireEvent.click(screen.getByLabelText("Absence d’assurance confirmée"));
+    fireEvent.click(screen.getByRole("button", { name: "Ajouter une ligne : Révisions de taux" }));
+    expect(screen.getByLabelText("Date d’effet de la révision 1")).toHaveValue("");
+    expect(screen.getByLabelText("Taux annuel de la révision 1, en %")).toHaveValue(null);
+    fireEvent.submit(screen.getByRole("button", { name: "Ajouter cette dette" }).closest("form")!);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Chaque révision de taux a une date");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Ajouter une ligne : Paliers de paiement" }),
+    );
+    expect(screen.getByLabelText("Date d’effet du palier 1")).toHaveValue("");
+    expect(screen.getByLabelText("Paiement du palier 1, en EUR")).toHaveValue(null);
+  });
+
+  it("n'ouvre plus la saisie d'un remboursement dans le contrat : il passe par le journal", () => {
+    render(
+      <DebtContractForm
+        asOfDate="2026-01-01"
+        reportingCurrency="EUR"
+        busy={false}
+        loan={null}
+        onCancel={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+    fillO03();
+    const section = screen.getByRole("region", { name: "Remboursements anticipés" });
+    expect(within(section).queryByRole("button", { name: /Ajouter/ })).toBeNull();
+    expect(section).toHaveTextContent("Événement ou avenant");
+  });
+
   it("laisse les détails de police inconnus par défaut et transmet ceux déclarés", async () => {
     const onSave = vi.fn().mockResolvedValue(true);
     const accountId = "8f7c3a52-6a44-4c4e-9d7e-3f0b1c2d4e5f";

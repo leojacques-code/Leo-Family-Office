@@ -187,6 +187,27 @@ try {
     await page.keyboard.press("Escape");
   }
 
+  // ---------- E14 : clauses du contrat sans préremplissage, remboursement par le journal ----------
+  await page.getByRole("button", { name: "Corriger le contrat" }).click();
+  {
+    const editor = page.getByRole("dialog");
+    await editor.getByText("Conditions avancées et événements").click();
+    await editor.getByRole("button", { name: "Ajouter une ligne : Révisions de taux" }).click();
+    const revisionDate = await editor.getByLabel("Date d’effet de la révision 1").inputValue();
+    const revisionRate = await editor.getByLabel("Taux annuel de la révision 1, en %").inputValue();
+    const repaymentAdd = await editor
+      .getByRole("region", { name: "Remboursements anticipés" })
+      .getByRole("button", { name: /Ajouter/ })
+      .count();
+    check(
+      "E14",
+      "clause de taux ajoutée vide ; aucun ajout de remboursement hors du journal d'événements",
+      revisionDate === "" && revisionRate === "" && repaymentAdd === 0,
+      { revisionDate, revisionRate, repaymentAdd },
+    );
+    await page.keyboard.press("Escape");
+  }
+
   // ---------- Remboursement prévu : intention, aucun encours ----------
   const plannedDate = await inDays(40);
   const plannedResponse = await page.request.post(`${APP}/api/debt`, {

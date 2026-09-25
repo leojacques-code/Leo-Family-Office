@@ -456,6 +456,14 @@ export function DebtContractForm({
             ? false
             : null,
       insurancePolicies: insurance.choice === "SEPARATE" ? insurance.policies : [],
+      // Une ligne en cours de saisie (date ou montant manquant) n'entre pas dans l'aperçu :
+      // le moteur ne calcule que sur des clauses déclarées. La soumission la refuse, nommée.
+      rateSchedule: contract.rateSchedule.filter(
+        (change) => change.effectiveFrom !== "" && Number.isFinite(change.annualRate),
+      ),
+      paymentSchedule: contract.paymentSchedule.filter(
+        (change) => change.effectiveFrom !== "" && Number.isFinite(change.amount),
+      ),
     };
   }, [contract, structure, mode, structureComplete, requiredValues, existing, insurance]);
 
@@ -584,6 +592,32 @@ export function DebtContractForm({
       )
     ) {
       setFormError("La fin de couverture d’une police précède sa date d’effet.");
+      return;
+    }
+    if (
+      contract.rateSchedule.some(
+        (change) =>
+          !change.effectiveFrom || !Number.isFinite(change.annualRate) || change.annualRate < 0,
+      )
+    ) {
+      setFormError("Chaque révision de taux a une date d’effet et un taux.");
+      return;
+    }
+    if (
+      contract.paymentSchedule.some(
+        (change) => !change.effectiveFrom || !Number.isFinite(change.amount) || change.amount < 0,
+      )
+    ) {
+      setFormError("Chaque palier de paiement a une date d’effet et un montant.");
+      return;
+    }
+    if (
+      contract.earlyRepayments.some(
+        (repayment) =>
+          !repayment.date || !Number.isFinite(repayment.amount) || repayment.amount <= 0,
+      )
+    ) {
+      setFormError("Chaque remboursement anticipé a une date et un capital positif.");
       return;
     }
     if (
@@ -1134,19 +1168,22 @@ export function DebtContractForm({
 
         <NestedSection
           title="Révisions de taux"
+          hint="Paliers de taux prévus au contrat signé. Une révision survenue depuis s’enregistre comme événement daté."
           onAdd={() =>
             setContract({
               ...contract,
+              // Ni date ni taux supposés : une clause se déclare, elle ne se recopie pas.
               rateSchedule: [
                 ...contract.rateSchedule,
-                { effectiveFrom: asOfDate, annualRate: contract.annualRate, kind: "CONTRACTUAL" },
+                { effectiveFrom: "", annualRate: Number.NaN, kind: "CONTRACTUAL" },
               ],
             })
           }
         >
           {contract.rateSchedule.map((change, index) => (
-            <div className="debt-editor-row" key={`${change.effectiveFrom}-${index}`}>
+            <div className="debt-editor-row" key={index}>
               <input
+                aria-label={`Date d’effet de la révision ${index + 1}`}
                 className="text-input"
                 type="date"
                 value={change.effectiveFrom}
@@ -1157,18 +1194,24 @@ export function DebtContractForm({
                 }}
               />
               <input
+                aria-label={`Taux annuel de la révision ${index + 1}, en %`}
                 className="text-input"
                 type="number"
                 min="0"
                 step="0.001"
-                value={change.annualRate * 100}
+                value={Number.isFinite(change.annualRate) ? change.annualRate * 100 : ""}
                 onChange={(event) => {
                   const rows = [...contract.rateSchedule];
-                  rows[index] = { ...change, annualRate: number(event.target.value) / 100 };
+                  const typed = nullableNumber(event.target.value);
+                  rows[index] = {
+                    ...change,
+                    annualRate: typed === null ? Number.NaN : typed / 100,
+                  };
                   setContract({ ...contract, rateSchedule: rows });
                 }}
               />
               <select
+                aria-label={`Nature de la révision ${index + 1}`}
                 className="text-input"
                 value={change.kind}
                 onChange={(event) => {
@@ -1197,23 +1240,21 @@ export function DebtContractForm({
 
         <NestedSection
           title="Paliers de paiement"
+          hint="Paliers de mensualité prévus au contrat signé. Un changement survenu depuis s’enregistre comme événement daté."
           onAdd={() =>
             setContract({
               ...contract,
               paymentSchedule: [
                 ...contract.paymentSchedule,
-                {
-                  effectiveFrom: contract.firstPaymentDate || asOfDate,
-                  amount: contract.paymentAmount ?? 0,
-                  kind: "CONTRACTUAL",
-                },
+                { effectiveFrom: "", amount: Number.NaN, kind: "CONTRACTUAL" },
               ],
             })
           }
         >
           {contract.paymentSchedule.map((change, index) => (
-            <div className="debt-editor-row" key={`${change.effectiveFrom}-${index}`}>
+            <div className="debt-editor-row" key={index}>
               <input
+                aria-label={`Date d’effet du palier ${index + 1}`}
                 className="text-input"
                 type="date"
                 value={change.effectiveFrom}
@@ -1224,18 +1265,23 @@ export function DebtContractForm({
                 }}
               />
               <input
+                aria-label={`Paiement du palier ${index + 1}, en ${currencyLabel}`}
                 className="text-input"
                 type="number"
                 min="0"
                 step="0.01"
-                value={change.amount}
+                value={Number.isFinite(change.amount) ? change.amount : ""}
                 onChange={(event) => {
                   const rows = [...contract.paymentSchedule];
-                  rows[index] = { ...change, amount: number(event.target.value) };
+                  rows[index] = {
+                    ...change,
+                    amount: nullableNumber(event.target.value) ?? Number.NaN,
+                  };
                   setContract({ ...contract, paymentSchedule: rows });
                 }}
               />
               <select
+                aria-label={`Nature du palier ${index + 1}`}
                 className="text-input"
                 value={change.kind}
                 onChange={(event) => {
@@ -1264,25 +1310,12 @@ export function DebtContractForm({
 
         <NestedSection
           title="Remboursements anticipés"
-          onAdd={() =>
-            setContract({
-              ...contract,
-              earlyRepayments: [
-                ...contract.earlyRepayments,
-                {
-                  id: crypto.randomUUID(),
-                  date: asOfDate,
-                  amount: 0,
-                  penalty: null,
-                  outcome: "UNKNOWN",
-                },
-              ],
-            })
-          }
+          hint="Un remboursement se déclare par « Événement ou avenant » : il garde sa date, sa source et l’encours constaté par le prêteur. Les lignes ci-dessous ont été saisies avant ce journal ; elles se corrigent ou se retirent ici."
         >
           {contract.earlyRepayments.map((repayment, index) => (
             <div className="debt-editor-row five" key={repayment.id}>
               <input
+                aria-label={`Date du remboursement ${index + 1}`}
                 className="text-input"
                 type="date"
                 value={repayment.date}
@@ -1297,6 +1330,7 @@ export function DebtContractForm({
                 type="number"
                 min="0.01"
                 step="0.01"
+                aria-label={`Capital remboursé ${index + 1}, en ${currencyLabel}`}
                 placeholder="Capital"
                 value={repayment.amount}
                 onChange={(event) => {
@@ -1310,6 +1344,7 @@ export function DebtContractForm({
                 type="number"
                 min="0"
                 step="0.01"
+                aria-label={`Indemnité du remboursement ${index + 1}, vide si inconnue`}
                 placeholder="Indemnité inconnue"
                 value={repayment.penalty ?? ""}
                 onChange={(event) => {
@@ -1319,6 +1354,7 @@ export function DebtContractForm({
                 }}
               />
               <select
+                aria-label={`Convention du remboursement ${index + 1}`}
                 className="text-input"
                 value={repayment.outcome}
                 onChange={(event) => {
@@ -1586,26 +1622,33 @@ export function DebtContractForm({
 
 function NestedSection({
   title,
+  hint,
   onAdd,
   children,
 }: {
   title: string;
-  onAdd: () => void;
+  /** Ce que la liste porte, et ce qu'elle ne porte pas. */
+  hint?: string;
+  /** Absent : la liste ne s'allonge plus ici (les lignes existantes restent corrigeables). */
+  onAdd?: () => void;
   children: React.ReactNode;
 }) {
   return (
     <section aria-label={title} className="debt-nested-editor">
       <header>
         <strong>{title}</strong>
-        <button
-          aria-label={`Ajouter une ligne : ${title}`}
-          className="button secondary compact"
-          onClick={onAdd}
-          type="button"
-        >
-          <Plus size={13} /> Ajouter
-        </button>
+        {onAdd ? (
+          <button
+            aria-label={`Ajouter une ligne : ${title}`}
+            className="button secondary compact"
+            onClick={onAdd}
+            type="button"
+          >
+            <Plus size={13} /> Ajouter
+          </button>
+        ) : null}
       </header>
+      {hint ? <small className="debt-nested-hint">{hint}</small> : null}
       {/* Une liste vide est un tableau, donc « vraie » : c'est le nombre d'enfants qui compte. */}
       {Children.count(children) ? children : <small>Aucune ligne déclarée.</small>}
     </section>
