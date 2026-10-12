@@ -1,0 +1,22 @@
+# Graphify must not index local secrets or financial exports.
+# This is additive to .gitignore in current Graphify versions.
+.env*
+**/.env*
+*.pem
+*.key
+*.p12
+*.pfx
+*.csv
+*.xlsx
+*.xls
+*.pdf
+*.docx
+*.zip
+*.sqlite
+*.db
+*credentials*
+*secrets*
+*private-data*
+graphify-out/
+node_modules/
+.next/
