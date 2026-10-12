@@ -49,6 +49,18 @@ claude plugin list
 
 Si la marketplace existe déjà, sa commande add peut échouer sans empêcher son installation. Relance Claude Code pour charger les plugins.
 
+### Cas rencontré : erreur SSH GitHub « No ED25519 host key is known »
+
+Quand `claude plugin install` échoue avec `Host key verification failed`, le clone interne utilise SSH. **Ne désactive jamais la vérification des clés SSH.** Dans le terminal Codespaces, utilise :
+
+~~~bash
+git config --global url."https://github.com/".insteadOf "git@github.com:"
+claude plugin install agent-skills@addy-agent-skills
+bash .devcontainer/verify.sh
+~~~
+
+Le bootstrap intègre également ce correctif pour les **nouveaux Codespaces**. Dans un Codespace déjà créé, ces trois commandes corrigent la configuration sans avoir besoin de le reconstruire.
+
 ## Utiliser les quatre outils
 
 - **Agent Skills** : ouvre Claude Code avec la commande claude ; demande une spécification, un plan, puis une revue. Selon la version, commandes /spec, /plan et /review.
