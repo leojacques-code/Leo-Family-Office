@@ -160,12 +160,20 @@ export interface WorkbookInput {
   /** Feuilles supplémentaires, pour éprouver le plafond. */
   extraSheets?: number;
   encrypted?: boolean;
+  /**
+   * Numéros Excel des lignes, quand ils ne se suivent pas : un vrai classeur omet les lignes
+   * vides de son XML. Par défaut, 1, 2, 3…
+   */
+  rowNumbers?: number[];
 }
 
 export function buildWorkbook(input: WorkbookInput): Uint8Array {
   const sheetName = input.sheetName ?? "Feuil1";
   const rowsXml = input.rows
-    .map((cells, index) => `<row r="${index + 1}">${cells.map(cellXml).join("")}</row>`)
+    .map(
+      (cells, index) =>
+        `<row r="${input.rowNumbers?.[index] ?? index + 1}">${cells.map(cellXml).join("")}</row>`,
+    )
     .join("");
 
   const extra = input.extraSheets ?? 0;

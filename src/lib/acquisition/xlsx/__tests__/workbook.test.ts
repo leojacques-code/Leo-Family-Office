@@ -55,6 +55,17 @@ describe("lecture d'un classeur", () => {
     }
   });
 
+  it("conserve le numéro Excel des lignes quand des lignes vides sont absentes du XML", () => {
+    const result = readWorkbook(
+      buildWorkbook({
+        rows: [[{ ref: "A1", type: "inlineStr", value: "Date" }], [{ ref: "A4", value: "1" }]],
+        rowNumbers: [1, 4],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.sheets[0].rowNumbers).toEqual([1, 4]);
+  });
+
   it("N'ÉVALUE PAS une formule : elle lit la valeur en cache et le SIGNALE", () => {
     const result = readWorkbook(
       buildWorkbook({

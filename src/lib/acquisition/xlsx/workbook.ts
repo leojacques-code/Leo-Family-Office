@@ -72,6 +72,12 @@ export interface WorkbookSheet {
    * distinguer une donnée saisie d'un résultat recopié par le tableur.
    */
   formulaCells: string[];
+  /**
+   * Numéro de ligne EXCEL de chaque entrée de `rows` (attribut `r` de `<row>`). Une ligne vide
+   * absente du XML ne laisse pas d'entrée dans `rows` : sans ce numéro, la référence d'une
+   * cellule montrée à l'utilisateur (« C12 ») serait décalée. `null` si le XML ne le porte pas.
+   */
+  rowNumbers: Array<number | null>;
   rowCount: number;
   columnCount: number;
 }
@@ -428,6 +434,7 @@ function parseSheet(input: {
 }): SheetParse {
   const rows: string[][] = [];
   const formulaCells: string[] = [];
+  const rowNumbers: Array<number | null> = [];
   let columnCount = 0;
 
   const rowMatches = input.xml.match(/<row\b[\s\S]*?<\/row>|<row\b[^>]*\/>/g) ?? [];
@@ -448,6 +455,8 @@ function parseSheet(input: {
 
   for (const rowXml of rowMatches) {
     const cells: string[] = [];
+    const declaredRow = /^<row\b[^>]*?\sr="(\d+)"/.exec(rowXml)?.[1];
+    rowNumbers.push(declaredRow === undefined ? null : Number(declaredRow));
     const cellMatches = rowXml.match(/<c\b[\s\S]*?<\/c>|<c\b[^>]*\/>/g) ?? [];
     for (const cellXml of cellMatches) {
       const reference = /r="([A-Z]+\d+)"/.exec(cellXml)?.[1] ?? null;
@@ -484,6 +493,7 @@ function parseSheet(input: {
       name: input.sheetName,
       rows,
       formulaCells,
+      rowNumbers,
       rowCount: rows.length,
       columnCount,
     },
