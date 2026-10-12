@@ -174,7 +174,7 @@ try {
     raw_value: raw,
     normalized_value: raw,
     unit: "MONEY",
-    extraction_method: "NATIVE_TEXT_LAYOUT",
+    extraction_method: "TABULAR_CELL",
     validation_status: "EXTRACTED",
   });
   const date = (line: number, raw: string) => ({
@@ -186,7 +186,7 @@ try {
     raw_value: raw,
     normalized_date: raw,
     unit: "DATE",
-    extraction_method: "NATIVE_TEXT_LAYOUT",
+    extraction_method: "TABULAR_CELL",
     validation_status: "EXTRACTED",
   });
   const fields = [
@@ -206,7 +206,7 @@ try {
       cell_ref: "E2",
       raw_value: "texte",
       unit: "TEXT",
-      extraction_method: "NATIVE_TEXT_LAYOUT",
+      extraction_method: "TABULAR_CELL",
       validation_status: "UNKNOWN_BOX",
     },
   ];

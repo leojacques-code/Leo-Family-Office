@@ -168,6 +168,15 @@ alter table public.document_extraction_fields
     unit in ('EUR', 'PCT', 'COUNT', 'DAYS', 'TEXT', 'MONEY', 'DATE')
   );
 
+-- Successeur de `document_extraction_fields_method_ck` (NATIVE_TEXT_LAYOUT, NATIVE_TEXT_LABEL,
+-- OCR, USER_INPUT). Une cellule de tableur n'est pas lue dans la couche texte d'un PDF : sa
+-- méthode est nommée `TABULAR_CELL`, au lieu d'emprunter celle d'une autre lecture.
+alter table public.document_extraction_fields drop constraint document_extraction_fields_method_ck;
+alter table public.document_extraction_fields
+  add constraint document_extraction_fields_method_v2_ck check (
+    extraction_method in ('NATIVE_TEXT_LAYOUT', 'NATIVE_TEXT_LABEL', 'OCR', 'USER_INPUT', 'TABULAR_CELL')
+  );
+
 -- Successeurs de `corrected_shape_ck` et `user_value_shape_ck` : une correction de DATE
 -- porte `user_date`. Les deux règles restent : une correction DIT QUAND et porte une valeur ;
 -- une valeur corrigée sans le statut correspondant serait une correction invisible.

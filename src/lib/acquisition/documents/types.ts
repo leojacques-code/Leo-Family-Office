@@ -87,10 +87,12 @@ export const EXTRACTION_METHODS = [
   "NATIVE_TEXT_LABEL",
   "OCR",
   "USER_INPUT",
+  // Cellule d'un fichier tabulaire (B19) : ni couche texte de PDF, ni OCR.
+  "TABULAR_CELL",
 ] as const;
 export type ExtractionMethod = (typeof EXTRACTION_METHODS)[number];
 
-export const EXTRACTION_UNITS = ["EUR", "PCT", "COUNT", "DAYS", "TEXT"] as const;
+export const EXTRACTION_UNITS = ["EUR", "PCT", "COUNT", "DAYS", "TEXT", "MONEY", "DATE"] as const;
 export type ExtractionUnit = (typeof EXTRACTION_UNITS)[number];
 
 export type DocumentIssueSeverity = "ERROR" | "WARNING" | "INFO";
