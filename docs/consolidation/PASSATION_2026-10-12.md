@@ -87,7 +87,29 @@ production. Trois risques sur une base peuplée :
   `profils_100.csv`. Les tickets au-delà de B21 ne sont rattachés que par la matrice de
   traçabilité du dossier consolidé.
 
+## 5 bis. B19, revue des candidats documentaires (en cours)
+
+| Commit | Tranche | Contenu |
+|---|---|---|
+| `3cd9a54` | B19.1 | Lecteur pur CSV/XLSX : cases `L{ligne}.{colonne}` localisées, conventions par colonne, vide ≠ zéro, formules signalées, macros refusées, devise lue ou déclarée, doublons et trous signalés, contrôles définis, complétude prouvée ; numéro Excel réel des lignes exposé par le lecteur XLSX partagé |
+| `14965ee` | B19.2 + B19.5 | Migration `20261012140000` (six incompatibilités du cahier résolues additivement, journal `document_field_decisions`, révision attendue obligatoire, validation d'échéancier relue des cases) ; client liasse transmettant la révision ; liste des liasses protégée contre une lecture sans société |
+| `0284a9b` | B19.3 | Repository et route `/api/debt/schedule-documents` ; méthode `TABULAR_CELL` |
+
+Preuves au commit `0284a9b` : suite complète 183 fichiers / 2 549 tests, lint, tsc, build,
+`gate:local` (64 migrations, 117 tables, 492 contraintes, 124 RPC), smokes
+`smoke-document-schedule` (nouveau) et `smoke-document-intelligence` (adapté) verts.
+
+Reste pour clore B19 (critères §7 du cahier) :
+
+- B19.4, écran : entrée « Importer un échéancier » depuis la fiche Dette, revue côte à côte
+  (pièce telle que lue / candidats), bandeau de lecture, conflits, correction avec motif et
+  historique par case, « Valider cette lecture » avec synthèse et mention que rien n'est encore
+  appliqué au prêt, section « Documents » de la dette, aide « ? » partagée ;
+- recette navigateur locale (ordinateur, tablette, mobile, clavier) sur pile auto-hébergée,
+  qui couvrira aussi le repository contre PostgREST et Storage réels (NOT_RUN à ce jour) ;
+- relecture indépendante de la tranche.
+
 ## 6. Prochaine étape
 
-B19 selon `CAHIER_DES_CHARGES_B19_2026-09-25.md`, puis B20 et B21. La clôture de 3C ouvre la
+B19.4 (écran et recette), puis B20 et B21. La clôture de 3C ouvre la
 revue UX transversale (registre UX §4), puis B55 et la phase 4B (Flux).

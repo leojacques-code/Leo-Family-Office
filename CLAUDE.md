@@ -205,10 +205,11 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **63 migrations** sur la branche de travail du lot A (gate local du 12 octobre
-2026, sans credential : 63 appliquées depuis zéro ; décompte relu dans `supabase/migrations/`).
+Le DÉPÔT porte **64 migrations** sur la branche de travail du 12 octobre 2026 (gate local sans
+credential : 64 appliquées depuis zéro, 117 tables publiques, 492 contraintes, 124 RPC ; décompte
+relu dans `supabase/migrations/`).
 La consolidation #52 en portait 62 au gate du 25 septembre (116 tables publiques, 478
-contraintes relevées par le vérificateur, 123 RPC). Les dix-huit dernières ne sont PAS en
+contraintes relevées par le vérificateur, 123 RPC). Les dix-neuf dernières ne sont PAS en
 production (dernier relevé connu de la production : 45, le 9 septembre 2026) :
 
 - `20260914191901_verified_personal_session` : `lfo_verify_session` (B12) ;
@@ -238,6 +239,11 @@ production (dernier relevé connu de la production : 45, le 9 septembre 2026) :
 - `20261012090000_debt_contract_declared_deferral_and_actor` : lot A, reprise de la dernière
   `lfo_save_debt_contract` ; une clé `deferral` absente ou un différé incomplet sont refusés
   (le JSON `null` reste « aucun différé »), une clé d'acteur dans la charge est refusée.
+- `20261012140000_document_schedule_review` : B19, revue d'un échéancier dans Document
+  Intelligence (lecture visant une dette, format tabulaire `NOT_PDF`, localisation de case,
+  unités MONEY et DATE, méthode `TABULAR_CELL`) et piste immuable `document_field_decisions`
+  commune à toutes les familles ; révision attendue obligatoire sur toute décision, liasse
+  comprise.
 
 Avant tout push de `20260924170000` vers une base PARTAGÉE : ses contraintes
 `liabilities_payment_count_ck` et `liabilities_contract_dates_ck` sont ajoutées sans `NOT VALID`.
