@@ -35,6 +35,7 @@ import { changedObservedFields } from "@/lib/data/observed-amounts";
 import { LEDGER_PAGE_SIZE, pagesFor, readAllPages } from "@/lib/data/pagination";
 import { nullableFiniteNumber } from "@/lib/data/row-validation";
 import { IMPORT_STAGING_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
+import { SupabaseOperationError } from "@/lib/data/supabase-errors";
 
 type Row = Record<string, unknown>;
 
@@ -49,7 +50,7 @@ const nullableStr = (value: unknown): string | null =>
   value === null || value === undefined ? null : String(value);
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
-  if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
+  if (result.error) throw new SupabaseOperationError(context, result.error);
   if (result.data === null) throw new Error(`Supabase ${context} : réponse vide`);
   return result.data;
 }

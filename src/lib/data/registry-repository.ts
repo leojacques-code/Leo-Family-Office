@@ -43,6 +43,7 @@ import type {
 } from "@/lib/data/registry-contracts";
 import { nullableFiniteNumber } from "@/lib/data/row-validation";
 import { supabaseAdmin } from "@/lib/data/supabase-client";
+import { SupabaseOperationError } from "@/lib/data/supabase-errors";
 
 /**
  * ACQUISITION DU REGISTRE — PERSISTANCE
@@ -70,7 +71,7 @@ type Row = Record<string, unknown>;
 const DOMAIN = "COMPANY_REGISTRY";
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
-  if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
+  if (result.error) throw new SupabaseOperationError(context, result.error);
   if (result.data === null) throw new Error(`Supabase ${context} : aucune donnée`);
   return result.data;
 }
@@ -170,7 +171,7 @@ class SupabaseRegistryRepository implements RegistryRepository {
       p_user_id: this.user,
       p_payload: payload,
     });
-    if (result.error) throw new Error(`Supabase ${name} : ${result.error.message}`);
+    if (result.error) throw new SupabaseOperationError(name, result.error);
     return result.data;
   }
 
@@ -514,7 +515,7 @@ class SupabaseRegistryRepository implements RegistryRepository {
       p_provider: provider,
     });
     if (result.error)
-      throw new Error(`Supabase lfo_unlink_business_registry : ${result.error.message}`);
+      throw new SupabaseOperationError("lfo_unlink_business_registry", result.error);
     return businessId;
   }
 

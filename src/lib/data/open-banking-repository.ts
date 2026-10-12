@@ -34,6 +34,7 @@ import type {
 import { readAllPages } from "@/lib/data/pagination";
 import { nullableFiniteNumber } from "@/lib/data/row-validation";
 import { supabaseAdmin } from "@/lib/data/supabase-client";
+import { SupabaseOperationError } from "@/lib/data/supabase-errors";
 
 type Row = Record<string, unknown>;
 
@@ -52,7 +53,7 @@ const nullableStr = (value: unknown): string | null =>
   value === null || value === undefined ? null : String(value);
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
-  if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
+  if (result.error) throw new SupabaseOperationError(context, result.error);
   if (result.data === null) throw new Error(`Supabase ${context} : réponse vide`);
   return result.data;
 }
@@ -522,12 +523,17 @@ export class OpenBankingRepository {
     } catch (error) {
       // Un échec NOMME sa cause et CONSERVE son curseur : la reprise ne relit pas ce qui a
       // déjà été écrit, et le diagnostic reste possible.
+      console.error("Synchronisation bancaire en échec", error);
       await this.client.rpc("lfo_fail_bank_sync_run", {
         p_user_id: this.userId,
         p_payload: {
           run_id: runId,
           failure_code: "SERVER_ERROR",
-          failure_message: error instanceof Error ? error.message : String(error),
+          // Message FIXE : `error.message` peut citer une URL de fournisseur, jetons compris,
+          // ou un texte de la base ; il serait persisté puis affiché (CLAUDE.md §3). Le détail
+          // reste dans le journal serveur ci-dessous.
+          failure_message:
+            "Erreur interne pendant la synchronisation ; le détail est journalisé côté serveur.",
         },
       });
       throw error;

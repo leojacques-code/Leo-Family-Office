@@ -40,6 +40,7 @@ import {
   MAX_DOCUMENT_FILE_BYTES,
   MAX_RETAINED_DOCUMENT_FILE_BYTES,
 } from "@/lib/validation/documents";
+import { SupabaseOperationError } from "@/lib/data/supabase-errors";
 
 /**
  * DOCUMENT INTELLIGENCE — PERSISTANCE
@@ -79,7 +80,7 @@ const FIELD_CHUNK = 400;
 export const PREVIEW_FIELD_LIMIT = 500;
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
-  if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
+  if (result.error) throw new SupabaseOperationError(context, result.error);
   if (result.data === null) throw new Error(`Supabase ${context} : aucune donnée`);
   return result.data;
 }
@@ -183,7 +184,7 @@ class SupabaseDocumentRepository implements DocumentRepository {
 
   private async rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
     const result = await this.client().rpc(name, { p_user_id: this.user, ...args });
-    if (result.error) throw new Error(`Supabase ${name} : ${result.error.message}`);
+    if (result.error) throw new SupabaseOperationError(name, result.error);
     return result.data;
   }
 

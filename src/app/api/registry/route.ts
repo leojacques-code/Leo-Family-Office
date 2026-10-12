@@ -9,6 +9,7 @@ import {
   registrySearchSchema,
   registryStateSchema,
 } from "@/lib/validation/registry";
+import { routeFailure as failure } from "@/lib/route-failure";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,15 +36,6 @@ export const runtime = "nodejs";
  * Aucun corps de requête ne dépasse quelques centaines d'octets : rien de volumineux ne
  * traverse cette route.
  */
-
-function failure(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message === "UNAUTHORIZED") {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
-  console.error(fallback, error);
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ error: message }, { status: 400 });
-}
 
 export async function GET(request: Request) {
   try {

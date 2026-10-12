@@ -32,6 +32,7 @@ import type {
 import { readAllPages } from "@/lib/data/pagination";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
 import { DOCUMENTS_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
+import { SupabaseOperationError } from "@/lib/data/supabase-errors";
 
 type Row = Record<string, unknown>;
 
@@ -74,7 +75,7 @@ function observationDate(): string {
 }
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
-  if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
+  if (result.error) throw new SupabaseOperationError(context, result.error);
   if (result.data === null) throw new Error(`Supabase ${context} : réponse vide`);
   return result.data;
 }

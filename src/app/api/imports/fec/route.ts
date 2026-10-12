@@ -8,6 +8,7 @@ import {
   fecCommandSchema,
   fecUploadTicketSchema,
 } from "@/lib/validation/fec-imports";
+import { routeFailure as failure } from "@/lib/route-failure";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,16 +29,6 @@ export const runtime = "nodejs";
  * Aucun corps de requête de cette route ne porte donc de contenu de fichier, et aucun ne
  * dépasse quelques centaines d'octets.
  */
-
-function failure(error: unknown, fallback: string) {
-  const unauthorized = error instanceof Error && error.message === "UNAUTHORIZED";
-  if (unauthorized) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  // Le message d'une RPC d'acquisition est informatif pour l'utilisateur (« couverture de
-  // l'exercice non déclarée ») : il est remonté tel quel, et journalisé pour le reste.
-  console.error(fallback, error);
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ error: message }, { status: 400 });
-}
 
 /** Écritures d'une session comptable. */
 export async function GET(request: Request) {
