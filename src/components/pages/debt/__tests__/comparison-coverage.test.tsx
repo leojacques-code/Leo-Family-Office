@@ -78,3 +78,26 @@ it("retire aussi l’import primaire pendant une reprise de lecture", () => {
   rerender(page(false));
   expect(onChange).toHaveBeenLastCalledWith({ run: expect.any(Function) });
 });
+
+it("ne suppose aucun rendement : la comparaison attend un taux déclaré (lot A)", async () => {
+  const state = buildDemoState("2026-09-13");
+  state.scenarios = [
+    { id: "scenario", name: "Central", annualVolatility: 0.1, annualInflation: 0.02 },
+  ] as typeof state.scenarios;
+  state.metrics.bankCash = 5000;
+  state.liabilities[0]!.currency = state.reportingCurrency;
+  render(
+    <DebtPage
+      state={{ ...state, cashObservationPresent: true }}
+      mutate={vi.fn()}
+      busy={false}
+      setExplanation={vi.fn()}
+    />,
+  );
+  const input = screen.getByRole("spinbutton", { name: /Rendement annuel hypothétique/ });
+  expect(input).toHaveValue(null);
+  expect(screen.getByText(/LFO n’en suppose aucun/)).toBeInTheDocument();
+  expect(screen.queryByText(/Gain espéré non garanti/)).toBeNull();
+  await userEvent.type(input, "4");
+  expect(screen.getByText(/Gain espéré non garanti/)).toBeInTheDocument();
+});

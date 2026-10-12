@@ -83,7 +83,9 @@ type DebtPageProps = Pick<SectionProps, "mutate" | "busy" | "setExplanation"> & 
 
 function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const [selectedId, setSelectedId] = useState(state.liabilities[0]?.id ?? "");
-  const [investmentReturn, setInvestmentReturn] = useState(5.5);
+  // Lot A : aucun rendement n'est supposé. « 5,5 % » préremplis étaient une hypothèse que
+  // personne n'avait fournie (CLAUDE.md §8) ; la comparaison attend un taux DÉCLARÉ.
+  const [investmentReturn, setInvestmentReturn] = useState<number | null>(null);
   const [contractEditor, setContractEditor] = useState<"new" | "edit" | null>(null);
   // B18 : événement ou avenant daté, distinct d'une correction de saisie du contrat.
   const [eventEditor, setEventEditor] = useState(false);
@@ -214,12 +216,14 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   );
   const scenario =
     state.scenarios.find((item) => item.name === "Central") ?? state.scenarios[0] ?? null;
-  const comparison =
+  const comparisonReady =
     loan &&
     state.cashObservationPresent !== false &&
     state.metrics.bankCash !== null &&
     scenario &&
-    loan.currency === state.reportingCurrency
+    loan.currency === state.reportingCurrency;
+  const comparison =
+    comparisonReady && state.metrics.bankCash !== null && scenario && investmentReturn !== null
       ? compareDebtVsInvest({
           availableCash: state.metrics.bankCash,
           debtBalance: loan.currentBalance,
@@ -1055,7 +1059,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           mutate({ action: "cancel_debt_event", eventId, reason })
         }
       />
-      {!comparison ? (
+      {!comparisonReady ? (
         <Callout title="Comparaison à compléter">
           {state.cashObservationPresent === false || state.metrics.bankCash === null
             ? "Renseignez une observation de cash et ses éventuels taux de change avant de comparer remboursement et placement."
@@ -1064,7 +1068,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
               : "La comparaison attend une dette dans la devise de reporting. Les montants de devises différentes ne sont pas comparés directement."}
         </Callout>
       ) : null}
-      {comparison ? (
+      {comparisonReady ? (
         <section className="panel decision-preview">
           <div className="panel-header">
             <div>
@@ -1079,42 +1083,58 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
           </div>
           <div className="decision-controls">
             <label>
-              Rendement annuel hypothétique <strong>{investmentReturn.toFixed(1)} %</strong>
+              Rendement annuel hypothétique, en %
               <input
-                type="range"
+                className="text-input"
+                type="number"
+                inputMode="decimal"
                 min="0"
-                max="10"
+                max="30"
                 step="0.1"
-                value={investmentReturn}
-                onChange={(event) => setInvestmentReturn(Number(event.target.value))}
+                placeholder="À déclarer"
+                value={investmentReturn ?? ""}
+                onChange={(event) => {
+                  const typed = event.target.value === "" ? null : Number(event.target.value);
+                  setInvestmentReturn(
+                    typed === null || !Number.isFinite(typed) || typed < 0 ? null : typed,
+                  );
+                }}
               />
             </label>
           </div>
-          <div className="comparison-cards">
-            <div>
-              <span>
-                Rembourser <Currency currency={currency} value={comparison.capital} />
-              </span>
-              <strong>
-                <OptionalCurrency currency={currency} value={comparison.repay.interestAvoided} />
-              </strong>
-              <small>
-                {comparison.repay.interestAvoided === null
-                  ? "Intérêts évités non calculables sans convention de remboursement anticipé"
-                  : `Intérêts évités sur ${comparison.horizonYears} ans, montant certain`}
-              </small>
+          {!comparison ? (
+            <p className="muted-copy">
+              Indiquez le rendement annuel que vous retenez pour le placement : LFO n’en suppose
+              aucun.
+            </p>
+          ) : null}
+          {comparison ? (
+            <div className="comparison-cards">
+              <div>
+                <span>
+                  Rembourser <Currency currency={currency} value={comparison.capital} />
+                </span>
+                <strong>
+                  <OptionalCurrency currency={currency} value={comparison.repay.interestAvoided} />
+                </strong>
+                <small>
+                  {comparison.repay.interestAvoided === null
+                    ? "Intérêts évités non calculables sans convention de remboursement anticipé"
+                    : `Intérêts évités sur ${comparison.horizonYears} ans, montant certain`}
+                </small>
+              </div>
+              <div>
+                <span>
+                  Investir <Currency currency={currency} value={comparison.capital} />
+                </span>
+                <strong>
+                  <Currency currency={currency} value={comparison.invest.expectedGain} sign />
+                </strong>
+                <small>Gain espéré non garanti, dette conservée</small>
+              </div>
             </div>
-            <div>
-              <span>
-                Investir <Currency currency={currency} value={comparison.capital} />
-              </span>
-              <strong>
-                <Currency currency={currency} value={comparison.invest.expectedGain} sign />
-              </strong>
-              <small>Gain espéré non garanti, dette conservée</small>
-            </div>
-          </div>
-          {comparison.interestAvoidedBlocker ? (
+          ) : null}
+          {comparison?.interestAvoidedBlocker ? (
             <Callout tone="warning" title="Intérêts évités non calculables">
               {comparison.interestAvoidedBlocker} Le montant réellement économisé n’est donc pas
               chiffré ici : les autres grandeurs restent comparables.

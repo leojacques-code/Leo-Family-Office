@@ -48,6 +48,28 @@ const percentFormatter = new Intl.NumberFormat("fr-FR", {
   maximumFractionDigits: 2,
 });
 
+const multipleFormatter = new Intl.NumberFormat("fr-FR", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/**
+ * Multiple DÉCLARÉ, en typographie française (« 6,50 × »). Un multiple absent n'est pas un
+ * multiple nul : il s'affiche « non déclaré », jamais « 0,00 × ».
+ */
+export function formatMultiple(value: number | null | undefined): string {
+  return value === null || value === undefined || !Number.isFinite(value)
+    ? "non déclaré"
+    : `${multipleFormatter.format(value)} ×`;
+}
+
+/** Taux DÉCLARÉ en pourcentage français ; absent, il reste « non déclaré », jamais 0 %. */
+export function formatDeclaredRate(rate: number | null | undefined): string {
+  return rate === null || rate === undefined || !Number.isFinite(rate)
+    ? "non déclaré"
+    : percentFormatter.format(rate);
+}
+
 /** Motifs d'un montant non calculable, en français, prêts pour une infobulle. */
 export function reasonsOf(amount: BusinessAmount, context: ExplainContext): string {
   return amount.blockers.map((item) => describeBlocker(item, context)).join(" · ");
