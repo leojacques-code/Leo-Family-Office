@@ -503,6 +503,7 @@ class SupabaseDocumentRepository implements DocumentRepository {
           ? row.confidence
           : ("MEDIUM" as const),
       validationStatus: readFieldStatus(row.validation_status),
+      decisionRevision: finiteNumber(row.decision_revision, "decision_revision"),
       issues: readIssues(row.issues),
     };
   }
@@ -646,6 +647,8 @@ class SupabaseDocumentRepository implements DocumentRepository {
         "id, business_id, status, detected_kind, detected_variant, fiscal_year_end, file_name, extracted_at, field_count, failed_check_count, not_computable_check_count",
       )
       .eq("user_id", this.user)
+      // Lectures de société seulement : un échéancier (B19) vise une dette, sans société.
+      .not("business_id", "is", null)
       .order("extracted_at", { ascending: false })
       .limit(50);
     if (businessId !== undefined) query = query.eq("business_id", businessId);
@@ -690,10 +693,13 @@ class SupabaseDocumentRepository implements DocumentRepository {
   async correct(input: DocumentCorrectionRequest): Promise<DocumentExtractionPreview> {
     const runId = requireText(
       await this.rpc("lfo_correct_document_extraction_field", {
+        // Charge stricte (B19) : la révision lue est transmise, et seule une correction porte
+        // une valeur — la base refuse `user_value` sur un rejet ou une revue.
         p_payload: {
           field_id: input.fieldId,
           action: input.action,
-          user_value: input.userValue ?? null,
+          expected_revision: input.expectedRevision,
+          ...(input.action === "correct" ? { user_value: input.userValue ?? null } : {}),
           reason: input.reason ?? null,
         },
       }),

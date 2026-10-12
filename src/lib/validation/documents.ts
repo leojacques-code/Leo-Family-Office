@@ -54,6 +54,8 @@ export const documentAnalyzeSchema = z.object({
 
 const documentCorrectionBase = z.object({
   fieldId: z.string().uuid(),
+  /** Révision lue de la case : sans elle, une seconde décision écraserait la première. */
+  expectedRevision: z.number().int().nonnegative(),
   userValue: z.number().finite().nullish(),
   reason: z.string().trim().max(500).nullish(),
 });

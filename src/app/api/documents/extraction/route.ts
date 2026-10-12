@@ -118,6 +118,7 @@ export async function PATCH(request: Request) {
           await repository.correct({
             fieldId: command.fieldId,
             action: command.action,
+            expectedRevision: command.expectedRevision,
             userValue: command.userValue ?? null,
             reason: command.reason ?? null,
           }),

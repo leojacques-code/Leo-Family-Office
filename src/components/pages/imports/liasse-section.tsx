@@ -548,6 +548,7 @@ export default function LiasseSection({ businesses, refresh }: LiasseSectionProp
                               void command({
                                 action: "correct",
                                 fieldId: field.fieldId,
+                                expectedRevision: field.decisionRevision,
                                 userValue: Number(
                                   (correction[field.fieldId] ?? "").replace(",", "."),
                                 ),
@@ -562,7 +563,11 @@ export default function LiasseSection({ businesses, refresh }: LiasseSectionProp
                             className="button secondary"
                             disabled={busy}
                             onClick={() =>
-                              void command({ action: "reject", fieldId: field.fieldId })
+                              void command({
+                                action: "reject",
+                                fieldId: field.fieldId,
+                                expectedRevision: field.decisionRevision,
+                              })
                             }
                           >
                             Écarter

@@ -71,6 +71,15 @@ async function rejects(
 
 let userId = "";
 
+/** B19 : une décision transmet la révision qu'elle a lue (`20261012140000`). */
+async function revisionOf(fieldId: string): Promise<number> {
+  const result = await client.query<{ revision: number }>(
+    "select decision_revision as revision from public.document_extraction_fields where id = $1",
+    [fieldId],
+  );
+  return result.rows[0].revision;
+}
+
 async function rpc(name: string, payload: unknown): Promise<string> {
   const result = await client.query<{ value: string }>(
     `select public.${name}($1::uuid, $2::jsonb)::text as value`,
@@ -407,6 +416,7 @@ try {
   );
   await rpc("lfo_correct_document_extraction_field", {
     field_id: duplicateId.rows[0].id,
+    expected_revision: await revisionOf(duplicateId.rows[0].id),
     action: "reject",
     reason: "Case d'un autre formulaire, hors périmètre de ce contrôle",
   });
@@ -446,6 +456,7 @@ try {
   );
   await rpc("lfo_correct_document_extraction_field", {
     field_id: passifId.rows[0].id,
+    expected_revision: await revisionOf(passifId.rows[0].id),
     action: "correct",
     user_value: 360_000,
     reason: "Relecture du PDF : 360 000 et non 350 000",
@@ -477,7 +488,14 @@ try {
   // Corriger vers rien n'est pas une correction.
   await rejects(
     `select public.lfo_correct_document_extraction_field($1::uuid, $2::jsonb)`,
-    [userId, JSON.stringify({ field_id: passifId.rows[0].id, action: "correct" })],
+    [
+      userId,
+      JSON.stringify({
+        field_id: passifId.rows[0].id,
+        action: "correct",
+        expected_revision: await revisionOf(passifId.rows[0].id),
+      }),
+    ],
     "Une correction sans valeur a été acceptée",
     "n'est pas une correction",
   );
@@ -493,6 +511,7 @@ try {
   // Retour à l'équilibre : la correction est ramenée à la valeur imprimée.
   await rpc("lfo_correct_document_extraction_field", {
     field_id: passifId.rows[0].id,
+    expected_revision: await revisionOf(passifId.rows[0].id),
     action: "correct",
     user_value: 350_000,
     reason: "Retour à la valeur imprimée",

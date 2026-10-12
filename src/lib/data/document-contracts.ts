@@ -57,6 +57,11 @@ export interface DocumentFieldView {
   extractionMethod: ExtractionMethod;
   confidence: "HIGH" | "MEDIUM" | "LOW";
   validationStatus: ExtractionFieldStatus;
+  /**
+   * Révision de la case (B19). Une décision la transmet : si la case a changé depuis, la base
+   * refuse en conflit au lieu d'écraser une décision prise ailleurs.
+   */
+  decisionRevision: number;
   issues: DocumentIssue[];
 }
 
@@ -162,6 +167,8 @@ export interface DocumentAnalyzeRequest {
 export interface DocumentCorrectionRequest {
   fieldId: string;
   action: "correct" | "reject" | "review";
+  /** Révision LUE de la case ; obligatoire depuis B19. */
+  expectedRevision: number;
   userValue?: number | null;
   reason?: string | null;
 }
