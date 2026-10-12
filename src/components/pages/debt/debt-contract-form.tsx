@@ -37,6 +37,11 @@ type Structure = {
   paymentFrequency: "" | DebtContractInput["paymentFrequency"];
   interestConvention: "" | DebtContractInput["interestConvention"];
   rateType: "" | DebtContractInput["rateType"];
+  /**
+   * Différé DÉCLARÉ : « » tant que l'utilisateur n'a rien répondu. « Aucun » est une réponse,
+   * pas une valeur de départ (lot A du 12 octobre 2026 ; la base refuse la clé absente).
+   */
+  deferral: "" | "NONE" | "PRINCIPAL_ONLY" | "TOTAL";
 };
 
 const MODES: Array<{ value: Exclude<Mode, "">; label: string; hint: string }> = [
@@ -341,6 +346,8 @@ export function DebtContractForm({
         paymentFrequency: loan ? loan.paymentFrequency : "",
         interestConvention: loan ? loan.interestConvention : "",
         rateType: loan ? loan.rateType : "",
+        // Un contrat enregistré porte une réponse ; une création ou une promotion n'en a pas.
+        deferral: loan ? (loan.deferral?.kind ?? "NONE") : "",
       },
       requiredValues: {
         principal: loan?.principal ?? null,
@@ -542,6 +549,17 @@ export function DebtContractForm({
       setFormError(
         "Indiquez le traitement de l’assurance : incluse, séparée, absente ou inconnue.",
       );
+      return;
+    }
+    if (structure.deferral === "") {
+      setFormError("Indiquez s’il existe un différé : aucun, sur le capital seulement, ou total.");
+      return;
+    }
+    if (
+      contract.deferral &&
+      (!Number.isInteger(contract.deferral.months) || contract.deferral.months < 1)
+    ) {
+      setFormError("Indiquez le nombre d’échéances différées, en nombre entier.");
       return;
     }
     if (
@@ -1102,21 +1120,25 @@ export function DebtContractForm({
             Différé
             <select
               className="text-input"
-              value={contract.deferral?.kind ?? "NONE"}
-              onChange={(event) =>
+              value={structure.deferral}
+              onChange={(event) => {
+                const choice = event.target.value as Structure["deferral"];
+                setStructure((current) => ({ ...current, deferral: choice }));
                 setContract({
                   ...contract,
                   deferral:
-                    event.target.value === "NONE"
+                    choice === "" || choice === "NONE"
                       ? null
                       : {
-                          kind: event.target.value as "PRINCIPAL_ONLY" | "TOTAL",
-                          months: contract.deferral?.months ?? 1,
+                          kind: choice,
+                          // Durée jamais supposée : elle reste à saisir (NaN = vide).
+                          months: contract.deferral?.months ?? Number.NaN,
                           interestTreatment: contract.deferral?.interestTreatment ?? "UNKNOWN",
                         },
-                })
-              }
+                });
+              }}
             >
+              <option value="">À déclarer</option>
               <option value="NONE">Aucun</option>
               <option value="PRINCIPAL_ONLY">Capital seulement</option>
               <option value="TOTAL">Total</option>
@@ -1130,11 +1152,14 @@ export function DebtContractForm({
                   className="text-input"
                   type="number"
                   min="1"
-                  value={contract.deferral.months}
+                  value={Number.isFinite(contract.deferral.months) ? contract.deferral.months : ""}
                   onChange={(event) =>
                     setContract({
                       ...contract,
-                      deferral: { ...contract.deferral!, months: number(event.target.value) },
+                      deferral: {
+                        ...contract.deferral!,
+                        months: nullableNumber(event.target.value) ?? Number.NaN,
+                      },
                     })
                   }
                 />

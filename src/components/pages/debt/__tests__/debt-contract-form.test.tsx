@@ -40,6 +40,8 @@ describe("nouveau contrat de dette : vide reste vide (document 03 §8, document 
     expect(screen.getByLabelText("Périodicité des échéances")).toHaveValue("");
     expect(screen.getByLabelText("Convention d’intérêt")).toHaveValue("");
     expect(screen.getByLabelText("Type de taux")).toHaveValue("");
+    // Lot A : le différé n'est pas supposé absent.
+    expect(screen.getByLabelText("Différé")).toHaveValue("");
   });
 
   it("refuse l’enregistrement tant que la structure n’est pas choisie", () => {
@@ -130,6 +132,8 @@ describe("B16 : contrat minimal et synthèse avant enregistrement", () => {
     });
     fillMoney(/Paiement par échéance/, "100");
     fireEvent.click(screen.getByLabelText("Inconnue (coût incomplet)"));
+    // Lot A : le différé se déclare, « Aucun » n’est pas une valeur de départ.
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "NONE" } });
     const synthesis = screen.getByRole("region", { name: "Synthèse du contrat" });
     expect(synthesis).toHaveTextContent(
       "12, dont 12 amortissant du capital (durée déduite de la mensualité)",
@@ -252,6 +256,8 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     );
     fillO03();
     fireEvent.click(screen.getByLabelText("Prélevée séparément"));
+    // Lot A : le différé se déclare, « Aucun » n’est pas une valeur de départ.
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "NONE" } });
     fireEvent.change(screen.getByLabelText("Assureur (facultatif)"), {
       target: { value: "Assureur" },
     });
@@ -310,6 +316,8 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     );
     fillO03();
     fireEvent.click(screen.getByLabelText("Prélevée séparément"));
+    // Lot A : le différé se déclare, « Aucun » n’est pas une valeur de départ.
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "NONE" } });
     fireEvent.click(screen.getByRole("button", { name: /Ajouter un assuré/ }));
     fireEvent.change(screen.getByLabelText("Nom de l’assuré 1"), { target: { value: "A" } });
     fireEvent.change(screen.getByLabelText("Quotité de l’assuré 1, en pourcentage"), {
@@ -339,6 +347,8 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     );
     fillO03();
     fireEvent.click(screen.getByLabelText("Absence d’assurance confirmée"));
+    // Lot A : le différé se déclare, « Aucun » n’est pas une valeur de départ.
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "NONE" } });
     const section = screen.getByRole("region", { name: "Frais ponctuels" });
     expect(section).toHaveTextContent("Aucune ligne déclarée.");
     fireEvent.click(
@@ -365,6 +375,8 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     );
     fillO03();
     fireEvent.click(screen.getByLabelText("Absence d’assurance confirmée"));
+    // Lot A : le différé se déclare, « Aucun » n’est pas une valeur de départ.
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "NONE" } });
     fireEvent.click(screen.getByRole("button", { name: "Ajouter une ligne : Révisions de taux" }));
     expect(screen.getByLabelText("Date d’effet de la révision 1")).toHaveValue("");
     expect(screen.getByLabelText("Taux annuel de la révision 1, en %")).toHaveValue(null);
@@ -411,6 +423,8 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     );
     fillO03();
     fireEvent.click(screen.getByLabelText("Prélevée séparément"));
+    // Lot A : le différé se déclare, « Aucun » n’est pas une valeur de départ.
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "NONE" } });
     expect(screen.getByLabelText("Début de couverture (facultatif)")).toHaveValue("");
     expect(screen.getByLabelText("Base assurée (facultative)")).toHaveValue("");
     expect(screen.getByLabelText("Compte débité (facultatif)")).toHaveValue("");
@@ -449,6 +463,8 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     );
     fillO03();
     fireEvent.click(screen.getByLabelText("Prélevée séparément"));
+    // Lot A : le différé se déclare, « Aucun » n’est pas une valeur de départ.
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "NONE" } });
     fireEvent.change(screen.getByLabelText("Premier débit"), { target: { value: "2026-01-05" } });
     fireEvent.change(screen.getByLabelText("Fréquence des débits"), {
       target: { value: "MONTHLY" },
@@ -479,6 +495,8 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     );
     fillO03();
     fireEvent.click(screen.getByLabelText("Prélevée séparément"));
+    // Lot A : le différé se déclare, « Aucun » n’est pas une valeur de départ.
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "NONE" } });
     fireEvent.change(screen.getByLabelText("Premier débit"), { target: { value: "2026-01-05" } });
     fillMoney(/Prime par débit/, "5");
     fireEvent.submit(screen.getByRole("button", { name: "Ajouter cette dette" }).closest("form")!);
@@ -486,5 +504,86 @@ describe("B17 : assurance séparée dans le contrat (document 04, étape D)", ()
     expect(screen.getByRole("alert")).toHaveTextContent(
       "première date de débit, fréquence et prime",
     );
+  });
+});
+
+describe("lot A : le différé se déclare (CLÉ ABSENTE ≠ « aucun différé »)", () => {
+  const fillMoney = (label: RegExp, value: string) => {
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.blur(screen.getByLabelText(label));
+  };
+  const fillMinimal = () => {
+    fireEvent.change(screen.getByLabelText("Mode de remboursement"), {
+      target: { value: "AMORTIZING" },
+    });
+    fireEvent.change(screen.getByLabelText("Nom de la dette"), { target: { value: "Prêt D" } });
+    fireEvent.change(screen.getByLabelText("Prêteur"), { target: { value: "Banque" } });
+    fillMoney(/Capital initial emprunté/, "1200");
+    fillMoney(/Encours observé initial/, "1200");
+    fireEvent.change(screen.getByLabelText("Date de l’encours initial"), {
+      target: { value: "2026-01-01" },
+    });
+    fillMoney(/Taux annuel/, "0");
+    fireEvent.change(screen.getByLabelText("Type de taux"), { target: { value: "FIXED" } });
+    fireEvent.change(screen.getByLabelText("Périodicité des échéances"), {
+      target: { value: "MONTHLY" },
+    });
+    fireEvent.change(screen.getByLabelText("Convention d’intérêt"), {
+      target: { value: "PROPORTIONAL" },
+    });
+    fireEvent.change(screen.getByLabelText("Première échéance"), {
+      target: { value: "2026-01-05" },
+    });
+    fillMoney(/Paiement par échéance/, "100");
+    fireEvent.click(screen.getByLabelText("Inconnue (coût incomplet)"));
+  };
+  const renderNew = (onSave: (...args: unknown[]) => unknown) =>
+    render(
+      <DebtContractForm
+        asOfDate="2026-01-01"
+        reportingCurrency="EUR"
+        busy={false}
+        loan={null}
+        onCancel={vi.fn()}
+        onSave={onSave as never}
+      />,
+    );
+  const submit = () =>
+    fireEvent.submit(screen.getByRole("button", { name: "Ajouter cette dette" }).closest("form")!);
+
+  it("refuse l'enregistrement tant que le différé n'est pas déclaré", () => {
+    const onSave = vi.fn();
+    renderNew(onSave);
+    fillMinimal();
+    submit();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Indiquez s’il existe un différé");
+  });
+
+  it("transmet « Aucun » comme null, une réponse et non une valeur de départ", async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    renderNew(onSave);
+    fillMinimal();
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "NONE" } });
+    submit();
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0]![0]).toMatchObject({ deferral: null });
+  });
+
+  it("ne suppose pas la durée d'un différé et l'exige entière", async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    renderNew(onSave);
+    fillMinimal();
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "TOTAL" } });
+    expect(screen.getByLabelText("Échéances différées")).toHaveValue(null);
+    submit();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("nombre d’échéances différées");
+    fireEvent.change(screen.getByLabelText("Échéances différées"), { target: { value: "6" } });
+    submit();
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0]![0]).toMatchObject({
+      deferral: { kind: "TOTAL", months: 6, interestTreatment: "UNKNOWN" },
+    });
   });
 });

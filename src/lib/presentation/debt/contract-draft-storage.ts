@@ -19,6 +19,8 @@ export interface ContractDraftState {
     paymentFrequency: string;
     interestConvention: string;
     rateType: string;
+    /** Différé déclaré (« » tant qu'il n'est pas répondu) ; absent des brouillons antérieurs. */
+    deferral?: string;
   };
   requiredValues: {
     principal: number | null;
@@ -35,6 +37,7 @@ const STRUCTURE_VALUES: Record<keyof ContractDraftState["structure"], readonly s
   paymentFrequency: ["", "MONTHLY", "QUARTERLY", "SEMIANNUAL", "ANNUAL"],
   interestConvention: ["", "PROPORTIONAL", "ACTUAL_365"],
   rateType: ["", "FIXED", "VARIABLE"],
+  deferral: ["", "NONE", "PRINCIPAL_ONLY", "TOTAL"],
 };
 const INSURANCE_CHOICES = ["", "INCLUDED", "SEPARATE", "NONE", "UNKNOWN"];
 
@@ -150,6 +153,16 @@ export function restoreContractDraft(
         base.structure.interestConvention,
       ),
       rateType: allowed(structure.rateType, STRUCTURE_VALUES.rateType, base.structure.rateType),
+      // Un brouillon antérieur au lot A ne porte pas de réponse : celle de départ s'applique.
+      ...(base.structure.deferral !== undefined
+        ? {
+            deferral: allowed(
+              structure.deferral,
+              STRUCTURE_VALUES.deferral,
+              base.structure.deferral,
+            ),
+          }
+        : {}),
     },
     requiredValues: {
       principal: numberOrNull(required.principal, base.requiredValues.principal),

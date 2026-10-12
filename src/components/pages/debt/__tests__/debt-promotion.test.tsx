@@ -60,6 +60,8 @@ describe("B16 : décrire le contrat d'une dette connue par son seul encours", ()
     });
     fireEvent.change(screen.getByLabelText("Prêteur"), { target: { value: "Famille" } });
     fireEvent.click(screen.getByLabelText("Inconnue (coût incomplet)"));
+    // Lot A : le différé se déclare, « Aucun » n’est pas une valeur de départ.
+    fireEvent.change(screen.getByLabelText("Différé"), { target: { value: "NONE" } });
     fill(/Capital initial emprunté/, "2000");
     fill(/Taux annuel/, "1");
     fill(/Paiement par échéance/, "100");

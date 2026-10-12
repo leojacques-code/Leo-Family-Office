@@ -129,4 +129,31 @@ describe("Brouillon de contrat : sérialisation et relecture défensive", () => 
     );
     expect(wrong.changeReason).toBe("");
   });
+
+  it("relit la réponse au différé, et ne l'invente pas pour un brouillon antérieur au lot A", () => {
+    const withDeferral: ContractDraftState = {
+      ...base,
+      structure: { ...base.structure, deferral: "" },
+    };
+    const answered = restoreContractDraft(
+      serializeContractDraft({
+        ...withDeferral,
+        structure: { ...withDeferral.structure, deferral: "TOTAL" },
+      }),
+      withDeferral,
+    );
+    expect(answered.structure.deferral).toBe("TOTAL");
+    // Brouillon ancien sans réponse : la réponse de départ (« à déclarer ») s'applique.
+    const legacy = restoreContractDraft(
+      { ...serializeContractDraft(base), structure: base.structure },
+      withDeferral,
+    );
+    expect(legacy.structure.deferral).toBe("");
+    // Valeur hors liste : ignorée, jamais lue comme « aucun ».
+    const forged = restoreContractDraft(
+      { ...serializeContractDraft(base), structure: { ...base.structure, deferral: "NOPE" } },
+      withDeferral,
+    );
+    expect(forged.structure.deferral).toBe("");
+  });
 });
