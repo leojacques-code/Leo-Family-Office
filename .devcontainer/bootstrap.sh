@@ -38,6 +38,10 @@ if command -v graphify >/dev/null 2>&1; then
   step "Graphify skill (user scope)" graphify install
 fi
 
+# Claude plugin installers may internally clone GitHub using SSH, even when the marketplace URL is HTTPS.
+# Prefer HTTPS inside this disposable Codespace; never disable SSH host-key verification.
+step "GitHub HTTPS instead of SSH for plugin clones" git config --global url."https://github.com/".insteadOf "git@github.com:"
+
 if command -v claude >/dev/null 2>&1; then
   if ! claude plugin list 2>/dev/null | grep -Fq "agent-skills@addy-agent-skills"; then
     step "Agent Skills marketplace (HTTPS)" claude plugin marketplace add https://github.com/addyosmani/agent-skills.git
