@@ -357,8 +357,12 @@ export function deriveFlowMetrics(
   // `monthlyDebtService` ne couvre que les contrats : avec une dette sans échéancier active,
   // soustraire ce seul service surestimerait le cash-flow libre sans le dire.
   const unscheduledDebt = outstandingDebts.some((debt) => debt.currentBalance > 0);
+  // Même règle pour une dépense déclarée sans montant : la retirer de la soustraction
+  // surestimerait le cash-flow libre sans le dire (NULL ≠ ZÉRO). `monthlyExpenses` reste la
+  // somme des seules dépenses connues, et `dataCompleteness` dit qu'elle est partielle.
+  const unknownExpense = knownExpenses.length < expenses.length;
   const freeCashFlow =
-    monthlyIncome === null || unscheduledDebt
+    monthlyIncome === null || unscheduledDebt || unknownExpense
       ? null
       : monthlyIncome - monthlyExpenses - monthlyDebtService;
   const completeFields = knownExpenses.length;

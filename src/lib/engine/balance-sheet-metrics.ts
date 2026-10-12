@@ -1,4 +1,5 @@
 import {
+  addMonths,
   debtServiceBreakdownForPeriod,
   debtServiceNextTwelveMonths,
   insuranceKnown,
@@ -103,12 +104,6 @@ function ratio(
 function addDays(iso: string, days: number): string {
   const value = new Date(`${iso}T00:00:00Z`);
   value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-}
-
-function addMonths(iso: string, months: number): string {
-  const value = new Date(`${iso}T00:00:00Z`);
-  value.setUTCMonth(value.getUTCMonth() + months);
   return value.toISOString().slice(0, 10);
 }
 
@@ -331,6 +326,8 @@ export function deriveCanonicalBalanceSheetMetrics(input: {
     },
     history: {
       mtd: historyChange(current, startOfMonth, snapshots),
+      // Mois calendaires plafonnés au dernier jour (31 mars − 1 mois = 28 février) : sans
+      // plafond, la référence « M-1 » tombait dans le mois courant (3 mars).
       m1: historyChange(current, addMonths(asOf, -1), snapshots),
       m3: historyChange(current, addMonths(asOf, -3), snapshots),
       m12: historyChange(current, addMonths(asOf, -12), snapshots),
