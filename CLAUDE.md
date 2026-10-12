@@ -205,9 +205,11 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **62 migrations** sur la branche de consolidation (gate local du 25 septembre
-2026 : 62 appliquées depuis zéro, 116 tables publiques, 478 contraintes relevées par le
-vérificateur, 123 RPC). Les dix-sept dernières ne sont PAS en production :
+Le DÉPÔT porte **63 migrations** sur la branche de travail du lot A (gate local du 12 octobre
+2026, sans credential : 63 appliquées depuis zéro ; décompte relu dans `supabase/migrations/`).
+La consolidation #52 en portait 62 au gate du 25 septembre (116 tables publiques, 478
+contraintes relevées par le vérificateur, 123 RPC). Les dix-huit dernières ne sont PAS en
+production (dernier relevé connu de la production : 45, le 9 septembre 2026) :
 
 - `20260914191901_verified_personal_session` : `lfo_verify_session` (B12) ;
 - `20260915064740_personal_reference_isolation` : références composites par propriétaire (B13) ;
@@ -233,6 +235,9 @@ vérificateur, 123 RPC). Les dix-sept dernières ne sont PAS en production :
   avant la première correction d'un contrat antérieur au versionnement, gardes de forme
   séquentielles de `lfo_record_debt_event` (relecture B18). Elle remplace la contrainte
   `liability_contract_versions_kind_ck` par `liability_contract_versions_kind_v2_ck`.
+- `20261012090000_debt_contract_declared_deferral_and_actor` : lot A, reprise de la dernière
+  `lfo_save_debt_contract` ; une clé `deferral` absente ou un différé incomplet sont refusés
+  (le JSON `null` reste « aucun différé »), une clé d'acteur dans la charge est refusée.
 
 Avant tout push de `20260924170000` vers une base PARTAGÉE : ses contraintes
 `liabilities_payment_count_ck` et `liabilities_contract_dates_ck` sont ajoutées sans `NOT VALID`.
@@ -385,10 +390,13 @@ canonique, jamais ce que la source a écrit, et une transaction importée n'est 
 supprimable en laissant sa provenance orpheline. SESSION ABSENTE ≠ SESSION INVISIBLE : un
 garde-fou qui décide à partir d'une lecture filtrée par la RLS de l'appelant conclut
 « déjà supprimé » sur une simple absence de droit, et autorise. La question « cet objet
-existe-t-il ? » se lit donc indépendamment de la visibilité de l'appelant, et le seul
-`SECURITY DEFINER` du schéma applicatif existe pour cela : `search_path` vide, objets
+existe-t-il ? » se lit donc indépendamment de la visibilité de l'appelant, et les deux seuls
+`SECURITY DEFINER` du schéma `public` existent pour cela (`import_session_freeze_state`,
+`bank_sync_freeze_state`) ; le troisième et dernier de la base, `lfo_private.verify_session`
+(B12), lit `auth.sessions` pour vérifier une session. Tous trois : `search_path` vide, objets
 qualifiés, aucune écriture, aucun `execute` pour `public`, `anon` ni `authenticated`, et un
-nom hors du contrat `lfo_*`, qui reste sans aucune RPC `SECURITY DEFINER`. UN FAIT ÉCRIT
+nom hors du contrat `lfo_*`, qui reste sans aucune RPC `SECURITY DEFINER`. Ce décompte se
+relit dans les migrations (`grep -i "security definer"`), il ne se recopie pas. UN FAIT ÉCRIT
 GÈLE TOUT LE BRUT DE SA SESSION : l'autorisation s'appuie sur la PREUVE qu'un fait existe,
 jamais sur le statut affiché, sans quoi un statut remis en arrière rouvrirait la suppression
 de sa propre provenance. Et SUPPRIMER LE BRUT D'UNE SESSION VIVANTE N'EST PAS UN ABANDON :
