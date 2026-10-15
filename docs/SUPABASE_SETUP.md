@@ -246,6 +246,25 @@ Points de contrat à relire avant application :
 - deux listes closes vivent en base — les huit domaines du §19.1 et les trois réponses du
   §18.1 — et elles doivent rester identiques à celles de `src/lib/presentation/today/`.
 
+## Migration 65 — droits explicites du serveur sur les projets neufs
+
+`20261015130044_explicit_server_role_grants` corrige un défaut constaté sur le staging
+Free `bjxhnwvomoznorijauyl` après application exacte des 64 migrations : l'option de
+création « Automatically expose new tables » désactivée laisse de nombreuses tables
+sans grants pour `service_role`. BYPASSRLS n'accorde pas les privilèges SQL manquants.
+
+Cette migration additive explicite les droits du serveur et ses privilèges par défaut
+sur les futures tables/séquences. Les interdictions DELETE/TRUNCATE de Goals et
+Décisions restent en place. Aucun droit nouveau n'est donné à `anon` ou `authenticated`.
+Le verifier contrôle désormais les droits serveur ainsi que les cinq interdictions de
+suppression d'audit. Application autorisée uniquement sur le staging dans cette reprise ;
+la production reste à 45 migrations et nécessite un accord distinct.
+
+L'historique des 64 applications MCP a été relevé avec ses identifiants d'exécution, puis
+aligné sur les identifiants du dépôt sur ce staging neuf uniquement. Les 64 SQL enregistrés
+correspondent octet pour octet aux fichiers GitHub (SHA-256 comparés), notamment B19.
+Aucun SQL appliqué ni fichier historique n'a été réécrit. Voir le rapport de recette.
+
 ## 4. Vérifications
 
 Après application :

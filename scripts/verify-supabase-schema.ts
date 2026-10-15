@@ -75,6 +75,7 @@ const canonicalMigrations = [
   "20260925140000",
   "20261012090000",
   "20261012140000",
+  "20261015130044",
 ] as const;
 
 const requiredColumns: Record<string, string[]> = {
@@ -2708,9 +2709,24 @@ try {
      where table_schema = 'public'
        and grantee = 'service_role'
        and privilege_type = 'DELETE'
-       and table_name in ('goals', 'goal_versions')`);
+       and table_name in ('goals', 'goal_versions', 'decision_cases', 'decision_case_versions', 'decision_runs')`);
   for (const row of serviceRoleGoalDeletes.rows) {
-    failures.push(`Suppression Goals V2 ouverte à service_role : public.${row.table_name}`);
+    failures.push(
+      `Suppression de l'audit Goals/Décisions ouverte à service_role : public.${row.table_name}`,
+    );
+  }
+
+  const serverAccess = await client.query<{ table_name: string }>(`
+    select c.relname as table_name
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public' and c.relkind = 'r'
+       and (not has_table_privilege('service_role', c.oid, 'SELECT')
+         or not has_table_privilege('service_role', c.oid, 'INSERT')
+         or not has_table_privilege('service_role', c.oid, 'UPDATE')
+         or (c.relname not in ('goals', 'goal_versions', 'decision_cases', 'decision_case_versions', 'decision_runs')
+           and not has_table_privilege('service_role', c.oid, 'DELETE')))`);
+  for (const row of serverAccess.rows) {
+    failures.push(`Persistance serveur inaccessible à service_role : public.${row.table_name}`);
   }
 
   const rpcs = await client.query<{

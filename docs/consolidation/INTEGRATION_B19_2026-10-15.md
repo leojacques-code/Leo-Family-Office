@@ -1,6 +1,8 @@
 # Intégration hébergée B19 — 15 octobre 2026
 
-**Verdict : staging Free préparé, création en attente de la saisie du mot de passe PostgreSQL par le propriétaire. B19 n'est pas clôturé.**
+**État initial conservé pour audit. Le staging a depuis été créé manuellement ; la suite
+est suivie dans [RECETTE_HEBERGEE_B19_2026-10-15.md](RECETTE_HEBERGEE_B19_2026-10-15.md).
+B19 n'est pas clôturé.**
 
 La production n'a reçu aucune mutation SQL, migration, donnée de test ou modification de
 configuration. Aucune fusion dans `main`. B20 et B21 ne sont pas commencés.

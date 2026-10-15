@@ -1,0 +1,508 @@
+{
+  "migrations": 64,
+  "migration_sources": [
+    {
+      "version": "20261015122903",
+      "name": "202608190001_initial_family_office",
+      "statement_count": 1,
+      "statement_bytes": 17776
+    },
+    {
+      "version": "20261015122941",
+      "name": "202608190002_scenario_parameters",
+      "statement_count": 1,
+      "statement_bytes": 3276
+    },
+    {
+      "version": "20261015122942",
+      "name": "202608240001_scenario_investment_allocation",
+      "statement_count": 1,
+      "statement_bytes": 2012
+    },
+    {
+      "version": "20261015123134",
+      "name": "202608240002_cash_flow_engine_v2",
+      "statement_count": 1,
+      "statement_bytes": 9314
+    },
+    {
+      "version": "20261015123147",
+      "name": "202608240003_debt_engine_v2",
+      "statement_count": 1,
+      "statement_bytes": 6514
+    },
+    {
+      "version": "20261015123158",
+      "name": "202608240004_debt_engine_v2_1",
+      "statement_count": 1,
+      "statement_bytes": 7092
+    },
+    {
+      "version": "20261015123159",
+      "name": "202608240005_supabase_only_runtime",
+      "statement_count": 1,
+      "statement_bytes": 14274
+    },
+    {
+      "version": "20261015123235",
+      "name": "20260824230233_debt_contract_input",
+      "statement_count": 1,
+      "statement_bytes": 11423
+    },
+    {
+      "version": "20261015123245",
+      "name": "20260824231522_debt_schedule_actual_priority",
+      "statement_count": 1,
+      "statement_bytes": 953
+    },
+    {
+      "version": "20261015123246",
+      "name": "20260825012954_debt_observation_user_index",
+      "statement_count": 1,
+      "statement_bytes": 120
+    },
+    {
+      "version": "20261015123310",
+      "name": "20260825020545_canonical_balance_sheet_v2",
+      "statement_count": 1,
+      "statement_bytes": 11334
+    },
+    {
+      "version": "20261015123312",
+      "name": "20260825021127_liability_currency_balance_sheet_v2",
+      "statement_count": 1,
+      "statement_bytes": 424
+    },
+    {
+      "version": "20261015123313",
+      "name": "20260825021742_snapshot_item_owner_integrity",
+      "statement_count": 1,
+      "statement_bytes": 698
+    },
+    {
+      "version": "20261015123314",
+      "name": "20260825063626_snapshot_item_owner_fk_index",
+      "statement_count": 1,
+      "statement_bytes": 131
+    },
+    {
+      "version": "20261015123326",
+      "name": "20260825063831_snapshot_item_fk_covering_index",
+      "statement_count": 1,
+      "statement_bytes": 205
+    },
+    {
+      "version": "20261015123337",
+      "name": "20260825193427_portfolio_data_foundation",
+      "statement_count": 1,
+      "statement_bytes": 24702
+    },
+    {
+      "version": "20261015123339",
+      "name": "20260825193606_portfolio_fk_covering_indexes",
+      "statement_count": 1,
+      "statement_bytes": 698
+    },
+    {
+      "version": "20261015123349",
+      "name": "20260826090117_real_estate_v2",
+      "statement_count": 1,
+      "statement_bytes": 43430
+    },
+    {
+      "version": "20261015123350",
+      "name": "20260826090347_real_estate_fk_covering_indexes",
+      "statement_count": 1,
+      "statement_bytes": 1151
+    },
+    {
+      "version": "20261015123402",
+      "name": "20260826145426_business_equity_v2",
+      "statement_count": 1,
+      "statement_bytes": 15569
+    },
+    {
+      "version": "20261015123403",
+      "name": "20260826145803_business_equity_effective_truth",
+      "statement_count": 1,
+      "statement_bytes": 4470
+    },
+    {
+      "version": "20261015123416",
+      "name": "20260826194551_business_equity_v2_1",
+      "statement_count": 1,
+      "statement_bytes": 50061
+    },
+    {
+      "version": "20261015123418",
+      "name": "20260826194605_business_equity_v2_1_indexes",
+      "statement_count": 1,
+      "statement_bytes": 1830
+    },
+    {
+      "version": "20261015123432",
+      "name": "20260826194644_business_equity_v2_1_blocking_invariants",
+      "statement_count": 1,
+      "statement_bytes": 15290
+    },
+    {
+      "version": "20261015123448",
+      "name": "20260827155134_data_acquisition_foundation",
+      "statement_count": 1,
+      "statement_bytes": 50940
+    },
+    {
+      "version": "20261015123607",
+      "name": "20260827215014_career_tax_v2",
+      "statement_count": 1,
+      "statement_bytes": 25414
+    },
+    {
+      "version": "20261015123608",
+      "name": "20260827215600_career_tax_v2_fk_indexes",
+      "statement_count": 1,
+      "statement_bytes": 456
+    },
+    {
+      "version": "20261015123645",
+      "name": "20260828131216_fec_corporate_acquisition",
+      "statement_count": 1,
+      "statement_bytes": 58582
+    },
+    {
+      "version": "20261015123646",
+      "name": "20260828131433_fec_corporate_acquisition_fk_indexes",
+      "statement_count": 1,
+      "statement_bytes": 1523
+    },
+    {
+      "version": "20261015123648",
+      "name": "20260829234017_scenarios_v2",
+      "statement_count": 1,
+      "statement_bytes": 24164
+    },
+    {
+      "version": "20261015123707",
+      "name": "20260829234053_goals_v2",
+      "statement_count": 1,
+      "statement_bytes": 20840
+    },
+    {
+      "version": "20261015123708",
+      "name": "20260829234259_scenarios_goals_fk_indexes",
+      "statement_count": 1,
+      "statement_bytes": 740
+    },
+    {
+      "version": "20261015123822",
+      "name": "20260830154315_decision_lab_v2",
+      "statement_count": 1,
+      "statement_bytes": 17623
+    },
+    {
+      "version": "20261015123842",
+      "name": "20260831101500_company_registry_acquisition",
+      "statement_count": 1,
+      "statement_bytes": 67750
+    },
+    {
+      "version": "20261015123907",
+      "name": "20260831154500_document_intelligence_foundation",
+      "statement_count": 1,
+      "statement_bytes": 58369
+    },
+    {
+      "version": "20261015123943",
+      "name": "20260831171500_real_estate_public_data",
+      "statement_count": 1,
+      "statement_bytes": 63930
+    },
+    {
+      "version": "20261015123953",
+      "name": "20260902093000_portfolio_import_acquisition",
+      "statement_count": 1,
+      "statement_bytes": 60939
+    },
+    {
+      "version": "20261015124010",
+      "name": "20260903090000_import_raw_freeze_hardening",
+      "statement_count": 1,
+      "statement_bytes": 11563
+    },
+    {
+      "version": "20261015124035",
+      "name": "20260903120000_open_banking_ais",
+      "statement_count": 1,
+      "statement_bytes": 97080
+    },
+    {
+      "version": "20261015124036",
+      "name": "20260903120500_open_banking_ais_fk_indexes",
+      "statement_count": 1,
+      "statement_bytes": 2283
+    },
+    {
+      "version": "20261015124111",
+      "name": "20260903190000_acquisition_integration_reconciliation",
+      "statement_count": 1,
+      "statement_bytes": 21453
+    },
+    {
+      "version": "20261015124127",
+      "name": "20260903200000_portfolio_findings_no_silent_upsert",
+      "statement_count": 1,
+      "statement_bytes": 14992
+    },
+    {
+      "version": "20261015124148",
+      "name": "20260904093000_portfolio_correction_audit",
+      "statement_count": 1,
+      "statement_bytes": 31499
+    },
+    {
+      "version": "20261015124159",
+      "name": "20260905090000_portfolio_correction_actor_and_expected",
+      "statement_count": 1,
+      "statement_bytes": 41288
+    },
+    {
+      "version": "20261015124213",
+      "name": "20260909190841_user_domain_declarations",
+      "statement_count": 1,
+      "statement_bytes": 14007
+    },
+    {
+      "version": "20261015124215",
+      "name": "20260914191901_verified_personal_session",
+      "statement_count": 1,
+      "statement_bytes": 1292
+    },
+    {
+      "version": "20261015124216",
+      "name": "20260915064740_personal_reference_isolation",
+      "statement_count": 1,
+      "statement_bytes": 15801
+    },
+    {
+      "version": "20261015124217",
+      "name": "20260915180426_personal_first_intent",
+      "statement_count": 1,
+      "statement_bytes": 465
+    },
+    {
+      "version": "20261015124219",
+      "name": "20260917071520_personal_context",
+      "statement_count": 1,
+      "statement_bytes": 953
+    },
+    {
+      "version": "20261015124220",
+      "name": "20260924081000_debt_outstanding_only",
+      "statement_count": 1,
+      "statement_bytes": 8231
+    },
+    {
+      "version": "20261015124221",
+      "name": "20260924091000_net_income_observation",
+      "statement_count": 1,
+      "statement_bytes": 4929
+    },
+    {
+      "version": "20261015124238",
+      "name": "20260924120000_net_income_correction",
+      "statement_count": 1,
+      "statement_bytes": 11267
+    },
+    {
+      "version": "20261015124839",
+      "name": "20260924150000_debt_outstanding_to_contract",
+      "statement_count": 1,
+      "statement_bytes": 13264
+    },
+    {
+      "version": "20261015124840",
+      "name": "20260924160000_income_correction_hardening",
+      "statement_count": 1,
+      "statement_bytes": 11050
+    },
+    {
+      "version": "20261015124841",
+      "name": "20260924170000_debt_adaptive_contract",
+      "statement_count": 1,
+      "statement_bytes": 3508
+    },
+    {
+      "version": "20261015124901",
+      "name": "20260924180000_debt_separate_insurance",
+      "statement_count": 1,
+      "statement_bytes": 18213
+    },
+    {
+      "version": "20261015124914",
+      "name": "20260925090000_debt_insurance_policy_details",
+      "statement_count": 1,
+      "statement_bytes": 15457
+    },
+    {
+      "version": "20261015124927",
+      "name": "20260925100000_debt_review_hardening",
+      "statement_count": 1,
+      "statement_bytes": 15592
+    },
+    {
+      "version": "20261015124937",
+      "name": "20260925110000_observation_dates_and_balance_rights",
+      "statement_count": 1,
+      "statement_bytes": 3714
+    },
+    {
+      "version": "20261015124951",
+      "name": "20260925120000_form_drafts",
+      "statement_count": 1,
+      "statement_bytes": 7877
+    },
+    {
+      "version": "20261015125007",
+      "name": "20260925130000_debt_events",
+      "statement_count": 1,
+      "statement_bytes": 33399
+    },
+    {
+      "version": "20261015125017",
+      "name": "20260925140000_debt_review_versions_and_guards",
+      "statement_count": 1,
+      "statement_bytes": 30360
+    },
+    {
+      "version": "20261015125029",
+      "name": "20261012090000_debt_contract_declared_deferral_and_actor",
+      "statement_count": 1,
+      "statement_bytes": 23158
+    },
+    {
+      "version": "20261015125038",
+      "name": "20261012140000_document_schedule_review",
+      "statement_count": 1,
+      "statement_bytes": 44708
+    }
+  ],
+  "tables": 117,
+  "tables_without_rls": [],
+  "unvalidated_constraints": 0,
+  "users": 0,
+  "buckets": [
+    {
+      "id": "family-office-documents",
+      "public": false,
+      "file_size_limit": 8388608,
+      "allowed_mime_types": [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "image/jpeg",
+        "image/png",
+        "text/csv",
+        "text/plain",
+        "text/tab-separated-values"
+      ]
+    },
+    {
+      "id": "family-office-import-staging",
+      "public": false,
+      "file_size_limit": 33554432,
+      "allowed_mime_types": [
+        "application/octet-stream",
+        "application/pdf",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/csv",
+        "text/plain",
+        "text/tab-separated-values"
+      ]
+    }
+  ],
+  "important_tables": {
+    "form_drafts": "form_drafts",
+    "liability_events": "liability_events",
+    "liability_contract_versions": "liability_contract_versions",
+    "document_field_decisions": "document_field_decisions"
+  },
+  "important_functions": [
+    {
+      "name": "lfo_correct_document_extraction_field(uuid,jsonb)",
+      "security_definer": false,
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "service_role_execute": true
+    },
+    {
+      "name": "lfo_open_schedule_extraction(uuid,jsonb)",
+      "security_definer": false,
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "service_role_execute": true
+    },
+    {
+      "name": "lfo_record_debt_event(uuid,jsonb)",
+      "security_definer": false,
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "service_role_execute": true
+    },
+    {
+      "name": "lfo_save_form_draft(uuid,jsonb)",
+      "security_definer": false,
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "service_role_execute": true
+    },
+    {
+      "name": "lfo_validate_document_extraction(uuid,uuid)",
+      "security_definer": false,
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "service_role_execute": true
+    },
+    {
+      "name": "lfo_verify_session(uuid,uuid)",
+      "security_definer": false,
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "service_role_execute": true
+    },
+    {
+      "name": "lfo_private.verify_session(uuid,uuid)",
+      "security_definer": true,
+      "owner": "postgres",
+      "config": [
+        "search_path=\"\""
+      ],
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "service_role_execute": true
+    }
+  ]
+}

@@ -208,6 +208,10 @@ ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 Le DÉPÔT porte **64 migrations** sur la branche de travail du 12 octobre 2026 (gate local sans
 credential : 64 appliquées depuis zéro, 117 tables publiques, 492 contraintes, 124 RPC ; décompte
 relu dans `supabase/migrations/`).
+La branche Astra du 15 octobre en porte **65** : une migration additive explicite les
+grants `service_role` absents sur un projet neuf avec exposition automatique désactivée.
+Elle conserve les restrictions d'audit Goals/Décisions ; aucun grant client supplémentaire.
+La production reste hors du périmètre d'application de cette reprise.
 La consolidation #52 en portait 62 au gate du 25 septembre (116 tables publiques, 478
 contraintes relevées par le vérificateur, 123 RPC). Les dix-neuf dernières ne sont PAS en
 production (dernier relevé connu de la production : 45, le 9 septembre 2026) :

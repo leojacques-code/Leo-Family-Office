@@ -1,0 +1,394 @@
+{
+  "project_ref": "bjxhnwvomoznorijauyl",
+  "source_sha": "e0b593b5199057754b62fa1df9a8467935808d78",
+  "all_sql_sha256_exact_match": true,
+  "ordered": true,
+  "mcp_application_history": [
+    {
+      "name": "202608190001_initial_family_office",
+      "version": "20261015122903",
+      "sha256": "5005054cebf1643753fb4a243aadccd13245dd9de4f18a649dc8be0aee09c4a0"
+    },
+    {
+      "name": "202608190002_scenario_parameters",
+      "version": "20261015122941",
+      "sha256": "04b8b288c2e6b46cd3c137823a24177c37a6d2aa4fdad8bbcde5e774f8a194a2"
+    },
+    {
+      "name": "202608240001_scenario_investment_allocation",
+      "version": "20261015122942",
+      "sha256": "71fe837773ccb4afa70afe01ff91208f10d57b7e0148fc3a1c08b8030f233e70"
+    },
+    {
+      "name": "202608240002_cash_flow_engine_v2",
+      "version": "20261015123134",
+      "sha256": "33e00cb6dbf9086a4a52e6f6b7c87ade0e1ed952bf56843a8c3fab6350fd68ad"
+    },
+    {
+      "name": "202608240003_debt_engine_v2",
+      "version": "20261015123147",
+      "sha256": "ff3b3cf8d40a51abedd72bdf532ee92307781d21942a8ab38aa7425f3e21dd69"
+    },
+    {
+      "name": "202608240004_debt_engine_v2_1",
+      "version": "20261015123158",
+      "sha256": "b5eced39f7317c83f85d5d79a3d22c7fee63da0a501a2a5e815f8624c5aaea16"
+    },
+    {
+      "name": "202608240005_supabase_only_runtime",
+      "version": "20261015123159",
+      "sha256": "b285183149de6ed569093ec32b49980e1187f04f2015a2baf986600d0042ea7c"
+    },
+    {
+      "name": "20260824230233_debt_contract_input",
+      "version": "20261015123235",
+      "sha256": "300f3e26b63c00ffb78abfd2b5c551b34444fd66795409f182b5b636ff031bf4"
+    },
+    {
+      "name": "20260824231522_debt_schedule_actual_priority",
+      "version": "20261015123245",
+      "sha256": "c9505a2f593fc5fd3e564178516fbd1cc20c3020a2b50483332b6bde0ba7ad88"
+    },
+    {
+      "name": "20260825012954_debt_observation_user_index",
+      "version": "20261015123246",
+      "sha256": "606bc1c944edb4da76ae27abf87b8e334361067ebf22705ae7b466c242bc2e64"
+    },
+    {
+      "name": "20260825020545_canonical_balance_sheet_v2",
+      "version": "20261015123310",
+      "sha256": "7407ef6ec9b4e1096faa872a0b3adcbb89ab04ce0ae6cdc67b47ccf9173e3efc"
+    },
+    {
+      "name": "20260825021127_liability_currency_balance_sheet_v2",
+      "version": "20261015123312",
+      "sha256": "a6420897244d4cb2ba1a297e965dc1a3752aaf164cd74619111441f6a0b7fda1"
+    },
+    {
+      "name": "20260825021742_snapshot_item_owner_integrity",
+      "version": "20261015123313",
+      "sha256": "d8b0decb5802a80b190a3a7ffd5d21feb53ec0ad44ad88fda3a325eac71e9165"
+    },
+    {
+      "name": "20260825063626_snapshot_item_owner_fk_index",
+      "version": "20261015123314",
+      "sha256": "bd0ad7e8e9e8e2423252f3f39be2005d3f3d04de23ee16e8b7e3b5d6b1f725d1"
+    },
+    {
+      "name": "20260825063831_snapshot_item_fk_covering_index",
+      "version": "20261015123326",
+      "sha256": "2b1fcb63c63b020823f344ad2acd472e21ce2a3bdd1b2d0ea640297701cd1156"
+    },
+    {
+      "name": "20260825193427_portfolio_data_foundation",
+      "version": "20261015123337",
+      "sha256": "5c01d5a1547f7297a2a70e6525e395e37087b0c8a8eda9a154c332749601cd68"
+    },
+    {
+      "name": "20260825193606_portfolio_fk_covering_indexes",
+      "version": "20261015123339",
+      "sha256": "3eb8346cfef8de20eb06e44b06431771541361c92ed7ab3309e3a552aba8489a"
+    },
+    {
+      "name": "20260826090117_real_estate_v2",
+      "version": "20261015123349",
+      "sha256": "aba991c28c03c4adf12ed85dfcd9011d7aaf54ee6e7d767d09ebd37a71cfad59"
+    },
+    {
+      "name": "20260826090347_real_estate_fk_covering_indexes",
+      "version": "20261015123350",
+      "sha256": "d51eab30783a0b13e3387a693e86084def68bf68fe5ef74e120b6364c395c47b"
+    },
+    {
+      "name": "20260826145426_business_equity_v2",
+      "version": "20261015123402",
+      "sha256": "fbb7b32e3d7cb43cb0adab1fd33d1cbf67bc37cda16877d1cdad35a87645532b"
+    },
+    {
+      "name": "20260826145803_business_equity_effective_truth",
+      "version": "20261015123403",
+      "sha256": "6e70c5beb05cd63c74663b09c57e1d831c59a9f19e5626ed263503442e014c02"
+    },
+    {
+      "name": "20260826194551_business_equity_v2_1",
+      "version": "20261015123416",
+      "sha256": "0586b002951ec7e0aa60b1da42e14389b71d63b532ce4ebaa429262a7cbab25e"
+    },
+    {
+      "name": "20260826194605_business_equity_v2_1_indexes",
+      "version": "20261015123418",
+      "sha256": "decc4fb8531605d63bada652c04a09320e91cdd8cfcfd36a8cab741919fac83d"
+    },
+    {
+      "name": "20260826194644_business_equity_v2_1_blocking_invariants",
+      "version": "20261015123432",
+      "sha256": "35f94339667af524fea24df4bca125ed92d7e06e7df26a28a55a253e19408e08"
+    },
+    {
+      "name": "20260827155134_data_acquisition_foundation",
+      "version": "20261015123448",
+      "sha256": "d2afdbf364130bcb4e47fdcb72f36883f82950dc6dfcafb3d3f82fb983ba626e"
+    },
+    {
+      "name": "20260827215014_career_tax_v2",
+      "version": "20261015123607",
+      "sha256": "9aabdb92201e3a35ed5e8480bcf577903d2d40cf1b4d074fee7963306e9804b5"
+    },
+    {
+      "name": "20260827215600_career_tax_v2_fk_indexes",
+      "version": "20261015123608",
+      "sha256": "f6746b27cd0da31fc91ff5a96c04cacedccae30147b9ee6ae7dd3de51ee9330c"
+    },
+    {
+      "name": "20260828131216_fec_corporate_acquisition",
+      "version": "20261015123645",
+      "sha256": "2030907178a9d4020ff7446bca10b166d15fb087923baba96cafc6e34aab1a8d"
+    },
+    {
+      "name": "20260828131433_fec_corporate_acquisition_fk_indexes",
+      "version": "20261015123646",
+      "sha256": "744cc186691d9ed8dd411e8485a8ebdfc073ebfb905d895d523fadfc61817f01"
+    },
+    {
+      "name": "20260829234017_scenarios_v2",
+      "version": "20261015123648",
+      "sha256": "d7e3b4e11c68aa8cd37bccddfbaeb1dd5f9a4cadd5a8e1fdbe03281244632495"
+    },
+    {
+      "name": "20260829234053_goals_v2",
+      "version": "20261015123707",
+      "sha256": "341fe0ebb9559c60f0b556d1e22c2e602b37743484570fe73a95aeeeee270f43"
+    },
+    {
+      "name": "20260829234259_scenarios_goals_fk_indexes",
+      "version": "20261015123708",
+      "sha256": "a3ac2aac722c479e49f402368a99f10045639638f37e85d315205615542caa92"
+    },
+    {
+      "name": "20260830154315_decision_lab_v2",
+      "version": "20261015123822",
+      "sha256": "322c528fd5c51791fd27e758775bd45f19ebc6a0ce0e6626aef74e4bdea9a5b5"
+    },
+    {
+      "name": "20260831101500_company_registry_acquisition",
+      "version": "20261015123842",
+      "sha256": "35e15a928ad854cdf5452be9dade9b341826fdc09280fabd0f9f6590b2fc1365"
+    },
+    {
+      "name": "20260831154500_document_intelligence_foundation",
+      "version": "20261015123907",
+      "sha256": "3717242b5b94b86857f98968256fc971835f483267f862ff50d5a72d5517f389"
+    },
+    {
+      "name": "20260831171500_real_estate_public_data",
+      "version": "20261015123943",
+      "sha256": "a2afd78c680601320179d95e51802aa288a9d4a99060bb08af45ebe0407b6c3b"
+    },
+    {
+      "name": "20260902093000_portfolio_import_acquisition",
+      "version": "20261015123953",
+      "sha256": "ffbc58b8d58b49ecdbf097d44787b6513d6b928f0fcbb11c31275d2c9d2578b5"
+    },
+    {
+      "name": "20260903090000_import_raw_freeze_hardening",
+      "version": "20261015124010",
+      "sha256": "12a0a0dc23235fc05ffb6a94b6fa07189aa792b5505721fb30a6e3e3f961a0e5"
+    },
+    {
+      "name": "20260903120000_open_banking_ais",
+      "version": "20261015124035",
+      "sha256": "0732923b3e2e9c14ff2d4a5783ed32e41ca0350457086462f864e68d232161f0"
+    },
+    {
+      "name": "20260903120500_open_banking_ais_fk_indexes",
+      "version": "20261015124036",
+      "sha256": "fe9065490a94c2e69e05740098aea2950af601cc6893f707817c44639bb7dccc"
+    },
+    {
+      "name": "20260903190000_acquisition_integration_reconciliation",
+      "version": "20261015124111",
+      "sha256": "e36adb727066262fd77d0db7237523b6947eefe219a6960212381e616a4902fc"
+    },
+    {
+      "name": "20260903200000_portfolio_findings_no_silent_upsert",
+      "version": "20261015124127",
+      "sha256": "bbd92c6cc477599839fdb2f712c74c5f8eb84c6c38c01859046737d57a5b4b40"
+    },
+    {
+      "name": "20260904093000_portfolio_correction_audit",
+      "version": "20261015124148",
+      "sha256": "e34ca45ab5f1d8301654ea4af9d30f040f25d9f28059d90227060c7a2ebd1a59"
+    },
+    {
+      "name": "20260905090000_portfolio_correction_actor_and_expected",
+      "version": "20261015124159",
+      "sha256": "5f227fb43e5f10e0587ff2aa5d6e584bfc512aad1b1956bc500dfb456b14380c"
+    },
+    {
+      "name": "20260909190841_user_domain_declarations",
+      "version": "20261015124213",
+      "sha256": "47ec93074376ab8aece5a1a5656dd789893d12ba05bc91147e2acb9835b051cd"
+    },
+    {
+      "name": "20260914191901_verified_personal_session",
+      "version": "20261015124215",
+      "sha256": "5770e7b48e146cf889eb60fd2322debfe54cc3beff56d365c539e2423b121385"
+    },
+    {
+      "name": "20260915064740_personal_reference_isolation",
+      "version": "20261015124216",
+      "sha256": "87432e5ac94e08f9afdec8c7acd01aef6466dc1e42c2568e6915e4ddb6f7f11d"
+    },
+    {
+      "name": "20260915180426_personal_first_intent",
+      "version": "20261015124217",
+      "sha256": "054b70a4656d439b440b9443be8e9a8f51e6857b7875529dfc6f4da22858f72a"
+    },
+    {
+      "name": "20260917071520_personal_context",
+      "version": "20261015124219",
+      "sha256": "46e4dcc087e41e813a3bc028d4f329e7c1828656cdde1446a835da9a9d39b1be"
+    },
+    {
+      "name": "20260924081000_debt_outstanding_only",
+      "version": "20261015124220",
+      "sha256": "a58830e0622c2e878bc389973cd718b0d7ea8329151deda7c00878b40c133492"
+    },
+    {
+      "name": "20260924091000_net_income_observation",
+      "version": "20261015124221",
+      "sha256": "a5900db462951dcbfc182bfd64e9fb05ad9fcc4496fb13f89218c01bfe2ae2ba"
+    },
+    {
+      "name": "20260924120000_net_income_correction",
+      "version": "20261015124238",
+      "sha256": "4ade91380bbcf467220719fc11744a91fa7206c961c6822aed245163897a96a2"
+    },
+    {
+      "name": "20260924150000_debt_outstanding_to_contract",
+      "version": "20261015124839",
+      "sha256": "3f07fb91f2acc230de7d7edc4fa58a12ac18ea2a30ed2b56f75720d797bbdc84"
+    },
+    {
+      "name": "20260924160000_income_correction_hardening",
+      "version": "20261015124840",
+      "sha256": "876ea082790a98e76fe4a831c957a92ec241075507641ade24eb570409f09cfe"
+    },
+    {
+      "name": "20260924170000_debt_adaptive_contract",
+      "version": "20261015124841",
+      "sha256": "161b1d9fb9806b561d5eb536697447aff96702b86f6c0c8cd7e68cdd67fdc155"
+    },
+    {
+      "name": "20260924180000_debt_separate_insurance",
+      "version": "20261015124901",
+      "sha256": "56abc8bac4aeb765c58489ccc5af806fbc6248576a1b8327a3f1fee034254cd4"
+    },
+    {
+      "name": "20260925090000_debt_insurance_policy_details",
+      "version": "20261015124914",
+      "sha256": "4cf98100cfee46145db6c977b6f6c6aa015e37a3046d9df4dd99e431b3514c34"
+    },
+    {
+      "name": "20260925100000_debt_review_hardening",
+      "version": "20261015124927",
+      "sha256": "eb2293e9a87cbc2dee9efeebe074e0eaa8c97b3e2d41e8208e425691aeee54b7"
+    },
+    {
+      "name": "20260925110000_observation_dates_and_balance_rights",
+      "version": "20261015124937",
+      "sha256": "c70962eb8dd4c0e5d1fd8bd6764bc426f1858b67a4c4d27677074b623cfcc175"
+    },
+    {
+      "name": "20260925120000_form_drafts",
+      "version": "20261015124951",
+      "sha256": "f4596b0495c0238d74a5411bc64b40ba4d33e739b18f1b643a9cd80afa6f9a48"
+    },
+    {
+      "name": "20260925130000_debt_events",
+      "version": "20261015125007",
+      "sha256": "e3725d631c40e99b4bd1f25be49e7d32a7b96d26bcb1114d6722d259b7205c38"
+    },
+    {
+      "name": "20260925140000_debt_review_versions_and_guards",
+      "version": "20261015125017",
+      "sha256": "3bcc7d4342d2d13a3c8ac36de63921909997da313d5a6a687f270da49499994f"
+    },
+    {
+      "name": "20261012090000_debt_contract_declared_deferral_and_actor",
+      "version": "20261015125029",
+      "sha256": "0ac316fe632011e750185cbc71a656347132c9445a8496e1ce799f1c67df9dc8"
+    },
+    {
+      "name": "20261012140000_document_schedule_review",
+      "version": "20261015125038",
+      "sha256": "4796ddf240dd703665c0042e21f8598bd0bd61cc8df9b8ce8252b71bbbf1b7e3"
+    }
+  ],
+  "canonical_versions": [
+    "202608190001",
+    "202608190002",
+    "202608240001",
+    "202608240002",
+    "202608240003",
+    "202608240004",
+    "202608240005",
+    "20260824230233",
+    "20260824231522",
+    "20260825012954",
+    "20260825020545",
+    "20260825021127",
+    "20260825021742",
+    "20260825063626",
+    "20260825063831",
+    "20260825193427",
+    "20260825193606",
+    "20260826090117",
+    "20260826090347",
+    "20260826145426",
+    "20260826145803",
+    "20260826194551",
+    "20260826194605",
+    "20260826194644",
+    "20260827155134",
+    "20260827215014",
+    "20260827215600",
+    "20260828131216",
+    "20260828131433",
+    "20260829234017",
+    "20260829234053",
+    "20260829234259",
+    "20260830154315",
+    "20260831101500",
+    "20260831154500",
+    "20260831171500",
+    "20260902093000",
+    "20260903090000",
+    "20260903120000",
+    "20260903120500",
+    "20260903190000",
+    "20260903200000",
+    "20260904093000",
+    "20260905090000",
+    "20260909190841",
+    "20260914191901",
+    "20260915064740",
+    "20260915180426",
+    "20260917071520",
+    "20260924081000",
+    "20260924091000",
+    "20260924120000",
+    "20260924150000",
+    "20260924160000",
+    "20260924170000",
+    "20260924180000",
+    "20260925090000",
+    "20260925100000",
+    "20260925110000",
+    "20260925120000",
+    "20260925130000",
+    "20260925140000",
+    "20261012090000",
+    "20261012140000"
+  ]
+}
