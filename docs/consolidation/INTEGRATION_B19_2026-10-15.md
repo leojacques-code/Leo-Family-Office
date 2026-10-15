@@ -1,6 +1,6 @@
 # Intégration hébergée B19 — 15 octobre 2026
 
-**Verdict : BLOQUÉ avant création du staging et recette hébergée. B19 n'est pas clôturé.**
+**Verdict : staging Free préparé, création en attente de la saisie du mot de passe PostgreSQL par le propriétaire. B19 n'est pas clôturé.**
 
 La production n'a reçu aucune mutation SQL, migration, donnée de test ou modification de
 configuration. Aucune fusion dans `main`. B20 et B21 ne sont pas commencés.
@@ -100,32 +100,84 @@ la production ne prouve pas l'absence sur une base externe inconnue. Avant toute
 à une cible existante, relire son historique et, si cette version existe, comparer son SQL
 enregistré. Une différence exige une migration additive, jamais un remplacement d'historique.
 
-## Staging et coût : décision requise
+## Staging gratuit : décision exécutée et étape manuelle restante
 
-L'organisation connectée est en offre **Free**. Deux projets actifs sont inventoriés : LFO et
-`leo-leaning`. Seule la branche par défaut `main` existe pour LFO. Le second projet n'est pas
-identifié comme staging LFO ; il n'est ni réaffecté, ni réinitialisé, ni modifié.
+Le fondateur a fixé un plafond absolu de **0 €** et autorisé la pause temporaire de
+`leo-leaning` après audit non destructif, puis la création d'un projet distinct `lfo-staging`.
+Aucun passage Pro, abonnement, carte, supplément ou ressource payante n'est autorisé.
 
-Le connecteur de devis échoue : `MCP tool get_cost was not returned by tools/list`.
-Il n'existe donc pas de devis de compte vérifié dans cette session.
+### Audit préalable de `leo-leaning`
 
-Tarifs publics consultés le 15 octobre 2026 :
+Projet `vsitqibxhgcyrayzwyjb`, région `eu-north-1`. Les requêtes d'audit ont été exécutées
+en transaction `READ ONLY`, sans contenu métier ni identifiant personnel dans les preuves.
+L'accès SQL avait d'abord échoué ; il a fonctionné lors de la vérification complémentaire.
 
-- Free : deux projets actifs maximum ; Branching indisponible.
-- Pro : à partir de 25 USD/mois ; les projets supplémentaires consomment du compute,
-  annoncé à partir de 10 USD/mois par projet, avec 10 USD/mois de crédit compute par organisation.
-- Une branche Micro démarre à 0,01344 USD/heure, soit 0,32256 USD par 24 heures et
-  9,6768 USD par 720 heures, hors autres consommations. Les crédits compute et le Spend Cap
-  ne couvrent pas son compute.
+| Contrôle | Constat avant pause |
+|---|---|
+| Auth | 10 utilisateurs ; dernière connexion le 19 août 2026 à 17:38 UTC |
+| Activité Auth sur 7 / 30 jours | 0 / 0 utilisateurs |
+| Sessions | 18 historiques ; dernière mise à jour le 19 août ; aucune sur 7 jours |
+| `hub_profiles` | 10 lignes ; dernière modification le 3 août |
+| `hub_progress` | 10 lignes ; dernière modification le 19 août |
+| `hub_plan` | 1 ligne ; dernière modification le 28 juillet |
+| Modifications métier sur 30 jours | 0 sur les trois tables |
+| Storage | 0 objet |
+| Edge Functions, serveurs externes, triggers webhook | Aucun |
+| Extensions | Pas de `pg_cron`, `pg_net` ou wrapper externe |
+| Connexions SQL observées | Services internes Supabase seulement |
+| Console Integrations | Data API et Vault seulement ; aucun dépôt GitHub connecté |
+| Site Vercel `leo-learning`, production | Déploiement READY au SHA `02d60151613b15758842fe614465eba493a8fe02` |
+| Source exacte de ce déploiement | `CLOUD_ENABLED = false`, URL et clé Supabase vides, référence du projet absente |
+| Configuration Vercel `leo-learning` | Aucune variable d'environnement |
+| Autre projet Vercel `ubique` | Aucun nom de variable Supabase ; valeurs non déchiffrées |
 
-**Ce ne sont pas un total ferme ni une autorisation de souscription.** Le passage Pro peut
-aussi facturer les deux projets existants. Le récapitulatif de la console doit confirmer le
-total applicable, les tailles de compute, les taxes et la période avant accord du propriétaire.
-Aucun abonnement ou staging payant n'a été créé.
+Les journaux récents examinés ne montrent pas de trafic utilisateur établi : les événements
+Auth relevés sont des démarrages et une erreur de connexion interne. Des événements système
+ne sont pas assimilés à des requêtes utilisateur. Une absence de trafic sous rétention
+courte, prise seule, n'aurait pas suffi à autoriser la pause.
 
-Références officielles : [tarifs](https://supabase.com/pricing),
-[Branching](https://supabase.com/docs/guides/deployment),
-[facturation des branches](https://supabase.com/docs/guides/platform/manage-your-usage/branching).
+L'ensemble de ces constats ne révèle pas de dépendance active à maintenir. La pause autorisée
+a été exécutée par le connecteur ; retour `success: true`, puis statut **INACTIVE** vérifié.
+Ce n'est ni une suppression ni une réinitialisation. Les données et configurations restent
+sur le projet. Ne pas restaurer ce projet alors que LFO et le staging occupent déjà les deux
+emplacements Free ; attendre l'interruption autorisée de la recette puis pauser le staging.
+
+### Offre et formulaire de création vérifiés
+
+L'organisation `wniscyevfmnmtzbmjwlx` indique toujours `plan: free`, `tier: tier_free`.
+Avant pause, le formulaire signalait la limite de deux projets actifs ; après pause, cet
+avertissement a disparu et le formulaire Free est disponible. Aucun paiement ni montant non
+nul n'est demandé. Cela confirme le parcours gratuit, sans constituer un devis contractuel.
+
+Formulaire préparé, **non soumis** : nom `lfo-staging`, région `eu-west-1`, Postgres standard,
+Data API activée, exposition automatique des nouvelles tables désactivée. Aucun dépôt GitHub
+relié pour éviter une application automatique des migrations avant leur contrôle. Aucun
+trigger RLS supplémentaire créé par la console : les politiques du dépôt restent à appliquer
+et vérifier. Les grants effectifs devront être contrôlés après les 64 migrations.
+
+Les outils `get_cost` et `confirm_cost` sont annoncés par le connecteur mais indisponibles
+côté serveur (`not returned by tools/list`). L'outil `create_project` exige l'identifiant de
+confirmation ainsi indisponible ; aucun faux identifiant n'a été utilisé.
+
+Le parcours web demande de définir un mot de passe PostgreSQL. Les règles du navigateur
+imposent de passer la main au propriétaire avant saisie d'un nouvel identifiant secret et
+de lui laisser la saisie et la soumission. Le champ est resté vide. Aucun secret n'a été
+généré, lu ou consigné. La création reste donc à terminer par le propriétaire dans le
+formulaire préparé, sans accepter aucune offre payante.
+
+Preuves : `preuves/integration-b19-2026-10-15/free-staging-audit.json` et
+`preuves/integration-b19-2026-10-15/lfo-staging-free-creation-20261015.jpg`.
+
+| Projet | Référence | État vérifié à ce point |
+|---|---|---|
+| LFO production | `zwgrcznzymbfdiybeuvv` | ACTIVE_HEALTHY ; aucune mutation |
+| `leo-leaning` | `vsitqibxhgcyrayzwyjb` | INACTIVE, pause confirmée |
+| `lfo-staging` | Pas encore attribuée | Formulaire préparé ; projet non créé |
+
+**Dépense engagée : 0 €.** Ni la configuration Production de Vercel ni la production
+Supabase ne sont modifiées. Aucun nouveau compte, objet Storage ou donnée de test créé.
+
+Référence officielle : [Billing FAQ — projets Free actifs et pauses](https://supabase.com/docs/guides/platform/billing-faq).
 
 ## Vercel : constat et préparation
 
@@ -166,13 +218,12 @@ staging créé et contrôlé :
 `OWNER_USER_ID`, `LOCAL_ACCESS_CODE` et `SESSION_SECRET` ne doivent pas servir à substituer
 une session fictive aux deux comptes réels de recette.
 
-## Protocole de reprise après accord
+## Protocole de reprise après création Free
 
-1. Obtenir le récapitulatif exact du coût et l'accord. Créer une cible isolée sans copie de
-   données personnelles. Identifier sa référence avant toute mutation.
-2. Si branche initialisée depuis le schéma de production : relire ses versions et appliquer
-   uniquement les 19 migrations manquantes dans l'ordre du manifeste. Si projet vierge :
-   appliquer les 64 migrations. Ne pas supposer qu'une branche est initialisée correctement.
+1. Vérifier que `lfo-staging` est bien créé dans l'organisation Free, sans supplément, et
+   identifier sa référence avant toute mutation. Ne copier aucune donnée de production.
+2. Sur ce projet vierge, appliquer les **64 migrations dans l'ordre** du manifeste, après
+   contrôle de l'historique vide. Ne pas appliquer seulement les 19 absentes de production.
 3. Contrôler historique, définitions, contraintes, propriétaires, grants, RLS, buckets et
    advisor. Exécuter les vérifications sur la cible explicitement identifiée.
 4. Créer des clés staging, configurer les huit variables ci-dessus, Site URL et allowlist

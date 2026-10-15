@@ -1,0 +1,68 @@
+{
+  "date": "2026-10-15",
+  "scope": "Non-destructive audit of leo-leaning, authorized pause, preparation of Free staging creation",
+  "organization": {"id": "wniscyevfmnmtzbmjwlx", "plan": "free", "tier": "tier_free"},
+  "audit_before_pause": {
+    "project_ref": "vsitqibxhgcyrayzwyjb",
+    "queries": "BEGIN READ ONLY; SELECT aggregates or metadata only; ROLLBACK",
+    "auth": {"users": 10, "last_sign_in": "2026-08-19T17:38:36.80547Z", "signed_in_7d": 0, "signed_in_30d": 0, "historical_sessions": 18, "last_session_update": "2026-08-19T17:38:36.806188Z", "sessions_updated_7d": 0},
+    "tables": [
+      {"name": "hub_profiles", "rows": 10, "last_change": "2026-08-03T10:16:35.87023Z", "changed_30d": 0},
+      {"name": "hub_progress", "rows": 10, "last_change": "2026-08-19T17:38:45.745117Z", "changed_30d": 0},
+      {"name": "hub_plan", "rows": 1, "last_change": "2026-07-28T08:12:53.645648Z", "changed_30d": 0}
+    ],
+    "storage_objects": 0,
+    "edge_functions": 0,
+    "foreign_servers": 0,
+    "outbound_webhook_triggers": 0,
+    "extensions": ["plpgsql", "pg_stat_statements", "uuid-ossp", "pgcrypto", "supabase_vault"],
+    "observed_database_clients": "Supabase internal services only",
+    "console_integrations": ["Data API", "Vault"],
+    "github_connected": false,
+    "vercel_learning": {
+      "project_id": "prj_ApQjDH3TWPV3ghgg1fRvvHkqmlQD",
+      "production_deployment": "dpl_31wu5PTtUQ9efiJZ2XPwLF9cQ1La",
+      "production_sha": "02d60151613b15758842fe614465eba493a8fe02",
+      "repository": "leojacques-code/leo-learning",
+      "cloud_enabled": false,
+      "supabase_configuration": "Empty URL and anonKey in exact deployed source",
+      "target_project_ref_in_source": false,
+      "environment_variables_count": 0
+    },
+    "ubique_vercel_environment": "No Supabase variable names; no values decrypted",
+    "limitations": ["Short log retention is not proof of non-use by itself", "Initial SQL connection failures recovered before aggregate audit", "Connector-specific Vercel connections endpoint returned 404; not interpreted as proof of no integration", "No assertion about unobservable external clients"],
+    "conclusion": "No active dependency identified; audit supports the explicitly authorized temporary pause"
+  },
+  "pause": {"project_ref": "vsitqibxhgcyrayzwyjb", "connector_result": {"success": true}, "verified_status": "INACTIVE", "deletion": false, "data_or_configuration_reset": false},
+  "staging_creation": {
+    "created": false,
+    "name": "lfo-staging",
+    "region": "eu-west-1",
+    "postgres": "standard",
+    "data_api": true,
+    "automatically_expose_new_tables": false,
+    "automatic_rls_console_trigger": false,
+    "github_link": false,
+    "password_entered_or_generated": false,
+    "form_submitted": false,
+    "free_limit_warning": "Present before pause; absent after pause",
+    "billing_prompt": "No payment or non-zero amount requested in current Free form",
+    "blocker": "get_cost and confirm_cost unavailable on MCP server; web creation requires owner credential entry and submission under browser rules",
+    "migrations_expected": 64,
+    "migrations_applied": 0,
+    "hosted_acceptance": "NOT_RUN"
+  },
+  "projects": [
+    {"name": "Leo Family Office", "ref": "zwgrcznzymbfdiybeuvv", "status": "ACTIVE_HEALTHY", "mutated": false},
+    {"name": "leo-leaning", "ref": "vsitqibxhgcyrayzwyjb", "status": "INACTIVE"},
+    {"name": "lfo-staging", "ref": null, "status": "NOT_CREATED"}
+  ],
+  "cost_incurred_eur": 0,
+  "paid_resource_created": false,
+  "subscription_changed": false,
+  "payment_method_added": false,
+  "production_mutated": false,
+  "vercel_configuration_mutated": false,
+  "main_merged": false,
+  "b20_b21_started": false
+}
