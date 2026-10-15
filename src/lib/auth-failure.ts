@@ -11,6 +11,7 @@ import "server-only";
  */
 export type AuthFailureCode =
   | "AUTH_NOT_CONFIGURED"
+  | "PREVIEW_SUPABASE_CONFIGURATION_REFUSED"
   | "AUTH_KEY_REJECTED"
   | "AUTH_DATA_NOT_CONFIGURED"
   | "AUTH_SESSION_CHECK_MISSING"
@@ -22,6 +23,7 @@ export type AuthFailureStage = "sign-in" | "sign-up" | "sign-out" | "session" | 
 
 const KNOWN: readonly AuthFailureCode[] = [
   "AUTH_NOT_CONFIGURED",
+  "PREVIEW_SUPABASE_CONFIGURATION_REFUSED",
   "AUTH_SESSION_CHECK_MISSING",
   "AUTH_SESSION_CHECK_FAILED",
   "PROFILE_INITIALIZATION_FAILED",

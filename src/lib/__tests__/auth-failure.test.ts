@@ -4,6 +4,9 @@ import { authFailureCode } from "@/lib/auth-failure";
 describe("Codes de panne d'authentification", () => {
   it("reconnaît les causes internes nommées", () => {
     expect(authFailureCode(new Error("AUTH_NOT_CONFIGURED"))).toBe("AUTH_NOT_CONFIGURED");
+    expect(authFailureCode(new Error("PREVIEW_SUPABASE_CONFIGURATION_REFUSED"))).toBe(
+      "PREVIEW_SUPABASE_CONFIGURATION_REFUSED",
+    );
     expect(authFailureCode(new Error("PROFILE_INITIALIZATION_FAILED"))).toBe(
       "PROFILE_INITIALIZATION_FAILED",
     );

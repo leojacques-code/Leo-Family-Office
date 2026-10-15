@@ -1,4 +1,7 @@
 import type { NextConfig } from "next";
+import { assertPreviewSupabaseConfiguration } from "./src/lib/preview-supabase-config";
+
+assertPreviewSupabaseConfiguration();
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,

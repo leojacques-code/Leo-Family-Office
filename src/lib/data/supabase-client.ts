@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { assertPreviewSupabaseConfiguration } from "@/lib/preview-supabase-config";
 
 /**
  * Client serveur uniquement. La secret key (service role) contourne RLS ; elle ne doit
@@ -33,6 +34,7 @@ function required(name: string): string {
 let client: SupabaseClient | undefined;
 
 export function supabaseAdmin(): SupabaseClient {
+  assertPreviewSupabaseConfiguration();
   if (client) return client;
   const url = required("SUPABASE_URL");
   const key = required("SUPABASE_SECRET_KEY");
