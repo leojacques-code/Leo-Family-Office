@@ -99,15 +99,60 @@ Preuves au commit `0284a9b` : suite complète 183 fichiers / 2 549 tests, lint, 
 `gate:local` (64 migrations, 117 tables, 492 contraintes, 124 RPC), smokes
 `smoke-document-schedule` (nouveau) et `smoke-document-intelligence` (adapté) verts.
 
-Reste pour clore B19 (critères §7 du cahier) :
+### Suite du 15 octobre 2026
 
-- B19.4, écran : entrée « Importer un échéancier » depuis la fiche Dette, revue côte à côte
-  (pièce telle que lue / candidats), bandeau de lecture, conflits, correction avec motif et
-  historique par case, « Valider cette lecture » avec synthèse et mention que rien n'est encore
-  appliqué au prêt, section « Documents » de la dette, aide « ? » partagée ;
-- recette navigateur locale (ordinateur, tablette, mobile, clavier) sur pile auto-hébergée,
-  qui couvrira aussi le repository contre PostgREST et Storage réels (NOT_RUN à ce jour) ;
-- relecture indépendante de la tranche.
+| Commit | Objet |
+|---|---|
+| `4e9eebe` | Lot A : un différé retiré ne revient plus par le brouillon (relecture, constat 3) |
+| `9b14352` | Lecteur : cellule XLSX en erreur illisible, « Échéance » tranchée par les autres colonnes, en-tête CSV cherché sous un titre, plafond de 16 colonnes, différé capitalisé lu |
+| `f5231bf` | Migration `20261012140000` durcie (validation d'une lecture tronquée, case illisible confirmée, montants bornés, complétude relue, redépôt d'un fichier en revue) ; devise jamais déduite du défaut de la dette ; lien signé vers la pièce |
+| `7b09610` | B19.4 : section « Documents », dépôt, revue côte à côte, correction motivée et historique, synthèse avant validation, aide « ? » partagée (`MetricHelp`) |
+
+Décisions prises, et pourquoi :
+
+1. La migration `20261012140000` a été MODIFIÉE en place plutôt que complétée par une
+   troisième migration : elle n'a jamais été appliquée ailleurs qu'à une base locale jetable,
+   et une base cible n'aura ainsi jamais connu sa version fautive. À reconsidérer si une base
+   partagée l'a reçue entre-temps.
+2. Un redépôt du même fichier pendant sa revue est REFUSÉ (409) au lieu de remplacer la lecture :
+   le remplacement effaçait en silence les décisions prises. L'utilisateur reprend la lecture ou
+   la refuse, puis redépose. Seule une lecture en échec est remplacée.
+3. `liabilities.currency` porte un défaut de schéma (« EUR ») que la saisie du contrat n'écrit
+   pas : il n'est plus repris comme devise « déclarée » d'un échéancier. L'écran propose la
+   devise de la dette par un geste explicite. Le défaut lui-même reste la dette consignée au §5.
+4. « Échéance » seule désigne la date ou le montant selon la banque : elle est lue comme le
+   montant si une autre colonne porte la date, comme la date sinon, et l'attribution est
+   signalée. Une attribution fausse reste bruyante (cellules non analysables, donc bloquées).
+5. Un capital négatif (intérêts capitalisés d'un différé total) est une valeur fidèle : lu et
+   signalé, jamais bloqué ; `ROW_BALANCE` devient un avertissement sur une ligne dont le capital
+   restant dû augmente.
+
+Relecture indépendante (agent dédié, méthodes Ponytail review et Agent Skills
+code-review-and-quality lues dans leurs dépôts et appliquées à la main) : 13 constats. Corrigés :
+1, 2, 3, 4, 5, 6, 7, 8 (par refus du redépôt), 9, 10, 11, 12, 13. Aucun ouvert.
+
+Preuves au commit `7b09610` :
+
+| Contrôle | Résultat |
+|---|---|
+| `npm run lint`, `tsc`, `npm run build` | PASS |
+| Suite complète | PASS, 185 fichiers / 2 577 tests |
+| `npm run gate:local` | PASS : 64 migrations depuis zéro, 117 tables, 492 contraintes, 124 RPC ; smokes échéancier (étendu) et Document Intelligence verts |
+| Recette navigateur des composants B19 (Chromium piloté par le protocole DevTools, page temporaire non commitée, réseau simulé sur données synthétiques) | PASS, 31 contrôles : 1 440, 900 et 390 px, sélection synchronisée, correction motivée, historique, dialogue (focus, Tab confiné, Échap), aide « ? » au clavier, grille à un arrêt de tabulation et flèches, aucun défilement horizontal, aucune erreur console |
+| Recette sur la vraie fiche Dette, repository contre PostgREST et Storage réels | NOT_RUN : aucune pile Supabase locale (auth, PostgREST, Storage) dans cette session |
+| HawkScan | NOT_RUN : ni `HAWK_API_KEY` ni application lancée sur données |
+
+Outils : Graphify n'a PAS pu être installé (refus du classifieur de sécurité de la session pour
+une installation de paquet tiers) ; il n'a pas été utilisé. Agent Skills et Ponytail ne sont pas
+installés comme plugins ; leurs méthodes (frontend-ui-engineering, code-review-and-quality,
+ponytail, ponytail-review) ont été lues dans leurs dépôts officiels et appliquées à la main.
+
+Reste pour clore B19 : recette sur pile Supabase locale complète (dépôt réel, Storage, lien de
+pièce, rechargement), puis revue UX de clôture 3C. Consigné pour la revue UX transversale : la
+taille des `.button.compact` (8 px), du texte des encadrés (9 px) et des sous-titres de dialogue
+de `globals.css` est sous le plancher de 12 px ; l'écran B19 la corrige dans son seul périmètre.
+Une sortie de dette « encours seul » n'a pas encore d'entrée « Importer un échéancier » (fiche
+réservée aux contrats) : à décider avec B20, qui rattache la lecture.
 
 ## 6. Prochaine étape
 

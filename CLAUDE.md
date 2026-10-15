@@ -243,7 +243,9 @@ production (dernier relevé connu de la production : 45, le 9 septembre 2026) :
   Intelligence (lecture visant une dette, format tabulaire `NOT_PDF`, localisation de case,
   unités MONEY et DATE, méthode `TABULAR_CELL`) et piste immuable `document_field_decisions`
   commune à toutes les familles ; révision attendue obligatoire sur toute décision, liasse
-  comprise.
+  comprise. Une case illisible ne se confirme pas, une lecture tronquée ou jamais contrôlée ne
+  se valide pas, la complétude est relue après chaque décision, et un fichier encore en revue
+  n'est pas relu.
 
 Avant tout push de `20260924170000` vers une base PARTAGÉE : ses contraintes
 `liabilities_payment_count_ck` et `liabilities_contract_dates_ck` sont ajoutées sans `NOT VALID`.
