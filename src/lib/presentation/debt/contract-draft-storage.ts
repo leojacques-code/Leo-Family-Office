@@ -138,8 +138,22 @@ export function restoreContractDraft(
   const insurance = isRecord(content.insurance) ? content.insurance : {};
   const numberOrNull = (value: unknown, fallback: number | null) =>
     value === null ? null : typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  const deferralAnswer =
+    base.structure.deferral !== undefined
+      ? allowed(structure.deferral, STRUCTURE_VALUES.deferral, base.structure.deferral)
+      : undefined;
+  // Le différé du contrat suit la réponse relue : « Aucun » ou « À déclarer » ne laissent pas
+  // survivre, caché, un différé saisi avant le changement d'avis.
+  const deferral: DebtContractInput["deferral"] =
+    deferralAnswer === "PRINCIPAL_ONLY" || deferralAnswer === "TOTAL"
+      ? contract.deferral
+        ? { ...contract.deferral, kind: deferralAnswer }
+        : { kind: deferralAnswer, months: Number.NaN, interestTreatment: "UNKNOWN" as const }
+      : deferralAnswer === undefined
+        ? contract.deferral
+        : null;
   return {
-    contract: { ...contract, liabilityId: base.contract.liabilityId },
+    contract: { ...contract, deferral, liabilityId: base.contract.liabilityId },
     structure: {
       mode: allowed(structure.mode, STRUCTURE_VALUES.mode, base.structure.mode),
       paymentFrequency: allowed(
@@ -154,15 +168,7 @@ export function restoreContractDraft(
       ),
       rateType: allowed(structure.rateType, STRUCTURE_VALUES.rateType, base.structure.rateType),
       // Un brouillon antérieur au lot A ne porte pas de réponse : celle de départ s'applique.
-      ...(base.structure.deferral !== undefined
-        ? {
-            deferral: allowed(
-              structure.deferral,
-              STRUCTURE_VALUES.deferral,
-              base.structure.deferral,
-            ),
-          }
-        : {}),
+      ...(deferralAnswer !== undefined ? { deferral: deferralAnswer } : {}),
     },
     requiredValues: {
       principal: numberOrNull(required.principal, base.requiredValues.principal),

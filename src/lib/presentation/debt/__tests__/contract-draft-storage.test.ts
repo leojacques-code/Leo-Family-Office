@@ -156,4 +156,32 @@ describe("Brouillon de contrat : sérialisation et relecture défensive", () => 
     );
     expect(forged.structure.deferral).toBe("");
   });
+
+  it("ne laisse pas survivre un différé retiré : « Aucun » relu efface le différé du contrat", () => {
+    const start: ContractDraftState = {
+      ...base,
+      contract: {
+        ...base.contract,
+        deferral: { kind: "PRINCIPAL_ONLY", months: 6, interestTreatment: "PAID" },
+      },
+      structure: { ...base.structure, deferral: "PRINCIPAL_ONLY" },
+    };
+    // L'utilisateur choisit « Aucun » ; l'état du contrat garde encore l'ancien différé.
+    const restored = restoreContractDraft(
+      serializeContractDraft({ ...start, structure: { ...start.structure, deferral: "NONE" } }),
+      start,
+    );
+    expect(restored.structure.deferral).toBe("NONE");
+    expect(restored.contract.deferral).toBeNull();
+    // À l'inverse, une réponse « Total » relue garde la durée saisie et suit la réponse.
+    const total = restoreContractDraft(
+      serializeContractDraft({ ...start, structure: { ...start.structure, deferral: "TOTAL" } }),
+      start,
+    );
+    expect(total.contract.deferral).toEqual({
+      kind: "TOTAL",
+      months: 6,
+      interestTreatment: "PAID",
+    });
+  });
 });

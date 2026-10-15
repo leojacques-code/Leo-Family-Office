@@ -445,6 +445,16 @@ export function DebtContractForm({
     if (!structureComplete) return null;
     return {
       ...contract,
+      // Le différé envoyé est celui que l'écran AFFICHE : la réponse « Aucun » l'emporte sur
+      // un différé resté dans l'état du contrat (brouillon repris, choix modifié).
+      deferral:
+        structure.deferral === "PRINCIPAL_ONLY" || structure.deferral === "TOTAL"
+          ? {
+              kind: structure.deferral,
+              months: contract.deferral?.months ?? Number.NaN,
+              interestTreatment: contract.deferral?.interestTreatment ?? "UNKNOWN",
+            }
+          : null,
       amortisationProfile: mode as DebtContractInput["amortisationProfile"],
       paymentFrequency: structure.paymentFrequency as DebtContractInput["paymentFrequency"],
       interestConvention: structure.interestConvention as DebtContractInput["interestConvention"],
@@ -556,8 +566,8 @@ export function DebtContractForm({
       return;
     }
     if (
-      contract.deferral &&
-      (!Number.isInteger(contract.deferral.months) || contract.deferral.months < 1)
+      candidate?.deferral &&
+      (!Number.isInteger(candidate.deferral.months) || candidate.deferral.months < 1)
     ) {
       setFormError("Indiquez le nombre d’échéances différées, en nombre entier.");
       return;
