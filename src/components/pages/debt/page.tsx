@@ -49,6 +49,8 @@ import { DebtContractForm } from "@/components/pages/debt/debt-contract-form";
 import { DebtEventForm } from "@/components/pages/debt/debt-event-form";
 import { DebtHistory } from "@/components/pages/debt/debt-history";
 import { OutstandingDebtDrawer } from "@/components/pages/debt/outstanding-debt-drawer";
+import { DebtDocumentsSection } from "@/components/pages/debt/schedule-review/documents-section";
+import { ScheduleReviewWorkspace } from "@/components/pages/debt/schedule-review/review-workspace";
 import type { OutstandingDebt } from "@/lib/types";
 
 const PROFILE_LABELS: Record<Liability["amortisationProfile"], string> = {
@@ -93,6 +95,8 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const [promoting, setPromoting] = useState<OutstandingDebt | null>(null);
   useRegisterPrimaryAction(busy ? null : () => setContractEditor(loan ? "edit" : "new"));
   const [balanceEditor, setBalanceEditor] = useState(false);
+  // B19 : revue d'un échéancier déposé, ouverte à la place du canevas de la dette.
+  const [scheduleRun, setScheduleRun] = useState<string | null>(null);
   const [balance, setBalance] = useState({ value: "", date: state.asOfDate, notes: "" });
   // Tiroir « encours seul » : création (`debt: null`) ou correction d'une dette existante.
   const [outstandingEditor, setOutstandingEditor] = useState<{
@@ -213,6 +217,10 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const timeline = useMemo(
     () => (loan ? buildLoanTimeline(loan, state.asOfDate) : null),
     [loan, state.asOfDate],
+  );
+  const recordedDueDates = useMemo(
+    () => loan?.providedSchedule.map((row) => row.dueDate) ?? [],
+    [loan],
   );
   const scenario =
     state.scenarios.find((item) => item.name === "Central") ?? state.scenarios[0] ?? null;
@@ -655,6 +663,19 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const providedNotice = timeline.flags.find((flag) => flag.code === "PROVIDED_SCHEDULE_USED");
   const anomalies = timeline.flags.filter((flag) => flag.code !== "PROVIDED_SCHEDULE_USED");
 
+  if (scheduleRun) {
+    return (
+      <div className="page-stack">
+        {header}
+        <ScheduleReviewWorkspace
+          existingDueDates={recordedDueDates}
+          onClose={() => setScheduleRun(null)}
+          runId={scheduleRun}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="page-stack">
       {header}
@@ -1058,6 +1079,11 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
         onCancelEvent={(eventId, reason) =>
           mutate({ action: "cancel_debt_event", eventId, reason })
         }
+      />
+      <DebtDocumentsSection
+        liabilityCurrency={loan.currency ?? null}
+        liabilityId={loan.id}
+        onOpenReview={setScheduleRun}
       />
       {!comparisonReady ? (
         <Callout title="Comparaison à compléter">

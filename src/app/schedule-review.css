@@ -1,0 +1,581 @@
+/*
+ * Revue d'un échéancier déposé (B19) et section « Documents » de la fiche Dette.
+ *
+ * Plancher typographique 12 px et contrôles de 40 px au moins (§10.2 du plan de refonte),
+ * tokens de `globals.css` sans redéfinition : un état se lit aussi par un texte ou une marque,
+ * jamais par la seule couleur.
+ *
+ * Trois géométries (cahier B19 §6) : côte à côte à partir de 1 024 px ; une seule surface
+ * latérale plus étroite sur tablette ; en dessous de 768 px, pièce et candidats en vues
+ * alternées, la sélection étant un état partagé qui survit au changement de vue.
+ */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ─── Aide contextuelle « ? » (D-UX-02) ─────────────────────────────────────────────── */
+
+.metric-help {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.metric-help-button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: help;
+}
+
+.metric-help-button:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+.metric-help-panel {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 50%;
+  width: min(300px, 80vw);
+  transform: translateX(-50%);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* ─── Section « Documents » ─────────────────────────────────────────────────────────── */
+
+.debt-documents-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.debt-documents-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+
+.debt-document-name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.debt-document-name small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.debt-document-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.debt-documents .panel-note {
+  font-size: 13px;
+}
+
+.schedule-status {
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.schedule-status.status-blocked {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.schedule-status.status-corrected,
+.schedule-status.status-reviewed {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+/* ─── Espace de revue ───────────────────────────────────────────────────────────────── */
+
+.schedule-review {
+  display: grid;
+  gap: 16px;
+  font-size: 14px;
+}
+
+.schedule-review-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.schedule-review-header h2 {
+  margin: 0;
+  flex: 1 1 auto;
+  font-size: 20px;
+}
+
+.schedule-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/*
+ * Plancher de 12 px et contrôles de 40 px dans le périmètre de l'écran : `.button.compact`
+ * (8 px), le texte des encadrés (9 px) et le sous-titre de dialogue de `globals.css` sont sous
+ * le plancher. Leur correction générale relève de la revue UX transversale ; ici on ne
+ * redéfinit que la taille, pas la sémantique.
+ */
+.schedule-review .button.compact,
+.debt-documents .button.compact {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.schedule-review .callout strong {
+  font-size: 13px;
+}
+
+.schedule-review .callout p,
+.schedule-review .modal header p {
+  font-size: 13px;
+}
+
+.debt-documents .icon-button {
+  width: 40px;
+  height: 40px;
+}
+
+.schedule-banner {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+}
+
+.schedule-banner dt,
+.schedule-synthesis dt,
+.schedule-field-facts dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.schedule-banner dd,
+.schedule-synthesis dd,
+.schedule-field-facts dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.schedule-conflicts {
+  padding: 12px 14px;
+  border-left: 3px solid var(--gold);
+  border-radius: 0 10px 10px 0;
+  background: var(--gold-soft);
+}
+
+.schedule-conflicts h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.schedule-conflicts ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.schedule-view-switch,
+.schedule-filter {
+  display: flex;
+  gap: 6px;
+}
+
+.schedule-view-switch button,
+.schedule-filter button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.schedule-view-switch button[aria-pressed="true"],
+.schedule-filter button[aria-pressed="true"] {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+  font-weight: 600;
+}
+
+/* Ordinateur : la pièce domine, la surface latérale la suit. */
+.schedule-review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.schedule-view-switch {
+  display: none;
+}
+
+.schedule-side {
+  position: sticky;
+  top: 12px;
+  display: grid;
+  gap: 12px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+}
+
+/* ─── Pièce telle que lue ───────────────────────────────────────────────────────────── */
+
+.schedule-grid-scroll {
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.schedule-grid-scroll:focus-visible {
+  outline: 2px solid var(--teal);
+}
+
+.schedule-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.schedule-grid th,
+.schedule-grid td {
+  border-right: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  padding: 0;
+  white-space: nowrap;
+}
+
+.schedule-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 6px 10px;
+  background: var(--surface-tint);
+  font-family: var(--font-sans);
+  text-align: left;
+  vertical-align: bottom;
+}
+
+.schedule-grid thead th[data-recognized="false"] {
+  color: var(--text-muted);
+}
+
+.schedule-grid-letter {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.schedule-grid-label {
+  display: block;
+  font-size: 12px;
+}
+
+.schedule-grid thead small {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.schedule-grid tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  padding: 0 8px;
+  background: var(--surface-tint);
+  color: var(--text-muted);
+  font-weight: 400;
+  text-align: right;
+}
+
+.schedule-grid td button {
+  width: 100%;
+  min-width: 72px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 2px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+
+.schedule-grid td button:hover {
+  background: var(--surface-tint);
+}
+
+.schedule-grid td button[aria-pressed="true"] {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.schedule-grid td[data-status="blocked"] button {
+  background: var(--gold-soft);
+}
+
+.schedule-grid td[data-status="rejected"] button {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.schedule-grid td[data-status="unknown_box"] button {
+  color: var(--text-muted);
+}
+
+.schedule-mark {
+  margin-left: 6px;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* ─── Case sélectionnée ─────────────────────────────────────────────────────────────── */
+
+.schedule-field-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--teal);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.schedule-field-panel header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.schedule-field-panel h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.schedule-field-facts {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-field-issues-title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.schedule-field-issues {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.schedule-field-actions,
+.schedule-field-form .form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.schedule-field-form {
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-field-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.schedule-field-history {
+  font-size: 13px;
+}
+
+.schedule-field-history summary {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.schedule-field-history ol {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+/* ─── Candidats ─────────────────────────────────────────────────────────────────────── */
+
+.schedule-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+}
+
+.schedule-lines h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.schedule-lines h4 small {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.schedule-lines ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+.schedule-lines button {
+  width: 100%;
+  min-height: 40px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.schedule-lines button:hover {
+  background: var(--surface-tint);
+}
+
+.schedule-lines button[aria-pressed="true"] {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.schedule-lines button[data-status="blocked"] .schedule-candidate-status {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.schedule-candidate-value {
+  display: grid;
+  justify-items: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-candidate-value small,
+.schedule-candidate-status {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.schedule-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.schedule-synthesis {
+  margin: 0 0 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 16px;
+}
+
+/* Tablette : une seule surface latérale, plus étroite. */
+@media (max-width: 1023px) {
+  .schedule-review-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  }
+}
+
+/* Mobile : vues alternées ; la sélection reste la même d'une vue à l'autre. */
+@media (max-width: 767px) {
+  .schedule-view-switch {
+    display: flex;
+  }
+  .schedule-review-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .schedule-review-layout[data-view="piece"] .schedule-side,
+  .schedule-review-layout[data-view="candidates"] .schedule-piece {
+    display: none;
+  }
+  .schedule-side {
+    position: static;
+    max-height: none;
+  }
+  .debt-documents-list li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .debt-documents-list li > .schedule-status,
+  .debt-documents-list li > .debt-document-actions {
+    grid-column: 2;
+  }
+}

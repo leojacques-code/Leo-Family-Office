@@ -24,7 +24,7 @@ const VERSION_LABELS = {
 } as const;
 
 /** Date civile de Paris d'un instant : un horodatage UTC près de minuit changerait de jour. */
-function parisDate(iso: string): string {
+export function parisDate(iso: string): string {
   const value = new Date(iso);
   return Number.isNaN(value.getTime())
     ? "date inconnue"

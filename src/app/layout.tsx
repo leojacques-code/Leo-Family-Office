@@ -13,6 +13,8 @@ import "./today.css";
 // zones détourées d'un montant inconnu. Quatrième fichier du découpage CSS du §10.2.
 import "./net-worth.css";
 import "./personal-setup.css";
+// Revue d'un échéancier déposé et section « Documents » de la fiche Dette (B19).
+import "./schedule-review.css";
 
 export const metadata: Metadata = {
   title: "Léo Family Office",
