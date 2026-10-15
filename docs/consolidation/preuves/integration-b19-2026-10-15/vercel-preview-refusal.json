@@ -1,0 +1,216 @@
+{
+  "application_commit": "c52781869bfe3d093cca95dc5603139e194f7d09",
+  "deployment": {
+    "id": "dpl_6T4tSva1cgaE8mnz3prRPKzsSbyP",
+    "name": "leo-family-office",
+    "url": "leo-family-office-f89z72x97-lech1.vercel.app",
+    "type": "LAMBDAS",
+    "state": "ERROR",
+    "createdAt": 1792056220434,
+    "creator": {
+      "uid": "gm5gsm0OO1dJDEwKolJFgnQd",
+      "username": "leojacqueschety-8879"
+    },
+    "project": {
+      "id": "prj_4YJeECIQaqDOEE8KodN6PotWaQfd",
+      "name": "leo-family-office",
+      "framework": "nextjs"
+    },
+    "meta": {
+      "githubCommitRef": "codex/astra-b19-hosted-integration-20261015",
+      "githubCommitSha": "c52781869bfe3d093cca95dc5603139e194f7d09",
+      "githubCommitMessage": "security(preview): reject Supabase production targets before build and client creation\n\nRequire explicit staging ref, matching Auth/Storage URLs and publishable keys on Vercel Preview. Fail closed with a redacted diagnostic code. Production configuration and all migrations remain unchanged.",
+      "githubRepo": "Leo-Family-Office",
+      "githubOrg": "leojacques-code"
+    },
+    "alias": [
+      "leo-family-office-git-codex-astra-b19-hosted-integ-ce3b7b-lech1.vercel.app"
+    ],
+    "target": null,
+    "regions": [
+      "iad1"
+    ],
+    "buildingAt": 1792056221943,
+    "ready": 1792056228633,
+    "readyState": "ERROR",
+    "source": "git",
+    "errorCode": "BUILD_UTILS_SPAWN_1",
+    "errorMessage": "Command \"npm run build\" exited with 1",
+    "errorStep": "buildStep"
+  },
+  "events": [
+    {
+      "created": 1792056227408,
+      "date": 1792056227408,
+      "type": "stderr",
+      "text": "Error: Command \"npm run build\" exited with 1",
+      "level": "error",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056227379,
+      "date": 1792056227379,
+      "type": "stderr",
+      "text": "    at Object.<anonymous> (next.config.compiled.js:12:63)",
+      "level": "error",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056227379,
+      "date": 1792056227379,
+      "type": "stderr",
+      "text": "    at assertPreviewSupabaseConfiguration (src/lib/preview-supabase-config.ts:19:77)",
+      "level": "error",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056227379,
+      "date": 1792056227379,
+      "type": "stderr",
+      "text": "    at refuse (src/lib/preview-supabase-config.ts:16:15)",
+      "level": "error",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056227379,
+      "date": 1792056227379,
+      "type": "stderr",
+      "text": "Error: PREVIEW_SUPABASE_CONFIGURATION_REFUSED",
+      "level": "error",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056227374,
+      "date": 1792056227374,
+      "type": "stderr",
+      "text": "> Build error occurred",
+      "level": "error",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056227374,
+      "date": 1792056227374,
+      "type": "stderr",
+      "text": "",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056227373,
+      "date": 1792056227373,
+      "type": "stderr",
+      "text": "⨯ Failed to load next.config.ts, see more info here https://nextjs.org/docs/messages/next-config-error",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056227164,
+      "date": 1792056227164,
+      "type": "stdout",
+      "text": "▲ Next.js 16.3.3 (Turbopack)",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056226527,
+      "date": 1792056226527,
+      "type": "stdout",
+      "text": "",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056226527,
+      "date": 1792056226527,
+      "type": "stdout",
+      "text": "> next build",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056226527,
+      "date": 1792056226527,
+      "type": "stdout",
+      "text": "> leo-family-office@1.0.0 build",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056226527,
+      "date": 1792056226527,
+      "type": "stdout",
+      "text": "",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056226503,
+      "date": 1792056226503,
+      "type": "stderr",
+      "text": "npm warn Unknown env config \"cache-dir\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.",
+      "level": "warning",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    },
+    {
+      "created": 1792056226393,
+      "date": 1792056226393,
+      "type": "stdout",
+      "text": "Running \"npm run build\"",
+      "info": {
+        "type": "build",
+        "name": "bld_feykdt8rn",
+        "entrypoint": "."
+      }
+    }
+  ],
+  "verdict": "EXPECTED_REFUSAL_WITHOUT_STAGING; not a functional hosted recipe"
+}
