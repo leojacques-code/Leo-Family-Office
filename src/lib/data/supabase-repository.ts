@@ -3242,19 +3242,23 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
         break;
       }
       case "record_net_income": {
-        unwrap(
-          await db.rpc("lfo_record_net_income", {
-            p_user_id: user,
-            p_payload: {
-              account_id: mutation.accountId,
-              received_on: mutation.receivedOn,
-              amount: decimalText(mutation.amount),
-              label: mutation.label,
-              notes: mutation.notes,
-            },
-          }),
-          "enregistrement du revenu net observé",
-        );
+        const result = await db.rpc("lfo_record_net_income", {
+          p_user_id: user,
+          p_payload: {
+            account_id: mutation.accountId,
+            received_on: mutation.receivedOn,
+            amount: decimalText(mutation.amount),
+            label: mutation.label,
+            notes: mutation.notes,
+          },
+        });
+        // La RPC refuse un compte absent comme un compte d'un autre propriétaire.
+        // Garder cette indistinction et ne jamais remonter son texte SQL au navigateur.
+        if (result.error?.code === "P0001")
+          throw new MutationRejectedError(
+            "Revenu refusé : vérifiez le compte et les informations saisies.",
+          );
+        unwrap(result, "enregistrement du revenu net observé");
         break;
       }
       case "record_outstanding_debt": {

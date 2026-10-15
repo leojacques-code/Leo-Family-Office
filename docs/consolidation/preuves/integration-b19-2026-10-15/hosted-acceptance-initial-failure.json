@@ -1,0 +1,20 @@
+{
+  "staging_ref": "bjxhnwvomoznorijauyl",
+  "preview_origin": "https://leo-family-office-2nu9s8gm3-lech1.vercel.app",
+  "deployment_sha": "9cb4f4b11adaf3f2eb9259c4f86cb36bd6438014",
+  "method": "Real hosted application HTTP, Supabase Auth, PostgreSQL/PostgREST and Storage; NOT a browser UI acceptance",
+  "started_at": "2026-10-15T16:32:32.800Z",
+  "synthetic_only": true,
+  "steps": [
+    {
+      "name": "First account and first observed income through deployed API",
+      "status": "PASS",
+      "observed_balance_unchanged": true
+    },
+    {
+      "name": "A/B account isolation on deployed API and foreign account mutation rejection",
+      "status": "FAIL",
+      "reason": "Foreign account mutation not refused"
+    }
+  ]
+}

@@ -26,6 +26,36 @@ beforeEach(() => {
   });
 });
 
+describe("refus d'un premier revenu (recette hébergée A/B)", () => {
+  const income = {
+    action: "record_net_income" as const,
+    accountId: "22222222-2222-4222-8222-222222222222",
+    receivedOn: "2026-09-23",
+    amount: 2500,
+    label: "Revenu synthétique",
+    notes: null,
+  };
+
+  it("rend le même refus métier sans exposer le compte ou le texte SQL", async () => {
+    failWith("Compte introuvable : détail technique sensible");
+    const error = await createSupabaseRepository("A")
+      .mutateState(income)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(MutationRejectedError);
+    expect((error as Error).message).toBe(
+      "Revenu refusé : vérifiez le compte et les informations saisies.",
+    );
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("conserve une panne technique comme panne, quel que soit son texte", async () => {
+    failWith("Compte introuvable", "42501");
+    await expect(createSupabaseRepository("A").mutateState(income)).rejects.not.toBeInstanceOf(
+      MutationRejectedError,
+    );
+  });
+});
+
 describe("correction d'un revenu saisi (repository)", () => {
   it("envoie l'état attendu et la seule valeur corrigée en TEXTE décimal", async () => {
     mocks.rpc.mockResolvedValueOnce({ data: "c", error: null });
