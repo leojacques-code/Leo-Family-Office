@@ -17,8 +17,8 @@ export const runtime = "nodejs";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
- * Lectures d'échéancier d'une dette (`?liabilityId=`) ou revue complète d'une lecture
- * (`?runId=`). Lecture seule.
+ * Lectures d'échéancier d'une dette (`?liabilityId=`), revue complète d'une lecture
+ * (`?runId=`) ou lien de la pièce conservée (`?piece=`). Lecture seule.
  */
 export async function GET(request: Request) {
   try {
@@ -26,7 +26,13 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     const runId = params.get("runId");
     const liabilityId = params.get("liabilityId");
+    const piece = params.get("piece");
     const repository = await getScheduleDocumentRepository();
+    if (piece !== null) {
+      if (!UUID.test(piece))
+        return NextResponse.json({ error: "Lecture non reconnue" }, { status: 400 });
+      return NextResponse.json(await repository.pieceUrl(piece), { headers: API_HEADERS });
+    }
     if (runId !== null) {
       if (!UUID.test(runId))
         return NextResponse.json({ error: "Lecture non reconnue" }, { status: 400 });

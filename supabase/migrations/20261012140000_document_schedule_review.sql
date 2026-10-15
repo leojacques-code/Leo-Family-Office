@@ -428,11 +428,23 @@ begin
       using errcode = 'LF409';
   end if;
 
-  -- Lecture ouverte du même contenu : elle est REMPLACÉE, l'ancienne reste consultable.
+  -- Lecture du même contenu encore EN REVUE : la remplacer effacerait en silence les
+  -- décisions déjà prises dessus. Le redépôt est refusé ; l'utilisateur reprend cette lecture
+  -- ou la refuse explicitement avant de redéposer.
+  if exists (
+    select 1 from public.document_extraction_runs
+     where user_id = p_user_id and liability_id = v_liability_id
+       and file_hash = v_hash and status in ('EXTRACTED', 'REVIEWED')
+  ) then
+    raise exception 'Ce fichier est déjà en revue pour cette dette : reprenez cette lecture, ou refusez-la avant de redéposer le fichier'
+      using errcode = 'LF409';
+  end if;
+
+  -- Seule une lecture EN ÉCHEC du même contenu est remplacée : elle ne porte aucune décision.
   select id into v_previous
     from public.document_extraction_runs
    where user_id = p_user_id and liability_id = v_liability_id and file_hash = v_hash
-     and status in ('EXTRACTED', 'REVIEWED', 'FAILED')
+     and status = 'FAILED'
    order by extracted_at desc, created_at desc
    limit 1;
 
@@ -586,6 +598,15 @@ declare
   v_before_date date;
   v_after_status text;
   v_rank integer;
+  v_family text;
+  v_column text;
+  v_liability_id uuid;
+  v_first_row integer;
+  v_last_row integer;
+  v_first_opening numeric;
+  v_last_closing numeric;
+  v_principal numeric;
+  v_reasons jsonb;
 begin
   if jsonb_typeof(p_payload) is distinct from 'object' then
     raise exception 'Décision sur une case : un objet est attendu' using errcode = 'LF422';
@@ -619,8 +640,10 @@ begin
 
   -- Verrou AVANT la comparaison.
   select f.run_id, r.status, f.unit, f.validation_status, f.decision_revision,
-         coalesce(f.user_value, f.normalized_value), coalesce(f.user_date, f.normalized_date)
-    into v_run_id, v_status, v_unit, v_field_status, v_revision, v_before_value, v_before_date
+         coalesce(f.user_value, f.normalized_value), coalesce(f.user_date, f.normalized_date),
+         r.document_family, f.column_key, r.liability_id
+    into v_run_id, v_status, v_unit, v_field_status, v_revision, v_before_value, v_before_date,
+         v_family, v_column, v_liability_id
     from public.document_extraction_fields f
     join public.document_extraction_runs r on r.id = f.run_id and r.user_id = f.user_id
    where f.id = v_field_id and f.user_id = p_user_id
@@ -635,6 +658,13 @@ begin
   if v_revision <> v_expected then
     raise exception 'Cette case a changé depuis votre lecture (révision % attendue, % courante) : relisez-la avant de décider',
       v_expected, v_revision using errcode = 'LF409';
+  end if;
+
+  -- Confirmer une case illisible la ferait passer pour revue avec une valeur toujours
+  -- inconnue, et lèverait le blocage que la validation exige de résoudre.
+  if v_action = 'review' and v_field_status = 'BLOCKED' then
+    raise exception 'Une case illisible ne se confirme pas : corrigez-la ou écartez-la'
+      using errcode = 'LF422';
   end if;
 
   if v_action = 'correct' then
@@ -664,11 +694,18 @@ begin
         raise exception
           'Correction sans valeur : corriger vers rien n''est pas une correction, c''est un rejet';
       end if;
-      if (p_payload ->> 'user_value') !~ '^-?[0-9]+(\.[0-9]+)?$' then
-        raise exception 'Montant de correction : nombre décimal fini attendu (ni NaN ni notation exponentielle)'
+      -- Bornes de `numeric(20,6)` : au-delà, la base lèverait une erreur technique.
+      if (p_payload ->> 'user_value') !~ '^-?[0-9]{1,14}(\.[0-9]{1,6})?$' then
+        raise exception 'Montant de correction : nombre décimal fini attendu, 14 chiffres entiers et 6 décimales au plus (ni NaN ni notation exponentielle)'
           using errcode = 'LF422';
       end if;
       v_value := (p_payload ->> 'user_value')::numeric;
+      -- Même règle que le lecteur : seul un capital amorti peut être négatif (intérêts
+      -- capitalisés). Une liasse, elle, porte des montants signés.
+      if v_family = 'AMORTIZATION_SCHEDULE' and v_value < 0 and v_column is distinct from 'principal' then
+        raise exception 'Montant négatif : dans un échéancier, seul le capital amorti peut l''être'
+          using errcode = 'LF422';
+      end if;
     end if;
   elsif p_payload ? 'user_value' or p_payload ? 'user_date' then
     raise exception 'Seule une correction porte une valeur' using errcode = 'LF422';
@@ -724,6 +761,58 @@ begin
      set status = 'REVIEWED', reviewed_at = now(), validated_at = null
    where id = v_run_id and user_id = p_user_id and status in ('EXTRACTED', 'REVIEWED', 'VALIDATED');
 
+  -- Complétude d'un échéancier RELUE après la décision : figée à la lecture, elle dirait
+  -- « complet » un extrait dont l'utilisateur vient d'écarter ou de corriger un solde. Mêmes
+  -- règles que le lecteur (`read.ts`) : premier solde d'ouverture = capital du contrat
+  -- déclaré, dernier solde de clôture nul. Ce sont des comparaisons, pas une formule.
+  if v_family = 'AMORTIZATION_SCHEDULE' then
+    select min(row_number), max(row_number) into v_first_row, v_last_row
+      from public.document_extraction_fields
+     where run_id = v_run_id and user_id = p_user_id;
+    select coalesce(user_value, normalized_value) into v_first_opening
+      from public.document_extraction_fields
+     where run_id = v_run_id and user_id = p_user_id and row_number = v_first_row
+       and column_key = 'opening' and validation_status not in ('REJECTED', 'BLOCKED');
+    select coalesce(user_value, normalized_value) into v_last_closing
+      from public.document_extraction_fields
+     where run_id = v_run_id and user_id = p_user_id and row_number = v_last_row
+       and column_key = 'closing' and validation_status not in ('REJECTED', 'BLOCKED');
+    select principal into v_principal
+      from public.liabilities
+     where id = v_liability_id and user_id = p_user_id and terms_status = 'CONTRACT';
+    v_reasons := '[]'::jsonb;
+    if v_first_row is null then
+      v_reasons := v_reasons || jsonb_build_array('Aucune ligne de données.');
+    end if;
+    if not exists (
+      select 1 from public.document_extraction_fields
+       where run_id = v_run_id and user_id = p_user_id and column_key = 'opening'
+    ) then
+      v_reasons := v_reasons || jsonb_build_array(
+        'Colonne de solde d’ouverture absente : le début du prêt n’est pas vérifiable.');
+    elsif v_principal is null then
+      v_reasons := v_reasons || jsonb_build_array(
+        'Capital initial du contrat non déclaré : le début du prêt n’est pas vérifiable.');
+    elsif v_first_opening is distinct from v_principal then
+      v_reasons := v_reasons || jsonb_build_array(
+        'Le premier solde d’ouverture est absent, écarté ou différent du capital initial du contrat : l’extrait ne commence pas au début du prêt.');
+    end if;
+    if not exists (
+      select 1 from public.document_extraction_fields
+       where run_id = v_run_id and user_id = p_user_id and column_key = 'closing'
+    ) then
+      v_reasons := v_reasons || jsonb_build_array(
+        'Colonne de solde de clôture absente : la fin du prêt n’est pas vérifiable.');
+    elsif v_last_closing is distinct from 0 then
+      v_reasons := v_reasons || jsonb_build_array(
+        'Le dernier solde de clôture est absent, écarté ou non nul : l’extrait s’arrête avant la fin.');
+    end if;
+    update public.document_extraction_runs
+       set completeness = case when jsonb_array_length(v_reasons) = 0 then 'COMPLETE' else 'PARTIAL' end,
+           completeness_reasons = v_reasons
+     where id = v_run_id and user_id = p_user_id;
+  end if;
+
   perform public.lfo_evaluate_document_extraction_checks(
     p_user_id, jsonb_build_object('run_id', v_run_id::text)
   );
@@ -756,8 +845,11 @@ declare
   v_blocked integer;
   v_duplicates integer;
   v_disorder integer;
+  v_line_count integer;
+  v_rows integer;
 begin
-  select status, document_family, currency into v_status, v_family, v_currency
+  select status, document_family, currency, line_count
+    into v_status, v_family, v_currency, v_line_count
     from public.document_extraction_runs
    where id = p_run_id and user_id = p_user_id
    for update;
@@ -793,6 +885,23 @@ begin
   end if;
 
   if v_family = 'AMORTIZATION_SCHEDULE' then
+    -- Le dépôt écrit les cases par lots, puis les contrôles : un dépôt interrompu laisse une
+    -- lecture amputée et jamais contrôlée, que rien d'autre ne distinguerait d'une lecture
+    -- saine. Toutes les lignes lues doivent être persistées, et les contrôles évalués.
+    select count(distinct row_number) into v_rows
+      from public.document_extraction_fields
+     where run_id = p_run_id and user_id = p_user_id;
+    if v_line_count is null or v_rows is distinct from v_line_count then
+      raise exception 'Lecture incomplète : % ligne(s) persistée(s) sur % lue(s). Refusez cette lecture puis redéposez le fichier',
+        coalesce(v_rows, 0), coalesce(v_line_count, 0) using errcode = 'LF422';
+    end if;
+    if not exists (
+      select 1 from public.document_extraction_checks
+       where run_id = p_run_id and user_id = p_user_id
+    ) then
+      raise exception 'Aucun contrôle n''a été évalué sur cette lecture. Refusez-la puis redéposez le fichier'
+        using errcode = 'LF422';
+    end if;
     if v_currency is null then
       raise exception 'Échéancier sans devise : déclarez-la avant de valider, aucune n''est supposée'
         using errcode = 'LF422';

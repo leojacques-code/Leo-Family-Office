@@ -102,7 +102,7 @@ export interface ScheduleReview {
 
 export interface ScheduleUploadInput {
   liabilityId: string;
-  /** Devise déclarée à l'import ; `null` = celle de la dette, si elle en a une. */
+  /** Devise DÉCLARÉE au dépôt ; `null` = aucune, la lecture en cherche une dans le fichier. */
   declaredCurrency: string | null;
   file: { name: string; contentType: string; size: number; bytes: Uint8Array };
 }

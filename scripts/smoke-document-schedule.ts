@@ -52,6 +52,7 @@ async function rejects(sql: string, params: unknown[], message: string, expected
 
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
+const HASH_C = "c".repeat(64);
 
 let succeeded = false;
 await client.connect();
@@ -300,6 +301,39 @@ try {
       "LF422",
     );
   }
+  await rejects(
+    correctSql,
+    decide({
+      field_id: closing2.id,
+      action: "correct",
+      user_value: "123456789012345.5",
+      expected_revision: 0,
+    }),
+    "Un montant hors des bornes de numeric(20,6) a atteint la base",
+    "LF422",
+  );
+  await rejects(
+    correctSql,
+    decide({ field_id: closing2.id, action: "correct", user_value: "-100", expected_revision: 0 }),
+    "Un solde négatif a été accepté en correction",
+    "seul le capital",
+  );
+  // Un capital négatif (intérêts capitalisés) est une valeur fidèle : il est accepté.
+  const principal2 = await fieldId("L2.principal");
+  await rpc("lfo_correct_document_extraction_field", {
+    field_id: principal2.id,
+    action: "correct",
+    user_value: "-5",
+    expected_revision: 0,
+    reason: "Intérêts capitalisés",
+  });
+  await rpc("lfo_correct_document_extraction_field", {
+    field_id: principal2.id,
+    action: "correct",
+    user_value: "900",
+    expected_revision: 1,
+    reason: "Retour à la valeur imprimée",
+  });
   await rpc("lfo_correct_document_extraction_field", {
     field_id: closing2.id,
     action: "correct",
@@ -420,6 +454,19 @@ try {
     "update public.document_extraction_runs set currency = 'EUR', currency_source = 'DECLARED' where id = $1",
     [runId],
   );
+  // Dépôt interrompu : la lecture annonce plus de lignes qu'elle n'en a persisté.
+  await client.query("update public.document_extraction_runs set line_count = 3 where id = $1", [
+    runId,
+  ]);
+  await rejects(
+    validateSql,
+    [userId, runId],
+    "Une lecture tronquée a été validée",
+    "Lecture incomplète",
+  );
+  await client.query("update public.document_extraction_runs set line_count = 2 where id = $1", [
+    runId,
+  ]);
   await client.query(validateSql, [userId, runId]);
   const validated = await client.query<{ status: string }>(
     "select status from public.document_extraction_runs where id = $1",
@@ -442,15 +489,82 @@ try {
     "Le même fichier validé a été relu",
     "LF409",
   );
-  const first = await rpc("lfo_open_schedule_extraction", open({ file_hash: HASH_B }));
-  const second = await rpc("lfo_open_schedule_extraction", open({ file_hash: HASH_B }));
-  const replaced = await client.query<{ supersedes: string | null }>(
-    "select supersedes_run_id::text as supersedes from public.document_extraction_runs where id = $1",
-    [second],
+  // Un fichier encore EN REVUE n'est pas relu : ses décisions seraient perdues en silence.
+  const inReview = await rpc(
+    "lfo_open_schedule_extraction",
+    open({ file_hash: HASH_B, line_count: 1, completeness: "COMPLETE", completeness_reasons: [] }),
+  );
+  await rejects(
+    openSql,
+    [userId, JSON.stringify(open({ file_hash: HASH_B }))],
+    "Un fichier en revue a été relu, effaçant ses décisions",
+    "déjà en revue",
+  );
+  await rpc("lfo_append_document_extraction_fields", {
+    run_id: inReview,
+    fields: [
+      date(1, "2026-10-05"),
+      { ...money(1, "opening", "B", "abc"), normalized_value: null, validation_status: "BLOCKED" },
+      money(1, "closing", "D", "0"),
+    ],
+  });
+  const blockedId = (
+    await client.query<{ id: string }>(
+      "select id from public.document_extraction_fields where run_id = $1 and box_code = 'L1.opening'",
+      [inReview],
+    )
+  ).rows[0]!.id;
+  await rejects(
+    correctSql,
+    decide({ field_id: blockedId, action: "review", expected_revision: 0 }),
+    "Une case illisible a été confirmée, levant son blocage",
+    "illisible",
+  );
+  // Une décision RELIT la complétude : la lecture annoncée complète ne l'est pas (dette
+  // connue par son seul encours, donc sans capital initial déclaré).
+  await rpc("lfo_correct_document_extraction_field", {
+    field_id: blockedId,
+    action: "reject",
+    expected_revision: 0,
+    reason: "Cellule illisible",
+  });
+  // Sans contrôle évalué, la lecture n'est pas validable (dépôt interrompu avant les contrôles).
+  await rejects(
+    validateSql,
+    [userId, inReview],
+    "Une lecture jamais contrôlée a été validée",
+    "Aucun contrôle",
+  );
+  const completeness = await client.query<{ completeness: string; reasons: string[] }>(
+    "select completeness, completeness_reasons as reasons from public.document_extraction_runs where id = $1",
+    [inReview],
   );
   assert(
-    replaced.rows[0]!.supersedes === first,
-    "La relecture ne désigne pas la lecture remplacée",
+    completeness.rows[0]!.completeness === "PARTIAL" &&
+      completeness.rows[0]!.reasons.some((reason) => reason.includes("non déclaré")),
+    "La complétude n'a pas été relue après la décision",
+  );
+
+  // Seule une lecture EN ÉCHEC du même contenu est remplacée.
+  const failedOpen = {
+    file_hash: HASH_C,
+    status: "FAILED",
+    line_count: null,
+    first_due_date: null,
+    last_due_date: null,
+    completeness: null,
+    completeness_reasons: [],
+    error: "Lecture d’échéancier en échec : voir les anomalies.",
+  };
+  const failed = await rpc("lfo_open_schedule_extraction", open(failedOpen));
+  const retried = await rpc("lfo_open_schedule_extraction", open(failedOpen));
+  const replaced = await client.query<{ supersedes: string | null }>(
+    "select supersedes_run_id::text as supersedes from public.document_extraction_runs where id = $1",
+    [retried],
+  );
+  assert(
+    replaced.rows[0]!.supersedes === failed,
+    "La relecture d'un échec ne désigne pas la lecture remplacée",
   );
 
   // ── 7. Droits : lecture seule pour `authenticated`, RPC refusées ────────────────
@@ -485,5 +599,5 @@ try {
 }
 if (succeeded)
   console.log(
-    "Smoke échéancier B19 : lecture visant une dette, tabulaire NOT_PDF et localisée, charge stricte et cloisonnement, contrôles calculés en base (réussi, non calculable sur case vide), décisions à révision attendue (conflit LF409), piste immuable avec acteur vérifié et rôle constaté, corrections typées (date, montant fini, texte refusé), validation exigeant devise et dates cohérentes sans écrire loan_schedules, même fichier validé une fois, relecture remplaçante, lecture seule pour authenticated, décisions emportées par leur lecture (transaction annulée).",
+    "Smoke échéancier B19 : lecture visant une dette, tabulaire NOT_PDF et localisée, charge stricte et cloisonnement, contrôles calculés en base (réussi, non calculable sur case vide), décisions à révision attendue (conflit LF409), piste immuable avec acteur vérifié et rôle constaté, corrections typées (date, montant fini, texte refusé), validation exigeant devise et dates cohérentes sans écrire loan_schedules, montants bornés et non négatifs hors capital, case illisible jamais confirmée, complétude relue après décision, lecture tronquée ou jamais contrôlée non validable, même fichier validé une fois, fichier en revue jamais relu, seul un échec remplacé, lecture seule pour authenticated, décisions emportées par leur lecture (transaction annulée).",
   );

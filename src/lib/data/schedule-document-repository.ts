@@ -5,7 +5,11 @@ import { createHash } from "node:crypto";
 import type { PostgrestError } from "@supabase/supabase-js";
 
 import { requireActor } from "@/lib/auth";
-import { readScheduleDocument } from "@/lib/acquisition/documents/schedule";
+import {
+  MAX_SCHEDULE_COLUMNS,
+  MAX_SCHEDULE_LINES,
+  readScheduleDocument,
+} from "@/lib/acquisition/documents/schedule";
 import type {
   DocumentIssue,
   ExtractionFieldStatus,
@@ -43,7 +47,8 @@ const MAX_RETAINED_SCHEDULE_BYTES = 8 * 1024 * 1024;
 const FIELD_BATCH = 500;
 /** Lecture paginée des cases : une page PostgREST ne porte pas tout un échéancier. */
 const READ_PAGE = 1000;
-const MAX_FIELDS = 1200 * 16;
+/** Borne de relecture : celle du lecteur, qui REFUSE au-delà. Rien n'est donc tronqué. */
+const MAX_FIELDS = MAX_SCHEDULE_LINES * MAX_SCHEDULE_COLUMNS;
 
 const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -224,6 +229,8 @@ export interface ScheduleDocumentRepository {
   decide(input: ScheduleDecisionInput): Promise<ScheduleReview>;
   validate(runId: string): Promise<ScheduleReview>;
   reject(runId: string, reason: string | null): Promise<ScheduleReview>;
+  /** Lien de téléchargement de la pièce conservée, valable une minute. */
+  pieceUrl(runId: string): Promise<{ url: string }>;
 }
 
 class SupabaseScheduleDocumentRepository implements ScheduleDocumentRepository {
@@ -301,8 +308,10 @@ class SupabaseScheduleDocumentRepository implements ScheduleDocumentRepository {
       checks.push(...page.map(toCheckView));
       if (page.length < READ_PAGE) break;
     }
-    const decisions = (
-      unwrap(
+    // Le journal n'a pas de borne : il est relu page par page, jamais coupé.
+    const decisions: ScheduleDecisionView[] = [];
+    for (let offset = 0; ; offset += READ_PAGE) {
+      const page = unwrap(
         await this.client()
           .from("document_field_decisions")
           .select("*")
@@ -310,10 +319,13 @@ class SupabaseScheduleDocumentRepository implements ScheduleDocumentRepository {
           .eq("run_id", runId)
           .order("decided_at", { ascending: true })
           .order("decision_rank", { ascending: true })
-          .limit(5000),
+          .order("id", { ascending: true })
+          .range(offset, offset + READ_PAGE - 1),
         "document_field_decisions",
-      ) as Row[]
-    ).map(toDecisionView);
+      ) as Row[];
+      decisions.push(...page.map(toDecisionView));
+      if (page.length < READ_PAGE) break;
+    }
     return { run, fields, checks, decisions };
   }
 
@@ -321,7 +333,7 @@ class SupabaseScheduleDocumentRepository implements ScheduleDocumentRepository {
     const liabilities = unwrap(
       await this.client()
         .from("liabilities")
-        .select("id, currency, principal, terms_status, archived")
+        .select("id, principal, terms_status, archived")
         .eq("id", input.liabilityId)
         .eq("user_id", this.user),
       "liabilities",
@@ -345,7 +357,10 @@ class SupabaseScheduleDocumentRepository implements ScheduleDocumentRepository {
     const extraction = readScheduleDocument({
       bytes: input.file.bytes,
       fileName: input.file.name,
-      declaredCurrency: input.declaredCurrency ?? text(liability.currency),
+      // Seule une devise DÉCLARÉE au dépôt en est une : `liabilities.currency` porte un défaut
+      // de schéma (« EUR ») que la saisie du contrat n'écrit pas, et le reprendre ici
+      // persisterait « déclarée » une devise que personne n'a choisie.
+      declaredCurrency: input.declaredCurrency,
       contractPrincipal,
     });
     if (extraction.sourceFormat === null) {
@@ -396,44 +411,54 @@ class SupabaseScheduleDocumentRepository implements ScheduleDocumentRepository {
     );
 
     if (extraction.status === "EXTRACTED") {
-      for (let index = 0; index < extraction.fields.length; index += FIELD_BATCH) {
-        await this.rpc("lfo_append_document_extraction_fields", {
+      try {
+        for (let index = 0; index < extraction.fields.length; index += FIELD_BATCH) {
+          await this.rpc("lfo_append_document_extraction_fields", {
+            p_payload: {
+              run_id: runId,
+              fields: extraction.fields.slice(index, index + FIELD_BATCH).map((field) => ({
+                box_code: field.boxCode,
+                row_number: field.rowNumber,
+                sheet_name: field.sheetName,
+                column_key: field.columnKey,
+                column_label: field.columnLabel,
+                cell_ref: field.cellRef,
+                raw_value: field.rawValue,
+                normalized_value:
+                  field.normalizedValue === null ? null : String(field.normalizedValue),
+                normalized_date: field.normalizedDate,
+                unit: field.unit,
+                extraction_method: "TABULAR_CELL",
+                confidence: field.validationStatus === "BLOCKED" ? "LOW" : "HIGH",
+                validation_status: field.validationStatus,
+                issues: field.issues,
+              })),
+            },
+          });
+        }
+        await this.rpc("lfo_evaluate_document_extraction_checks", {
           p_payload: {
             run_id: runId,
-            fields: extraction.fields.slice(index, index + FIELD_BATCH).map((field) => ({
-              box_code: field.boxCode,
-              row_number: field.rowNumber,
-              sheet_name: field.sheetName,
-              column_key: field.columnKey,
-              column_label: field.columnLabel,
-              cell_ref: field.cellRef,
-              raw_value: field.rawValue,
-              normalized_value:
-                field.normalizedValue === null ? null : String(field.normalizedValue),
-              normalized_date: field.normalizedDate,
-              unit: field.unit,
-              extraction_method: "TABULAR_CELL",
-              confidence: field.validationStatus === "BLOCKED" ? "LOW" : "HIGH",
-              validation_status: field.validationStatus,
-              issues: field.issues,
+            checks: extraction.checks.map((check) => ({
+              check_code: check.checkCode,
+              label: check.label,
+              severity: check.severity,
+              tolerance: check.tolerance,
+              left: check.left,
+              right: check.right,
+              message: check.message,
             })),
           },
         });
+      } catch (error) {
+        // Dépôt interrompu après l'ouverture : la lecture amputée est refusée, au mieux, pour
+        // que le même fichier puisse être redéposé. La validation la refuserait de toute façon.
+        await this.rpc("lfo_reject_document_extraction", {
+          p_run_id: runId,
+          p_reason: "Dépôt interrompu : lecture incomplète.",
+        }).catch(() => undefined);
+        throw error;
       }
-      await this.rpc("lfo_evaluate_document_extraction_checks", {
-        p_payload: {
-          run_id: runId,
-          checks: extraction.checks.map((check) => ({
-            check_code: check.checkCode,
-            label: check.label,
-            severity: check.severity,
-            tolerance: check.tolerance,
-            left: check.left,
-            right: check.right,
-            message: check.message,
-          })),
-        },
-      });
     }
     return this.getReview(runId);
   }
@@ -467,7 +492,8 @@ class SupabaseScheduleDocumentRepository implements ScheduleDocumentRepository {
       .insert({
         user_id: this.user,
         name: file.name.slice(0, 180),
-        category: "debt",
+        // Vocabulaire du coffre (`/api/documents`) : une pièce de prêt y est rangée sous « loan ».
+        category: "loan",
         storage_path: storagePath,
         size_bytes: file.size,
         status: "INBOX",
@@ -528,6 +554,32 @@ class SupabaseScheduleDocumentRepository implements ScheduleDocumentRepository {
     await this.readRun(runId);
     await this.rpc("lfo_reject_document_extraction", { p_run_id: runId, p_reason: reason });
     return this.getReview(runId);
+  }
+
+  async pieceUrl(runId: string): Promise<{ url: string }> {
+    const documentId = text((await this.readRun(runId)).document_id);
+    if (documentId === null) {
+      throw new MutationRejectedError("Aucune pièce n’est conservée pour cette lecture.");
+    }
+    const documents = unwrap(
+      await this.client()
+        .from("documents")
+        .select("storage_path, name")
+        .eq("id", documentId)
+        .eq("user_id", this.user),
+      "documents",
+    ) as Row[];
+    const storagePath = text(documents[0]?.storage_path);
+    if (storagePath === null) throw new MutationRejectedError("Pièce introuvable au coffre.");
+    const signed = await this.client()
+      .storage.from(DOCUMENTS_BUCKET)
+      .createSignedUrl(storagePath, 60, { download: text(documents[0]?.name) ?? true });
+    if (signed.error || !signed.data) {
+      throw new SupabaseOperationError("lien de la pièce", {
+        message: signed.error?.message ?? "lien absent",
+      });
+    }
+    return { url: signed.data.signedUrl };
   }
 }
 

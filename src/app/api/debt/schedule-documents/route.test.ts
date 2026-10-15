@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   decide: vi.fn(),
   validate: vi.fn(),
   reject: vi.fn(),
+  pieceUrl: vi.fn(),
 }));
 vi.mock("@/lib/auth", () => ({ requireAuthenticated: mocks.auth }));
 vi.mock("@/lib/data/schedule-document-repository", () => ({
@@ -17,6 +18,7 @@ vi.mock("@/lib/data/schedule-document-repository", () => ({
     decide: mocks.decide,
     validate: mocks.validate,
     reject: mocks.reject,
+    pieceUrl: mocks.pieceUrl,
   }),
 }));
 import { GET, PATCH, POST } from "./route";
@@ -45,6 +47,15 @@ describe("frontière HTTP des échéanciers déposés (B19)", () => {
     expect((await patch({ action: "validate", runId: LIABILITY })).status).toBe(401);
     expect(mocks.listRuns).not.toHaveBeenCalled();
     expect(mocks.validate).not.toHaveBeenCalled();
+  });
+
+  it("ne demande le lien de la pièce que pour un identifiant de lecture bien formé", async () => {
+    expect((await GET(new Request(`${url}?piece=../x`))).status).toBe(400);
+    expect(mocks.pieceUrl).not.toHaveBeenCalled();
+    mocks.pieceUrl.mockResolvedValue({ url: "https://stockage/signe" });
+    const response = await GET(new Request(`${url}?piece=${LIABILITY}`));
+    expect(response.status).toBe(200);
+    expect(mocks.pieceUrl).toHaveBeenCalledWith(LIABILITY);
   });
 
   it("refuse un format non annoncé avant toute lecture", async () => {
