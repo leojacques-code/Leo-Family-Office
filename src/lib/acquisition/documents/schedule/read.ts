@@ -43,6 +43,8 @@ export const SCHEDULE_SCHEMA_VERSION = "schedule-columns-v1";
 /** Plafonds du cahier des charges B19 : ils REFUSENT, ils ne tronquent pas. */
 export const MAX_SCHEDULE_CSV_BYTES = 2 * 1024 * 1024;
 export const MAX_SCHEDULE_LINES = 1200;
+/** Colonnes lues au plus : avec les lignes, il borne le nombre de cases qu'une revue relit. */
+export const MAX_SCHEDULE_COLUMNS = 16;
 
 export type ScheduleSourceFormat = "CSV" | "XLSX";
 export type ScheduleFieldUnit = "MONEY" | "DATE" | "TEXT";
@@ -121,8 +123,11 @@ interface Tabular {
   headers: string[];
   rows: Array<{ rowNumber: number; cells: string[] }>;
   formulaCells: Set<string>;
-  /** Formules SANS valeur en cache : la cellule n'est pas vide, elle est inconnue. */
-  formulaWithoutValueCells: Set<string>;
+  /**
+   * Cellules dont la valeur est INCONNUE, avec la raison : formule sans valeur en cache, ou
+   * cellule en erreur du tableur (`#REF!`, `#DIV/0!`). Elles ne sont pas vides.
+   */
+  unknownValueCells: Map<string, string>;
   decodedDateCells: Set<string>;
   issues: DocumentIssue[];
 }
@@ -197,8 +202,19 @@ function readCsv(bytes: Uint8Array): TabularResult {
     };
   }
   const decoded = decodeSourceBytes(bytes);
-  const delimiter = detectDelimiter(decoded.text);
-  const document = parseDelimited(decoded.text, delimiter.delimiter, {
+  // Un export peut précéder l'en-tête d'un titre, ce que la détection du séparateur lirait
+  // comme un fichier instable : la ligne d'en-tête est CHERCHÉE d'abord, comme en XLSX.
+  // Faute d'en-tête reconnu, le fichier est lu depuis sa première ligne et le dira.
+  const lines = decoded.text.split(/\r?\n/);
+  const skipped = Math.max(
+    0,
+    lines
+      .slice(0, 20)
+      .findIndex((line) => [";", ",", "\t"].some((sep) => recognisedHeader(line.split(sep)))),
+  );
+  const text = skipped > 0 ? lines.slice(skipped).join("\n") : decoded.text;
+  const delimiter = detectDelimiter(text);
+  const document = parseDelimited(text, delimiter.delimiter, {
     maxRows: MAX_SCHEDULE_LINES + 1,
   });
   const issues: DocumentIssue[] = [...decoded.issues, ...delimiter.issues, ...document.issues].map(
@@ -218,28 +234,41 @@ function readCsv(bytes: Uint8Array): TabularResult {
   ) {
     return { ok: false, issues };
   }
+  if (skipped > 0) {
+    issues.push(
+      fileIssue(
+        "SCHEDULE_SOURCE_NOTICE",
+        `En-tête trouvé à la ligne ${skipped + 1} : les ${skipped} ligne(s) qui le précèdent ne sont pas lues.`,
+        "INFO",
+      ),
+    );
+  }
   return {
     ok: true,
     value: {
       format: "CSV",
       sheetName: null,
-      headerRowNumber: 1,
+      headerRowNumber: skipped + 1,
       headers: document.headers,
+      // Numéros de ligne du FICHIER, titre compris : c'est là que l'utilisateur les relira.
       rows: document.rows
         .filter((row) => row.cells.some((cell) => cell.trim().length > 0))
-        .map((row) => ({ rowNumber: row.rowNumber, cells: row.cells })),
+        .map((row) => ({ rowNumber: row.rowNumber + skipped, cells: row.cells })),
       formulaCells: new Set(),
-      formulaWithoutValueCells: new Set(),
+      unknownValueCells: new Map(),
       decodedDateCells: new Set(),
       issues,
     },
   };
 }
 
-/** Un en-tête est « reconnu » s'il porte une date et au moins un montant. */
+/** Un en-tête est « reconnu » s'il porte une date (« Échéance » comprise) et un montant. */
 function recognisedHeader(cells: readonly string[]): boolean {
-  const roles = cells.map((cell) => readHeader(cell).role);
-  return roles.includes("DUE_DATE") && roles.some((role) => role !== null && MONEY_ROLES.has(role));
+  const readings = cells.map((cell) => readHeader(cell));
+  return (
+    readings.some((reading) => reading.role === "DUE_DATE" || reading.dateOrTotal) &&
+    readings.some((reading) => reading.role !== null && MONEY_ROLES.has(reading.role))
+  );
 }
 
 function readXlsx(bytes: Uint8Array): TabularResult {
@@ -295,11 +324,20 @@ function readXlsx(bytes: Uint8Array): TabularResult {
       .map((entry) => entry.cell)
       .filter((cell): cell is string => cell !== null),
   );
-  const withoutValue = new Set<string>();
+  const withoutValue = new Map<string, string>();
   for (const entry of workbook.issues) {
     if (entry.sheet !== null && entry.sheet !== chosen.name) continue;
     if (entry.code === "DATE_SERIAL_DECODED" || entry.code === "FORMULA_CACHED_VALUE") continue;
-    if (entry.code === "FORMULA_WITHOUT_VALUE" && entry.cell) withoutValue.add(entry.cell);
+    if (entry.code === "FORMULA_WITHOUT_VALUE" && entry.cell) {
+      withoutValue.set(
+        entry.cell,
+        "Formule sans valeur en cache : la valeur est inconnue, elle n’est ni lue ni calculée.",
+      );
+    }
+    // Une erreur de tableur n'est pas une absence de valeur : la case est illisible.
+    if (entry.code === "ERROR_CELL" && entry.cell) {
+      withoutValue.set(entry.cell, "Cellule en erreur dans le tableur : la valeur est inconnue.");
+    }
     issues.push(
       documentIssue(
         entry.code.startsWith("FORMULA") ? "SCHEDULE_FORMULA_CELL" : "SCHEDULE_SOURCE_NOTICE",
@@ -323,7 +361,7 @@ function readXlsx(bytes: Uint8Array): TabularResult {
         .map((cells, offset) => ({ rowNumber: rowNumberAt(headerIndex + 1 + offset), cells }))
         .filter((row) => row.cells.some((cell) => cell.trim().length > 0)),
       formulaCells: new Set(chosen.formulaCells),
-      formulaWithoutValueCells: withoutValue,
+      unknownValueCells: withoutValue,
       decodedDateCells: decoded,
       issues,
     },
@@ -360,6 +398,28 @@ function failed(
 /** Attribue les rôles : un rôle revendiqué par deux colonnes n'est attribué à aucune. */
 function buildColumns(headers: readonly string[], issues: DocumentIssue[]) {
   const readings = headers.map((label) => ({ label, ...readHeader(label) }));
+  // « Échéance » seule : le MONTANT si une autre colonne porte déjà la date, la DATE sinon.
+  // Une attribution fausse reste bruyante : ses cellules ne s'analysent pas dans le type
+  // attendu et sont bloquées, elles ne passent jamais pour des valeurs lues.
+  const otherDate = readings.some((reading) => reading.role === "DUE_DATE");
+  for (const reading of readings) {
+    if (!reading.dateOrTotal) continue;
+    reading.role = otherDate ? "TOTAL_PAYMENT" : "DUE_DATE";
+    issues.push(
+      documentIssue(
+        "SCHEDULE_COLUMN_AMBIGUOUS",
+        "INFO",
+        null,
+        null,
+        reading.label,
+        `« ${reading.label} » est lue comme ${
+          otherDate
+            ? "le montant de l’échéance, une autre colonne portant la date"
+            : "la date de l’échéance, aucune autre colonne ne la portant"
+        } : vérifiez-le sur la pièce.`,
+      ),
+    );
+  }
   const claims = new Map<ScheduleColumnRole, number>();
   for (const reading of readings) {
     if (reading.role) claims.set(reading.role, (claims.get(reading.role) ?? 0) + 1);
@@ -440,6 +500,16 @@ export function readScheduleDocument(input: ScheduleReadInput): ScheduleExtracti
       fileIssue(
         "SCHEDULE_TOO_MANY_ROWS",
         `${source.rows.length} lignes de données pour un plafond de ${MAX_SCHEDULE_LINES} : le fichier est refusé, jamais tronqué.`,
+      ),
+    ]);
+  }
+
+  if (source.headers.length > MAX_SCHEDULE_COLUMNS) {
+    return failed(input, source.format, [
+      ...issues,
+      fileIssue(
+        "SCHEDULE_TOO_MANY_COLUMNS",
+        `${source.headers.length} colonnes pour un plafond de ${MAX_SCHEDULE_COLUMNS} : le fichier est refusé, jamais tronqué.`,
       ),
     ]);
   }
@@ -545,18 +615,12 @@ export function readScheduleDocument(input: ScheduleReadInput): ScheduleExtracti
       const boxCode = `L${line}.${column.key}`;
       const fromFormula = source.formulaCells.has(cellRef);
       const fieldIssues: DocumentIssue[] = [];
-      // Formule sans valeur en cache : la cellule n'est PAS vide, sa valeur est inconnue.
-      const unknownFormula = source.formulaWithoutValueCells.has(cellRef);
-      if (unknownFormula) {
+      // Formule sans valeur en cache ou cellule en erreur : PAS vide, valeur inconnue.
+      const unknownReason = source.unknownValueCells.get(cellRef) ?? null;
+      const unknownFormula = unknownReason !== null;
+      if (unknownReason !== null) {
         fieldIssues.push(
-          documentIssue(
-            "SCHEDULE_FORMULA_CELL",
-            "ERROR",
-            null,
-            boxCode,
-            null,
-            "Formule sans valeur en cache : la valeur est inconnue, elle n’est ni lue ni calculée.",
-          ),
+          documentIssue("SCHEDULE_FORMULA_CELL", "ERROR", null, boxCode, null, unknownReason),
         );
       }
       if (fromFormula) {
@@ -662,6 +726,19 @@ export function readScheduleDocument(input: ScheduleReadInput): ScheduleExtracti
             parsed.code === "AMBIGUOUS"
               ? "Aucune valeur de la colonne ne tranche entre virgule décimale et séparateur de milliers : le montant n’est pas lu."
               : "Montant illisible.",
+          ),
+        );
+      } else if (parsed.value !== null && parsed.value < 0 && column.role === "PRINCIPAL") {
+        // Un capital négatif est la forme bancaire d'intérêts capitalisés (différé total) : la
+        // valeur est fidèle, elle est lue et signalée, jamais « corrigée » en positif.
+        fieldIssues.push(
+          documentIssue(
+            "SCHEDULE_NEGATIVE_AMOUNT",
+            "WARNING",
+            null,
+            boxCode,
+            raw,
+            "Capital négatif : le capital restant dû augmente sur cette échéance (intérêts capitalisés ?).",
           ),
         );
       } else if (parsed.value !== null && parsed.value < 0) {
@@ -777,11 +854,18 @@ export function readScheduleDocument(input: ScheduleReadInput): ScheduleExtracti
     unresolved: absent,
   });
   if (has("OPENING_BALANCE", "PRINCIPAL", "CLOSING_BALANCE")) {
+    const read = (code: string) =>
+      fields.find((field) => field.boxCode === code)?.normalizedValue ?? null;
     for (let line = 1; line <= lineCount; line += 1) {
+      const opening = read(`L${line}.opening`);
+      const closing = read(`L${line}.closing`);
+      // Un capital restant dû qui AUGMENTE (différé capitalisé) peut contredire l'identité
+      // sans que la pièce soit fausse : l'écart est signalé, il ne bloque pas la validation.
+      const growing = opening !== null && closing !== null && closing > opening;
       checks.push({
         checkCode: `ROW_BALANCE:${line}`,
         label: `Ligne ${line} : ouverture − capital = clôture`,
-        severity: "BLOCKING",
+        severity: growing ? "WARNING" : "BLOCKING",
         tolerance: 0,
         left: [`L${line}.opening`],
         right: [`L${line}.principal`, `L${line}.closing`],

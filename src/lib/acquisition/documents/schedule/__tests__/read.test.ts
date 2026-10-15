@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { buildWorkbook } from "@/lib/acquisition/xlsx/__tests__/fixtures/xlsx-builder";
 import { readHeader } from "../columns";
-import { MAX_SCHEDULE_LINES, readScheduleDocument, type ScheduleExtraction } from "../read";
+import {
+  MAX_SCHEDULE_COLUMNS,
+  MAX_SCHEDULE_LINES,
+  readScheduleDocument,
+  type ScheduleExtraction,
+} from "../read";
 
 // Fixtures entièrement synthétiques : aucun échéancier réel, aucune donnée personnelle.
 const csv = (text: string) => new TextEncoder().encode(text);
@@ -137,13 +142,13 @@ describe("lecture d'un échéancier CSV en candidats localisés", () => {
     expect(field(impossible, "L1.date")?.issues[0]?.message).toMatch(/n’existe pas/);
   });
 
-  it("bloque un montant négatif au lieu de le lire", () => {
-    const result = read(["date;principal", "2026-10-05;-10"].join("\n"));
-    expect(field(result, "L1.principal")).toMatchObject({
+  it("bloque un montant négatif au lieu de le lire (hors capital, voir différé capitalisé)", () => {
+    const result = read(["date;principal;interet", "2026-10-05;10;-10"].join("\n"));
+    expect(field(result, "L1.interest")).toMatchObject({
       normalizedValue: null,
       validationStatus: "BLOCKED",
     });
-    expect(field(result, "L1.principal")?.issues[0]?.code).toBe("SCHEDULE_NEGATIVE_AMOUNT");
+    expect(field(result, "L1.interest")?.issues[0]?.code).toBe("SCHEDULE_NEGATIVE_AMOUNT");
   });
 
   it("signale doublons, désordre et trous de périodicité sans rien reconstituer", () => {
@@ -274,6 +279,30 @@ describe("lecture d'un échéancier XLSX", () => {
     });
   });
 
+  it("bloque une cellule en erreur du tableur : #REF! n'est pas une cellule vide", () => {
+    const result = readScheduleDocument({
+      bytes: buildWorkbook({
+        rows: [
+          header,
+          [
+            { ref: "A2", type: "inlineStr", value: "2026-10-05" },
+            { ref: "B2", value: "200" },
+            { ref: "C2", type: "e", value: "#REF!", formula: "B2-D2" },
+            { ref: "D2", value: "100" },
+          ],
+        ],
+      }),
+      fileName: "echeancier.xlsx",
+      declaredCurrency: "EUR",
+      contractPrincipal: null,
+    });
+    expect(field(result, "L1.principal")).toMatchObject({
+      normalizedValue: null,
+      validationStatus: "BLOCKED",
+    });
+    expect(field(result, "L1.principal")?.issues[0]?.message).toMatch(/erreur/);
+  });
+
   it("refuse un classeur porteur de macros", () => {
     const result = readScheduleDocument({
       bytes: buildWorkbook({ rows: [header], withMacro: true }),
@@ -293,5 +322,70 @@ describe("registre des en-têtes", () => {
     expect(readHeader("CRD après")).toMatchObject({ role: "CLOSING_BALANCE" });
     expect(readHeader("Capital restant dû")).toMatchObject({ role: null, ambiguous: true });
     expect(readHeader("Remarques")).toMatchObject({ role: null, ambiguous: false });
+  });
+});
+
+describe("en-têtes qui ne tranchent pas seuls (relecture indépendante)", () => {
+  it("lit « Échéance » comme le montant quand une autre colonne porte la date", () => {
+    const result = read(["Date;Échéance;Capital;Intérêts", "2026-10-05;1030;1000;30"].join("\n"));
+    expect(result.status).toBe("EXTRACTED");
+    expect(field(result, "L1.date")?.normalizedDate).toBe("2026-10-05");
+    expect(field(result, "L1.total")?.normalizedValue).toBe(1030);
+    expect(
+      result.issues.find((issue) => issue.code === "SCHEDULE_COLUMN_AMBIGUOUS")?.message,
+    ).toMatch(/montant/);
+  });
+
+  it("lit « Échéance » comme la date quand aucune autre colonne ne la porte", () => {
+    const result = read(["Échéance;Capital;Intérêts", "2026-10-05;1000;30"].join("\n"));
+    expect(result.status).toBe("EXTRACTED");
+    expect(field(result, "L1.date")?.normalizedDate).toBe("2026-10-05");
+  });
+
+  it("cherche l'en-tête d'un CSV sous une ligne de titre, avec les vrais numéros de ligne", () => {
+    const result = read(
+      ["Tableau d'amortissement du prêt", "date;principal;interet", "2026-10-05;1000;30"].join(
+        "\n",
+      ),
+    );
+    expect(result.status).toBe("EXTRACTED");
+    expect(field(result, "L1.principal")).toMatchObject({ rowNumber: 3, cellRef: "B3" });
+    expect(result.lineCount).toBe(1);
+  });
+
+  it("refuse un fichier au-delà du plafond de colonnes au lieu de tronquer la revue", () => {
+    const extra = Array.from({ length: MAX_SCHEDULE_COLUMNS }, (_, index) => `note${index}`);
+    const result = read(
+      [["date", "principal", ...extra].join(";"), ["2026-10-05", "1000", ...extra].join(";")].join(
+        "\n",
+      ),
+    );
+    expect(result.status).toBe("FAILED");
+    expect(codes(result)).toContain("SCHEDULE_TOO_MANY_COLUMNS");
+  });
+
+  it("lit un différé capitalisé sans le bloquer : capital négatif signalé, contrôle non bloquant", () => {
+    const result = read(
+      [
+        "date;ouverture;principal;interet;cloture",
+        "2026-10-05;100000;-250;0;100250",
+        "2026-11-05;100250;0;250;100250",
+      ].join("\n"),
+    );
+    expect(field(result, "L1.principal")).toMatchObject({
+      normalizedValue: -250,
+      validationStatus: "EXTRACTED",
+    });
+    expect(field(result, "L1.principal")?.issues[0]?.severity).toBe("WARNING");
+    // Clôture > ouverture sans capital négatif : écart signalé, validation non bloquée.
+    const flat = read(
+      ["date;ouverture;principal;cloture", "2026-10-05;100000;0;100250"].join("\n"),
+    );
+    expect(flat.checks.find((check) => check.checkCode === "ROW_BALANCE:1")?.severity).toBe(
+      "WARNING",
+    );
+    // Un intérêt négatif reste bloqué.
+    const negativeInterest = read(["date;principal;interet", "2026-10-05;100;-3"].join("\n"));
+    expect(field(negativeInterest, "L1.interest")?.validationStatus).toBe("BLOCKED");
   });
 });

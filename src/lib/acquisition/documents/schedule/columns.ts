@@ -60,7 +60,6 @@ export const MONEY_ROLES: ReadonlySet<ScheduleColumnRole> = new Set([
 const LABELS: Record<ScheduleColumnRole, readonly string[]> = {
   DUE_DATE: [
     "DATE",
-    "ECHEANCE",
     "DATE D'ECHEANCE",
     "DATE ECHEANCE",
     "DATE DE PRELEVEMENT",
@@ -140,9 +139,17 @@ const ROLE_BY_LABEL = new Map<string, ScheduleColumnRole>(
 const HEADER_CURRENCY = /(?:\(|\s|^)(EUR|USD|CHF|GBP|€|\$|£)\)?\s*$/i;
 const SYMBOLS: Record<string, string> = { "€": "EUR", $: "USD", "£": "GBP" };
 
+/**
+ * « Échéance » seule désigne, selon la banque, la DATE ou le MONTANT de l'échéance. Le
+ * libellé ne tranche pas : c'est le reste de l'en-tête qui le fait (voir `buildColumns`).
+ */
+export const DATE_OR_TOTAL_LABEL = "ECHEANCE";
+
 export interface HeaderReading {
   role: ScheduleColumnRole | null;
   ambiguous: boolean;
+  /** Libellé « Échéance » seul : date ou montant, tranché par les autres colonnes. */
+  dateOrTotal: boolean;
   /** Devise mentionnée dans l'en-tête, en code ISO, ou `null`. */
   currency: string | null;
 }
@@ -163,7 +170,12 @@ export function readHeader(label: string): HeaderReading {
     .replace(/\s+/g, " ")
     .trim();
   const role = ROLE_BY_LABEL.get(folded) ?? null;
-  return { role, ambiguous: role === null && AMBIGUOUS_LABELS.includes(folded), currency };
+  return {
+    role,
+    ambiguous: role === null && AMBIGUOUS_LABELS.includes(folded),
+    dateOrTotal: folded === DATE_OR_TOTAL_LABEL,
+    currency,
+  };
 }
 
 /** Lettre de colonne façon tableur : 0 → A, 25 → Z, 26 → AA. */
