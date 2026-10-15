@@ -1,0 +1,58 @@
+{
+  "verified_at": "2026-10-15T16:56:25.881Z",
+  "staging_ref": "bjxhnwvomoznorijauyl",
+  "schema": {
+    "buckets": [
+      {
+        "id": "family-office-documents",
+        "public": false
+      },
+      {
+        "id": "family-office-import-staging",
+        "public": false
+      }
+    ],
+    "public_tables": 117,
+    "migration_count": 65,
+    "canonical_schedule_rows": 0,
+    "public_tables_without_rls": 0,
+    "client_callable_business_rpc": 0
+  },
+  "security_advisor": {
+    "lints": [
+      {
+        "name": "auth_leaked_password_protection",
+        "title": "Leaked Password Protection Disabled",
+        "level": "WARN",
+        "facing": "EXTERNAL",
+        "categories": ["SECURITY"],
+        "description": "Leaked password protection is currently disabled.",
+        "remediation": "https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection",
+        "count": 1,
+        "findings": [
+          {
+            "detail": "Supabase Auth prevents the use of compromised passwords by checking against HaveIBeenPwned.org. Enable this feature to enhance security.",
+            "metadata": {
+              "type": "auth",
+              "entity": "Auth"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "deployment": {
+    "id": "dpl_rKTDNftdWJ3CZoiiTYDBpL47HBrD",
+    "url": "leo-family-office-379zofqnf-lech1.vercel.app",
+    "state": "READY",
+    "target": null,
+    "alias": ["leo-family-office-git-codex-astra-b19-hosted-integ-ce3b7b-lech1.vercel.app"],
+    "meta": {
+      "githubCommitRef": "codex/astra-b19-hosted-integration-20261015",
+      "githubCommitSha": "c0331a20588428b1a03cd8aad61f9793b7d3cff2",
+      "githubCommitMessage": "fix: return safe income refusal found by hosted isolation acceptance",
+      "githubRepo": "Leo-Family-Office",
+      "githubOrg": "leojacques-code"
+    }
+  }
+}

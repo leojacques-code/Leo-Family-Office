@@ -1,0 +1,42 @@
+{
+  "staging_ref": "bjxhnwvomoznorijauyl",
+  "synthetic_only": true,
+  "method": "Real Supabase Auth, PostgREST/RLS, RPC and Storage HTTP",
+  "started_at": "2026-10-15T16:46:09.843Z",
+  "steps": [
+    {
+      "name": "Distinct A/B credentials establish separate real hosted sessions",
+      "status": "PASS",
+      "users": 2
+    },
+    {
+      "name": "PostgREST financial account RLS restricts A/B/anonymous",
+      "status": "PASS",
+      "a_own_rows": 1,
+      "foreign_rows": 0
+    },
+    {
+      "name": "Sensitive document/draft/debt-event tables do not leak via client API",
+      "status": "PASS",
+      "table_checks": 12
+    },
+    {
+      "name": "Server-only debt RPC cannot be executed by A/B/anonymous",
+      "status": "PASS",
+      "denied_callers": 3
+    },
+    {
+      "name": "Storage owner can download, B and anonymous cannot; foreign-prefix upload denied",
+      "status": "PASS",
+      "owner_read": true,
+      "foreign_reads_denied": 2,
+      "foreign_write_denied": true
+    },
+    {
+      "name": "Real Auth token refresh succeeds and keeps A identity",
+      "status": "PASS",
+      "refreshed": true
+    }
+  ],
+  "completed_at": "2026-10-15T16:46:30.070Z"
+}
