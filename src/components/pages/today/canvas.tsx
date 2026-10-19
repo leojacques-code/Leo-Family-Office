@@ -9,7 +9,27 @@ import type {
   TodayReadModel,
 } from "@/lib/presentation/today/contracts";
 import { formatDate } from "@/components/pages/shared";
+import { MetricHelp } from "@/components/primitives/metric-help";
+import { KPI_REGISTRY } from "@/lib/presentation/registry/kpis";
 import { Amount, Unavailable, share } from "./figures";
+
+/** Le nom financier reste visible ; question et définition viennent du même registre. */
+function MetricLabel({ kpiId, label }: { kpiId: string; label?: string }) {
+  const kpi = KPI_REGISTRY[kpiId]!;
+  const term = label ?? kpi.label;
+  return (
+    <span className="today-metric-label">
+      {term}
+      <MetricHelp term={term}>
+        <strong>{kpi.question}</strong>
+        <br />
+        {kpi.userExplanation}
+        <br />
+        Données : {kpi.requiredData.join(" · ")}.
+      </MetricHelp>
+    </span>
+  );
+}
 
 /**
  * Canvas d'Aujourd'hui : les six questions du §3, répondues par une GÉOMÉTRIE.
@@ -30,9 +50,8 @@ import { Amount, Unavailable, share } from "./figures";
  *   * Q4 est un RUBAN : revenu, dépenses essentielles, service de dette, solde libre, dans
  *     l'ordre du §20 item 3, chaque segment large à proportion du revenu. C'est le flux du
  *     mois, pas le Sankey complet de Cash Flow — le §11 de V10 réserve celui-là à son domaine.
- *   * Q5 est une piste de trajectoire vers l'échéance de l'objectif, et non un anneau de
- *     progression : le §20 de V10 veut « timeline / trajectory as primary analytic visual » et
- *     l'anneau « only as secondary summary ».
+ *   * L'objectif montre sa progression actuelle, sans la présenter comme la trajectoire
+ *     future demandée par Q5. Une échéance affichée ne constitue pas une projection.
  *   * Q6 est le compte de ce qui attend une décision, rendu comme entrée vers l'inbox.
  *
  * AUCUNE VALEUR ABSENTE N'EST DESSINÉE. Une barre à largeur nulle affirmerait un zéro : les
@@ -51,8 +70,10 @@ function Stock({
   currency: string;
 }) {
   return (
-    <section aria-label={netWorth.question} className="today-stock">
-      <p className="today-question">{netWorth.question}</p>
+    <section aria-label="Patrimoine net" className="today-stock">
+      <h2 className="today-question">
+        <MetricLabel kpiId="net_worth" />
+      </h2>
       <p className="today-figure">
         {netWorth.value === null ? (
           <Unavailable answer={netWorth} />
@@ -61,7 +82,9 @@ function Stock({
         )}
       </p>
       <p className="today-subline">
-        <span className="today-label">{cash.question}</span>
+        <span className="today-label">
+          <MetricLabel kpiId="immediate_cash" />
+        </span>
         {cash.value === null ? (
           <Unavailable answer={cash} />
         ) : (
@@ -86,8 +109,10 @@ function Delta({
 }) {
   const total = change ? change.causes.reduce((sum, cause) => sum + Math.abs(cause.amount), 0) : 0;
   return (
-    <section aria-label={answer.question} className="today-delta">
-      <p className="today-question">{answer.question}</p>
+    <section aria-label="Évolution depuis la clôture" className="today-delta">
+      <h2 className="today-question">
+        <MetricLabel kpiId="net_worth_change_since_close" />
+      </h2>
       {change === null ? (
         <>
           <p className="today-figure small">
@@ -160,8 +185,10 @@ function Ribbon({
   currency: string;
 }) {
   return (
-    <section aria-label={answer.question} className="today-ribbon">
-      <p className="today-question">{answer.question}</p>
+    <section aria-label="Solde libre du mois" className="today-ribbon">
+      <h2 className="today-question">
+        <MetricLabel kpiId="free_cash_flow_after_debt" label="Solde libre du mois" />
+      </h2>
       {flow === null ? (
         <>
           <p className="today-figure small">
@@ -224,15 +251,17 @@ function Ribbon({
 
 function Trajectory({ answer, goal }: { answer: AnswerView; goal: GoalTrajectoryView | null }) {
   return (
-    <section aria-label={answer.question} className="today-trajectory">
-      <p className="today-question">{answer.question}</p>
+    <section aria-label="Progression de l’objectif" className="today-trajectory">
+      <h2 className="today-question">
+        <MetricLabel kpiId="goal_progress" label="Progression de l’objectif" />
+      </h2>
       {goal === null ? (
         <>
           <p className="today-figure small">
             <Unavailable answer={answer} />
           </p>
           <p className="today-reserve">
-            Aucun objectif actif : une trajectoire suppose une cible datée.
+            Aucun objectif actif : une progression suppose une cible définie.
           </p>
         </>
       ) : (
@@ -280,7 +309,9 @@ function Obligations({
 }) {
   return (
     <section aria-label="Échéances à trente jours" className="today-obligations">
-      <p className="today-question">Qu’est-ce qui tombe dans les trente jours ?</p>
+      <h2 className="today-question">
+        <MetricLabel kpiId="upcoming_obligations_30d" />
+      </h2>
       {obligations.length === 0 ? (
         <p className="today-reserve">
           Aucune échéance contractuelle datée dans les trente jours. Une récurrence non confirmée
@@ -323,7 +354,7 @@ export interface TodayCanvasProps {
 }
 
 export function TodayCanvas({ model, onOpenInbox }: TodayCanvasProps) {
-  const [netWorth, cash, delta, flow, trajectory, decision] = model.answers;
+  const [netWorth, cash, delta, flow, trajectory] = model.answers;
   const currency = model.reportingCurrency;
   return (
     <div className="today-canvas">
@@ -337,8 +368,10 @@ export function TodayCanvas({ model, onOpenInbox }: TodayCanvasProps) {
       <Ribbon answer={flow!} currency={currency} flow={model.monthFlow} />
       <Trajectory answer={trajectory!} goal={model.goalTrajectory} />
       <Obligations currency={currency} obligations={model.obligations} />
-      <section aria-label={decision!.question} className="today-decision">
-        <p className="today-question">{decision!.question}</p>
+      <section aria-label="Éléments à vérifier" className="today-decision">
+        <h2 className="today-question">
+          <MetricLabel kpiId="pending_review_count" />
+        </h2>
         <button className="today-inbox-entry" onClick={onOpenInbox} type="button">
           <span className="today-inbox-count">{model.inbox.pendingCount}</span>
           <span>

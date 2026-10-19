@@ -176,26 +176,21 @@
   /* §2 de V10 : « main workstation: minimum 580 px desktop ». */
   min-height: 580px;
   align-items: start;
+  align-content: start;
 }
 
-.workstation[data-with-rail="true"] .workstation-body {
-  grid-template-columns: var(--ws-rail) minmax(0, 1fr);
-}
-
-.workstation[data-with-inspector="true"] .workstation-body {
-  grid-template-columns: minmax(0, 1fr) var(--ws-inspector);
-}
-
+.workstation[data-with-inspector="true"] .workstation-body,
 .workstation[data-with-rail="true"][data-with-inspector="true"] .workstation-body {
-  grid-template-columns: var(--ws-rail) minmax(0, 1fr) var(--ws-inspector);
+  grid-template-columns: minmax(0, 1fr) var(--ws-inspector);
 }
 
 /* ─── Zone B : rail de sources ───────────────────────────────────────────────────────── */
 
 .source-rail {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -208,16 +203,40 @@
   text-transform: uppercase;
 }
 
+.source-rail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.source-rail-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.source-rail-toggle:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+
 .source-rail-list {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .source-rail-list li {
+  flex: 1 1 180px;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -227,15 +246,15 @@
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 8px;
   row-gap: 3px;
-  min-height: 48px;
-  padding: 8px 11px;
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  background: var(--surface);
+  min-height: 44px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--surface-tint);
   font-family: inherit;
   text-align: left;
   cursor: pointer;
@@ -252,14 +271,10 @@
 }
 
 .source-tile {
-  grid-row: 1 / span 2;
-  /* §4.2 de V10 : « 32-36 px icon tile ». */
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  background: var(--surface-tint);
+  width: 24px;
+  height: 24px;
   color: var(--teal-dark);
 }
 
@@ -289,10 +304,16 @@
 }
 
 .source-status {
-  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   font-weight: 600;
   white-space: normal;
+}
+
+.source-rail[data-expanded="true"] .source-status {
+  grid-column: 2 / -1;
 }
 
 .source-row[data-status="ACTIVE"] .source-status {
@@ -506,14 +527,13 @@
 /* ─── Responsive desktop et tablette ─────────────────────────────────────────────────── */
 
 /*
- * Le §11 du plan demande « responsive desktop/tablette ». En dessous de 1 280 px, les trois
- * zones ne tiennent plus dans les proportions du §2 : l'inspecteur passe sous le canvas
- * plutôt que d'écraser les deux autres. Il reste une colonne persistante, pas un dialogue,
- * parce qu'à cette largeur il y a encore la place de le lire à côté de son contexte.
+ * Le rail compact ne réserve plus de colonne vide (D-UX-03). En dessous de 1 280 px,
+ * l'inspecteur passe sous le canvas pour préserver la largeur de lecture.
  */
 @media (max-width: 1279px) {
+  .workstation[data-with-inspector="true"] .workstation-body,
   .workstation[data-with-rail="true"][data-with-inspector="true"] .workstation-body {
-    grid-template-columns: var(--ws-rail) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
   .workstation[data-with-inspector="true"] .inspector {
     grid-column: 1 / -1;
@@ -521,9 +541,7 @@
 }
 
 /*
- * En dessous de 1 024 px, le rail passe aussi sous le canvas et devient une liste
- * horizontale : à cette largeur, une colonne de 2,75/16 fait 176 px, ce qui ne suffit plus
- * pour un nom de source et son état sur la même ligne.
+ * En dessous de 1 024 px, les sources restent dans l'ordre de lecture avant le canvas.
  */
 @media (max-width: 1023px) {
   .workstation-body,

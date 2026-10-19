@@ -1,0 +1,61 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 check
+> npm run check:conflict-markers && npm run lint && npm run test && npm run build
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 check:conflict-markers
+> node --experimental-strip-types scripts/check-conflict-markers.ts
+
+(node:31) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/scratch/1b59cbc42178/lfo/scripts/check-conflict-markers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /workspace/scratch/1b59cbc42178/lfo/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Marqueurs de conflit : 744 fichier(s) balayé(s), 72 ignoré(s).
+Aucun marqueur de conflit dans les fichiers suivis.
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 lint
+> eslint .
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 test
+> vitest run
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+
+ Test Files  187 passed (187)
+      Tests  2595 passed (2595)
+   Start at  00:24:29
+   Duration  20.33s (transform 10.94s, setup 5.33s, import 33.42s, tests 50.57s, environment 17.99s)
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 build
+> next build
+
+▲ Next.js 16.3.3 (Turbopack)
+✓ Running next.config.ts took 20ms
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+- Experiments (use with caution):
+  · serverActions
+
+  Creating an optimized production build ...
+
+> Build error occurred
+[Error: Failed to open database
+
+Caused by:
+    0: Loading persistence directory failed
+    1: invalid digit found in string]
