@@ -69,17 +69,20 @@ export function SectionHeader({
   title,
   description,
   actions,
+  headingLevel = 1,
 }: {
   eyebrow?: string;
   title: string;
   description?: string;
   actions?: React.ReactNode;
+  headingLevel?: 1 | 2;
 }) {
+  const Heading = headingLevel === 2 ? "h2" : "h1";
   return (
     <header className="section-header">
       <div>
         {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
-        <h1>{title}</h1>
+        <Heading>{title}</Heading>
         {description ? <p>{description}</p> : null}
       </div>
       {actions ? <div className="header-actions">{actions}</div> : null}

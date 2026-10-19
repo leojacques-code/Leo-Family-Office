@@ -2,6 +2,9 @@
 
 **En cours. B19 non clôturé. B20/B21 non commencés.**
 
+La suite de la recette dans le navigateur authentifié et les anomalies trouvées sont suivies
+dans [RECETTE_VISUELLE_B19_2026-10-19.md](RECETTE_VISUELLE_B19_2026-10-19.md).
+
 ## Environnement vérifié
 
 - Organisation `wniscyevfmnmtzbmjwlx`, plan Free, aucun paiement ni supplément créé.

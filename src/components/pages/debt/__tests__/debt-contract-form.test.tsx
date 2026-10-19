@@ -142,6 +142,11 @@ describe("B16 : contrat minimal et synthèse avant enregistrement", () => {
     // Assurance et frais non déclarés : inconnus, jamais zéro, et le total le dit.
     expect(synthesis).toHaveTextContent("Assurance futureInconnue");
     expect(synthesis).toHaveTextContent("connus, hors assurance et frais récurrents");
+    // Recette hébergée : choisir « séparée » puis laisser sa prime vide annonçait 0 €.
+    fireEvent.click(screen.getByLabelText("Prélevée séparément"));
+    expect(synthesis).toHaveTextContent("Assurance futureInconnue");
+    expect(synthesis).toHaveTextContent("connus, hors assurance et frais récurrents");
+    fireEvent.click(screen.getByLabelText("Inconnue (coût incomplet)"));
     fireEvent.submit(screen.getByRole("button", { name: "Ajouter cette dette" }).closest("form")!);
     await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(onSave.mock.calls[0]![0]).toMatchObject({

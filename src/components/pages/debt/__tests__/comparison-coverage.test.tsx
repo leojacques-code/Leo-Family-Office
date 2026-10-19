@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import DebtPage from "../page";
 import { PrimaryActionProvider } from "@/components/workstation/primary-action";
 import { buildDemoState } from "@/lib/data/read-models/today-demo";
@@ -14,6 +14,26 @@ vi.mock("recharts", () => ({
   YAxis: () => null,
 }));
 describe("comparaison dette/placement : faits et unités indispensables", () => {
+  it("ouvre la revue CSV/XLSX depuis l'import primaire sans corriger le contrat", () => {
+    const onChange = vi.fn();
+    const mutate = vi.fn();
+    render(
+      <PrimaryActionProvider onChange={onChange}>
+        <DebtPage
+          state={buildDemoState("2026-09-13")}
+          busy={false}
+          mutate={mutate}
+          setExplanation={vi.fn()}
+        />
+      </PrimaryActionProvider>,
+    );
+    act(() => onChange.mock.lastCall![0].run());
+    expect(screen.getByRole("dialog", { name: "Importer un échéancier" })).toHaveTextContent(
+      "CSV ou XLSX",
+    );
+    expect(screen.queryByRole("dialog", { name: /Corriger/ })).toBeNull();
+    expect(mutate).not.toHaveBeenCalled();
+  });
   it.each(["no-cash", "missing-fx", "foreign-loan"])(
     "ne chiffre pas une comparaison %s",
     (situation) => {

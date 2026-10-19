@@ -93,7 +93,6 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   const [eventEditor, setEventEditor] = useState(false);
   // B16 : dette encours seul dont on décrit le contrat (même ligne, décision tracée).
   const [promoting, setPromoting] = useState<OutstandingDebt | null>(null);
-  useRegisterPrimaryAction(busy ? null : () => setContractEditor(loan ? "edit" : "new"));
   const [balanceEditor, setBalanceEditor] = useState(false);
   // B19 : revue d'un échéancier déposé, ouverte à la place du canevas de la dette.
   const [scheduleRun, setScheduleRun] = useState<string | null>(null);
@@ -104,6 +103,8 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
   } | null>(null);
   const outstandingDebts = state.outstandingDebts ?? [];
   const loan = state.liabilities.find((item) => item.id === selectedId) ?? state.liabilities[0];
+  const [scheduleUploadOpen, setScheduleUploadOpen] = useState(false);
+  useRegisterPrimaryAction(busy || !loan || scheduleRun ? null : () => setScheduleUploadOpen(true));
   const debitAccounts = state.debitAccounts ?? [];
   // Brouillons (document 03 §8) : liste locale, tenue à jour par les réponses de la route
   // dédiée, et resynchronisée à chaque relecture du modèle Dette.
@@ -245,9 +246,8 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
 
   const header = (
     <SectionHeader
-      eyebrow="Passif"
       title="Dettes"
-      description="Échéanciers datés, coût du crédit et arbitrage remboursement vs investissement."
+      headingLevel={2}
       actions={
         <>
           {loan ? (
@@ -1015,7 +1015,7 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
       <section className="panel">
         <div className="panel-header">
           <div>
-            <span className="eyebrow">Échéancier forward daté · {forward.kind}</span>
+            <span className="eyebrow">Échéancier projeté</span>
             <h2>Prochaines échéances</h2>
           </div>
           <span className="panel-note">
@@ -1084,6 +1084,8 @@ function DebtPage({ state, mutate, busy, setExplanation }: DebtPageProps) {
         liabilityCurrency={loan.currency ?? null}
         liabilityId={loan.id}
         onOpenReview={setScheduleRun}
+        uploadOpen={scheduleUploadOpen}
+        onUploadOpenChange={setScheduleUploadOpen}
       />
       {!comparisonReady ? (
         <Callout title="Comparaison à compléter">

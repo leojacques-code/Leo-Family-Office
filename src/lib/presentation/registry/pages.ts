@@ -381,10 +381,9 @@ export const PAGE_REGISTRY = manifests([
   // ─── Section 24 ─────────────────────────────────────────────────────────────────────
   {
     id: "debt",
-    version: 1,
+    version: 2,
     title: "Dette",
-    question:
-      "Combien dois-je, quand le cash sort-il, quel est le coût restant et quelles options ai-je ?",
+    question: "Quel encours, quelles échéances et quel coût reste-t-il à financer ?",
     zones: [...STANDARD_ZONES],
     // §6.2 donne le rail de Dette mot pour mot : « Contrat, échéancier, compte débité ». Le §24
     // ajoute la priorité : « l’échéancier bancaire fourni domine la reconstruction », donc il

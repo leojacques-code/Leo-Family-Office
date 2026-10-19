@@ -18,6 +18,25 @@ function stateWith(patch: Partial<DashboardState>): DashboardState {
 }
 
 describe("railSourcesFor — pertinence déclarée, état lu dans les faits", () => {
+  it("conserve l'encours observé dans les Sources après promotion en contrat", () => {
+    const source = railSourcesFor(
+      PAGE_REGISTRY.debt,
+      stateWith({
+        liabilities: [
+          { balanceDate: "2026-10-15", providedSchedule: [] },
+        ] as unknown as DashboardState["liabilities"],
+        outstandingDebts: [],
+      }),
+    ).find((s) => s.id === "outstanding");
+    expect(source).toMatchObject({ status: "ACTIVE", latestDate: "2026-10-15" });
+    const absent = railSourcesFor(
+      PAGE_REGISTRY.debt,
+      stateWith({
+        liabilities: [{ providedSchedule: [] }] as unknown as DashboardState["liabilities"],
+      }),
+    ).find((s) => s.id === "outstanding");
+    expect(absent?.status).toBe("ABSENTE");
+  });
   it("ne rend aucune source pour une page sans manifeste", () => {
     expect(railSourcesFor(null, empty)).toEqual([]);
   });

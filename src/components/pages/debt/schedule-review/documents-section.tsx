@@ -24,15 +24,18 @@ export function DebtDocumentsSection({
   liabilityId,
   liabilityCurrency,
   onOpenReview,
+  uploadOpen,
+  onUploadOpenChange,
 }: {
   liabilityId: string;
   liabilityCurrency: string | null;
   onOpenReview: (runId: string) => void;
+  uploadOpen: boolean;
+  onUploadOpenChange: (open: boolean) => void;
 }) {
   const [runs, setRuns] = useState<ScheduleRunSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [drawer, setDrawer] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [currency, setCurrency] = useState("");
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -66,7 +69,7 @@ export function DebtDocumentsSection({
   }, [fetchRuns]);
 
   function closeDrawer() {
-    setDrawer(false);
+    onUploadOpenChange(false);
     setFile(null);
     setCurrency("");
     setUploadError(null);
@@ -120,7 +123,11 @@ export function DebtDocumentsSection({
           <span className="eyebrow">Pièces et lectures</span>
           <h2>Documents</h2>
         </div>
-        <button className="button secondary compact" onClick={() => setDrawer(true)} type="button">
+        <button
+          className="button secondary compact"
+          onClick={() => onUploadOpenChange(true)}
+          type="button"
+        >
           <UploadCloud size={15} /> Importer un échéancier
         </button>
       </div>
@@ -182,7 +189,7 @@ export function DebtDocumentsSection({
       ) : null}
 
       <FinancialDrawer
-        open={drawer}
+        open={uploadOpen}
         onClose={closeDrawer}
         title="Importer un échéancier"
         subtitle="La pièce est lue en cases à vérifier ; le prêt n’est pas modifié."

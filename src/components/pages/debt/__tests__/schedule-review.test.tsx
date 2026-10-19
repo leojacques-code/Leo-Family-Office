@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { MetricHelp } from "@/components/primitives/metric-help";
@@ -9,6 +10,19 @@ import type {
 } from "@/lib/data/schedule-document-contracts";
 import { DebtDocumentsSection } from "../schedule-review/documents-section";
 import { ScheduleReviewWorkspace } from "../schedule-review/review-workspace";
+
+function DocumentsFixture() {
+  const [open, setOpen] = useState(false);
+  return (
+    <DebtDocumentsSection
+      liabilityCurrency="CHF"
+      liabilityId={LOAN}
+      onOpenReview={vi.fn()}
+      uploadOpen={open}
+      onUploadOpenChange={setOpen}
+    />
+  );
+}
 
 // Fixtures synthétiques : aucun échéancier réel.
 const RUN = "33333333-3333-4333-8333-333333333333";
@@ -222,9 +236,7 @@ describe("revue côte à côte d'un échéancier déposé (B19)", () => {
 describe("section « Documents » de la dette", () => {
   it("liste les lectures et n'envoie une devise que si elle est déclarée", async () => {
     fetchMock.mockReturnValueOnce(json([run]));
-    render(
-      <DebtDocumentsSection liabilityCurrency="CHF" liabilityId={LOAN} onOpenReview={vi.fn()} />,
-    );
+    render(<DocumentsFixture />);
     expect(await screen.findByText("echeancier.csv")).toBeInTheDocument();
     expect(screen.getByText("À examiner")).toBeInTheDocument();
 
@@ -250,9 +262,7 @@ describe("section « Documents » de la dette", () => {
 
   it("déclare la devise de la dette seulement sur un geste explicite", async () => {
     fetchMock.mockReturnValueOnce(json([]));
-    render(
-      <DebtDocumentsSection liabilityCurrency="CHF" liabilityId={LOAN} onOpenReview={vi.fn()} />,
-    );
+    render(<DocumentsFixture />);
     await screen.findByText(/Aucun échéancier déposé/);
     fireEvent.click(screen.getByRole("button", { name: /Importer un échéancier/ }));
     fireEvent.click(screen.getByRole("button", { name: "Déclarer la devise de la dette (CHF)" }));

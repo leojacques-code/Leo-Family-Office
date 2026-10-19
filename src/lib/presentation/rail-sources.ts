@@ -107,11 +107,18 @@ function readEvidence(
         count: listOf(state.liabilities).length,
         latestDate: maxDate(listOf(state.liabilities).map((l) => l.balanceDate)),
       };
-    case "OUTSTANDING_DEBTS":
+    case "OUTSTANDING_DEBTS": {
+      // La promotion conserve l'observation : le contrat ne rend pas son encours absent.
+      // Seuls les contrats portant une date d'observation prouvent cette source.
+      const observed = [
+        ...listOf(state.outstandingDebts),
+        ...listOf(state.liabilities).filter((debt) => Boolean(debt.balanceDate)),
+      ];
       return {
-        count: listOf(state.outstandingDebts).length,
-        latestDate: maxDate(listOf(state.outstandingDebts).map((d) => d.balanceDate)),
+        count: observed.length,
+        latestDate: maxDate(observed.map((debt) => debt.balanceDate)),
       };
+    }
     case "LIABILITY_PROVIDED_SCHEDULE": {
       // La dette porte son échéancier fourni : la source existe dès qu'UNE dette en a un.
       // Compter les dettes plutôt que les lignes dirait « À jour » pour un échéancier vide.

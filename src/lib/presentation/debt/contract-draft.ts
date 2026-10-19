@@ -46,7 +46,23 @@ export function draftLiability(
     monthlyInsurance: contract.insuranceAmount,
     recurringFees: contract.recurringFees,
     paymentIncludesInsurance: contract.paymentIncludesInsurance,
-    insuranceMode: contract.insuranceMode,
+    // Une police en cours de saisie ne confirme pas une assurance à zéro. La synthèse
+    // délègue au moteur le cas UNKNOWN jusqu'à ce que toutes les primes soient décrites.
+    insuranceMode:
+      contract.insuranceMode === "SEPARATE" &&
+      (contract.insurancePolicies.length === 0 ||
+        contract.insurancePolicies.some(
+          (policy) =>
+            policy.periods.length === 0 ||
+            policy.periods.some(
+              (period) =>
+                period.firstDebitDate === "" ||
+                (period.frequency as string) === "" ||
+                !Number.isFinite(period.premiumAmount),
+            ),
+        ))
+        ? "UNKNOWN"
+        : contract.insuranceMode,
     // Une période sans date, fréquence ou prime lisible n'est pas projetée : rien n'est supposé.
     insurancePolicies: contract.insurancePolicies.map((policy, index) => ({
       id: `draft-policy-${index}`,
