@@ -105,6 +105,33 @@ n'a été utilisé comme preuve visuelle.
 
 **B19 reste ouvert. B20 ne doit pas démarrer.**
 
+## Reprise du 20 octobre — contrôle hébergé des correctifs UX
+
+L'environnement est revenu. Les changements locaux ont été rapprochés octet pour octet de
+l'arbre Git publié `ca88a08cdec000678e618e0b2147f35a02dc9b22` ; ce déploiement est READY.
+L'alias de branche ouvre toujours l'écran de connexion : aucune session privée n'est présumée.
+
+La démonstration hébergée en lecture seule a réellement été ouverte depuis son lien public.
+Ces essais portent uniquement sur cette démonstration et ne valident pas les imports privés :
+
+- Les six entrées Sources occupent une bande compacte, sans colonne réservée. Entrée déplie
+  les dates et états détaillés. La répétition Échéancier / Échéancier a disparu.
+- Patrimoine net, Liquidité immédiate, Solde libre du mois et Progression de l'objectif
+  sont effectivement affichés ; aucune promesse de projection ne remplace la progression.
+- L'aide Patrimoine net s'ouvre par Entrée et se ferme par Échap ; le focus reste sur son bouton.
+- Un défaut visuel a été constaté : l'aide ouverte recouvre le montant du patrimoine et la
+  liquidité. La correction CSS place désormais l'aide dans le flux, sans superposition.
+  Son contrôle hébergé après publication reste nécessaire.
+- Les captures `preuves/visual-b19-2026-10-20/demo-overview.jpg` et
+  `demo-help-overlap-before.jpg` conservent le rendu initial et le défaut. Le viewport mesuré
+  est 1363 × 936 ; la largeur du document est 1348 px, sans débordement horizontal observé.
+  Le raccourci d'outils navigateur n'a pas modifié ce viewport. Aucun format 1440/900/390
+  ni geste tactile n'est déclaré vérifié par ces captures.
+
+La correction de placement passe les **15 tests ciblés** Aujourd'hui/Sources et le build.
+Les journaux `ux-targeted-tests.log` et `ux-build.log` sont conservés avec ces preuves.
+La suite complète de 2 595 tests du commit précédent reste une preuve distincte.
+
 ## Limites de périmètre
 
 Uniquement le staging synthétique. Aucun changement de production, aucune migration,

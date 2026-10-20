@@ -111,19 +111,29 @@
 }
 
 .today-metric-label {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: block;
 }
 
 .today-metric-label .metric-help {
+  display: inline;
   position: static;
 }
 
+.today-metric-label .metric-help-button {
+  margin-left: 6px;
+}
+
+/* L'aide ouverte prend sa place dans le flux : elle ne recouvre jamais le montant. */
 .today-metric-label .metric-help-panel {
-  left: 0;
+  position: static;
+  display: block;
+  width: min(360px, 100%);
+  margin-top: 6px;
   transform: none;
+}
+
+.today-metric-label .metric-help-panel[hidden] {
+  display: none;
 }
 
 /* §26 de V10 : chiffres majeurs 22-32 px. Tabular nums, §10.2. */
@@ -195,6 +205,8 @@
 }
 
 .today-label {
+  max-width: 100%;
+  min-width: 0;
   color: var(--text-muted);
   font-size: 12px;
 }
