@@ -1,0 +1,61 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 build
+> next build
+
+▲ Next.js 16.3.3 (Turbopack)
+✓ Running next.config.ts took 265ms
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+- Experiments (use with caution):
+  · serverActions
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 65s
+  Running TypeScript ...
+  Finished TypeScript in 70s ...
+  Collecting page data using 8 workers ...
+  Generating static pages using 8 workers (0/7) ...
+  Generating static pages using 8 workers (1/7) 
+  Generating static pages using 8 workers (3/7) 
+  Generating static pages using 8 workers (5/7) 
+✓ Generating static pages using 8 workers (7/7) in 590ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ○ /_not-found
+├ ƒ /[section]
+├ ƒ /api/auth
+├ ƒ /api/debt
+├ ƒ /api/debt/schedule-documents
+├ ƒ /api/documents
+├ ƒ /api/documents/extraction
+├ ƒ /api/drafts
+├ ƒ /api/export
+├ ƒ /api/imports
+├ ƒ /api/imports/fec
+├ ƒ /api/imports/open-banking
+├ ƒ /api/imports/portfolio
+├ ƒ /api/profile/setup
+├ ƒ /api/projection
+├ ƒ /api/real-estate/public-data
+├ ƒ /api/registry
+├ ƒ /api/reports/pdf
+├ ƒ /api/state
+├ ƒ /api/today
+├ ƒ /auth/confirm
+├ ƒ /demo
+├ ○ /icon.svg
+├ ƒ /login
+└ ƒ /setup
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

@@ -1,0 +1,14 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 test
+> vitest run --maxWorkers=1
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+ ❯ |dom| src/components/pages/debt/__tests__/debt-contract-form.test.tsx (17 tests | 2 failed) 38232ms
+   × conserve les notes du contrat distinctes de la dernière observation lors d’une réédition 5064ms
+     × accepte la seule mensualité, montre la durée déduite et n'envoie aucune durée inventée 5851ms

@@ -1,0 +1,17 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 build
+> next build
+
+▲ Next.js 16.3.3 (Turbopack)
+✓ Running next.config.ts took 281ms
+- Experiments (use with caution):
+  · serverActions
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 104s
+  Running TypeScript ...
+src/lib/acquisition/documents/schedule/__tests__/read.test.ts(53,58): error TS2345: Argument of type 'readonly ["SCHEDULE_PARTIAL_EXTRACT"] | readonly ["SCHEDULE_DUPLICATE_DUE_DATE", "SCHEDULE_PERIOD_GAP"] | readonly ["SCHEDULE_FORMULA_CELL"]' is not assignable to parameter of type 'unknown[]'.
+  The type 'readonly ["SCHEDULE_PARTIAL_EXTRACT"]' is 'readonly' and cannot be assigned to the mutable type 'unknown[]'.
+Failed to type check.
+

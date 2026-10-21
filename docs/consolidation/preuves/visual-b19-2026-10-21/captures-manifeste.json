@@ -1,0 +1,162 @@
+{
+  "code_sha": "c62e039245866a6c9d86b91183bf78746f138c1f",
+  "viewport_observed": {
+    "width": 1363,
+    "height": 936
+  },
+  "requested_viewports_verified": false,
+  "captures": [
+    {
+      "file": "aujourdhui-aide-sans-recouvrement.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 90737,
+      "sha256": "db58d5c592d7888615bec0715b4111ff882a99cdceb6f5c753d4d292e56d75be",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "aujourdhui-banque-inconnue-corrigee.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 86912,
+      "sha256": "49f93ddd0a020f232bdd8e009c86b78cc195579999fafe4b98097d7bea08cf87",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "aujourdhui-theme-sombre.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 86772,
+      "sha256": "ea1ad45d00d28b460481aba4f4df7cbe06c030c5657fd7363beabd154214e24d",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "case-ecartee-valeur-absente.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 104768,
+      "sha256": "64e6e91635d6b63454bb75e99f0ab320d65af38851a8bbe75c2b5c31af150934",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "cinq-lectures-etats-persistants.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 98562,
+      "sha256": "7911ce12cba40ce4e5baf1fde87e2d1c287c7e9088bc8c0a8dd121a4b29c61a4",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "csv-defilement-page-avant.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 64092,
+      "sha256": "827f57713d1615006d0f1cc0367bd6b755707529f6e9441b638c5c9db8953403",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "csv-validation-refusee.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 67060,
+      "sha256": "ce74ee94af977ffc87b57329e96f6df36f32a83808e69eefab7fe3757b915b2a",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "deux-lectures-validees-persistantes.jpg",
+      "width": 1348,
+      "height": 2167,
+      "bytes": 201677,
+      "sha256": "462dba1ed5c65ac36b6525d826fa197c003bc8ce4e5e02d8f0f5ef786aeff104",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "historique-confirmation-defaut-residuel.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 102713,
+      "sha256": "cfb93000deac296b8ae8b62e49cf80215a0e79697a397da996d2a3774abbfeca",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "login-ready.jpg",
+      "width": 1363,
+      "height": 936,
+      "bytes": 50063,
+      "sha256": "c052b20f00a70b14013f51bc534691ad49e0484a6d16ce8bd0acf1a97991dd0d",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "xlsx-conflit-revision-fullpage.jpg",
+      "width": 1348,
+      "height": 1746,
+      "bytes": 156839,
+      "sha256": "c20538878546d91d3315d480ec51bd025dfeb851043a87350a7b53ce982f03d6",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "xlsx-dates-doublon-trou.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 103196,
+      "sha256": "28fbd103d9e1ae9228d14bfe19bdc27b9531f5ef427f03d12f98dcc2f4b08c50",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "xlsx-dates-validation-refusee.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 60884,
+      "sha256": "f02bcb8f0124d329528cc6ad0511fbd8f0c82ed287329bbafaec242e6f3faf33",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "xlsx-doublon-refuse.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 69255,
+      "sha256": "08c0999854ee0e9ecf0e7cd90bf42fbd8ea1c072de26e037940b138e3911d4df",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "xlsx-formule-cache-signalee.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 98375,
+      "sha256": "1d25f66f7071ee3b40f070bb3b07ec9f5d8820ff58890f60da997409c8b45938",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "xlsx-partiel-selection-sans-saut.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 92217,
+      "sha256": "bebc6f1a8335f38468db74004a5e32084a755079f17c029c3ecd84262a26b730",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "xlsx-partiel-synthese-bornee.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 61900,
+      "sha256": "beb3d8e9f6738658b9cd1469b2201b95dbe9aaf2430c44f989b0f0402f0b5eea",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "xlsx-prefixes-refus-avant.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 69575,
+      "sha256": "71c27ec60e035e28f1962a6299de7fc879abb7c72f3c97e90d2f325dad90d905",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
+    {
+      "file": "xlsx-selection-clavier-finale.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 91395,
+      "sha256": "59a43c5d600c7a890eae9a2401b5fe805fe5b9d3e9cf6c981408d9782ed02ae0",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    }
+  ]
+}

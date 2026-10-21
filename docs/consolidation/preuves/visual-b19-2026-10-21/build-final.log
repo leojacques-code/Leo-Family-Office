@@ -1,0 +1,16 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 build
+> next build
+
+▲ Next.js 16.3.3 (Turbopack)
+✓ Running next.config.ts took 156ms
+
+> Build error occurred
+Error: ENOTEMPTY: directory not empty, rmdir '/workspace/scratch/1b59cbc42178/lfo/.next/diagnostics'
+    at ignore-listed frames {
+  errno: -39,
+  code: 'ENOTEMPTY',
+  syscall: 'rmdir',
+  path: '/workspace/scratch/1b59cbc42178/lfo/.next/diagnostics'
+}

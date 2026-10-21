@@ -2,6 +2,10 @@
 
 **En cours. B19 non clôturé ; B20 non commencé.**
 
+> Mise à jour du 21 octobre : la session authentifiée a été reprise, les véritables CSV et
+> XLSX ont été déposés, corrigés et validés. Les constats ci-dessous sont historiques ; le
+> [compte rendu courant](RECETTE_VISUELLE_B19_2026-10-21.md) remplace leurs verdicts en attente.
+
 ## État observé le 15 octobre
 
 Preview de référence : https://leo-family-office-379zofqnf-lech1.vercel.app/debt,

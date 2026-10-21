@@ -1,0 +1,17 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 test
+> vitest run
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+ ❯ |dom| src/components/primitives/__tests__/money-input.test.tsx (14 tests | 1 failed) 15367ms
+     × part d’un champ VIDE quand la valeur est null, et pas de « 0 » 10556ms
+ ❯ |dom| src/components/pages/debt/__tests__/debt-contract-form.test.tsx (17 tests | 3 failed) 50030ms
+     × enregistre une police séparée, ses assurés et sa période, sans prime par échéance 7648ms
+     × ne laisse pas une quotité hors bornes partir au serveur 6738ms
+     × n'invente ni date ni taux pour une révision, ni date ni montant pour un palier 5099ms
