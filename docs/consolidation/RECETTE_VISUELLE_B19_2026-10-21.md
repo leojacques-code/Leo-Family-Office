@@ -1,9 +1,10 @@
 # B19 — recette réelle du 21 octobre 2026
 
-**B19 ouvert. B20 non commencé.** Un défaut de traçabilité reste à corriger ; les formats
-demandés et le toucher restent à certifier.
+**B19 ouvert. B20 non commencé.** Le défaut de traçabilité a été corrigé et relu ; les formats
+demandés, le toucher et les autres réserves ci-dessous restent à certifier.
 Toutes les manipulations concernent le staging et des montants synthétiques. Aucune dépense,
-migration, action de production ou fusion dans main.
+migration de production, action de production ou fusion dans main. Une correction de RPC a
+été appliquée uniquement au staging, sans réécriture des traces anciennes.
 
 ## Session et référence
 
@@ -17,9 +18,9 @@ Le parcours initial a été exécuté sur `0b80663f171e35bd9bfd0b3aae1b9b9c93ab2
 https://leo-family-office-29ktzapkm-lech1.vercel.app, READY avant les essais.
 Branche : `codex/astra-b19-hosted-integration-20261015`.
 
-Dernier code publié et testé : **`c62e039245866a6c9d86b91183bf78746f138c1f`**.
-Preview READY : https://leo-family-office-ag8xq6w6c-lech1.vercel.app.
-Déploiement : `dpl_5SfSXbaVUtjZpcZBLd1SSTZSyuvR`, cible Preview, aucune promotion production.
+Dernier code publié et testé : **`e79b09175d84dda4f01dd835bdd98134528440db`**.
+Preview READY : https://leo-family-office-8vb98yb7x-lech1.vercel.app.
+Déploiement : `dpl_4CS4DbZFfBPQ58xEzUzmY4JhdUQa`, cible Preview (`target=null`), aucune promotion production.
 Le lot de preuves publié ensuite ne modifie pas le code applicatif.
 
 ## Résultats réellement observés
@@ -44,7 +45,7 @@ Le lot de preuves publié ensuite ne modifie pas le code applicatif.
 | Extrait partiel XLSX réel | Une seule échéance du 5 décembre, ouverture 1 000 € contre un capital contractuel de 2 000 €. L'interface annonce « Extrait partiel ». Synthèse bornée à l'extrait : capital 1 000 €, assurance 5 €, total 1 005 €, sans prétendre au coût du prêt. Lecture validée sans rattachement. |
 | Dates contradictoires XLSX réelles | Cinq échéances avec un doublon au 5 décembre et un trou en février. Les deux alertes sont visibles. La validation finale est réellement soumise et refusée par le serveur pour doublon. Lecture ensuite refusée avec un motif explicite de fin du test. |
 | Formules XLSX réelles | H2 et H3 contiennent une formule SUM et sa valeur en cache 1 005. La sélection H2 montre explicitement « la valeur en cache qui est lue, la formule n'est pas évaluée ». Lecture ensuite refusée avec motif de fin du test ; pièce conservée. |
-| Écartement et reprise | D2 du XLSX complet écartée avec motif : « Aucune — case écartée » dans l'inspecteur, valeur imprimée 0 conservée, un contrôle non calculable. Confirmation de la lecture imprimée : valeur retenue 0 €, zéro contrôle en échec ou non calculable, puis validation documentaire réussie. Les quatre décisions sont conservées, mais la dernière transition affichée est fausse : voir R1. |
+| Écartement et reprise | D2 du XLSX complet écartée avec motif : « Aucune — case écartée » dans l'inspecteur, valeur imprimée 0 conservée, un contrôle non calculable. Confirmation de la lecture imprimée : valeur retenue 0 €, zéro contrôle en échec ou non calculable, puis validation documentaire réussie. Une première trace fautive a conduit à R1. Après correction, une nouvelle décision affiche et consigne bien « aucune → 0 € ». Six décisions conservées ; la lacune de la quatrième est nommée explicitement. |
 | Persistance finale des cinq lectures | Après rechargement, trois lectures validées (CSV, XLSX complet, XLSX partiel), deux refusées (dates et formules). Aucun nouveau compte ni nouvelle dette. Le délai technique du premier appel de rechargement n'a pas perdu l'état : l'observation suivante montre les cinq lectures. |
 | Aides, clavier, thèmes | Aide Patrimoine net ouverte par Entrée, fermée par Échap. Le montant reste visible sous l'aide. Thèmes clair et sombre réellement affichés. Navigation fléchée et sélection synchronisée testées dans la grille. |
 
@@ -62,7 +63,11 @@ CSV `53d2d98f-f4be-40c1-a8d2-b479a7677b91` et XLSX
 `0f5bb898-4217-4410-b506-6f3a71705c52` est **VALIDATED** ; dates
 `f1bbd914-83ac-4fb4-bd29-3943458536f3` et formules
 `806b9173-4cf0-4ba8-b52c-8345ed59577d` sont **REJECTED**.
-Résultat brut structuré conservé dans `preuves/visual-b19-2026-10-21/etat-staging-final.json`.
+Résultat brut structuré avant correction d'audit conservé dans
+`preuves/visual-b19-2026-10-21/etat-staging-final.json`. Le contrôle final après correction,
+nouvelle décision UI et revalidation est dans `etat-staging-apres-audit.json` : encours
+toujours 2 000 €, zéro ligne canonique, XLSX validé, six décisions dont la dernière
+`before=null`, `after=0`, sans altération des quatre premières.
 Cette vérification technique
 confirme l'absence d'effet canonique ; elle ne remplace aucun des essais UI ci-dessus.
 
@@ -92,9 +97,20 @@ confirme l'absence d'effet canonique ; elle ne remplace aucun des essais UI ci-d
    les préfixes déclarés pour SpreadsheetML et les relations OOXML. Les attributs, les liens
    externes et les préfixes étrangers ne sont pas réinterprétés. Trois vrais classeurs sont
    conservés comme régressions, avec un test de refus d'un espace XML étranger.
+9. **R1, audit de confirmation** : confirmer une case après l'avoir écartée retenait bien la
+   valeur imprimée, mais consignait `after_value=null` et affichait « 0 € → aucune ».
+   La nouvelle RPC consigne la valeur normalisée effectivement restaurée, montant ou date ;
+   l'avant d'une case écartée est absent. Le code `e79b091` et la migration
+   `20261021153408_document_field_confirmation_audit.sql` corrigent ce point. La définition
+   staging a été confrontée exactement à la dernière RPC du dépôt avant remplacement.
+   Les gardes, le verrou, les révisions et les droits restent inchangés. Les traces anciennes
+   ne sont jamais réécrites : l'interface nomme leur valeur après non consignée, sans inventer
+   une valeur historique. Relecture réelle de la quatrième trace lacunaire et de la sixième
+   confirmation fidèle « aucune → 0 € » sur la Preview publiée.
 
-Les corrections ne créent aucune formule financière dans les composants et ne changent pas
-le schéma. Le premier lot est publié dans `902f7e587dff7140fc680f3fd800c392e88be957`,
+Les huit premières corrections ne créent aucune formule financière dans les composants et ne
+changent pas le schéma. La neuvième remplace uniquement la RPC de décision en staging.
+Le premier lot est publié dans `902f7e587dff7140fc680f3fd800c392e88be957`,
 Preview READY https://leo-family-office-ffi04oxua-lech1.vercel.app. La relecture y confirme
 « Document présent » et la valeur absente d'une case écartée. Elle a aussi fait ajuster le
 défilement : l'inspecteur et les candidats doivent défiler dans leurs propres surfaces, pour
@@ -126,6 +142,24 @@ Ces mesures concernent cette fenêtre uniquement.
   composition à 1440 × 900 et les variantes 900/390 ne peuvent pas être déduites de cette taille.
 
 ## Vérifications et captures
+
+| Vérification finale du code e79b091 | Résultat | Journal |
+| --- | --- | --- |
+| Suite complète `npm test -- --maxWorkers=4 --testTimeout=60000` | **2 611 tests / 187 fichiers réussis**, 85,02 s | `audit-confirmation-complet.log` |
+| `npm run lint` | Réussi | `audit-confirmation-lint.log` |
+| `npm run build` sur cache propre | Réussi, compilation, TypeScript et pages | `audit-confirmation-build.log` |
+| Assertions SQL en staging, écritures annulées | Montant zéro et date : correction → confirmation et rejet → confirmation réussis ; lecture revenue VALIDATED après rollback | `audit-confirmation-staging.sql` et `audit-confirmation-staging-resultat.json` |
+| Droits de la RPC | EXECUTE anon=false, authenticated=false, service_role=true | Même résultat SQL |
+
+Les quatre régressions d'affichage passent aussi dans le fichier ciblé (17 tests). Le smoke
+TypeScript de schéma a été étendu avec les mêmes assertions ; son exécution complète n'est
+pas revendiquée ici. Le test SQL initial a été arrêté avant toute décision par une collision
+entre un alias et une variable record ; alias corrigé, reprise ci-dessus réussie. L'avis de
+sécurité staging reste celui déjà connu : [protection contre les mots de passe compromis](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection)
+désactivée ; aucun nouvel avis. Aucun changement de formule financière ou de droit d'accès.
+Le contrôle automatique a bloqué une requête de télémétrie non sollicitée du CLI Supabase
+vers PostHog après création du fichier local. Ce CLI n'a pas été relancé ; l'application
+en staging et les vérifications ont utilisé le connecteur Supabase.
 
 | Vérification du code c62e039 | Résultat | Journal |
 | --- | --- | --- |
@@ -161,6 +195,7 @@ redimensionnée pour simuler un format demandé.
 | `xlsx-dates-validation-refusee.jpg` | 1348 × 926 | Refus réel du serveur après soumission finale |
 | `xlsx-formule-cache-signalee.jpg` | 1348 × 926 | Formule signalée et valeur en cache non recalculée |
 | `historique-confirmation-defaut-residuel.jpg` | 1348 × 926 | Confirmation affichée « 0 € → aucune » malgré valeur retenue 0 € |
+| `audit-confirmation-historique-corrige.jpg` | 1348 × 926 | Correction publiée : trace ancienne lacunaire nommée, nouvelle confirmation « aucune → 0 € », lecture validée |
 | `csv-validation-refusee.jpg` | 1348 × 926 | Correction contradictoire bloquée |
 | `xlsx-conflit-revision-fullpage.jpg` | 1348 × 1746 | Refus de la révision périmée et absence d'écrasement |
 | `deux-lectures-validees-persistantes.jpg` | 1348 × 2167 | Première vérification de persistance des deux pièces complètes |
@@ -174,7 +209,6 @@ de l'application. Le manifeste `captures-manifeste.json` conserve taille et SHA-
 
 | Référence | Constat vérifié | Suite nécessaire |
 | --- | --- | --- |
-| **R1 — bloquant** | Après Écarter puis Confirmer D2, l'inspecteur et le candidat retiennent bien 0 €, mais l'historique affiche « Confirmée : 0 € → aucune ». La lecture SQL ciblée confirme `action=REVIEW`, `after_status=REVIEWED`, `after_value=null`, `normalized_value=0`. La trace n'exprime donc pas fidèlement la valeur effective restaurée. | Corriger le contrat d'audit des décisions et sa présentation, vérifier confirmation monétaire et date après rejet/correction. Préserver les traces anciennes ; aucune réécriture d'historique n'a été tentée ici. La validation documentaire n'atteste pas la conformité de cette trace. |
 | R2 | Les messages de doublon et de trou parlent encore de « lignes » selon les numéros d'échéance normalisés, décalés d'une ligne par rapport au fichier avec en-tête. Les libellés des contrôles ont été corrigés, pas ces deux messages. | Employer « échéances » ou les véritables lignes source dans ces alertes, puis relire la fixture anormale. |
 | R3 | Certains petits textes et libellés du tiroir d'import restent sous le minimum typographique V10. | Ajuster la typographie des formulaires et relire aux trois formats demandés. |
 | R4 | Sources Dette sait dire « Document présent » ; Sources Aujourd'hui peut encore dire « À fournir » en ne consommant que les faits canoniques appliqués. | Harmoniser la provenance documentaire interpages, sans confondre document déposé et échéancier appliqué. |

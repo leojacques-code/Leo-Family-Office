@@ -1,0 +1,65 @@
+{
+  "date": "2026-10-21",
+  "project": "bjxhnwvomoznorijauyl",
+  "environment": "staging",
+  "code_sha": "e79b09175d84dda4f01dd835bdd98134528440db",
+  "migration": "20261021153408_document_field_confirmation_audit.sql",
+  "old_decisions_preserved": true,
+  "state": [
+    {
+      "canonical_rows": 0,
+      "outstanding": "2000.000000",
+      "xlsx_status": "VALIDATED",
+      "audit": [
+        {
+          "rank": 1,
+          "after": 1,
+          "action": "CORRECT",
+          "before": 0,
+          "after_status": "CORRECTED",
+          "before_status": "EXTRACTED"
+        },
+        {
+          "rank": 2,
+          "after": 0,
+          "action": "CORRECT",
+          "before": 1,
+          "after_status": "CORRECTED",
+          "before_status": "CORRECTED"
+        },
+        {
+          "rank": 3,
+          "after": null,
+          "action": "REJECT",
+          "before": 0,
+          "after_status": "REJECTED",
+          "before_status": "CORRECTED"
+        },
+        {
+          "rank": 4,
+          "after": null,
+          "action": "REVIEW",
+          "before": 0,
+          "after_status": "REVIEWED",
+          "before_status": "REJECTED"
+        },
+        {
+          "rank": 5,
+          "after": null,
+          "action": "REJECT",
+          "before": 0,
+          "after_status": "REJECTED",
+          "before_status": "REVIEWED"
+        },
+        {
+          "rank": 6,
+          "after": 0,
+          "action": "REVIEW",
+          "before": null,
+          "after_status": "REVIEWED",
+          "before_status": "REJECTED"
+        }
+      ]
+    }
+  ]
+}

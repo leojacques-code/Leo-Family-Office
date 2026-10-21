@@ -1,11 +1,30 @@
 {
-  "code_sha": "c62e039245866a6c9d86b91183bf78746f138c1f",
+  "final_code_sha": "e79b09175d84dda4f01dd835bdd98134528440db",
+  "captures_cover_multiple_commits": true,
+  "note": "Captures prises successivement avant et après les corrections ; voir le rapport pour la chronologie. La capture du zéro serveur précède le déploiement de la présentation des traces anciennes.",
   "viewport_observed": {
     "width": 1363,
     "height": 936
   },
   "requested_viewports_verified": false,
   "captures": [
+    {
+      "file": "audit-confirmation-historique-corrige.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 108158,
+      "sha256": "3b902910e35d48f22a67d8c78b661baacb7d58199d29db6ebde25cc249870bd5",
+      "kind": "capture navigateur réelle, sans redimensionnement",
+      "code_sha": "e79b09175d84dda4f01dd835bdd98134528440db"
+    },
+    {
+      "file": "audit-confirmation-zero-serveur-corrige.jpg",
+      "width": 1348,
+      "height": 926,
+      "bytes": 103685,
+      "sha256": "18cfe7993d838d05009fb481cc5ae1e82d107f01ac9f0c4ec70b00513bae9bd1",
+      "kind": "capture navigateur réelle, sans redimensionnement"
+    },
     {
       "file": "aujourdhui-aide-sans-recouvrement.jpg",
       "width": 1348,
