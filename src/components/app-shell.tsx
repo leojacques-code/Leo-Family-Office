@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import {
+  saveTheme,
+  serverThemeSnapshot,
+  subscribeTheme,
+  themeSnapshot,
+} from "@/lib/presentation/theme";
 import {
   Banknote,
   ChevronDown,
@@ -121,7 +127,7 @@ export function AppShell({
   const [error, setError] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const theme = useSyncExternalStore(subscribeTheme, themeSnapshot, serverThemeSnapshot);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
   const [projection, setProjection] = useState<ProjectionEnvelope | null>(null);
   // B03 : aucun mode global tant que les commandes ne portent pas de contexte isolé.
@@ -240,8 +246,7 @@ export function AppShell({
 
   function toggleTheme() {
     const next = theme === "light" ? "dark" : "light";
-    setTheme(next);
-    document.documentElement.dataset.theme = next;
+    saveTheme(next);
   }
 
   async function logout() {
