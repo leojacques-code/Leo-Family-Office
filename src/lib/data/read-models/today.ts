@@ -118,6 +118,18 @@ export function todayViewInputFrom(
   // viennent donc du bilan canonique lui-même.
   const context = buildGlobalFinancialContext(state, HORIZON_MONTHS);
   const balanceSheet = context.balanceSheet;
+  // La somme canonique d'un périmètre vide vaut zéro. Elle ne prouve pas que la banque
+  // a été renseignée : seule une ligne de compte ou une déclaration explicite le permet.
+  const cashScopeKnown =
+    balanceSheet.contributions.some(
+      (line) =>
+        (line.category === "CASH_ACCOUNT" || line.category === "ACCOUNT_OVERDRAFT") &&
+        line.liquidity === "IMMEDIATE",
+    ) ||
+    declarations.some(
+      (declaration) =>
+        declaration.domain === "BANQUE" && declaration.applicability === "DECLARED_NONE",
+    );
 
   const month = monthPeriod(state.asOfDate);
   const observed = computeObservedCashFlow(
@@ -177,7 +189,7 @@ export function todayViewInputFrom(
       blockers: balanceSheet.netWorth.blockers,
     },
     immediateCash: {
-      value: balanceSheet.immediateCash.value,
+      value: cashScopeKnown ? balanceSheet.immediateCash.value : null,
       blockers: balanceSheet.immediateCash.blockers,
     },
     closes: state.monthlyCloses ?? [],

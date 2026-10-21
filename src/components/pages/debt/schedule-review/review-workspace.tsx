@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Download } from "lucide-react";
 
 import { Callout, Modal } from "@/components/ui";
@@ -20,10 +20,7 @@ import { callSchedule, openPiece, runIsOpen, ScheduleCallError } from "./client"
 import { FieldPanel, type FieldDecision } from "./field-panel";
 import { ConflictList, PartialHelp, ReadingBanner } from "./reading-banner";
 import { SourceGrid } from "./source-grid";
-
-function reveal(id: string) {
-  document.getElementById(id)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-}
+import { revealScheduleField } from "./reveal-field";
 
 /**
  * Revue d'un échéancier déposé (B19, D-UX-11) : la pièce à gauche, les candidats et la case
@@ -46,10 +43,16 @@ export function ScheduleReviewWorkspace({
   const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<"piece" | "candidates">("piece");
-  const [filter, setFilter] = useState<"attention" | "all">("attention");
+  const [filter, setFilter] = useState<"attention" | "all" | null>(null);
   const [validating, setValidating] = useState(false);
   const [refusing, setRefusing] = useState(false);
   const [refusal, setRefusal] = useState("");
+  const workspace = useRef<HTMLElement>(null);
+  const loadedRunId = review?.run.runId;
+
+  useEffect(() => {
+    if (loadedRunId) workspace.current?.scrollIntoView?.({ block: "start" });
+  }, [loadedRunId]);
 
   const fetchReview = useCallback(
     () => callSchedule<ScheduleReview>(`?runId=${encodeURIComponent(runId)}`),
@@ -93,14 +96,25 @@ export function ScheduleReviewWorkspace({
     };
   }, [review, existingDueDates]);
 
-  const select = useCallback((fieldId: string) => {
-    setSelectedId(fieldId);
-    // La sélection est partagée : l'autre côté se place sur la même case.
-    requestAnimationFrame(() => {
-      reveal(`schedule-cell-${fieldId}`);
-      reveal(`schedule-candidate-${fieldId}`);
-    });
-  }, []);
+  const activeFilter = filter ?? (derived?.attentionLines.length ? "attention" : "all");
+  const select = useCallback(
+    (fieldId: string) => {
+      setSelectedId(fieldId);
+      if (
+        activeFilter === "attention" &&
+        !derived?.attentionLines.some((line) =>
+          line.fields.some((field) => field.fieldId === fieldId),
+        )
+      ) {
+        setFilter("all");
+      }
+      requestAnimationFrame(() => {
+        revealScheduleField(`schedule-cell-${fieldId}`, ".schedule-grid-scroll");
+        revealScheduleField(`schedule-candidate-${fieldId}`, ".schedule-side");
+      });
+    },
+    [activeFilter, derived],
+  );
 
   async function patch(body: Record<string, unknown>): Promise<boolean> {
     setBusy(true);
@@ -152,7 +166,7 @@ export function ScheduleReviewWorkspace({
   const { synthesis } = derived;
   const decidable = runIsOpen(run.status) || run.status === "VALIDATED";
   const selected = review.fields.find((field) => field.fieldId === selectedId) ?? null;
-  const shownLines = filter === "attention" ? derived.attentionLines : derived.lines;
+  const shownLines = activeFilter === "attention" ? derived.attentionLines : derived.lines;
 
   function showCheck(check: ScheduleCheckView) {
     const first = checkFields(review!.fields, [...check.left, ...check.right])[0];
@@ -160,7 +174,12 @@ export function ScheduleReviewWorkspace({
   }
 
   return (
-    <section className="panel schedule-review" aria-label="Revue de l’échéancier">
+    <section
+      className="panel schedule-review"
+      aria-label="Revue de l’échéancier"
+      data-ready="true"
+      ref={workspace}
+    >
       <header className="schedule-review-header">
         <button className="button secondary compact" onClick={onClose} type="button">
           <ArrowLeft size={15} /> Retour à la dette
@@ -273,14 +292,14 @@ export function ScheduleReviewWorkspace({
               )}
               <div className="schedule-filter" role="group" aria-label="Lignes affichées">
                 <button
-                  aria-pressed={filter === "attention"}
+                  aria-pressed={activeFilter === "attention"}
                   onClick={() => setFilter("attention")}
                   type="button"
                 >
                   À examiner ({derived.attentionLines.length})
                 </button>
                 <button
-                  aria-pressed={filter === "all"}
+                  aria-pressed={activeFilter === "all"}
                   onClick={() => setFilter("all")}
                   type="button"
                 >

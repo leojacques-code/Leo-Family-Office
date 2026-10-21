@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { todayViewInputFrom } from "../today";
 import {
   getDemoTodayReadModel,
   buildDemoState,
@@ -15,6 +16,32 @@ import {
  */
 
 const MODULE = new URL("../today-demo.ts", import.meta.url).pathname;
+
+describe("B19 — absence de banque et zéro déclaré", () => {
+  it("ne transforme pas une banque jamais renseignée en liquidité nulle", () => {
+    const state = { ...buildDemoState("2026-10-21"), accounts: [], accountBalanceHistory: [] };
+    expect(todayViewInputFrom(state, []).immediateCash.value).toBeNull();
+    expect(
+      todayViewInputFrom(state, [
+        {
+          domain: "BANQUE",
+          applicability: "DECLARED_NONE",
+          declaredOn: "2026-10-21",
+          note: null,
+        },
+      ]).immediateCash.value,
+    ).toBe(0);
+  });
+
+  it("conserve un solde bancaire réellement observé à zéro", () => {
+    const state = buildDemoState("2026-10-21");
+    state.accounts = state.accounts
+      .filter((account) => account.type === "BANK")
+      .map((account) => ({ ...account, balance: 0 }));
+    state.accountBalanceHistory = [];
+    expect(todayViewInputFrom(state, []).immediateCash.value).toBe(0);
+  });
+});
 
 describe("cloisonnement — la démonstration ne peut pas lire de donnée réelle", () => {
   it("n'importe ni le dépôt, ni le client Supabase, ni la lecture d'état", () => {

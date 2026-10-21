@@ -109,7 +109,7 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
     // brouillons de formulaire + le journal, les annulations et les versions (B18), toutes
     // propres au domaine Dettes et cloisonnées par propriétaire. Un brouillon est LU pour
     // être repris, jamais pour être calculé.
-    expect(queries).toHaveLength(21);
+    expect(queries).toHaveLength(22);
     expect(queries.map((q) => q.table)).toEqual(
       expect.arrayContaining([
         "loan_insurance_policies",
@@ -351,5 +351,60 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
     expect(rail.outstanding).toBe("ACTIVE");
     // Sans observation datée, aucune date n'est fabriquée.
     expect(model.outstandingDebts[0]).not.toHaveProperty("balanceDate");
+  });
+
+  it("reconnaît une pièce explicitement liée sans la présenter comme un échéancier appliqué", async () => {
+    const rows = {
+      liabilities: [
+        {
+          id: "outstanding",
+          name: "Prêt",
+          current_balance: "1000",
+          currency: "EUR",
+          terms_status: "OUTSTANDING_ONLY",
+          archived: false,
+          data_kind: "ACTUAL",
+          confidence: "HIGH",
+          source: "Saisie",
+        },
+      ],
+      document_extraction_runs: [
+        {
+          id: "run",
+          liability_id: "outstanding",
+          document_id: "doc",
+          document_family: "AMORTIZATION_SCHEDULE",
+          status: "VALIDATED",
+          extracted_at: "2026-10-21T12:00:00Z",
+        },
+        {
+          id: "other",
+          liability_id: "other-debt",
+          document_id: "other",
+          document_family: "AMORTIZATION_SCHEDULE",
+          status: "VALIDATED",
+          extracted_at: "2026-10-22T12:00:00Z",
+        },
+      ],
+    };
+    install(rows);
+    const model = await createSupabaseRepository("owner").getDebtReadModel();
+    expect(model.railSources.find((source) => source.id === "provided-schedule")).toMatchObject({
+      status: "DOCUMENT_AVAILABLE",
+      latestDate: "2026-10-21T12:00:00Z",
+    });
+    expect(model.liabilities).toEqual([]);
+    install({
+      ...rows,
+      document_extraction_runs: rows.document_extraction_runs.map((run) => ({
+        ...run,
+        status: "REJECTED",
+      })),
+    });
+    expect(
+      (await createSupabaseRepository("owner").getDebtReadModel()).railSources.find(
+        (source) => source.id === "provided-schedule",
+      )?.status,
+    ).toBe("ABSENTE");
   });
 });

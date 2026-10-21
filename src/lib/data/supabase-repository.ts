@@ -830,41 +830,53 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       "liability_contract_versions",
       "profiles",
     ] as const;
-    const [results, cashResult, closeResult, transactionResult] = await Promise.all([
-      Promise.all(
-        tables.map((table) =>
-          table === "profiles"
-            ? db.from("profiles").select("reporting_currency").eq("user_id", user).limit(1)
-            : fetchAllPages(table, "id"),
+    const [results, cashResult, closeResult, transactionResult, scheduleDocumentResult] =
+      await Promise.all([
+        Promise.all(
+          tables.map((table) =>
+            table === "profiles"
+              ? db.from("profiles").select("reporting_currency").eq("user_id", user).limit(1)
+              : fetchAllPages(table, "id"),
+          ),
         ),
-      ),
-      readAllPages<Row, PostgrestError>("comptes de cash", async (from, to) => {
-        const result = await db
-          .from("financial_accounts")
-          .select("*")
+        readAllPages<Row, PostgrestError>("comptes de cash", async (from, to) => {
+          const result = await db
+            .from("financial_accounts")
+            .select("*")
+            .eq("user_id", user)
+            .eq("status", "ACTIVE")
+            .eq("liquidity", "IMMEDIATE")
+            .in("account_type", ["BANK", "SAVINGS"])
+            .order("id", { ascending: true })
+            .range(from, to);
+          return { data: result.data as Row[] | null, error: result.error };
+        }),
+        db
+          .from("monthly_closes")
+          .select("close_date")
           .eq("user_id", user)
-          .eq("status", "ACTIVE")
-          .eq("liquidity", "IMMEDIATE")
-          .in("account_type", ["BANK", "SAVINGS"])
-          .order("id", { ascending: true })
-          .range(from, to);
-        return { data: result.data as Row[] | null, error: result.error };
-      }),
-      db
-        .from("monthly_closes")
-        .select("close_date")
-        .eq("user_id", user)
-        .lte("close_date", today)
-        .order("close_date", { ascending: false })
-        .limit(1),
-      // Le rail déclare BANK_TRANSACTIONS : présence/date suffisent, pas le ledger entier.
-      db
-        .from("transactions")
-        .select("transaction_date")
-        .eq("user_id", user)
-        .order("transaction_date", { ascending: false })
-        .limit(1),
-    ]);
+          .lte("close_date", today)
+          .order("close_date", { ascending: false })
+          .limit(1),
+        // Le rail déclare BANK_TRANSACTIONS : présence/date suffisent, pas le ledger entier.
+        db
+          .from("transactions")
+          .select("transaction_date")
+          .eq("user_id", user)
+          .order("transaction_date", { ascending: false })
+          .limit(1),
+        readAllPages<Row, PostgrestError>("pièces d’échéancier", async (from, to) => {
+          const result = await db
+            .from("document_extraction_runs")
+            .select("id,liability_id,document_id,status,extracted_at")
+            .eq("user_id", user)
+            .eq("document_family", "AMORTIZATION_SCHEDULE")
+            .in("status", ["EXTRACTED", "REVIEWED", "VALIDATED", "LINKED"])
+            .order("id", { ascending: true })
+            .range(from, to);
+          return { data: result.data as Row[] | null, error: result.error };
+        }),
+      ]);
     const rows = Object.fromEntries(
       results.map((result, index) => [
         tables[index]!,
@@ -874,6 +886,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
     const cashRows = unwrap(cashResult, "lecture #11") as Row[];
     const closeRows = unwrap(closeResult, "lecture #12") as Row[];
     const transactionRows = unwrap(transactionResult, "lecture #13") as Row[];
+    const scheduleDocumentRows = unwrap(scheduleDocumentResult, "pièces d’échéancier") as Row[];
     // Un placement sans valorisation n'est pas une dépendance du cash immédiat.
     // Lire aussi ses historiques réintroduirait cette dépendance (et son coût) par le mapping.
     const balanceResult =
@@ -921,6 +934,15 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       },
     );
     const scenarios = mapScenarioFacts(rows.scenarios, rows.scenario_versions);
+    const debtIds = new Set([...liabilities, ...outstandingDebts].map((debt) => debt.id));
+    const scheduleDocuments = scheduleDocumentRows.filter(
+      (run) => run.document_id && debtIds.has(str(run.liability_id)),
+    );
+    const latestScheduleDocument =
+      scheduleDocuments
+        .map((run) => str(run.extracted_at))
+        .sort()
+        .at(-1) ?? null;
     // Seul immediateCash est conservé. Ce bilan intermédiaire n'est pas un bilan global.
     const cashQuality = buildCanonicalBalanceSheet({
       asOfDate: dates.asOfDate,
@@ -970,6 +992,10 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
             latestDate: transactionRows[0] ? str(transactionRows[0].transaction_date) : null,
           },
         },
+      ).map((source) =>
+        source.id === "provided-schedule" && source.status === "ABSENTE" && scheduleDocuments.length
+          ? { ...source, status: "DOCUMENT_AVAILABLE" as const, latestDate: latestScheduleDocument }
+          : source,
       ),
       readAt: now.toISOString(),
     };

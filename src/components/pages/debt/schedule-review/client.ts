@@ -1,6 +1,6 @@
 import type { ExtractionFieldStatus, ExtractionRunStatus } from "@/lib/acquisition/documents/types";
 
-/** Appel de la route des échéanciers déposés ; le message d'erreur est celui de la route. */
+/** Appel de la route des échéanciers déposés. */
 export class ScheduleCallError extends Error {
   constructor(
     message: string,
@@ -21,7 +21,13 @@ export async function callSchedule<T>(query: string, init?: RequestInit): Promis
       body && typeof body === "object" && "error" in body && typeof body.error === "string"
         ? body.error
         : "La demande n’a pas abouti.";
-    throw new ScheduleCallError(message, response.status, body);
+    // Le garde SQL est partagé avec des lectures rattachables au patrimoine. Dans cette
+    // revue, valider confirme la pièce seulement : le rattachement reste une autre action.
+    const readingMessage = message.replace(
+      "valider ferait entrer dans le patrimoine une lecture que le document contredit",
+      "la lecture contredit encore la pièce ; corrigez les écarts avant de la valider",
+    );
+    throw new ScheduleCallError(readingMessage, response.status, body);
   }
   return body as T;
 }

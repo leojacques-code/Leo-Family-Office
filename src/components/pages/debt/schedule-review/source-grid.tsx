@@ -65,7 +65,7 @@ export const SourceGrid = memo(function SourceGrid({
     const field = grid.rows[r]?.cells[grid.columns[c]?.key ?? ""];
     if (!field) return;
     onSelect(field.fieldId);
-    document.getElementById(`schedule-cell-${field.fieldId}`)?.focus();
+    document.getElementById(`schedule-cell-${field.fieldId}`)?.focus({ preventScroll: true });
   }
 
   return (

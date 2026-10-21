@@ -864,7 +864,7 @@ export function readScheduleDocument(input: ScheduleReadInput): ScheduleExtracti
       const growing = opening !== null && closing !== null && closing > opening;
       checks.push({
         checkCode: `ROW_BALANCE:${line}`,
-        label: `Ligne ${line} : ouverture − capital = clôture`,
+        label: `Échéance ${line} : ouverture − capital = clôture`,
         severity: growing ? "WARNING" : "BLOCKING",
         tolerance: 0,
         left: [`L${line}.opening`],
@@ -895,7 +895,7 @@ export function readScheduleDocument(input: ScheduleReadInput): ScheduleExtracti
     for (let line = 1; line <= lineCount; line += 1) {
       checks.push({
         checkCode: `ROW_TOTAL:${line}`,
-        label: `Ligne ${line} : total = capital + intérêts + assurance + frais`,
+        label: `Échéance ${line} : total = capital + intérêts + assurance + frais`,
         severity: "BLOCKING",
         tolerance: 0,
         left: [`L${line}.total`],
@@ -926,7 +926,7 @@ export function readScheduleDocument(input: ScheduleReadInput): ScheduleExtracti
     for (let line = 1; line < lineCount; line += 1) {
       checks.push({
         checkCode: `CHAIN:${line}`,
-        label: `Lignes ${line} et ${line + 1} : clôture = ouverture suivante`,
+        label: `Échéances ${line} et ${line + 1} : clôture = ouverture suivante`,
         severity: "BLOCKING",
         tolerance: 0,
         left: [`L${line}.closing`],

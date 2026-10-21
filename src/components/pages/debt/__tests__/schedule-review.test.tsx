@@ -10,6 +10,7 @@ import type {
 } from "@/lib/data/schedule-document-contracts";
 import { DebtDocumentsSection } from "../schedule-review/documents-section";
 import { ScheduleReviewWorkspace } from "../schedule-review/review-workspace";
+import { revealScheduleField } from "../schedule-review/reveal-field";
 
 function DocumentsFixture() {
   const [open, setOpen] = useState(false);
@@ -175,6 +176,57 @@ describe("revue côte à côte d'un échéancier déposé (B19)", () => {
     expect(conflicts).toHaveTextContent("1 case illisible");
   });
 
+  it("ne présente pas la valeur imprimée d'une case écartée comme encore retenue", async () => {
+    fetchMock.mockReturnValueOnce(
+      json({
+        ...review,
+        fields: review.fields.map((field) =>
+          field.fieldId === "interest-1" ? { ...field, validationStatus: "REJECTED" } : field,
+        ),
+      }),
+    );
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: /B2 30, Écartée/ }));
+    const panel = screen.getByRole("region", { name: "Case B2" });
+    expect(within(panel).getByText("30")).toBeInTheDocument();
+    expect(within(panel).getByText("Aucune — case écartée")).toBeInTheDocument();
+  });
+
+  it("montre les candidats d'une lecture sans anomalie dès l'ouverture", async () => {
+    fetchMock.mockReturnValueOnce(
+      json({
+        ...review,
+        run: { ...run, blockedFieldCount: 0 },
+        fields: review.fields.map((field) =>
+          field.fieldId === "interest-2" ? cell(2, "interest", "B", "0") : field,
+        ),
+      }),
+    );
+    mount();
+    expect(await screen.findByRole("button", { name: "Toutes (2)" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(document.getElementById("schedule-candidate-interest-1")).toBeInTheDocument();
+  });
+
+  it("révèle le candidat sélectionné même hors des lignes à examiner", async () => {
+    fetchMock.mockReturnValueOnce(json(review));
+    mount();
+    const source = await screen.findByRole("button", { name: /B2 30, Lue/ });
+    expect(document.getElementById("schedule-candidate-interest-1")).not.toBeInTheDocument();
+    fireEvent.click(source);
+    expect(source).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Toutes (2)" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(document.getElementById("schedule-candidate-interest-1")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
   it("corrige avec la révision lue et un montant décimal sans séparateur de milliers", async () => {
     fetchMock.mockReturnValueOnce(json(review)).mockReturnValueOnce(json(review));
     mount();
@@ -230,6 +282,30 @@ describe("revue côte à côte d'un échéancier déposé (B19)", () => {
       "candidates",
     );
     expect(screen.getByRole("region", { name: "Case B2" })).toBeInTheDocument();
+  });
+});
+
+describe("défilement de la sélection documentaire", () => {
+  it("révèle la case dans son panneau sans déplacer la page", () => {
+    const pane = document.createElement("div");
+    pane.className = "schedule-side";
+    const field = document.createElement("button");
+    field.id = "offscreen-field";
+    pane.append(field);
+    document.body.append(pane);
+    Object.defineProperties(pane, {
+      clientHeight: { value: 200 },
+      clientWidth: { value: 200 },
+    });
+    pane.getBoundingClientRect = () => ({ top: 100, left: 20 }) as DOMRect;
+    field.getBoundingClientRect = () =>
+      ({ top: 400, bottom: 440, left: 240, right: 300 }) as DOMRect;
+    pane.scrollBy = vi.fn();
+    field.scrollIntoView = vi.fn();
+    revealScheduleField(field.id, ".schedule-side");
+    expect(pane.scrollBy).toHaveBeenCalledWith({ top: 144, left: 84, behavior: "auto" });
+    expect(field.scrollIntoView).not.toHaveBeenCalled();
+    pane.remove();
   });
 });
 

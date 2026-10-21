@@ -260,16 +260,50 @@
   align-items: start;
 }
 
+/* Une revue chargée occupe un poste borné : la pièce et les candidats défilent séparément. */
+@media (min-width: 768px) {
+  .schedule-review[data-ready="true"] {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 96px);
+    min-height: 520px;
+    scroll-margin-top: 80px;
+  }
+
+  .schedule-review[data-ready="true"] > :not(.schedule-review-layout) {
+    flex-shrink: 0;
+  }
+
+  .schedule-review[data-ready="true"] .schedule-conflicts {
+    max-height: 160px;
+    overflow: auto;
+  }
+
+  .schedule-review-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .schedule-piece {
+    min-height: 0;
+    height: 100%;
+  }
+
+  .schedule-piece .schedule-grid-scroll {
+    max-height: 100%;
+  }
+}
+
 .schedule-view-switch {
   display: none;
 }
 
 .schedule-side {
-  position: sticky;
-  top: 12px;
   display: grid;
+  align-content: start;
   gap: 12px;
-  max-height: calc(100vh - 24px);
+  min-height: 0;
+  max-height: 100%;
   overflow: auto;
 }
 

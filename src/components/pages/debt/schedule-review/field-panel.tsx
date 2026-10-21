@@ -22,9 +22,13 @@ export interface FieldDecision {
 
 /** Valeur RETENUE d'une case, telle qu'elle entrera dans la lecture validée. */
 export function retainedText(
-  field: Pick<ScheduleFieldView, "unit" | "effectiveValue" | "effectiveDate" | "rawValue">,
+  field: Pick<
+    ScheduleFieldView,
+    "unit" | "effectiveValue" | "effectiveDate" | "rawValue" | "validationStatus"
+  >,
   currency: string | null,
 ): string {
+  if (field.validationStatus === "REJECTED") return "Aucune — case écartée";
   if (field.unit === "DATE")
     return field.effectiveDate ? formatDate(field.effectiveDate) : "Aucune";
   if (field.unit === "TEXT") return field.rawValue ?? "Cellule vide";
