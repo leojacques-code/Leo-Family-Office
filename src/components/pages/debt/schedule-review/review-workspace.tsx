@@ -51,7 +51,8 @@ export function ScheduleReviewWorkspace({
   const loadedRunId = review?.run.runId;
 
   useEffect(() => {
-    if (loadedRunId) workspace.current?.scrollIntoView?.({ block: "start" });
+    if (loadedRunId)
+      requestAnimationFrame(() => workspace.current?.scrollIntoView?.({ block: "start" }));
   }, [loadedRunId]);
 
   const fetchReview = useCallback(
@@ -110,7 +111,7 @@ export function ScheduleReviewWorkspace({
       }
       requestAnimationFrame(() => {
         revealScheduleField(`schedule-cell-${fieldId}`, ".schedule-grid-scroll");
-        revealScheduleField(`schedule-candidate-${fieldId}`, ".schedule-side");
+        revealScheduleField(`schedule-candidate-${fieldId}`, ".schedule-lines");
       });
     },
     [activeFilter, derived],

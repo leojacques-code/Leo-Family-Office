@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { buildWorkbook } from "@/lib/acquisition/xlsx/__tests__/fixtures/xlsx-builder";
 import { readHeader } from "../columns";
 import {
@@ -29,6 +30,34 @@ const LEGACY = [
   "2026-10-05;12000;1000;30;5;0;11000;1035",
   "2026-11-05;11000;1000;27,5;5;0;10000;1032,5",
 ].join("\n");
+
+describe("B19 — classeurs réellement déposés en recette", () => {
+  it.each([
+    ["echeancier-partiel", ["SCHEDULE_PARTIAL_EXTRACT"]],
+    ["echeancier-dates-anormales", ["SCHEDULE_DUPLICATE_DUE_DATE", "SCHEDULE_PERIOD_GAP"]],
+    ["echeancier-formules", ["SCHEDULE_FORMULA_CELL"]],
+  ] as const)("lit %s et garde ses réserves", (name, expectedCodes) => {
+    const bytes = readFileSync(
+      new URL(
+        `../../../../../../docs/consolidation/preuves/visual-b19-2026-10-21/fixtures/${name}.xlsx`,
+        import.meta.url,
+      ),
+    );
+    const result = readScheduleDocument({
+      bytes,
+      fileName: `${name}.xlsx`,
+      declaredCurrency: "EUR",
+      contractPrincipal: 2000,
+    });
+    expect(result.status).toBe("EXTRACTED");
+    const reportedCodes = [...result.issues, ...result.fields.flatMap((entry) => entry.issues)].map(
+      (entry) => entry.code,
+    );
+    expect(reportedCodes).toEqual(expect.arrayContaining([...expectedCodes]));
+    expect(result.firstDueDate).toMatch(/^2026-/);
+    if (name === "echeancier-partiel") expect(result.completeness).toBe("PARTIAL");
+  });
+});
 
 describe("lecture d'un échéancier CSV en candidats localisés", () => {
   it("rend chaque cellule avec sa ligne, sa colonne, sa référence et son unité", () => {

@@ -265,7 +265,7 @@
   .schedule-review[data-ready="true"] {
     display: flex;
     flex-direction: column;
-    height: calc(100dvh - 96px);
+    height: calc(100dvh - 176px);
     min-height: 520px;
     scroll-margin-top: 80px;
   }
@@ -291,6 +291,30 @@
 
   .schedule-piece .schedule-grid-scroll {
     max-height: 100%;
+  }
+
+  .schedule-review-layout .schedule-side {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .schedule-side > .schedule-field-panel {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 60%;
+    overflow: auto;
+  }
+
+  .schedule-side > .schedule-filter {
+    flex-shrink: 0;
+  }
+
+  .schedule-side > .schedule-lines {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
   }
 }
 

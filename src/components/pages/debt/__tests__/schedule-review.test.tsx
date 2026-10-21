@@ -288,7 +288,7 @@ describe("revue côte à côte d'un échéancier déposé (B19)", () => {
 describe("défilement de la sélection documentaire", () => {
   it("révèle la case dans son panneau sans déplacer la page", () => {
     const pane = document.createElement("div");
-    pane.className = "schedule-side";
+    pane.className = "schedule-lines";
     const field = document.createElement("button");
     field.id = "offscreen-field";
     pane.append(field);
@@ -302,7 +302,7 @@ describe("défilement de la sélection documentaire", () => {
       ({ top: 400, bottom: 440, left: 240, right: 300 }) as DOMRect;
     pane.scrollBy = vi.fn();
     field.scrollIntoView = vi.fn();
-    revealScheduleField(field.id, ".schedule-side");
+    revealScheduleField(field.id, ".schedule-lines");
     expect(pane.scrollBy).toHaveBeenCalledWith({ top: 144, left: 84, behavior: "auto" });
     expect(field.scrollIntoView).not.toHaveBeenCalled();
     pane.remove();

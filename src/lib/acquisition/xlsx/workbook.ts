@@ -112,7 +112,30 @@ function decodeXmlText(value: string): string {
 }
 
 function textOf(bytes: Uint8Array): string {
-  return new TextDecoder("utf-8").decode(bytes);
+  const xml = new TextDecoder("utf-8").decode(bytes);
+  // Un export OOXML peut qualifier ses éléments (`x:sheet`, `x:c`, etc.) au lieu
+  // d'utiliser l'espace de noms par défaut. Seuls les préfixes déclarés sans ambiguïté
+  // pour ces deux espaces OOXML sont ramenés aux noms locaux attendus par le lecteur.
+  // Les attributs (notamment r:id), le texte et les espaces étrangers restent intacts.
+  const bindings = new Map<string, Set<string>>();
+  for (const match of xml.matchAll(/\bxmlns:([A-Za-z_][\w.-]*)\s*=\s*(["'])([^"'<>]*)\2/g)) {
+    const namespaces = bindings.get(match[1]) ?? new Set<string>();
+    namespaces.add(match[3]);
+    bindings.set(match[1], namespaces);
+  }
+  const supported = new Set([
+    "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "http://schemas.openxmlformats.org/package/2006/relationships",
+  ]);
+  return xml.replace(
+    /<(\/?)([A-Za-z_][\w.-]*):([A-Za-z_][\w.-]*)(?=[\s/>])/g,
+    (tag, closing: string, prefix: string, local: string) => {
+      const namespaces = bindings.get(prefix);
+      return namespaces?.size === 1 && supported.has([...namespaces][0]!)
+        ? `<${closing}${local}`
+        : tag;
+    },
+  );
 }
 
 /** Colonne d'une référence de cellule : `BC12` → 55 (index 0). */
