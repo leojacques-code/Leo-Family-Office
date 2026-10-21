@@ -1,5 +1,9 @@
 # B19 — recette réelle du 21 octobre 2026
 
+> Suite de la recette : [préparation de fusion B19](PREPARATION_FUSION_B19_2026-10-21.md).
+> Les réserves R2/R3/R4 et l'alignement du fichier de migration y sont traités ; ce relevé
+> conserve les observations et preuves de la première passe.
+
 **B19 ouvert. B20 non commencé.** Le défaut de traçabilité a été corrigé et relu ; les formats
 demandés, le toucher et les autres réserves ci-dessous restent à certifier.
 Toutes les manipulations concernent le staging et des montants synthétiques. Aucune dépense,

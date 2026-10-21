@@ -1,0 +1,11 @@
+{
+  "source": "https://raw.githubusercontent.com/jmcnamara/XlsxWriter/5d4606d89a955226d2d0825a0f44309043ae7251/xlsxwriter/test/comparison/xlsx_files/macro01.xlsm",
+  "repository": "jmcnamara/XlsxWriter",
+  "commit": "5d4606d89a955226d2d0825a0f44309043ae7251",
+  "original_path": "xlsxwriter/test/comparison/xlsx_files/macro01.xlsm",
+  "sha256": "09c35d1580eb6d7e678ba8249cdd1cbc0bd245fbb0eed8794981728715944736",
+  "vba_project_bytes": 13312,
+  "vba_execution": false,
+  "byte_identical_xlsx_copy": "classeur-macros-cache.xlsx",
+  "purpose": "Refus de la vraie interface, extension XLSM puis même contenu sous extension XLSX ; aucune macro exécutée."
+}

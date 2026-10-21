@@ -1,0 +1,91 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 test
+> vitest run --maxWorkers=4 --testTimeout=60000
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+stderr | src/app/api/today/route.test.ts > GET /api/today > rend le modèle de lecture, et JAMAIS l'état global
+Lecture impossible TypeError: repository.getScheduleDocumentEvidence is not a function
+    at getTodayReadModel (/workspace/scratch/1b59cbc42178/lfo/src/lib/data/read-models/today.ts:245:16)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.GET (/workspace/scratch/1b59cbc42178/lfo/src/app/api/today/route.ts:61:30)
+    at /workspace/scratch/1b59cbc42178/lfo/src/app/api/today/route.test.ts:69:25
+    at file:///workspace/scratch/1b59cbc42178/lfo/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | src/app/api/today/route.test.ts > POST /api/today > date la déclaration côté SERVEUR, et ignore toute date envoyée par le client
+Déclaration impossible TypeError: repository.getScheduleDocumentEvidence is not a function
+    at getTodayReadModel (/workspace/scratch/1b59cbc42178/lfo/src/lib/data/read-models/today.ts:245:16)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.POST (/workspace/scratch/1b59cbc42178/lfo/src/app/api/today/route.ts:87:30)
+    at /workspace/scratch/1b59cbc42178/lfo/src/app/api/today/route.test.ts:92:22
+    at file:///workspace/scratch/1b59cbc42178/lfo/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+stderr | src/app/api/today/route.test.ts > POST /api/today > rend le modèle relu APRÈS écriture, pas celui d'avant
+Déclaration impossible TypeError: repository.getScheduleDocumentEvidence is not a function
+    at getTodayReadModel (/workspace/scratch/1b59cbc42178/lfo/src/lib/data/read-models/today.ts:245:16)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.POST (/workspace/scratch/1b59cbc42178/lfo/src/app/api/today/route.ts:87:30)
+    at /workspace/scratch/1b59cbc42178/lfo/src/app/api/today/route.test.ts:127:25
+    at file:///workspace/scratch/1b59cbc42178/lfo/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+ ❯ |node| src/app/api/today/route.test.ts (9 tests | 3 failed) 122ms
+     × rend le modèle de lecture, et JAMAIS l'état global 45ms
+     × date la déclaration côté SERVEUR, et ignore toute date envoyée par le client 17ms
+     × rend le modèle relu APRÈS écriture, pas celui d'avant 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |node| src/app/api/today/route.test.ts > GET /api/today > rend le modèle de lecture, et JAMAIS l'état global
+AssertionError: Target cannot be null or undefined.
+ ❯ src/app/api/today/route.test.ts:72:26
+     70|     // Le §13 : « aucune page de domaine ne sérialise tout DashboardSt…
+     71|     // faits de l'état ne doivent pas apparaître dans la réponse.
+     72|     expect(body.answers).toHaveLength(6);
+       |                          ^
+     73|     expect(body.transactions).toBeUndefined();
+     74|     expect(body.accounts).toBeUndefined();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  |node| src/app/api/today/route.test.ts > POST /api/today > date la déclaration côté SERVEUR, et ignore toute date envoyée par le client
+AssertionError: expected 500 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 500
+
+ ❯ src/app/api/today/route.test.ts:97:29
+     95|       declaredOn: "2020-01-01",
+     96|     });
+     97|     expect(response.status).toBe(200);
+       |                             ^
+     98|     expect(mocks.declared).toHaveLength(1);
+     99|     // La date du client est absente du schéma, donc rejetée par omiss…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  |node| src/app/api/today/route.test.ts > POST /api/today > rend le modèle relu APRÈS écriture, pas celui d'avant
+AssertionError: Target cannot be null or undefined.
+ ❯ src/app/api/today/route.test.ts:128:26
+    126|   it("rend le modèle relu APRÈS écriture, pas celui d'avant", async ()…
+    127|     const body = await (await post({ domain: "IMMOBILIER", applicabili…
+    128|     expect(body.answers).toHaveLength(6);
+       |                          ^
+    129|     expect(body.domains).toHaveLength(8);
+    130|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed | 186 passed (187)
+      Tests  3 failed | 2620 passed (2623)
+   Start at  19:17:07
+   Duration  145.85s (transform 34.45s, setup 19.26s, import 145.75s, tests 190.94s, environment 63.28s)
+

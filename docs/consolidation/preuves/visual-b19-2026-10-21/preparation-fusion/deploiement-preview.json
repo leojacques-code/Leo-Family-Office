@@ -1,0 +1,39 @@
+{
+  "result": {
+    "deployment": {
+      "id": "dpl_8wzevV142z8oU4o4uGrUmQwui4Su",
+      "name": "leo-family-office",
+      "url": "leo-family-office-8iwkvk3sp-lech1.vercel.app",
+      "type": "LAMBDAS",
+      "state": "READY",
+      "createdAt": 1792616350909,
+      "creator": {
+        "uid": "gm5gsm0OO1dJDEwKolJFgnQd",
+        "username": "leojacqueschety-8879"
+      },
+      "project": {
+        "id": "prj_4YJeECIQaqDOEE8KodN6PotWaQfd",
+        "name": "leo-family-office",
+        "framework": "nextjs"
+      },
+      "meta": {
+        "githubCommitRef": "codex/astra-b19-hosted-integration-20261015",
+        "githubCommitSha": "ae8ba7c69245c7e116e05958ca753ab5a89ff4bc",
+        "githubCommitMessage": "fix(ui): restore saved theme before initial paint",
+        "githubRepo": "Leo-Family-Office",
+        "githubOrg": "leojacques-code"
+      },
+      "alias": [
+        "leo-family-office-git-codex-astra-b19-hosted-integ-ce3b7b-lech1.vercel.app"
+      ],
+      "target": null,
+      "regions": [
+        "iad1"
+      ],
+      "buildingAt": 1792616367293,
+      "ready": 1792616404831,
+      "readyState": "READY",
+      "aliasError": null
+    }
+  }
+}

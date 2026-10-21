@@ -1,0 +1,62 @@
+{
+  "fields": [
+    {
+      "font": "12px",
+      "height": 40,
+      "tag": "BUTTON",
+      "text": "Fermer"
+    },
+    {
+      "font": "12px",
+      "height": 87,
+      "tag": "LABEL",
+      "text": "Tableau d’amortissementCSV ou XLSX, 4 Mo au plus. Le PDF n’est pas encore pris en charge."
+    },
+    {
+      "font": "14px",
+      "height": 40,
+      "tag": "INPUT",
+      "text": "file"
+    },
+    {
+      "font": "12px",
+      "height": 18,
+      "tag": "SMALL",
+      "text": "CSV ou XLSX, 4 Mo au plus. Le PDF n’est pas encore pris en charge."
+    },
+    {
+      "font": "12px",
+      "height": 87,
+      "tag": "LABEL",
+      "text": "Devise, si le fichier ne l’indique pasVide : aucune devise n’est supposée ; la validation l’exigera "
+    },
+    {
+      "font": "14px",
+      "height": 40,
+      "tag": "INPUT",
+      "text": "text"
+    },
+    {
+      "font": "12px",
+      "height": 18,
+      "tag": "SMALL",
+      "text": "Vide : aucune devise n’est supposée ; la validation l’exigera si le fichier n’en indique pas."
+    },
+    {
+      "font": "12px",
+      "height": 34,
+      "tag": "BUTTON",
+      "text": "Annuler"
+    },
+    {
+      "font": "12px",
+      "height": 34,
+      "tag": "BUTTON",
+      "text": "Lire l’échéancier"
+    }
+  ],
+  "viewport": {
+    "height": 936,
+    "width": 1363
+  }
+}

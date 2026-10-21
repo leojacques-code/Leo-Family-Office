@@ -1,0 +1,11 @@
+{
+  "main": "bd1782cae6b5f7141c3cc2765bd30c6a11a325fe",
+  "head_code": "ae8ba7c69245c7e116e05958ca753ab5a89ff4bc",
+  "merge_base": "bd1782cae6b5f7141c3cc2765bd30c6a11a325fe",
+  "main_is_ancestor": true,
+  "simulated_merge_tree": "a4fa3c807d766c6aefc940ef4516cae781db24c1",
+  "head_tree": "a4fa3c807d766c6aefc940ef4516cae781db24c1",
+  "conflicts": false,
+  "main_modified": false,
+  "production_action": false
+}

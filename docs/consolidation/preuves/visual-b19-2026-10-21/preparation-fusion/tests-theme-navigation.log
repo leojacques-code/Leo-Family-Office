@@ -1,0 +1,101 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+ ❯ |node| src/lib/presentation/__tests__/theme.test.ts (5 tests | 5 failed) 15ms
+     × restaure le choix après rechargement sans changer le snapshot serveur 9ms
+     × notifie le changement local, conserve le choix et retire son écouteur 1ms
+     × synchronise un autre onglet sans réécrire sa préférence 1ms
+     × ignore une préférence invalide et les événements d'un autre stockage 1ms
+     × reste utilisable lorsque le navigateur refuse le stockage 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |node| src/lib/presentation/__tests__/theme.test.ts > préférence de thème du navigateur > restaure le choix après rechargement sans changer le snapshot serveur
+ReferenceError: document is not defined
+ ❯ saveTheme src/lib/presentation/theme.ts:18:3
+     16|
+     17| export function saveTheme(theme: Theme): void {
+     18|   document.documentElement.dataset.theme = theme;
+       |   ^
+     19|   try {
+     20|     window.localStorage.setItem(STORAGE_KEY, theme);
+ ❯ src/lib/presentation/__tests__/theme.test.ts:17:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/10]⎯
+
+ FAIL  |node| src/lib/presentation/__tests__/theme.test.ts > préférence de thème du navigateur > restaure le choix après rechargement sans changer le snapshot serveur
+ FAIL  |node| src/lib/presentation/__tests__/theme.test.ts > préférence de thème du navigateur > notifie le changement local, conserve le choix et retire son écouteur
+ FAIL  |node| src/lib/presentation/__tests__/theme.test.ts > préférence de thème du navigateur > synchronise un autre onglet sans réécrire sa préférence
+ FAIL  |node| src/lib/presentation/__tests__/theme.test.ts > préférence de thème du navigateur > ignore une préférence invalide et les événements d'un autre stockage
+ FAIL  |node| src/lib/presentation/__tests__/theme.test.ts > préférence de thème du navigateur > reste utilisable lorsque le navigateur refuse le stockage
+ReferenceError: window is not defined
+ ❯ src/lib/presentation/__tests__/theme.test.ts:11:3
+      9| afterEach(() => {
+     10|   vi.restoreAllMocks();
+     11|   window.localStorage.clear();
+       |   ^
+     12|   delete document.documentElement.dataset.theme;
+     13| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/10]⎯
+
+ FAIL  |node| src/lib/presentation/__tests__/theme.test.ts > préférence de thème du navigateur > notifie le changement local, conserve le choix et retire son écouteur
+ReferenceError: window is not defined
+ ❯ subscribeTheme src/lib/presentation/theme.ts:43:3
+     41|     if (event.key === STORAGE_KEY) restore();
+     42|   }
+     43|   window.addEventListener(CHANGE_EVENT, notify);
+       |   ^
+     44|   window.addEventListener("storage", storageChanged);
+     45|   restore();
+ ❯ src/lib/presentation/__tests__/theme.test.ts:29:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/10]⎯
+
+ FAIL  |node| src/lib/presentation/__tests__/theme.test.ts > préférence de thème du navigateur > synchronise un autre onglet sans réécrire sa préférence
+ReferenceError: window is not defined
+ ❯ subscribeTheme src/lib/presentation/theme.ts:43:3
+     41|     if (event.key === STORAGE_KEY) restore();
+     42|   }
+     43|   window.addEventListener(CHANGE_EVENT, notify);
+       |   ^
+     44|   window.addEventListener("storage", storageChanged);
+     45|   restore();
+ ❯ src/lib/presentation/__tests__/theme.test.ts:41:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/10]⎯
+
+ FAIL  |node| src/lib/presentation/__tests__/theme.test.ts > préférence de thème du navigateur > ignore une préférence invalide et les événements d'un autre stockage
+ReferenceError: window is not defined
+ ❯ src/lib/presentation/__tests__/theme.test.ts:51:5
+     49|
+     50|   it("ignore une préférence invalide et les événements d'un autre stoc…
+     51|     window.localStorage.setItem("lfo.theme", "unknown");
+       |     ^
+     52|     const notify = vi.fn();
+     53|     const stop = subscribeTheme(notify);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/10]⎯
+
+ FAIL  |node| src/lib/presentation/__tests__/theme.test.ts > préférence de thème du navigateur > reste utilisable lorsque le navigateur refuse le stockage
+ReferenceError: Storage is not defined
+ ❯ src/lib/presentation/__tests__/theme.test.ts:62:14
+     60|
+     61|   it("reste utilisable lorsque le navigateur refuse le stockage", () =…
+     62|     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+       |              ^
+     63|       throw new Error("Storage unavailable");
+     64|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/10]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  5 failed | 21 passed (26)
+   Start at  22:54:57
+   Duration  3.63s (transform 971ms, setup 165ms, import 1.59s, tests 1.26s, environment 474ms)
+
