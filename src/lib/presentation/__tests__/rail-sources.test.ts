@@ -18,6 +18,67 @@ function stateWith(patch: Partial<DashboardState>): DashboardState {
 }
 
 describe("railSourcesFor — pertinence déclarée, état lu dans les faits", () => {
+  const documentState = stateWith({
+    liabilities: [
+      { id: "loan", balanceDate: "2026-10-15", providedSchedule: [] },
+    ] as unknown as DashboardState["liabilities"],
+  });
+  const piece = {
+    liabilityId: "loan",
+    documentId: "document",
+    status: "VALIDATED",
+    extractedAt: "2026-10-21T10:00:00Z",
+  };
+
+  it("annonce la même pièce disponible sur Dette et Aujourd'hui sans la dire appliquée", () => {
+    for (const page of [PAGE_REGISTRY.debt, PAGE_REGISTRY.today]) {
+      const sources = railSourcesFor(page, documentState, {}, [piece]);
+      const schedule = sources.find(
+        (source) => source.id === "provided-schedule" || source.id === "schedule",
+      );
+      expect(schedule).toMatchObject({
+        status: "DOCUMENT_AVAILABLE",
+        latestDate: "2026-10-21",
+      });
+    }
+  });
+
+  it("date la lecture documentaire au jour de Paris, sans exposer l'horodatage technique", () => {
+    const sources = railSourcesFor(PAGE_REGISTRY.today, documentState, {}, [
+      { ...piece, extractedAt: "2026-10-21T23:30:00Z" },
+    ]);
+    expect(sources.find((source) => source.id === "schedule")?.latestDate).toBe("2026-10-22");
+  });
+
+  it.each([
+    { ...piece, status: "REJECTED" },
+    { ...piece, status: "FAILED" },
+    { ...piece, liabilityId: "other-loan" },
+    { ...piece, documentId: null },
+  ])(
+    "ne prouve pas une pièce pour une lecture non exploitable ou une autre dette : %j",
+    (document) => {
+      expect(
+        railSourcesFor(PAGE_REGISTRY.today, documentState, {}, [document]).find(
+          (source) => source.id === "schedule",
+        )?.status,
+      ).toBe("ABSENTE");
+    },
+  );
+
+  it("garde la source canonique prioritaire quand un échéancier est déjà appliqué", () => {
+    const applied = stateWith({
+      liabilities: [
+        { id: "loan", balanceDate: "2026-10-15", providedSchedule: [{}] },
+      ] as unknown as DashboardState["liabilities"],
+    });
+    expect(
+      railSourcesFor(PAGE_REGISTRY.today, applied, {}, [piece]).find(
+        (source) => source.id === "schedule",
+      ),
+    ).toMatchObject({ status: "ACTIVE", latestDate: "2026-10-15" });
+  });
+
   it("conserve l'encours observé dans les Sources après promotion en contrat", () => {
     const source = railSourcesFor(
       PAGE_REGISTRY.debt,

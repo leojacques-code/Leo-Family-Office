@@ -6,6 +6,7 @@ import type { DashboardState, DocumentRecord } from "@/lib/types";
 import type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 import type { DomainDeclaration } from "@/lib/presentation/today/contracts";
 import type { FormDraftSaveInput, FormDraftSaved } from "@/lib/presentation/drafts/contracts";
+import type { ScheduleDocumentEvidence } from "@/lib/presentation/rail-sources";
 
 export type { DocumentUpload, Mutation, SimulationRun } from "@/lib/data/contracts";
 
@@ -29,6 +30,7 @@ export interface FamilyOfficeRepository {
   readonly adapter: "supabase";
   getDashboardState(): Promise<DashboardState>;
   getDebtReadModel(): Promise<DebtReadModel>;
+  getScheduleDocumentEvidence(): Promise<readonly ScheduleDocumentEvidence[]>;
   executeMutation(mutation: Mutation): Promise<void>;
   mutateState(mutation: Mutation): Promise<DashboardState>;
   storeDocument(upload: DocumentUpload): Promise<DocumentRecord>;

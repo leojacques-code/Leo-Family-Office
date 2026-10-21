@@ -212,6 +212,11 @@ La branche Astra du 15 octobre en porte **65** : une migration additive explicit
 grants `service_role` absents sur un projet neuf avec exposition automatique désactivée.
 Elle conserve les restrictions d'audit Goals/Décisions ; aucun grant client supplémentaire.
 La production reste hors du périmètre d'application de cette reprise.
+La reprise B19 du 21 octobre porte **66 migrations** :
+`20261021153711_document_field_confirmation_audit` consigne les valeurs effectives avant/après
+confirmation et l'absence de valeur d'une case écartée. Appliquée uniquement au staging.
+Son fichier a été aligné sur la version réellement inscrite par le connecteur (création
+locale initiale `20261021153408`), sans changer son SQL ni l'historique distant.
 La consolidation #52 en portait 62 au gate du 25 septembre (116 tables publiques, 478
 contraintes relevées par le vérificateur, 123 RPC). Les dix-neuf dernières ne sont PAS en
 production (dernier relevé connu de la production : 45, le 9 septembre 2026) :

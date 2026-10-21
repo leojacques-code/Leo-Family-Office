@@ -11,7 +11,7 @@ import type {
   FormDraftSaveInput,
   FormDraftSaved,
 } from "@/lib/presentation/drafts/contracts";
-import { railSourcesFor } from "@/lib/presentation/rail-sources";
+import { railSourcesFor, type ScheduleDocumentEvidence } from "@/lib/presentation/rail-sources";
 import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
 import { mapDecisionCases } from "@/lib/data/decision-snapshots";
 
@@ -807,6 +807,30 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
     });
   }
 
+  /** Lecture documentaire ciblée, commune à Dette et Aujourd’hui, sans faits financiers. */
+  async function getScheduleDocumentEvidence(): Promise<readonly ScheduleDocumentEvidence[]> {
+    const result = await readAllPages<Row, PostgrestError>(
+      "pièces d’échéancier",
+      async (from, to) => {
+        const result = await db
+          .from("document_extraction_runs")
+          .select("id,liability_id,document_id,status,extracted_at")
+          .eq("user_id", user)
+          .eq("document_family", "AMORTIZATION_SCHEDULE")
+          .in("status", ["EXTRACTED", "REVIEWED", "VALIDATED", "LINKED"])
+          .order("id", { ascending: true })
+          .range(from, to);
+        return { data: result.data as Row[] | null, error: result.error };
+      },
+    );
+    return (unwrap(result, "pièces d’échéancier") as Row[]).map((run) => ({
+      liabilityId: str(run.liability_id),
+      documentId: optional(run.document_id) ?? null,
+      status: str(run.status),
+      extractedAt: optional(run.extracted_at) ?? null,
+    }));
+  }
+
   async function getDebtReadModel(): Promise<DebtReadModel> {
     const now = new Date();
     const today = operationalToday(now);
@@ -830,7 +854,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       "liability_contract_versions",
       "profiles",
     ] as const;
-    const [results, cashResult, closeResult, transactionResult, scheduleDocumentResult] =
+    const [results, cashResult, closeResult, transactionResult, documentEvidence] =
       await Promise.all([
         Promise.all(
           tables.map((table) =>
@@ -865,17 +889,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
           .eq("user_id", user)
           .order("transaction_date", { ascending: false })
           .limit(1),
-        readAllPages<Row, PostgrestError>("pièces d’échéancier", async (from, to) => {
-          const result = await db
-            .from("document_extraction_runs")
-            .select("id,liability_id,document_id,status,extracted_at")
-            .eq("user_id", user)
-            .eq("document_family", "AMORTIZATION_SCHEDULE")
-            .in("status", ["EXTRACTED", "REVIEWED", "VALIDATED", "LINKED"])
-            .order("id", { ascending: true })
-            .range(from, to);
-          return { data: result.data as Row[] | null, error: result.error };
-        }),
+        getScheduleDocumentEvidence(),
       ]);
     const rows = Object.fromEntries(
       results.map((result, index) => [
@@ -886,7 +900,6 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
     const cashRows = unwrap(cashResult, "lecture #11") as Row[];
     const closeRows = unwrap(closeResult, "lecture #12") as Row[];
     const transactionRows = unwrap(transactionResult, "lecture #13") as Row[];
-    const scheduleDocumentRows = unwrap(scheduleDocumentResult, "pièces d’échéancier") as Row[];
     // Un placement sans valorisation n'est pas une dépendance du cash immédiat.
     // Lire aussi ses historiques réintroduirait cette dépendance (et son coût) par le mapping.
     const balanceResult =
@@ -934,15 +947,6 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       },
     );
     const scenarios = mapScenarioFacts(rows.scenarios, rows.scenario_versions);
-    const debtIds = new Set([...liabilities, ...outstandingDebts].map((debt) => debt.id));
-    const scheduleDocuments = scheduleDocumentRows.filter(
-      (run) => run.document_id && debtIds.has(str(run.liability_id)),
-    );
-    const latestScheduleDocument =
-      scheduleDocuments
-        .map((run) => str(run.extracted_at))
-        .sort()
-        .at(-1) ?? null;
     // Seul immediateCash est conservé. Ce bilan intermédiaire n'est pas un bilan global.
     const cashQuality = buildCanonicalBalanceSheet({
       asOfDate: dates.asOfDate,
@@ -992,10 +996,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
             latestDate: transactionRows[0] ? str(transactionRows[0].transaction_date) : null,
           },
         },
-      ).map((source) =>
-        source.id === "provided-schedule" && source.status === "ABSENTE" && scheduleDocuments.length
-          ? { ...source, status: "DOCUMENT_AVAILABLE" as const, latestDate: latestScheduleDocument }
-          : source,
+        documentEvidence,
       ),
       readAt: now.toISOString(),
     };
@@ -4238,6 +4239,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
     adapter: "supabase",
     getDashboardState,
     getDebtReadModel,
+    getScheduleDocumentEvidence,
     executeMutation,
     saveFormDraft,
     deleteFormDraft,

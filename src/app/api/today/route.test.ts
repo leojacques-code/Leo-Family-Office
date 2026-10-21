@@ -30,6 +30,7 @@ vi.mock("@/lib/data/repository", () => ({
   getRepository: vi.fn(async () => ({
     getDashboardState: async () => buildDemoState("2026-09-08"),
     getDomainDeclarations: async () => demoDeclarations("2026-09-08"),
+    getScheduleDocumentEvidence: async () => [],
     declareDomainApplicability: async (input: (typeof mocks.declared)[number]) => {
       mocks.declared.push(input);
       return true;

@@ -18,6 +18,29 @@ import {
 const MODULE = new URL("../today-demo.ts", import.meta.url).pathname;
 
 describe("B19 — absence de banque et zéro déclaré", () => {
+  it("ajoute la provenance documentaire au rail sans modifier les valeurs financières", () => {
+    const state = buildDemoState("2026-10-21");
+    state.liabilities = state.liabilities.map((debt) => ({ ...debt, providedSchedule: [] }));
+    const before = todayViewInputFrom(state, []);
+    const after = todayViewInputFrom(state, [], {
+      scheduleDocuments: [
+        {
+          liabilityId: state.liabilities[0]!.id,
+          documentId: "synthetic-piece",
+          status: "VALIDATED",
+          extractedAt: "2026-10-21T10:00:00Z",
+        },
+      ],
+    });
+    expect(before.railSources.find((source) => source.id === "schedule")?.status).toBe("ABSENTE");
+    expect(after.railSources.find((source) => source.id === "schedule")?.status).toBe(
+      "DOCUMENT_AVAILABLE",
+    );
+    expect(after.netWorth).toEqual(before.netWorth);
+    expect(after.immediateCash).toEqual(before.immediateCash);
+    expect(after.observedFlow).toEqual(before.observedFlow);
+    expect(after.events).toEqual(before.events);
+  });
   it("ne transforme pas une banque jamais renseignée en liquidité nulle", () => {
     const state = { ...buildDemoState("2026-10-21"), accounts: [], accountBalanceHistory: [] };
     expect(todayViewInputFrom(state, []).immediateCash.value).toBeNull();

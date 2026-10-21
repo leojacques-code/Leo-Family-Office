@@ -2,7 +2,7 @@ import "server-only";
 
 import { aggregateBlocked, computeObservedCashFlow, monthPeriod } from "@/lib/engine/cash-flow";
 import { buildGlobalFinancialContext } from "@/lib/engine/global-financial-model";
-import { railSourcesFor } from "@/lib/presentation/rail-sources";
+import { railSourcesFor, type ScheduleDocumentEvidence } from "@/lib/presentation/rail-sources";
 import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
 import { DOMAIN_REGISTRY } from "@/lib/presentation/today/domains";
 import { buildTodayView, type TodayViewInput } from "@/lib/presentation/today/view";
@@ -104,7 +104,10 @@ function domainFacts(state: DashboardState) {
 export function todayViewInputFrom(
   state: DashboardState,
   declarations: readonly DomainDeclaration[],
-  options: { readonly readOnlyDemo?: boolean } = {},
+  options: {
+    readonly readOnlyDemo?: boolean;
+    readonly scheduleDocuments?: readonly ScheduleDocumentEvidence[];
+  } = {},
 ): TodayViewInput {
   // UN SEUL contexte partagé, et le bilan et la timeline en sont LUS.
   //
@@ -168,18 +171,21 @@ export function todayViewInputFrom(
     href: reserveHref(blocker.source),
   }));
 
-  const railSources: RailSourceView[] = railSourcesFor(PAGE_REGISTRY.today!, state).map(
-    (source) => ({
-      id: source.id,
-      category: source.category,
-      name: source.name,
-      status: source.status,
-      // La date est AFFICHÉE et l'utilisateur juge : aucun seuil de fraîcheur n'est déclaré
-      // dans le produit, et en poser un ici serait décider « si une anomalie est assez
-      // importante pour alerter », ce que le §16 refuse.
-      hint: source.latestDate,
-    }),
-  );
+  const railSources: RailSourceView[] = railSourcesFor(
+    PAGE_REGISTRY.today!,
+    state,
+    {},
+    options.scheduleDocuments,
+  ).map((source) => ({
+    id: source.id,
+    category: source.category,
+    name: source.name,
+    status: source.status,
+    // La date est AFFICHÉE et l'utilisateur juge : aucun seuil de fraîcheur n'est déclaré
+    // dans le produit, et en poser un ici serait décider « si une anomalie est assez
+    // importante pour alerter », ce que le §16 refuse.
+    hint: source.latestDate,
+  }));
 
   return {
     asOfDate: state.asOfDate,
@@ -227,15 +233,16 @@ export function todayViewInputFrom(
 /**
  * Le modèle de lecture servi à la route.
  *
- * Les deux lectures — état canonique et déclarations — sont faites EN PARALLÈLE : elles ne
+ * Les lectures — état canonique, déclarations et preuves documentaires — sont faites EN PARALLÈLE : elles ne
  * dépendent pas l'une de l'autre, et les enchaîner doublerait la latence de la page d'accueil
  * du produit sans rien garantir de plus.
  */
 export async function getTodayReadModel(): Promise<TodayReadModel> {
   const repository = await getRepository();
-  const [state, declarations] = await Promise.all([
+  const [state, declarations, scheduleDocuments] = await Promise.all([
     repository.getDashboardState(),
     repository.getDomainDeclarations(),
+    repository.getScheduleDocumentEvidence(),
   ]);
-  return buildTodayView(todayViewInputFrom(state, declarations));
+  return buildTodayView(todayViewInputFrom(state, declarations, { scheduleDocuments }));
 }

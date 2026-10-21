@@ -11,7 +11,37 @@ import {
   fieldHistory,
   overlappingDueDates,
   summarizeScheduleReview,
+  scheduleIssueText,
 } from "../schedule-review";
+
+describe("localisation des alertes de calendrier", () => {
+  it.each([
+    [
+      "SCHEDULE_DUPLICATE_DUE_DATE",
+      "L’échéance apparaît aux lignes 2 et 3.",
+      "L’échéance apparaît aux échéances 2 et 3.",
+    ],
+    [
+      "SCHEDULE_PERIOD_GAP",
+      "Entre les lignes 4 et 5, une échéance manque.",
+      "Entre les échéances 4 et 5, une échéance manque.",
+    ],
+    [
+      "SCHEDULE_DATES_NOT_INCREASING",
+      "La ligne 2 est datée avant la ligne 1.",
+      "L’échéance 2 est datée avant l’échéance 1.",
+    ],
+  ] as const)(
+    "distingue les rangs d'échéances des lignes du fichier pour %s",
+    (code, message, expected) => {
+      expect(scheduleIssueText({ code, message })).toBe(expected);
+    },
+  );
+  it("conserve les véritables localisations source des autres alertes", () => {
+    const message = "En-tête trouvé à la ligne 3 : les lignes précédentes ne sont pas lues.";
+    expect(scheduleIssueText({ code: "SCHEDULE_SOURCE_NOTICE", message })).toBe(message);
+  });
+});
 
 const LETTERS: Record<string, string> = {
   date: "A",

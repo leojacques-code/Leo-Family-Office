@@ -94,6 +94,27 @@ beforeEach(() => {
   queries.length = 0;
 });
 describe("B09 — lecture des seules dépendances des dettes", () => {
+  it("lit les seules preuves documentaires, cloisonnées et paginées, pour les autres pages", async () => {
+    install({
+      document_extraction_runs: Array.from({ length: 1001 }, (_, index) => ({
+        id: `reading-${index}`,
+        liability_id: "loan",
+        document_id: `piece-${index}`,
+        document_family: "AMORTIZATION_SCHEDULE",
+        status: "VALIDATED",
+        extracted_at: "2026-10-21T10:00:00Z",
+      })),
+    });
+    const pieces = await createSupabaseRepository("owner").getScheduleDocumentEvidence();
+    expect(pieces).toHaveLength(1001);
+    expect(pieces[1000]).toMatchObject({ liabilityId: "loan", documentId: "piece-1000" });
+    expect(queries.every((query) => query.table === "document_extraction_runs")).toBe(true);
+    for (const query of queries) {
+      expect(query.filters).toContainEqual(["user_id", "owner"]);
+      expect(query.filters).toContainEqual(["document_family", "AMORTIZATION_SCHEDULE"]);
+    }
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
   it("ne lit aucun domaine étranger, ne sérialise aucun état global, ne fabrique pas de cash", async () => {
     install();
     const model = await createSupabaseRepository("owner").getDebtReadModel();
@@ -391,7 +412,7 @@ describe("B09 — lecture des seules dépendances des dettes", () => {
     const model = await createSupabaseRepository("owner").getDebtReadModel();
     expect(model.railSources.find((source) => source.id === "provided-schedule")).toMatchObject({
       status: "DOCUMENT_AVAILABLE",
-      latestDate: "2026-10-21T12:00:00Z",
+      latestDate: "2026-10-21",
     });
     expect(model.liabilities).toEqual([]);
     install({

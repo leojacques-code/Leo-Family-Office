@@ -464,6 +464,35 @@
   outline-offset: -3px;
 }
 
+/* V10 : les formulaires opérationnels restent lisibles dans les éditeurs partagés. */
+:is(.financial-drawer, .modal) .form-grid label,
+:is(.financial-drawer, .modal) .mini-form-grid label,
+:is(.financial-drawer, .modal) .field-label,
+:is(.financial-drawer, .modal) .debt-advanced > summary,
+:is(.financial-drawer, .modal) button {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+:is(.financial-drawer, .modal) small,
+.modal[aria-modal="true"] > header p,
+:is(.financial-drawer, .modal) .field-hint,
+:is(.financial-drawer, .modal) .form-notice,
+:is(.financial-drawer, .modal) .form-error,
+:is(.financial-drawer, .modal) .panel-note,
+:is(.financial-drawer, .modal) .warning-text {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+:is(.financial-drawer, .modal) .text-input,
+:is(.financial-drawer, .modal) select,
+:is(.financial-drawer, .modal) textarea {
+  min-height: 40px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .drawer-header {
   display: flex;
   align-items: flex-start;

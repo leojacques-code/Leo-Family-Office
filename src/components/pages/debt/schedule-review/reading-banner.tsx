@@ -4,7 +4,7 @@ import { MetricHelp } from "@/components/primitives/metric-help";
 import { formatDate } from "@/components/pages/shared";
 import type { ScheduleCheckView, ScheduleRunSummary } from "@/lib/data/schedule-document-contracts";
 import { formatCurrency } from "@/lib/presentation/currency";
-import type { ScheduleSynthesis } from "@/lib/presentation/debt/schedule-review";
+import { scheduleIssueText, type ScheduleSynthesis } from "@/lib/presentation/debt/schedule-review";
 import { RUN_STATUS_LABELS } from "./client";
 
 const CURRENCY_SOURCES: Record<NonNullable<ScheduleRunSummary["currencySource"]>, string> = {
@@ -168,7 +168,7 @@ export function ConflictList({
     );
   }
   for (const issue of runWarnings) {
-    items.push(<li key={`${issue.code}-${issue.message}`}>{issue.message}</li>);
+    items.push(<li key={`${issue.code}-${issue.message}`}>{scheduleIssueText(issue)}</li>);
   }
   if (items.length === 0) return null;
   return (

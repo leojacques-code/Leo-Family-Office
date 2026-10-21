@@ -780,7 +780,7 @@ export function readScheduleDocument(input: ScheduleReadInput): ScheduleExtracti
           null,
           `L${entry.line}.date`,
           entry.date,
-          `L’échéance du ${entry.date} apparaît aux lignes ${previousLine} et ${entry.line} : doublon à résoudre avant validation.`,
+          `L’échéance du ${entry.date} apparaît aux échéances ${previousLine} et ${entry.line} : doublon à résoudre avant validation.`,
         ),
       );
     } else {
@@ -796,7 +796,7 @@ export function readScheduleDocument(input: ScheduleReadInput): ScheduleExtracti
           null,
           `L${dated[index]!.line}.date`,
           dated[index]!.date,
-          `La ligne ${dated[index]!.line} est datée avant la ligne ${dated[index - 1]!.line} : l’ordre des échéances est à vérifier.`,
+          `L’échéance ${dated[index]!.line} est datée avant l’échéance ${dated[index - 1]!.line} : l’ordre des échéances est à vérifier.`,
         ),
       );
     }
@@ -823,7 +823,7 @@ export function readScheduleDocument(input: ScheduleReadInput): ScheduleExtracti
               null,
               `L${dated[index]!.line}.date`,
               dated[index]!.date,
-              `Entre les lignes ${dated[index - 1]!.line} et ${dated[index]!.line}, ${step / usual - 1} échéance(s) manquent selon la périodicité du fichier. Rien n’est reconstitué.`,
+              `Entre les échéances ${dated[index - 1]!.line} et ${dated[index]!.line}, ${step / usual - 1} échéance(s) manquent selon la périodicité du fichier. Rien n’est reconstitué.`,
             ),
           );
         }

@@ -3,6 +3,24 @@ import type {
   ScheduleFieldView,
   ScheduleReview,
 } from "@/lib/data/schedule-document-contracts";
+import type { DocumentIssue } from "@/lib/acquisition/documents/types";
+
+/** Les anciennes alertes nommaient « lignes » les rangs d'échéances, en-tête exclu. */
+export function scheduleIssueText(issue: Pick<DocumentIssue, "code" | "message">): string {
+  if (
+    ![
+      "SCHEDULE_DUPLICATE_DUE_DATE",
+      "SCHEDULE_DATES_NOT_INCREASING",
+      "SCHEDULE_PERIOD_GAP",
+    ].includes(issue.code)
+  )
+    return issue.message;
+  return issue.message
+    .replaceAll("aux lignes", "aux échéances")
+    .replaceAll("les lignes", "les échéances")
+    .replaceAll("La ligne", "L’échéance")
+    .replaceAll("la ligne", "l’échéance");
+}
 
 /**
  * Modèle de présentation de la revue d'un échéancier déposé (B19).

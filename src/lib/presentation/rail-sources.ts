@@ -4,6 +4,7 @@ import type {
   SourceEvidence,
 } from "@/lib/presentation/registry/contracts";
 import type { DashboardState } from "@/lib/types";
+import { operationalToday } from "@/lib/financial-date";
 
 /**
  * Zone B, côté données : ce que la page DÉCLARE devient ce que le rail MONTRE.
@@ -33,6 +34,14 @@ export interface DerivedRailSource {
   readonly status: RailSourceStatus;
   /** Date la plus récente portée par les faits de cette source. `null` si aucune. */
   readonly latestDate: string | null;
+}
+
+/** Pièce explicitement liée à une dette ; elle ne prouve aucun échéancier appliqué. */
+export interface ScheduleDocumentEvidence {
+  readonly liabilityId: string;
+  readonly documentId: string | null;
+  readonly status: string;
+  readonly extractedAt: string | null;
 }
 
 /**
@@ -220,12 +229,34 @@ export function railSourcesFor(
   evidenceSummaries: Partial<
     Record<SourceEvidence, { count: number; latestDate: string | null }>
   > = {},
+  scheduleDocuments: readonly ScheduleDocumentEvidence[] = [],
 ): DerivedRailSource[] {
   if (!manifest) return [];
   if (!manifest.zones.includes("SOURCE_RAIL")) return [];
+  const debtIds = new Set([
+    ...listOf(state.liabilities).map((debt) => debt.id),
+    ...listOf(state.outstandingDebts).map((debt) => debt.id),
+  ]);
+  const schedulePieces = scheduleDocuments.filter(
+    (piece) =>
+      piece.documentId &&
+      debtIds.has(piece.liabilityId) &&
+      ["EXTRACTED", "REVIEWED", "VALIDATED", "LINKED"].includes(piece.status),
+  );
+  const latestScheduleDocument = maxDate(
+    schedulePieces.map((piece) => {
+      if (!piece.extractedAt) return null;
+      const instant = new Date(piece.extractedAt);
+      return Number.isNaN(instant.getTime()) ? null : operationalToday(instant);
+    }),
+  );
   return listOf(manifest.sources).map((declaration) => {
     const { count, latestDate } =
       evidenceSummaries[declaration.evidence] ?? readEvidence(declaration.evidence, state);
+    const documentOnly =
+      count === 0 &&
+      declaration.evidence === "LIABILITY_PROVIDED_SCHEDULE" &&
+      schedulePieces.length > 0;
     return {
       id: declaration.id,
       category: declaration.category,
@@ -233,13 +264,14 @@ export function railSourcesFor(
       // Un fait ou un tableau saisi ne prouve ni la détention d'une pièce ni sa fraîcheur.
       // Seul le catalogue documentaire prouve ici la présence d'un document ; aucune
       // liaison document/objet n'est inférée depuis un libellé ou une catégorie.
-      status:
-        count === 0
+      status: documentOnly
+        ? "DOCUMENT_AVAILABLE"
+        : count === 0
           ? "ABSENTE"
           : declaration.evidence === "DOCUMENTS"
             ? "DOCUMENT_AVAILABLE"
             : "ACTIVE",
-      latestDate,
+      latestDate: documentOnly ? latestScheduleDocument : latestDate,
     };
   });
 }
