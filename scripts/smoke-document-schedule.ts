@@ -567,6 +567,59 @@ try {
     "La relecture d'un échec ne désigne pas la lecture remplacée",
   );
 
+  // Confirmer revient à la valeur de la pièce, après correction comme après écartement.
+  // Ces vérifications sont isolées pour préserver les hypothèses du reste du smoke.
+  await client.query("savepoint confirmation_trace");
+  for (const [code, correction] of [
+    ["L1.principal", { user_value: "17" }],
+    ["L1.date", { user_date: "2026-10-06" }],
+  ] as const) {
+    const field = await fieldId(code);
+    const decideCurrent = async (action: string, extra: Record<string, string> = {}) => {
+      const current = await fieldId(code);
+      await rpc("lfo_correct_document_extraction_field", {
+        field_id: current.id,
+        action,
+        expected_revision: current.revision,
+        reason: "Recette synthétique de la piste de confirmation",
+        ...extra,
+      });
+    };
+    const lastTrace = async () =>
+      (
+        await client.query<{
+          before_status: string;
+          before_empty: boolean;
+          after_matches_source: boolean;
+        }>(
+          `select d.before_status,
+          d.before_value is null and d.before_date is null as before_empty,
+          case when f.unit = 'DATE' then d.after_date is not distinct from f.normalized_date
+               else d.after_value is not distinct from f.normalized_value end as after_matches_source
+        from public.document_field_decisions d
+        join public.document_extraction_fields f on f.id = d.field_id and f.user_id = d.user_id
+        where d.field_id = $1 order by d.decision_rank desc limit 1`,
+          [field.id],
+        )
+      ).rows[0]!;
+    await decideCurrent("correct", correction);
+    await decideCurrent("review");
+    assert(
+      (await lastTrace()).after_matches_source,
+      `${code} : confirmation sans valeur de la pièce dans la piste`,
+    );
+    await decideCurrent("reject");
+    await decideCurrent("review");
+    const restored = await lastTrace();
+    assert(
+      restored.before_status === "REJECTED" &&
+        restored.before_empty &&
+        restored.after_matches_source,
+      `${code} : la piste confond une case écartée avec sa valeur imprimée`,
+    );
+  }
+  await client.query("rollback to savepoint confirmation_trace");
+
   // ── 7. Droits : lecture seule pour `authenticated`, RPC refusées ────────────────
   await client.query("set local role authenticated");
   await client.query("select set_config('request.jwt.claim.sub', $1, true)", [userId]);

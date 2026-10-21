@@ -268,8 +268,25 @@ export function FieldPanel({
             {history.map((decision) => (
               <li key={decision.rank}>
                 <strong>{ACTION_LABELS[decision.action]}</strong> le {parisDate(decision.decidedAt)}{" "}
-                : {decisionValue(field.unit, decision.beforeValue, decision.beforeDate, currency)} →{" "}
-                {decisionValue(field.unit, decision.afterValue, decision.afterDate, currency)}
+                {decision.action === "REVIEW" && field.unit === "TEXT" ? (
+                  <span>: texte imprimé confirmé</span>
+                ) : decision.action === "REVIEW" &&
+                  (field.unit === "DATE"
+                    ? decision.afterDate === null && field.normalizedDate !== null
+                    : decision.afterValue === null && field.normalizedValue !== null) ? (
+                  <span>: valeur après non consignée dans cette trace ancienne</span>
+                ) : (
+                  <>
+                    :{" "}
+                    {decisionValue(
+                      field.unit,
+                      decision.beforeStatus === "REJECTED" ? null : decision.beforeValue,
+                      decision.beforeStatus === "REJECTED" ? null : decision.beforeDate,
+                      currency,
+                    )}{" "}
+                    → {decisionValue(field.unit, decision.afterValue, decision.afterDate, currency)}
+                  </>
+                )}
                 {decision.reason ? <small> · {decision.reason}</small> : null}
               </li>
             ))}

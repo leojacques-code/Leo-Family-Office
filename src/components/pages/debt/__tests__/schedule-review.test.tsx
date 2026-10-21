@@ -11,6 +11,7 @@ import type {
 import { DebtDocumentsSection } from "../schedule-review/documents-section";
 import { ScheduleReviewWorkspace } from "../schedule-review/review-workspace";
 import { revealScheduleField } from "../schedule-review/reveal-field";
+import { FieldPanel } from "../schedule-review/field-panel";
 
 function DocumentsFixture() {
   const [open, setOpen] = useState(false);
@@ -114,6 +115,80 @@ const review: ScheduleReview = {
   checks: [],
   decisions: [],
 };
+
+describe("piste de confirmation d'une case", () => {
+  it.each(["MONEY", "DATE"] as const)(
+    "affiche la valeur %s restaurée après un écartement",
+    (unit) => {
+      const isDate = unit === "DATE";
+      const field = cell(1, isDate ? "date" : "interest", "B", isDate ? "2026-10-05" : "0");
+      render(
+        <FieldPanel
+          field={field}
+          run={run}
+          editable={false}
+          busy={false}
+          onDecide={vi.fn()}
+          history={[
+            {
+              fieldId: field.fieldId,
+              rank: 1,
+              action: "REVIEW",
+              beforeStatus: "REJECTED",
+              beforeValue: 99,
+              beforeDate: "2026-09-05",
+              afterStatus: "REVIEWED",
+              afterValue: isDate ? null : 0,
+              afterDate: isDate ? "2026-10-05" : null,
+              reason: null,
+              decidedAt: "2026-10-21T10:00:00Z",
+            },
+          ]}
+        />,
+      );
+      const history = screen.getByRole("list", { hidden: true });
+      expect(history.textContent).toMatch(
+        isDate ? /aucune\s*→\s*5 octobre 2026/ : /aucune\s*→\s*0\s*€/,
+      );
+      expect(history).not.toHaveTextContent("trace ancienne");
+    },
+  );
+
+  it.each(["MONEY", "DATE"] as const)(
+    "nomme la lacune d'une confirmation %s ancienne sans inventer de valeur historique",
+    (unit) => {
+      const isDate = unit === "DATE";
+      const field = cell(1, isDate ? "date" : "interest", "B", isDate ? "2026-10-05" : "0");
+      render(
+        <FieldPanel
+          field={field}
+          run={run}
+          editable={false}
+          busy={false}
+          onDecide={vi.fn()}
+          history={[
+            {
+              fieldId: field.fieldId,
+              rank: 1,
+              action: "REVIEW",
+              beforeStatus: "REJECTED",
+              beforeValue: 0,
+              beforeDate: null,
+              afterStatus: "REVIEWED",
+              afterValue: null,
+              afterDate: null,
+              reason: null,
+              decidedAt: "2026-10-21T10:00:00Z",
+            },
+          ]}
+        />,
+      );
+      const history = screen.getByRole("list", { hidden: true });
+      expect(history).toHaveTextContent("valeur après non consignée dans cette trace ancienne");
+      expect(history).not.toHaveTextContent("→");
+    },
+  );
+});
 
 const json = (body: unknown, status = 200) =>
   Promise.resolve(new Response(JSON.stringify(body), { status }));
