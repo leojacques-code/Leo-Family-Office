@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { themeBootstrapScript } from "@/lib/presentation/theme";
 import "./globals.css";
 // CSS des primitives financières, séparé de `globals.css` : premier fichier du découpage
 // « par primitives et workspaces » demandé par la section 10.2 du plan de refonte.
@@ -25,6 +26,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="fr" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );

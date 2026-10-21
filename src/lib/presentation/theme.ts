@@ -1,7 +1,10 @@
 export type Theme = "light" | "dark";
 
-const STORAGE_KEY = "lfo.theme";
+const STORAGE_KEY = "lfo.theme:v1";
 const CHANGE_EVENT = "lfo:theme-changed";
+
+/** Script statique avant peinture : aucune donnée personnelle ni valeur injectée. */
+export const themeBootstrapScript = `(function(){try{var theme=localStorage.getItem('${STORAGE_KEY}');if(theme==='light'||theme==='dark')document.documentElement.dataset.theme=theme;}catch{}})();`;
 
 export function themeSnapshot(): Theme {
   return typeof document !== "undefined" && document.documentElement.dataset.theme === "dark"

@@ -4,6 +4,7 @@ import {
   saveTheme,
   serverThemeSnapshot,
   subscribeTheme,
+  themeBootstrapScript,
   themeSnapshot,
 } from "../theme";
 
@@ -14,6 +15,13 @@ afterEach(() => {
 });
 
 describe("préférence de thème du navigateur", () => {
+  it("applique le choix avant l'hydratation, sans flash du thème par défaut", () => {
+    window.localStorage.setItem("lfo.theme:v1", "dark");
+    new Function(themeBootstrapScript)();
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(serverThemeSnapshot()).toBe("light");
+  });
+
   it("restaure le choix après rechargement sans changer le snapshot serveur", () => {
     saveTheme("dark");
     delete document.documentElement.dataset.theme;
@@ -31,7 +39,7 @@ describe("préférence de thème du navigateur", () => {
     notify.mockClear();
     saveTheme("dark");
     expect(themeSnapshot()).toBe("dark");
-    expect(window.localStorage.getItem("lfo.theme")).toBe("dark");
+    expect(window.localStorage.getItem("lfo.theme:v1")).toBe("dark");
     expect(notify).toHaveBeenCalledOnce();
     stop();
     saveTheme("light");
@@ -40,16 +48,16 @@ describe("préférence de thème du navigateur", () => {
 
   it("synchronise un autre onglet sans réécrire sa préférence", () => {
     const stop = subscribeTheme(vi.fn());
-    window.localStorage.setItem("lfo.theme", "dark");
+    window.localStorage.setItem("lfo.theme:v1", "dark");
     const write = vi.spyOn(Storage.prototype, "setItem");
-    window.dispatchEvent(new StorageEvent("storage", { key: "lfo.theme" }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "lfo.theme:v1" }));
     expect(themeSnapshot()).toBe("dark");
     expect(write).not.toHaveBeenCalled();
     stop();
   });
 
   it("ignore une préférence invalide et les événements d'un autre stockage", () => {
-    window.localStorage.setItem("lfo.theme", "unknown");
+    window.localStorage.setItem("lfo.theme:v1", "unknown");
     const notify = vi.fn();
     const stop = subscribeTheme(notify);
     expect(themeSnapshot()).toBe("light");
