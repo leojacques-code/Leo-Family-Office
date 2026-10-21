@@ -485,12 +485,30 @@
   line-height: 1.5;
 }
 
+:is(.financial-drawer, .modal) button {
+  min-width: 40px;
+  min-height: 40px;
+}
+
 :is(.financial-drawer, .modal) .text-input,
 :is(.financial-drawer, .modal) select,
 :is(.financial-drawer, .modal) textarea {
   min-height: 40px;
   font-size: 14px;
   line-height: 1.5;
+}
+
+@media (any-pointer: coarse) {
+  :is(.financial-drawer, .modal) button,
+  :is(.financial-drawer, .modal) .text-input,
+  :is(.financial-drawer, .modal) select,
+  :is(.financial-drawer, .modal) textarea {
+    min-height: 44px;
+  }
+
+  :is(.financial-drawer, .modal) button {
+    min-width: 44px;
+  }
 }
 
 .drawer-header {
