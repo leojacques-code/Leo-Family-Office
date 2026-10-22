@@ -35,6 +35,7 @@ import type {
   DocumentUploadTicket,
 } from "@/lib/data/document-contracts";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
+import { readDocumentFieldDecisions } from "@/lib/data/document-field-decisions";
 import { DOCUMENTS_BUCKET, IMPORT_STAGING_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
 import {
   MAX_DOCUMENT_FILE_BYTES,
@@ -631,6 +632,7 @@ class SupabaseDocumentRepository implements DocumentRepository {
       },
       fields: visible.map((row) => this.toFieldView(row)),
       fieldsTruncated: truncated,
+      decisions: await readDocumentFieldDecisions(this.client(), this.user, runId),
       checks: await this.readChecks(runId),
       financials: this.buildFinancialProposal(fieldRows, run, text(business.functional_currency)),
       issues: readIssues(run.issues),

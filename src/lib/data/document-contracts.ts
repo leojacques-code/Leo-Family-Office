@@ -65,6 +65,23 @@ export interface DocumentFieldView {
   issues: DocumentIssue[];
 }
 
+/** Journal commun aux cases PDF et tabulaires ; aucune identité brute n'est exposée. */
+export interface DocumentFieldDecisionView {
+  fieldId: string;
+  rank: number;
+  action: "REVIEW" | "CORRECT" | "REJECT";
+  beforeStatus: ExtractionFieldStatus;
+  beforeValue: number | null;
+  beforeDate: string | null;
+  afterStatus: ExtractionFieldStatus;
+  afterValue: number | null;
+  afterDate: string | null;
+  reason: string | null;
+  decidedAt: string;
+  /** Absent sur un ancien contrat de transport : ne signifie jamais « vous ». */
+  actor?: "CURRENT_USER" | "OTHER" | null;
+}
+
 /** Résultat d'un contrôle, avec ses opérandes réels. */
 export interface DocumentCheckView {
   checkCode: string;
@@ -124,6 +141,8 @@ export interface DocumentExtractionPreview {
   /** Cases AFFICHÉES. Le staging en contient toujours l'intégralité. */
   fields: DocumentFieldView[];
   fieldsTruncated: boolean;
+  /** Absent sur un ancien serveur : historique indisponible, pas historique vide. */
+  decisions?: DocumentFieldDecisionView[];
   checks: DocumentCheckView[];
   financials: DocumentFinancialProposal;
   issues: DocumentIssue[];

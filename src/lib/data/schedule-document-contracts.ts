@@ -79,19 +79,7 @@ export interface ScheduleCheckView {
   message: string | null;
 }
 
-export interface ScheduleDecisionView {
-  fieldId: string;
-  rank: number;
-  action: "REVIEW" | "CORRECT" | "REJECT";
-  beforeStatus: ExtractionFieldStatus;
-  beforeValue: number | null;
-  beforeDate: string | null;
-  afterStatus: ExtractionFieldStatus;
-  afterValue: number | null;
-  afterDate: string | null;
-  reason: string | null;
-  decidedAt: string;
-}
+export type ScheduleDecisionView = import("./document-contracts").DocumentFieldDecisionView;
 
 export interface ScheduleReview {
   run: ScheduleRunSummary;

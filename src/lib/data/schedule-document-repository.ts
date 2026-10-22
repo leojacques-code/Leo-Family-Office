@@ -17,12 +17,12 @@ import type {
 } from "@/lib/acquisition/documents/types";
 import { MutationRejectedError } from "@/lib/data/mutation-errors";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
+import { readDocumentFieldDecisions } from "@/lib/data/document-field-decisions";
 import { DOCUMENTS_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
 import { SupabaseOperationError } from "@/lib/data/supabase-errors";
 import type {
   ScheduleCheckView,
   ScheduleDecisionInput,
-  ScheduleDecisionView,
   ScheduleFieldUnit,
   ScheduleFieldView,
   ScheduleReview,
@@ -206,22 +206,6 @@ function toCheckView(row: Row): ScheduleCheckView {
   };
 }
 
-function toDecisionView(row: Row): ScheduleDecisionView {
-  return {
-    fieldId: requireText(row.field_id, "field_id"),
-    rank: finiteNumber(row.decision_rank, "decision_rank"),
-    action: oneOf(row.action, ["REVIEW", "CORRECT", "REJECT"] as const, "Action de décision"),
-    beforeStatus: oneOf(row.before_status, FIELD_STATUSES, "Statut avant décision"),
-    beforeValue: nullableFiniteNumber(row.before_value, "before_value"),
-    beforeDate: text(row.before_date),
-    afterStatus: oneOf(row.after_status, FIELD_STATUSES, "Statut après décision"),
-    afterValue: nullableFiniteNumber(row.after_value, "after_value"),
-    afterDate: text(row.after_date),
-    reason: text(row.reason),
-    decidedAt: requireText(row.decided_at, "decided_at"),
-  };
-}
-
 export interface ScheduleDocumentRepository {
   listRuns(liabilityId: string): Promise<ScheduleRunSummary[]>;
   getReview(runId: string): Promise<ScheduleReview>;
@@ -308,24 +292,7 @@ class SupabaseScheduleDocumentRepository implements ScheduleDocumentRepository {
       checks.push(...page.map(toCheckView));
       if (page.length < READ_PAGE) break;
     }
-    // Le journal n'a pas de borne : il est relu page par page, jamais coupé.
-    const decisions: ScheduleDecisionView[] = [];
-    for (let offset = 0; ; offset += READ_PAGE) {
-      const page = unwrap(
-        await this.client()
-          .from("document_field_decisions")
-          .select("*")
-          .eq("user_id", this.user)
-          .eq("run_id", runId)
-          .order("decided_at", { ascending: true })
-          .order("decision_rank", { ascending: true })
-          .order("id", { ascending: true })
-          .range(offset, offset + READ_PAGE - 1),
-        "document_field_decisions",
-      ) as Row[];
-      decisions.push(...page.map(toDecisionView));
-      if (page.length < READ_PAGE) break;
-    }
+    const decisions = await readDocumentFieldDecisions(this.client(), this.user, runId);
     return { run, fields, checks, decisions };
   }
 
