@@ -1,9 +1,11 @@
 # B19 — préparation de la fusion, reprise du 21 octobre 2026
 
-> **Suite du 22 octobre :** accès Vercel rétabli, nouveaux défauts corrigés et vrais écrans
-> relus. La [recette après authentification](RECETTE_REPRISE_B19_2026-10-22.md) porte le point
-> courant, code `8d7ce426173d2be94d5c925da512ee2da84bb49c`, 2 646 tests. Le blocage d’origine
-> décrit plus bas est historique ; B19 reste ouvert pour les critères encore non prouvés.
+> **Suite du 22 octobre :** accès Vercel rétabli, vrais écrans et captures conservés dans
+> [la recette réelle](RECETTE_REPRISE_B19_2026-10-22.md). Puis correctif de liquidité inconnue
+> et [CI complète verte](REPRISE_CI_B19_2026-10-22.md), code `1cf004886a708e70d07b3becfd13ba3b2a1b053d` :
+> 2 653 tests, lint, build, PostgreSQL depuis zéro et concurrence. La vérification visuelle du
+> dernier correctif attend le retour du navigateur. Les observations plus bas sont historiques ;
+> B19 reste ouvert pour les critères non prouvés.
 
 > Suite du 22 octobre : [revue transversale et focus clavier](REVUE_TRANSVERSALE_B19_2026-10-22.md),
 > avec [plan de déploiement à examiner](PLAN_DEPLOIEMENT_B19_2026-10-22.md).

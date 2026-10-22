@@ -1,12 +1,20 @@
 # B19 — reprise hébergée après authentification Vercel, 22 octobre 2026
 
+> **Actualisation après la recette ci-dessous :** le correctif de liquidité inconnue et
+> l’inventaire des migrations sont publiés. [CI entièrement verte](REPRISE_CI_B19_2026-10-22.md)
+> sur `1cf004886a708e70d07b3becfd13ba3b2a1b053d` : 2 653 tests, lint, build, PostgreSQL
+> depuis zéro, 29 smokes et 3 tests de concurrence. Le nouveau correctif de liquidité reste à
+> revoir dans le navigateur, devenu indisponible après la perte de l’environnement.
+> Les observations et captures ci-dessous restent celles des versions indiquées.
+> **B19 reste ouvert ; ne pas refaire l’inscription ou les imports.**
+
 **B19 ouvert ; B20 non commencé ; PR #54 en brouillon.** L’accès navigateur a été rétabli
 avec l’autorisation explicite du propriétaire d’ouvrir Vercel pour cette Preview. La connexion
 GitHub proposée par le formulaire sécurisé a ramené au compte LFO déjà connecté. Aucun compte,
 contrat ou document de test n’a été recréé. Le refus d’origine décrit dans la première revue
 du 22 octobre est donc levé ; ses preuves historiques restent conservées.
 
-Code final publié : `8d7ce426173d2be94d5c925da512ee2da84bb49c`.
+Code des derniers parcours réels décrits ci-dessous : `8d7ce426173d2be94d5c925da512ee2da84bb49c`.
 Preview : https://leo-family-office-git-codex-astra-b19-hosted-integ-ce3b7b-lech1.vercel.app/debt.
 Déploiement correspondant : `dpl_BvcggrTeCoPASgz3crvDtcBZRPmo`, READY, cible `null` (Preview),
 URL immuable fournie par Vercel : https://leo-family-office-gcsu38rzc-lech1.vercel.app.
@@ -139,10 +147,12 @@ Le viewport observé est **1363×936 CSS px**. Les JPEG bruts rendus par le navi
 Les capacités exposées ne permettent ni redimensionnement du viewport ni émulation tactile.
 **1440×900, tablette 900 px, mobile 390 px et toucher restent donc non vérifiés.**
 
-Le gate PostgreSQL depuis zéro reste inexécuté dans cet environnement sans PostgreSQL ;
-les refus de provisionnement antérieurs ne sont pas contournés. La recette hébergée de
-l’historique liasse, la revue indépendante et les corrections financières/transversales
-identifiées ci-dessus restent également à terminer. Le [plan de déploiement préparé](PLAN_DEPLOIEMENT_B19_2026-10-22.md)
+Le gate PostgreSQL depuis zéro, jusque-là inexécuté, a ensuite réussi dans le service jetable
+de la CI ; les refus de provisionnement locaux n’ont pas été contournés. Voir
+[les résultats exacts](REPRISE_CI_B19_2026-10-22.md). Le défaut de liquidité est corrigé dans
+le code et testé, mais sa nouvelle présentation reste à revoir dans la vraie interface.
+La recette hébergée de l’historique liasse, la revue indépendante et les autres écarts
+transversaux identifiés ci-dessus restent à terminer. Le [plan de déploiement préparé](PLAN_DEPLOIEMENT_B19_2026-10-22.md)
 demeure une préparation sans exécution en production.
 
 La session navigateur est conservée sur la dette. Reprendre ces critères et les défauts

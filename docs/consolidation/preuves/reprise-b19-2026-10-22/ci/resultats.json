@@ -1,0 +1,151 @@
+{
+  "source_sha": "1cf004886a708e70d07b3becfd13ba3b2a1b053d",
+  "repository": "leojacques-code/Leo-Family-Office",
+  "branch": "codex/astra-b19-hosted-integration-20261015",
+  "run_id": 39850932017,
+  "run_url": "https://github.com/leojacques-code/Leo-Family-Office/actions/runs/39850932017",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "id": 120076562772,
+      "name": "postgres-from-zero",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Initialize containers",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install locked dependencies",
+          "conclusion": "success"
+        },
+        {
+          "name": "Rebuild schema and run all SQL gates",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "conclusion": "success"
+        },
+        {
+          "name": "Stop containers",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 120076563154,
+      "name": "application",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install locked dependencies",
+          "conclusion": "success"
+        },
+        {
+          "name": "Conflict markers",
+          "conclusion": "success"
+        },
+        {
+          "name": "Unit and component tests",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify all 2653 tests and 193 files passed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Lint",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build and TypeScript",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "application": {
+    "tests": 2653,
+    "test_files": 193,
+    "failed_tests": 0,
+    "lint": "passed",
+    "build_and_typescript": "passed",
+    "conflict_markers": "passed"
+  },
+  "postgres": {
+    "version": 16,
+    "scope": "disposable GitHub runner service; loopback only; synthetic fixtures",
+    "migrations": 66,
+    "public_tables": 117,
+    "constraints": 492,
+    "rpcs": 124,
+    "invariant_triggers": 27,
+    "read_only_audit_tables": 59,
+    "smoke_scripts": 29,
+    "concurrency_scripts": 3,
+    "gate": "npm run gate:local",
+    "result": "passed"
+  },
+  "previous_failure": {
+    "run_id": 39840269907,
+    "source_sha": "ac410e3f0c28f76c0d9eb27b6b2d8241303c9715",
+    "cause": "schema verifier canonicalMigrations inventory omitted existing 20261021153711 migration",
+    "resolution": "Add existing migration version to exact verifier inventory; no SQL migration changed or applied remotely"
+  },
+  "browser": {
+    "last_visually_verified_source_sha": "8d7ce426173d2be94d5c925da512ee2da84bb49c",
+    "new_liquidity_fix_visually_verified": false,
+    "session_recovery": "cua.rewriteDocumentation timed out after 300 seconds after executor became offline; no new login or fixture creation attempted",
+    "requested_sizes_verified": false,
+    "touch_verified": false
+  },
+  "b19": "open",
+  "b20": "not started",
+  "production_changes": false,
+  "merge": false
+}

@@ -1,18 +1,24 @@
 # Reprise du programme LFO — 12 septembre 2026
 
-> **Point de reprise courant — 22 octobre 2026, après accès Vercel rétabli.**
+> **Point de reprise courant — 22 octobre 2026, CI complète verte.**
 > Continuer B19 sur `codex/astra-b19-hosted-integration-20261015`, PR #54 en brouillon.
-> Code Preview testé `8d7ce426173d2be94d5c925da512ee2da84bb49c`, staging
-> `bjxhnwvomoznorijauyl`, 66 migrations. **2 646 tests / 192 fichiers**, lint et build réussis.
-> L’authentification Vercel autorisée a ramené au compte LFO existant. Ne pas refaire
-> l’inscription, la dette synthétique ou ses cinq lectures. Le navigateur reste sur la dette.
-> Plantage Scénarios sans scénario corrigé ; auteur et heure de l’historique documentaire
-> commun affichés, avec preuve réelle sur le CSV. Lire [la nouvelle recette](RECETTE_REPRISE_B19_2026-10-22.md)
-> et le [plan de déploiement préparé](PLAN_DEPLOIEMENT_B19_2026-10-22.md).
-> Restent les vrais formats 1440×900 / 900 / 390 et toucher, PostgreSQL depuis zéro,
-> relecture indépendante, recette hébergée de l’historique liasse et défauts transversaux
-> de liquidité / vocabulaire identifiés. **B19 ouvert, B20 attend ; aucune fusion, dépense
-> ou migration de production autorisée.** Les sections ci-dessous conservent l’historique.
+> Code validé en CI `1cf004886a708e70d07b3becfd13ba3b2a1b053d` :
+> **2 653 tests / 193 fichiers, lint, build, PostgreSQL 16 depuis zéro, 29 smokes et 3 tests
+> de concurrence réussis.** 66 migrations ; inventaire du vérificateur remis en accord.
+> Preview READY ; lire [le résultat CI et la reprise exacte](REPRISE_CI_B19_2026-10-22.md).
+> Le correctif de liquidité inconnue est testé automatiquement ; sa vérification visuelle
+> attend. Le dernier code réellement recetté dans le navigateur est `8d7ce42` :
+> Scénarios vide, focus, auteur/heure, sélection documentaire et thème.
+> L’authentification Vercel a retrouvé le compte LFO existant. L’environnement et le navigateur
+> sont ensuite devenus indisponibles ; ce n’est pas un nouvel échec d’identification.
+> Ne refaire ni inscription, ni dette synthétique, ni cinq imports. Le staging reste
+> `bjxhnwvomoznorijauyl`. Les captures antérieures conservent leur version et leurs mesures.
+> Restent les vrais formats 1440×900 / 900 / 390 et toucher, la relecture indépendante,
+> l’historique liasse hébergé, la vérification visuelle de liquidité et les écarts V10/fondateur
+> recensés. **B19 ouvert, B20 attend ; aucune fusion, dépense ou opération de production.**
+> Les sections ci-dessous conservent l’historique. Lire aussi
+> [la recette réelle](RECETTE_REPRISE_B19_2026-10-22.md) et
+> [le plan de déploiement préparé](PLAN_DEPLOIEMENT_B19_2026-10-22.md).
 
 ## Autorité et baseline (B01/B02)
 
