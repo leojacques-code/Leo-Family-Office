@@ -1047,6 +1047,8 @@ export interface RealEstateFinancingLink {
 
 export interface DashboardState {
   asOfDate: string;
+  /** Déclarations pour l'affichage seulement : aucun montant ni nouvelle hypothèse moteur. */
+  domainDeclarations?: import("@/lib/presentation/today/contracts").DomainDeclaration[];
   /** Contexte serveur ; absent seulement des anciennes fixtures. */
   dates?: FinancialDateContext;
   reportingCurrency: string;

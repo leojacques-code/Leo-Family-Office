@@ -1,0 +1,92 @@
+name: B19 staging gates
+
+on:
+  push:
+    branches: [codex/astra-b19-hosted-integration-20261015]
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "supabase/**"
+      - "package*.json"
+      - "vitest.config.ts"
+      - ".github/workflows/b19-staging-gates.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: b19-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  application:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Conflict markers
+        run: npm run check:conflict-markers
+      - name: Unit and component tests
+        run: node node_modules/vitest/vitest.mjs run --reporter=default --reporter=json --outputFile=vitest-report.json
+      - name: Verify all 2653 tests and 193 files passed
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import assert from "node:assert/strict";
+          const report = JSON.parse(fs.readFileSync("vitest-report.json", "utf8"));
+          assert.equal(report.success, true);
+          assert.equal(report.numTotalTests, 2653);
+          assert.equal(report.numPassedTests, 2653);
+          assert.equal(report.numFailedTests, 0);
+          assert.equal(report.testResults.length, 193);
+          console.log("2653 tests / 193 files passed for", process.env.GITHUB_SHA);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, "2653 tests / 193 files passed.\n");
+          NODE
+      - name: Lint
+        run: npm run lint
+      - name: Build and TypeScript
+        run: npm run build
+
+  postgres-from-zero:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: lfo_local
+          POSTGRES_DB: lfo_b19_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      LFO_LOCAL_DB_URL: postgres://postgres:lfo_local@127.0.0.1:5432/lfo_b19_ci?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Rebuild schema and run all SQL gates
+        run: npm run gate:local

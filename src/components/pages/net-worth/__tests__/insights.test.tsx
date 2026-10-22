@@ -139,6 +139,31 @@ function renderInsights(state: DashboardState) {
 }
 
 describe("répartition des placements", () => {
+  it("ne présente pas une banque jamais renseignée comme une liquidité observée à zéro", () => {
+    renderInsights(stateOf({}));
+    const ownership = screen.getByRole("region", { name: "Périmètre de détention" });
+    expect(ownership).toHaveTextContent("Liquidité immédiate : À compléter");
+    expect(ownership).not.toHaveTextContent(/Liquidité immédiate :\s*0/);
+  });
+
+  it.each(["observed", "declared-none"] as const)(
+    "conserve le zéro explicitement connu (%s)",
+    (kind) => {
+      const state = stateOf({ accounts: kind === "observed" ? [account("bank", 0)] : [] });
+      if (kind === "declared-none") {
+        state.domainDeclarations = [{
+          domain: "BANQUE",
+          applicability: "DECLARED_NONE",
+          declaredOn: AS_OF,
+          note: null,
+        }];
+      }
+      renderInsights(state);
+      const ownership = screen.getByRole("region", { name: "Périmètre de détention" });
+      expect(ownership).toHaveTextContent(/Liquidité immédiate :\s*0\s*€/);
+      expect(ownership).not.toHaveTextContent("À compléter");
+    },
+  );
   it("ventile les seuls actifs financiers, et le dit", async () => {
     const { onInspectAllocation } = renderInsights(
       stateOf({

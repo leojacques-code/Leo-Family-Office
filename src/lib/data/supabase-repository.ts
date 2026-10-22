@@ -725,6 +725,36 @@ function mapCurrencyFacts(currencyRateRows: Row[]) {
   return currencyRates;
 }
 
+function mapDomainDeclarations(rows: Row[]): DomainDeclaration[] {
+  rows.sort(
+    (a, b) =>
+      String(b.declared_on).localeCompare(String(a.declared_on)) ||
+      Number(b.revision) - Number(a.revision),
+  );
+  const current = new Map<string, DomainDeclaration>();
+  for (const row of rows) {
+    const domain = requiredString(row.domain, "déclaration de domaine : domaine");
+    // Les lignes arrivent de la plus récente à la plus ancienne : la PREMIÈRE vue d'un
+    // domaine est donc sa déclaration courante, et les suivantes sont son historique.
+    if (current.has(domain)) continue;
+    current.set(domain, {
+      domain: domain as DomainDeclaration["domain"],
+      applicability: requiredString(
+        row.applicability,
+        "déclaration de domaine : applicabilité",
+      ) as DomainDeclaration["applicability"],
+      declaredOn: requiredString(row.declared_on, "déclaration de domaine : date"),
+      note: nullableString(row.note, "déclaration de domaine : motif"),
+    });
+  }
+  // L'ordre de sortie est celui du registre de présentation, pas celui de la base : une
+  // liste de domaines dont l'ordre change avec les dates de déclaration ferait bouger les
+  // lignes du parcours d'installation à chaque réponse.
+  return DOMAIN_IDS.map((id) => current.get(id)).filter(
+    (declaration): declaration is DomainDeclaration => declaration !== undefined,
+  );
+}
+
 export function createSupabaseRepository(user: string): FamilyOfficeRepository {
   const db = supabaseAdmin();
   const mine = (table: string) => db.from(table).select("*").eq("user_id", user);
@@ -1077,6 +1107,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       debtEventRows,
       debtEventCancellationRows,
       contractVersionRows,
+      domainDeclarationRows,
     ] = await Promise.all([
       mine("institutions"),
       mine("financial_accounts"),
@@ -1146,6 +1177,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       fetchAllPages("liability_events", "effective_date"),
       fetchAllPages("liability_event_cancellations", "cancelled_at"),
       fetchAllPages("liability_contract_versions", "version_no"),
+      fetchAllPages("user_domain_declarations", "declared_on"),
     ]).then((results) =>
       results.map((result, index) => unwrap(result, `lecture #${index}`) as Row[]),
     );
@@ -2411,6 +2443,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       asOfDate: dates.asOfDate,
       dates,
       reportingCurrency,
+      domainDeclarations: mapDomainDeclarations(domainDeclarationRows),
       ledgerCoverageStart: coverage.start,
       ledgerCoverageSource: coverage.source,
       accounts,
@@ -4182,33 +4215,7 @@ export function createSupabaseRepository(user: string): FamilyOfficeRepository {
       await fetchAllPages("user_domain_declarations", "declared_on"),
       "lecture des déclarations de domaine",
     ) as Row[];
-    rows.sort(
-      (a, b) =>
-        String(b.declared_on).localeCompare(String(a.declared_on)) ||
-        Number(b.revision) - Number(a.revision),
-    );
-    const current = new Map<string, DomainDeclaration>();
-    for (const row of rows) {
-      const domain = requiredString(row.domain, "déclaration de domaine : domaine");
-      // Les lignes arrivent de la plus récente à la plus ancienne : la PREMIÈRE vue d'un
-      // domaine est donc sa déclaration courante, et les suivantes sont son historique.
-      if (current.has(domain)) continue;
-      current.set(domain, {
-        domain: domain as DomainDeclaration["domain"],
-        applicability: requiredString(
-          row.applicability,
-          "déclaration de domaine : applicabilité",
-        ) as DomainDeclaration["applicability"],
-        declaredOn: requiredString(row.declared_on, "déclaration de domaine : date"),
-        note: nullableString(row.note, "déclaration de domaine : motif"),
-      });
-    }
-    // L'ordre de sortie est celui du registre de présentation, pas celui de la base : une
-    // liste de domaines dont l'ordre change avec les dates de déclaration ferait bouger les
-    // lignes du parcours d'installation à chaque réponse.
-    return DOMAIN_IDS.map((id) => current.get(id)).filter(
-      (declaration): declaration is DomainDeclaration => declaration !== undefined,
-    );
+    return mapDomainDeclarations(rows);
   }
 
   /**

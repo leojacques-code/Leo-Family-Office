@@ -272,3 +272,18 @@ it("conserve les déclarations après la première page PostgREST", async () => 
   const declarations = await createSupabaseRepository(mocks.user).getDomainDeclarations();
   expect(declarations.find((row) => row.domain === "DETTE")?.applicability).toBe("DECLARED_NONE");
 });
+
+it("transporte la déclaration courante de banque dans l'état global, sous le même propriétaire", async () => {
+  tables.user_domain_declarations = [
+    { id: "ancienne", user_id: "owner", domain: "BANQUE", applicability: "APPLICABLE", declared_on: "2026-10-21", revision: 1, note: null },
+    { id: "courante", user_id: "owner", domain: "BANQUE", applicability: "DECLARED_NONE", declared_on: "2026-10-22", revision: 2, note: "Absence explicite" },
+    { id: "autre", user_id: "other", domain: "BANQUE", applicability: "APPLICABLE", declared_on: "2026-10-23", revision: 1, note: null },
+  ];
+  const state = await createSupabaseRepository("owner").getDashboardState();
+  expect(state.domainDeclarations).toEqual([{
+    domain: "BANQUE",
+    applicability: "DECLARED_NONE",
+    declaredOn: "2026-10-22",
+    note: "Absence explicite",
+  }]);
+});

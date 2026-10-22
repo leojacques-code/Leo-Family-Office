@@ -187,7 +187,11 @@ function OwnershipPanel({ view }: { view: NetWorthView }) {
           sans entrée de registre portant formule, source et règle d'affichage. */}
       <p className="nw-note">
         Liquidité immédiate :{" "}
-        {view.immediateCash.value === null ? (
+        {!view.immediateCashScopeKnown ? (
+          <span title="Aucun solde de compte à liquidité immédiate ni absence de banque déclarée.">
+            À compléter
+          </span>
+        ) : view.immediateCash.value === null ? (
           <span title={issueSummary(view.immediateCash.blockers)}>{NOT_COMPUTABLE}</span>
         ) : (
           <Currency value={view.immediateCash.value} />

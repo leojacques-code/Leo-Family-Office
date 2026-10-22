@@ -26,6 +26,8 @@ import {
 import { addMonths, monthBounds } from "@/lib/engine/debt";
 import { formatCurrency } from "@/lib/presentation/currency";
 import { shouldDeriveBalance } from "@/lib/data/shared";
+import { canonicalBalanceSheetOf } from "@/lib/engine/balance-sheet-view";
+import { hasImmediateCashScope } from "@/lib/presentation/cash-scope";
 import {
   INTERNAL_TRANSFER_NOTICE,
   cashRunwayDays,
@@ -177,16 +179,23 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
         state.reportingCurrency,
       )
     : null;
+  const immediateCash = useMemo(() => {
+    const sheet = canonicalBalanceSheetOf(state);
+    return {
+      value: sheet.immediateCash.value,
+      scopeKnown: hasImmediateCashScope(sheet, state.domainDeclarations),
+    };
+  }, [state]);
   const forecast = useMemo(
     () =>
       forecastCashFlow({
         asOfDate: state.asOfDate,
         horizonDays: horizon,
-        openingCash: state.metrics.bankCash ?? 0,
+        openingCash: immediateCash.value ?? 0,
         rules: state.recurringRules,
         liabilities: state.liabilities,
       }),
-    [state.asOfDate, horizon, state.metrics.bankCash, state.recurringRules, state.liabilities],
+    [state.asOfDate, horizon, immediateCash.value, state.recurringRules, state.liabilities],
   );
   const runway = cashRunwayDays(forecast);
   // La prévision ne connaît que les échéances des CONTRATS et part du cash observé. Avec une
@@ -194,7 +203,7 @@ function CashFlowPage({ state, mutate, busy, setExplanation }: SectionProps) {
   // vaudrait 0 par repli. Dans les deux cas les montants ne sont pas affichés comme complets.
   const unscheduledDebt = (state.outstandingDebts ?? []).some((debt) => debt.currentBalance > 0);
   const forecastReserve =
-    state.metrics.bankCash === null
+    !immediateCash.scopeKnown || immediateCash.value === null
       ? "Trésorerie de départ inconnue"
       : unscheduledDebt
         ? "Une dette sans échéancier : ses sorties sont inconnues"

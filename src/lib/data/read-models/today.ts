@@ -1,3 +1,4 @@
+import { hasImmediateCashScope } from "@/lib/presentation/cash-scope";
 import "server-only";
 
 import { aggregateBlocked, computeObservedCashFlow, monthPeriod } from "@/lib/engine/cash-flow";
@@ -123,16 +124,7 @@ export function todayViewInputFrom(
   const balanceSheet = context.balanceSheet;
   // La somme canonique d'un périmètre vide vaut zéro. Elle ne prouve pas que la banque
   // a été renseignée : seule une ligne de compte ou une déclaration explicite le permet.
-  const cashScopeKnown =
-    balanceSheet.contributions.some(
-      (line) =>
-        (line.category === "CASH_ACCOUNT" || line.category === "ACCOUNT_OVERDRAFT") &&
-        line.liquidity === "IMMEDIATE",
-    ) ||
-    declarations.some(
-      (declaration) =>
-        declaration.domain === "BANQUE" && declaration.applicability === "DECLARED_NONE",
-    );
+  const cashScopeKnown = hasImmediateCashScope(balanceSheet, declarations);
 
   const month = monthPeriod(state.asOfDate);
   const observed = computeObservedCashFlow(
@@ -233,16 +225,16 @@ export function todayViewInputFrom(
 /**
  * Le modèle de lecture servi à la route.
  *
- * Les lectures — état canonique, déclarations et preuves documentaires — sont faites EN PARALLÈLE : elles ne
- * dépendent pas l'une de l'autre, et les enchaîner doublerait la latence de la page d'accueil
- * du produit sans rien garantir de plus.
+ * L'état canonique transporte désormais les déclarations d'affichage, lues en parallèle de
+ * ses autres dépendances. Les preuves documentaires restent une lecture indépendante.
  */
 export async function getTodayReadModel(): Promise<TodayReadModel> {
   const repository = await getRepository();
-  const [state, declarations, scheduleDocuments] = await Promise.all([
+  const [state, scheduleDocuments] = await Promise.all([
     repository.getDashboardState(),
-    repository.getDomainDeclarations(),
     repository.getScheduleDocumentEvidence(),
   ]);
+  // Compatibilité d'un ancien fournisseur d'état : absence du champ ≠ liste vide.
+  const declarations = state.domainDeclarations ?? (await repository.getDomainDeclarations());
   return buildTodayView(todayViewInputFrom(state, declarations, { scheduleDocuments }));
 }

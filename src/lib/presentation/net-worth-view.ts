@@ -13,6 +13,7 @@ import type {
 } from "@/lib/engine/balance-sheet";
 import { buildCloseChange, type CloseChangeResult } from "@/lib/presentation/today/flow";
 import type { DashboardState } from "@/lib/types";
+import { hasImmediateCashScope } from "@/lib/presentation/cash-scope";
 
 /**
  * MODÈLE DE LECTURE DU POSTE DE TRAVAIL PATRIMOINE
@@ -83,6 +84,7 @@ export interface NetWorthView {
   readonly totalLiabilities: CanonicalAggregate;
   readonly netWorth: CanonicalAggregate;
   readonly immediateCash: CanonicalAggregate;
+  readonly immediateCashScopeKnown: boolean;
   readonly liquidAssets: CanonicalAggregate;
   /** Base commune de proportion des deux colonnes. `null` quand rien n'est connu. */
   readonly scaleBasis: number | null;
@@ -286,6 +288,7 @@ export function buildNetWorthView(state: DashboardState): NetWorthView {
     totalLiabilities: sheet.totalLiabilities,
     netWorth: sheet.netWorth,
     immediateCash: sheet.immediateCash,
+    immediateCashScopeKnown: hasImmediateCashScope(sheet, state.domainDeclarations),
     liquidAssets: sheet.liquidAssets,
     scaleBasis,
     // Bouclage : les familles rendues doivent redonner l'agrégat canonique. Un écart signale
