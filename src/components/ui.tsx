@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { AlertTriangle, Check, CircleHelp, Info, X } from "lucide-react";
 import type { DataKind } from "@/lib/types";
 import { DATA_KIND_LABELS } from "@/lib/presentation/language";
+import { focusableWithin } from "@/components/workstation/use-dialog-focus";
 
 const percent = new Intl.NumberFormat("fr-FR", {
   style: "percent",
@@ -192,17 +193,7 @@ export function Modal({
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusables = () =>
-      Array.from(
-        dialog.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
-        ) ?? [],
-      ).filter((node) => {
-        // Invisible : dans un bloc masqué, ou dans un <details> fermé (hors de son résumé).
-        if (node.closest("[hidden]")) return false;
-        const details = node.closest("details");
-        return !details || details.open || node.closest("summary") !== null;
-      });
+    const focusables = () => (dialog.current ? focusableWithin(dialog.current) : []);
     const first = focusables().find((node) => node.getAttribute("aria-label") !== "Fermer");
     (first ?? dialog.current)?.focus();
     const handler = (event: KeyboardEvent) => {

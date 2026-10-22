@@ -24,7 +24,7 @@ import { useEffect, useRef, type RefObject } from "react";
 const FOCUSABLE = [
   "a[href]",
   "button:not([disabled])",
-  "input:not([disabled])",
+  'input:not([disabled]):not([type="hidden"])',
   "select:not([disabled])",
   "textarea:not([disabled])",
   "summary",
@@ -42,8 +42,19 @@ const FOCUSABLE = [
  * n'est plus vérifiable du tout. Un garde-fou qu'aucun test ne peut exercer ne garde rien.
  */
 function isRendered(element: HTMLElement): boolean {
+  // Un contrôle natif matche aussi "button" ou "input" : son tabindex négatif doit
+  // donc être vérifié séparément du sélecteur générique [tabindex].
+  const tabIndex = element.getAttribute("tabindex");
+  if (tabIndex !== null && Number(tabIndex) < 0) return false;
   for (let node: HTMLElement | null = element; node; node = node.parentElement) {
     if (node.hidden || node.getAttribute("aria-hidden") === "true") return false;
+    // Les descendants d'un <details> fermé gardent un display calculé ordinaire.
+    // Seul son premier résumé reste dans le parcours clavier, y compris si des
+    // sections repliables sont imbriquées.
+    if (node.tagName === "DETAILS" && !(node as HTMLDetailsElement).open) {
+      const summary = [...node.children].find((child) => child.tagName === "SUMMARY");
+      if (!summary?.contains(element)) return false;
+    }
     // `display` n'est pas héritée : elle se vérifie sur chaque ancêtre, faute de quoi un
     // panneau replié laisserait ses boutons dans le cycle.
     if (getComputedStyle(node).display === "none") return false;
@@ -53,7 +64,7 @@ function isRendered(element: HTMLElement): boolean {
   return getComputedStyle(element).visibility !== "hidden";
 }
 
-function focusableWithin(container: HTMLElement): HTMLElement[] {
+export function focusableWithin(container: HTMLElement): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(isRendered);
 }
 
@@ -65,6 +76,11 @@ export function useDialogFocus(
   // L'élément qui avait le focus AVANT l'ouverture. Le rendre à la fermeture est ce qui
   // permet de rouvrir le même panneau en tabulant, au lieu de repartir du haut de la page.
   const restoreTo = useRef<HTMLElement | null>(null);
+  const closeRef = useRef(onClose);
+
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -81,7 +97,7 @@ export function useDialogFocus(
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.stopPropagation();
-        onClose();
+        closeRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -112,5 +128,5 @@ export function useDialogFocus(
       // faire de visible.
       if (restoreTo.current?.isConnected) restoreTo.current.focus();
     };
-  }, [containerRef, open, onClose]);
+  }, [containerRef, open]);
 }

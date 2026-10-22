@@ -19,6 +19,20 @@ function Harness() {
 }
 
 describe("Modal : focus d'un dialogue modal", () => {
+  it("ne piège pas le clavier sur une action native exclue de la tabulation", () => {
+    render(
+      <Modal open title="Formulaire" onClose={() => {}}>
+        <button type="button">Dernier accessible</button>
+        <button type="button" tabIndex={-1}>
+          Action hors tabulation
+        </button>
+      </Modal>,
+    );
+    screen.getByRole("button", { name: "Fermer" }).focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(screen.getByRole("button", { name: "Dernier accessible" })).toHaveFocus();
+  });
+
   it("entre dans le dialogue, y reste pendant la saisie, et revient au déclencheur", () => {
     render(<Harness />);
     const trigger = screen.getByRole("button", { name: "Ouvrir" });

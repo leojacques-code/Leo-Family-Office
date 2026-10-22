@@ -31,7 +31,62 @@ function DrawerHost() {
   );
 }
 
+function EditingDrawerHost() {
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
+  return (
+    <>
+      <button onClick={() => setOpen(true)} type="button">
+        Ouvrir la saisie
+      </button>
+      <FinancialDrawer open={open} title="Encours" onClose={() => setOpen(false)}>
+        <input
+          aria-label="Montant saisi"
+          value={amount}
+          onChange={(event) => setAmount(event.target.value)}
+        />
+      </FinancialDrawer>
+    </>
+  );
+}
+
 describe("FinancialDrawer au clavier", () => {
+  it("conserve le focus pendant une saisie contrôlée et le rend au véritable déclencheur", async () => {
+    const user = userEvent.setup();
+    render(<EditingDrawerHost />);
+    const trigger = screen.getByRole("button", { name: "Ouvrir la saisie" });
+    await user.click(trigger);
+    const amount = screen.getByRole("textbox", { name: "Montant saisi" });
+    await user.type(amount, "2000");
+    expect(amount).toHaveValue("2000");
+    expect(amount).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("utilise la dernière fermeture sans reprendre le focus lors d'un nouveau rendu", async () => {
+    const user = userEvent.setup();
+    const first = vi.fn();
+    const latest = vi.fn();
+    const { rerender } = render(
+      <FinancialDrawer open title="Dette" onClose={first}>
+        <input aria-label="Saisie" />
+      </FinancialDrawer>,
+    );
+    const input = screen.getByRole("textbox", { name: "Saisie" });
+    await user.click(input);
+    rerender(
+      <FinancialDrawer open title="Dette" onClose={latest}>
+        <input aria-label="Saisie" />
+      </FinancialDrawer>,
+    );
+    expect(input).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(first).not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledOnce();
+  });
+
   it("prend le focus à l'ouverture, l'y retient aux deux bords, et le rend à la fermeture", async () => {
     const user = userEvent.setup();
     render(<DrawerHost />);
@@ -156,6 +211,43 @@ describe("Inspector", () => {
 });
 
 describe("piège de focus et contrôles masqués", () => {
+  it("exclut de la boucle les contrôles natifs retirés de la tabulation", async () => {
+    const user = userEvent.setup();
+    render(
+      <FinancialDrawer open title="Dette" onClose={() => {}}>
+        <button type="button">Dernier accessible</button>
+        <button type="button" tabIndex={-1}>
+          Action hors tabulation
+        </button>
+        <input aria-label="Champ hors tabulation" tabIndex={-2} />
+      </FinancialDrawer>,
+    );
+    await user.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "Dernier accessible" })).toHaveFocus();
+  });
+
+  it("boucle sur le résumé des options repliées, puis inclut leurs champs une fois ouvertes", async () => {
+    const user = userEvent.setup();
+    render(
+      <FinancialDrawer open title="Dette" onClose={() => {}}>
+        <input aria-label="Visible" />
+        <details>
+          <summary>Options avancées</summary>
+          <input aria-label="Condition avancée" />
+        </details>
+      </FinancialDrawer>,
+    );
+    const close = screen.getByRole("button", { name: "Fermer" });
+    const summary = screen.getByText("Options avancées");
+    expect(close).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(summary).toHaveFocus();
+    await user.click(summary);
+    close.focus();
+    await user.tab({ shift: true });
+    expect(screen.getByLabelText("Condition avancée")).toHaveFocus();
+  });
+
   it("ignore un contrôle masqué au lieu de lui donner le focus", async () => {
     const user = userEvent.setup();
     render(
