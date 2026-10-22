@@ -1,5 +1,9 @@
 # B19 — préparation de la fusion, reprise du 21 octobre 2026
 
+> Suite du 22 octobre : [revue transversale et focus clavier](REVUE_TRANSVERSALE_B19_2026-10-22.md),
+> avec [plan de déploiement à examiner](PLAN_DEPLOIEMENT_B19_2026-10-22.md).
+> Les mesures et captures de cette page restent celles du 21 octobre.
+
 **B19 ouvert. B20 non commencé. Aucune fusion dans main.**
 Cette reprise continue la recette du même compte et de la même dette synthétique. Elle ne
 recommence ni l'inscription, ni l'onboarding, ni les décisions documentaires déjà vérifiées.

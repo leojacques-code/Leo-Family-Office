@@ -1,5 +1,16 @@
 # Reprise du programme LFO — 12 septembre 2026
 
+> **Point de reprise courant — 22 octobre 2026.** Continuer B19 sur
+> `codex/astra-b19-hosted-integration-20261015`, PR #54 en brouillon. Code Preview
+> `6164219b962eb5730a987c9e5072e50509c7d1b6`, staging `bjxhnwvomoznorijauyl`, 66 migrations.
+> 2 635 tests, lint et build réussis. Ne pas recréer le compte, la dette synthétique ou ses
+> cinq lectures. Le refus automatique d'accès à l'origine Vercel suspend la nouvelle recette
+> visuelle ; ce n'est pas un nouvel échec d'inscription LFO constaté.
+> Lire [la revue du 22 octobre](REVUE_TRANSVERSALE_B19_2026-10-22.md) et le
+> [plan de déploiement préparé](PLAN_DEPLOIEMENT_B19_2026-10-22.md).
+> B19 reste ouvert, B20 attend ; aucune dépense, migration de production ou fusion autorisée.
+> Les sections datées ci-dessous conservent l'historique du programme.
+
 ## Autorité et baseline (B01/B02)
 
 La demande du propriétaire dans la tâche des 11–12 septembre 2026 autorise l'exécution du dossier et du kit dans leur ordre, à la lettre. Empreintes SHA-256 : dossier `5326d684b2773f92fc80aac902941711cb08e31ce56a0ec30638a760c930d714` ; kit `cb36e41c7479955b4d2e1eda22aa34e65bdff156e9d1f59d8bf77e9a27c2a1a9`. Le dossier consolidé et le kit datés du 11 septembre 2026 sont conservés dans le répertoire de travail voisin `../source/LFO_Programme`. Leur contenu d'audit décrit des observations historiques, pas des tests exécutés pendant cette reprise.

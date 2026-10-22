@@ -1,0 +1,127 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+ ❯ |dom| src/components/workstation/__tests__/dialog-focus.test.tsx (13 tests | 4 failed) 845ms
+     × conserve le focus pendant une saisie contrôlée et le rend au véritable déclencheur 252ms
+     × utilise la dernière fermeture sans reprendre le focus lors d'un nouveau rendu 62ms
+     × exclut de la boucle les contrôles natifs retirés de la tabulation 149ms
+     × boucle sur le résumé des options repliées, puis inclut leurs champs une fois ouvertes 44ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |dom| src/components/workstation/__tests__/dialog-focus.test.tsx > FinancialDrawer au clavier > conserve le focus pendant une saisie contrôlée et le rend au véritable déclencheur
+Error: expect(element).toHaveValue(2000)
+
+Expected the element to have value:
+  2000
+Received:
+  2
+ ❯ src/components/workstation/__tests__/dialog-focus.test.tsx:55:20
+     53|     const amount = screen.getByRole("textbox", { name: "Montant saisi"…
+     54|     await user.type(amount, "2000");
+     55|     expect(amount).toHaveValue("2000");
+       |                    ^
+     56|     expect(amount).toHaveFocus();
+     57|     await user.keyboard("{Escape}");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  |dom| src/components/workstation/__tests__/dialog-focus.test.tsx > FinancialDrawer au clavier > utilise la dernière fermeture sans reprendre le focus lors d'un nouveau rendu
+Error: expect(element).toHaveFocus()
+
+Expected element with focus:
+  <input
+  aria-label="Saisie"
+/>
+Received element with focus:
+  <button
+  aria-label="Fermer"
+  class="icon-button"
+  type="button"
+>
+  <svg
+    aria-hidden="true"
+    class="lucide lucide-x"
+    fill="none"
+    height="16"
+    stroke="currentColor"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="2"
+    viewBox="0 0 24 24"
+    width="16"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M18 6 6 18"
+    />
+    <path
+      d="m6 6 12 12"
+    />
+  </svg>
+</button>
+ ❯ src/components/workstation/__tests__/dialog-focus.test.tsx:78:19
+     76|       </FinancialDrawer>,
+     77|     );
+     78|     expect(input).toHaveFocus();
+       |                   ^
+     79|     await user.keyboard("{Escape}");
+     80|     expect(first).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  |dom| src/components/workstation/__tests__/dialog-focus.test.tsx > piège de focus et contrôles masqués > exclut de la boucle les contrôles natifs retirés de la tabulation
+Error: expect(element).toHaveFocus()
+
+Expected element with focus:
+  <button
+  type="button"
+>
+  Dernier accessible
+</button>
+Received element with focus:
+  <input
+  aria-label="Champ hors tabulation"
+  tabindex="-2"
+/>
+ ❯ src/components/workstation/__tests__/dialog-focus.test.tsx:218:72
+    216|     );
+    217|     await user.tab({ shift: true });
+    218|     expect(screen.getByRole("button", { name: "Dernier accessible" }))…
+       |                                                                        ^
+    219|   });
+    220|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  |dom| src/components/workstation/__tests__/dialog-focus.test.tsx > piège de focus et contrôles masqués > boucle sur le résumé des options repliées, puis inclut leurs champs une fois ouvertes
+Error: expect(element).toHaveFocus()
+
+Expected element with focus:
+  <summary>
+  Options avancées
+</summary>
+Received element with focus:
+  <input
+  aria-label="Condition avancée"
+/>
+ ❯ src/components/workstation/__tests__/dialog-focus.test.tsx:236:21
+    234|     expect(close).toHaveFocus();
+    235|     await user.tab({ shift: true });
+    236|     expect(summary).toHaveFocus();
+       |                     ^
+    237|     await user.click(summary);
+    238|     close.focus();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 9 passed (13)
+   Start at  17:58:01
+   Duration  1.82s (transform 98ms, setup 157ms, import 207ms, tests 845ms, environment 433ms)
+
