@@ -156,7 +156,9 @@ export function DebtDocumentsSection({
                   {run.firstDueDate && run.lastDueDate
                     ? ` · ${formatDate(run.firstDueDate)} → ${formatDate(run.lastDueDate)}`
                     : ""}
-                  {run.lineCount !== null ? ` · ${run.lineCount} échéances` : ""}
+                  {run.lineCount !== null
+                    ? ` · ${run.lineCount} échéance${run.lineCount === 1 ? "" : "s"}`
+                    : ""}
                   {run.completeness === "PARTIAL" ? " · extrait partiel" : ""}
                 </small>
               </span>
