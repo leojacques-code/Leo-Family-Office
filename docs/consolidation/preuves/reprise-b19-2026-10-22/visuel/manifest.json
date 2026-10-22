@@ -1,0 +1,379 @@
+{
+  "capture_date": "2026-10-22",
+  "preview_alias": "https://leo-family-office-git-codex-astra-b19-hosted-integ-ce3b7b-lech1.vercel.app",
+  "environment": "staging bjxhnwvomoznorijauyl",
+  "raw_unmodified": true,
+  "requested_sizes_verified": false,
+  "touch_verified": false,
+  "excluded_transition_frames": 2,
+  "captures": [
+    {
+      "file": "aide-patrimoine-cible-etendue.jpg",
+      "bytes": 91288,
+      "sha256": "0a6aa270d457fd3b64dcb0dcdfa5f38dbdfd6f08d4565385a890e2e77a56ae4c",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "carriere-sans-faits.jpg",
+      "bytes": 63466,
+      "sha256": "213b0450e96f46b8bc0338b9512d7f42e64d5d035c0ee48bd185698214116d29",
+      "jpeg_dimensions_px": [
+        1363,
+        936
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "coffre-cinq-pieces.jpg",
+      "bytes": 73520,
+      "sha256": "168c32319b72b2e5da5acec476d017f9166014280325bb57c7c6aaba0672a17d",
+      "jpeg_dimensions_px": [
+        1363,
+        936
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": null,
+      "version_note": "Navigation SPA pendant transition de déploiement ; aucun SHA exact de rendu affirmé.",
+      "theme": "light"
+    },
+    {
+      "file": "contrat-options-avancees-clavier.jpg",
+      "bytes": 84078,
+      "sha256": "987c9f3bb0d047c5b4980101d18c8e87fdf9cb686b5158268ae241fcbea1c565",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "decisions-sans-scenarios.jpg",
+      "bytes": 61660,
+      "sha256": "eb9a9e52a1f023a4f7a31bdc5546e542451746423989c29741e92726c373117e",
+      "jpeg_dimensions_px": [
+        1363,
+        936
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "encours-saisie-2000-version-finale.jpg",
+      "bytes": 81555,
+      "sha256": "c5663cce6ffad292c1fe7723f236924f54cfa72cbf832a8c53e89ee9881f6767",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "8d7ce426173d2be94d5c925da512ee2da84bb49c",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "entreprises-sans-faits.jpg",
+      "bytes": 72517,
+      "sha256": "f976f4e5561dadca2dcac8a8d5b5473b272dcfe7057fffb0a3725c29e481c5e8",
+      "jpeg_dimensions_px": [
+        1363,
+        936
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "fiscalite-sans-faits.jpg",
+      "bytes": 90857,
+      "sha256": "5a15f590056b9d5da3a16f7afed6cf9b0ce2f1756730dbde6e78a5cb30b7b613",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "flux-sans-operation.jpg",
+      "bytes": 94325,
+      "sha256": "bc4aec0c615207e2107402db460ff54d660ada10b2d89ba4408c384374f17cf5",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "historique-csv-auteur-absent-avant.jpg",
+      "bytes": 101644,
+      "sha256": "ff0558a1e01373b3ff32ec5c0fe700abf65f10ca4e784337d953012170c08956",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "9348c0d9ee509ebb6a2b2e97f901db24bd8826aa",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "historique-csv-auteur-heures-corrige.jpg",
+      "bytes": 103020,
+      "sha256": "4b9bb95278d3d6856c04165fe2b8ac2b7e308f8c6129d4312ab863b6903aeb0f",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "8d7ce426173d2be94d5c925da512ee2da84bb49c",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "immobilier-rendu-stable.jpg",
+      "bytes": 84588,
+      "sha256": "b186cace8c208c1e09113a3e1071aa9ec1dcb20aa70ea123af40b6ab1e862cd5",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "objectifs-sans-intention.jpg",
+      "bytes": 77541,
+      "sha256": "c701d8c7ad83361c69c8eb046ac0646b76271c2c8c24c83fd38d8ddf6019e5ea",
+      "jpeg_dimensions_px": [
+        1363,
+        936
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "patrimoine-compte-synthetique.jpg",
+      "bytes": 74571,
+      "sha256": "195fd39cdb0f244d8a4ce45565877be2a5603774d7be822a443676ee887229d1",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "placements-sans-faits.jpg",
+      "bytes": 81684,
+      "sha256": "daab796ee163cfac5f3691ac936192a36cd9fca8b44f7cf0bf41256a9266b771",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "rapports-reserves-et-codes.jpg",
+      "bytes": 83857,
+      "sha256": "aadde835ce7e18a07756d9da4e40e8e0784e8389e66872eb920489c5c02ba895",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": null,
+      "version_note": "Navigation SPA pendant transition de déploiement ; aucun SHA exact de rendu affirmé.",
+      "theme": "light"
+    },
+    {
+      "file": "revue-xlsx-selection-sombre.jpg",
+      "bytes": 95798,
+      "sha256": "a5caea555d867c6936965502ad14208400c9d5a6927327d16be56740b7efd703",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "9348c0d9ee509ebb6a2b2e97f901db24bd8826aa",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "dark"
+    },
+    {
+      "file": "scenarios-erreur-reelle.jpg",
+      "bytes": 22606,
+      "sha256": "594ed8b858e4e1bb857ba8b8c641eed2b379d1da228d6a9c61822a710689caa6",
+      "jpeg_dimensions_px": [
+        1363,
+        936
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "6164219b962eb5730a987c9e5072e50509c7d1b6",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "scenarios-saisie-preservee.jpg",
+      "bytes": 37934,
+      "sha256": "24fc3bdeed57743189c7f7b9a333f78f2f3af4bd906444c4f35b143fda69ecb9",
+      "jpeg_dimensions_px": [
+        1363,
+        936
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "9348c0d9ee509ebb6a2b2e97f901db24bd8826aa",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "scenarios-sombre-apres-rechargement.jpg",
+      "bytes": 62980,
+      "sha256": "b43c230a4e9295ef3af64f650f2d4c3d36f8d37492136809f5a8f1414be48ae7",
+      "jpeg_dimensions_px": [
+        1363,
+        936
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "9348c0d9ee509ebb6a2b2e97f901db24bd8826aa",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "dark"
+    },
+    {
+      "file": "scenarios-version-finale.jpg",
+      "bytes": 63028,
+      "sha256": "9c05e7f575054832f8259445f8f80d2adbc867c9e576c772b0bc84d599ab89ac",
+      "jpeg_dimensions_px": [
+        1363,
+        936
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "8d7ce426173d2be94d5c925da512ee2da84bb49c",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "scenarios-vide-corrige.jpg",
+      "bytes": 62847,
+      "sha256": "83353d519dbab44a03c30fc97af8bd3035ac1166f98769750bcf2b305109d696",
+      "jpeg_dimensions_px": [
+        1363,
+        936
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": "9348c0d9ee509ebb6a2b2e97f901db24bd8826aa",
+      "version_note": "Après chargement explicite de cette version ou avant tout nouveau déploiement.",
+      "theme": "light"
+    },
+    {
+      "file": "sources-imports.jpg",
+      "bytes": 79339,
+      "sha256": "113c442c649f5a0ec9dc4430844858b5da03b08373011e300eab75d44bb0cbf9",
+      "jpeg_dimensions_px": [
+        1348,
+        926
+      ],
+      "observed_viewport_css_px": [
+        1363,
+        936
+      ],
+      "code_sha": null,
+      "version_note": "Navigation SPA pendant transition de déploiement ; aucun SHA exact de rendu affirmé.",
+      "theme": "light"
+    }
+  ]
+}

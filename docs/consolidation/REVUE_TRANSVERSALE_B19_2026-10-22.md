@@ -1,5 +1,10 @@
 # B19 — reprise et revue transversale du 22 octobre 2026
 
+> **Suite du 22 octobre :** accès Vercel rétabli, nouveaux défauts corrigés et vrais écrans
+> relus. La [recette après authentification](RECETTE_REPRISE_B19_2026-10-22.md) porte le point
+> courant, code `8d7ce426173d2be94d5c925da512ee2da84bb49c`, 2 646 tests. Le blocage d’origine
+> décrit plus bas est historique ; B19 reste ouvert pour les critères encore non prouvés.
+
 **B19 ouvert ; B20 non commencé ; PR #54 en brouillon.** Cette reprise prolonge les preuves
 du 21 octobre sans recréer le compte, les dettes ou les lectures documentaires.
 Elle concerne le staging `bjxhnwvomoznorijauyl`. Aucune dépense, migration distante,

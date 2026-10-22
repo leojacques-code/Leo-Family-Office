@@ -1,5 +1,10 @@
 # B19 — préparation de la fusion, reprise du 21 octobre 2026
 
+> **Suite du 22 octobre :** accès Vercel rétabli, nouveaux défauts corrigés et vrais écrans
+> relus. La [recette après authentification](RECETTE_REPRISE_B19_2026-10-22.md) porte le point
+> courant, code `8d7ce426173d2be94d5c925da512ee2da84bb49c`, 2 646 tests. Le blocage d’origine
+> décrit plus bas est historique ; B19 reste ouvert pour les critères encore non prouvés.
+
 > Suite du 22 octobre : [revue transversale et focus clavier](REVUE_TRANSVERSALE_B19_2026-10-22.md),
 > avec [plan de déploiement à examiner](PLAN_DEPLOIEMENT_B19_2026-10-22.md).
 > Les mesures et captures de cette page restent celles du 21 octobre.

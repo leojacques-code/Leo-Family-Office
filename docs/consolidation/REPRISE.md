@@ -1,15 +1,18 @@
 # Reprise du programme LFO — 12 septembre 2026
 
-> **Point de reprise courant — 22 octobre 2026.** Continuer B19 sur
-> `codex/astra-b19-hosted-integration-20261015`, PR #54 en brouillon. Code Preview
-> `6164219b962eb5730a987c9e5072e50509c7d1b6`, staging `bjxhnwvomoznorijauyl`, 66 migrations.
-> 2 635 tests, lint et build réussis. Ne pas recréer le compte, la dette synthétique ou ses
-> cinq lectures. Le refus automatique d'accès à l'origine Vercel suspend la nouvelle recette
-> visuelle ; ce n'est pas un nouvel échec d'inscription LFO constaté.
-> Lire [la revue du 22 octobre](REVUE_TRANSVERSALE_B19_2026-10-22.md) et le
-> [plan de déploiement préparé](PLAN_DEPLOIEMENT_B19_2026-10-22.md).
-> B19 reste ouvert, B20 attend ; aucune dépense, migration de production ou fusion autorisée.
-> Les sections datées ci-dessous conservent l'historique du programme.
+> **Point de reprise courant — 22 octobre 2026, après accès Vercel rétabli.**
+> Continuer B19 sur `codex/astra-b19-hosted-integration-20261015`, PR #54 en brouillon.
+> Code Preview testé `8d7ce426173d2be94d5c925da512ee2da84bb49c`, staging
+> `bjxhnwvomoznorijauyl`, 66 migrations. **2 646 tests / 192 fichiers**, lint et build réussis.
+> L’authentification Vercel autorisée a ramené au compte LFO existant. Ne pas refaire
+> l’inscription, la dette synthétique ou ses cinq lectures. Le navigateur reste sur la dette.
+> Plantage Scénarios sans scénario corrigé ; auteur et heure de l’historique documentaire
+> commun affichés, avec preuve réelle sur le CSV. Lire [la nouvelle recette](RECETTE_REPRISE_B19_2026-10-22.md)
+> et le [plan de déploiement préparé](PLAN_DEPLOIEMENT_B19_2026-10-22.md).
+> Restent les vrais formats 1440×900 / 900 / 390 et toucher, PostgreSQL depuis zéro,
+> relecture indépendante, recette hébergée de l’historique liasse et défauts transversaux
+> de liquidité / vocabulaire identifiés. **B19 ouvert, B20 attend ; aucune fusion, dépense
+> ou migration de production autorisée.** Les sections ci-dessous conservent l’historique.
 
 ## Autorité et baseline (B01/B02)
 
