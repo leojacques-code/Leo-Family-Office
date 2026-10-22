@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -34,16 +35,13 @@ import type {
   DocumentUploadTicket,
 } from "@/lib/data/document-contracts";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
-import {
-  DOCUMENTS_BUCKET,
-  IMPORT_STAGING_BUCKET,
-  ownerId,
-  supabaseAdmin,
-} from "@/lib/data/supabase-client";
+import { readDocumentFieldDecisions } from "@/lib/data/document-field-decisions";
+import { DOCUMENTS_BUCKET, IMPORT_STAGING_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
 import {
   MAX_DOCUMENT_FILE_BYTES,
   MAX_RETAINED_DOCUMENT_FILE_BYTES,
 } from "@/lib/validation/documents";
+import { SupabaseOperationError } from "@/lib/data/supabase-errors";
 
 /**
  * DOCUMENT INTELLIGENCE — PERSISTANCE
@@ -83,7 +81,7 @@ const FIELD_CHUNK = 400;
 export const PREVIEW_FIELD_LIMIT = 500;
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
-  if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
+  if (result.error) throw new SupabaseOperationError(context, result.error);
   if (result.data === null) throw new Error(`Supabase ${context} : aucune donnée`);
   return result.data;
 }
@@ -179,7 +177,7 @@ export interface DocumentRepository {
 }
 
 class SupabaseDocumentRepository implements DocumentRepository {
-  private readonly user = ownerId();
+  constructor(private readonly user: string) {}
 
   private client() {
     return supabaseAdmin();
@@ -187,7 +185,7 @@ class SupabaseDocumentRepository implements DocumentRepository {
 
   private async rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
     const result = await this.client().rpc(name, { p_user_id: this.user, ...args });
-    if (result.error) throw new Error(`Supabase ${name} : ${result.error.message}`);
+    if (result.error) throw new SupabaseOperationError(name, result.error);
     return result.data;
   }
 
@@ -506,6 +504,7 @@ class SupabaseDocumentRepository implements DocumentRepository {
           ? row.confidence
           : ("MEDIUM" as const),
       validationStatus: readFieldStatus(row.validation_status),
+      decisionRevision: finiteNumber(row.decision_revision, "decision_revision"),
       issues: readIssues(row.issues),
     };
   }
@@ -633,6 +632,7 @@ class SupabaseDocumentRepository implements DocumentRepository {
       },
       fields: visible.map((row) => this.toFieldView(row)),
       fieldsTruncated: truncated,
+      decisions: await readDocumentFieldDecisions(this.client(), this.user, runId),
       checks: await this.readChecks(runId),
       financials: this.buildFinancialProposal(fieldRows, run, text(business.functional_currency)),
       issues: readIssues(run.issues),
@@ -649,6 +649,8 @@ class SupabaseDocumentRepository implements DocumentRepository {
         "id, business_id, status, detected_kind, detected_variant, fiscal_year_end, file_name, extracted_at, field_count, failed_check_count, not_computable_check_count",
       )
       .eq("user_id", this.user)
+      // Lectures de société seulement : un échéancier (B19) vise une dette, sans société.
+      .not("business_id", "is", null)
       .order("extracted_at", { ascending: false })
       .limit(50);
     if (businessId !== undefined) query = query.eq("business_id", businessId);
@@ -693,10 +695,13 @@ class SupabaseDocumentRepository implements DocumentRepository {
   async correct(input: DocumentCorrectionRequest): Promise<DocumentExtractionPreview> {
     const runId = requireText(
       await this.rpc("lfo_correct_document_extraction_field", {
+        // Charge stricte (B19) : la révision lue est transmise, et seule une correction porte
+        // une valeur — la base refuse `user_value` sur un rejet ou une revue.
         p_payload: {
           field_id: input.fieldId,
           action: input.action,
-          user_value: input.userValue ?? null,
+          expected_revision: input.expectedRevision,
+          ...(input.action === "correct" ? { user_value: input.userValue ?? null } : {}),
           reason: input.reason ?? null,
         },
       }),
@@ -780,11 +785,9 @@ class SupabaseDocumentRepository implements DocumentRepository {
   }
 }
 
-let repository: DocumentRepository | undefined;
-
-export function getDocumentRepository(): DocumentRepository {
-  repository ??= new SupabaseDocumentRepository();
-  return repository;
+export async function getDocumentRepository(): Promise<DocumentRepository> {
+  const actor = await requireActor();
+  return new SupabaseDocumentRepository(actor.userId);
 }
 
 /** Réexporté pour les tests : la liste des ancres est un contrat, pas un détail. */

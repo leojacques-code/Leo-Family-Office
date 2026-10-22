@@ -4,6 +4,7 @@ import { API_HEADERS } from "@/lib/http";
 import { requireAuthenticated } from "@/lib/auth";
 import { getPublicDataRepository } from "@/lib/data/public-data-repository";
 import { publicDataCommandSchema } from "@/lib/validation/public-data";
+import { routeFailure as failure } from "@/lib/route-failure";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,22 +29,11 @@ export const runtime = "nodejs";
  * depuis les comparables persistés, puis encadrée par la base.
  */
 
-function failure(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message === "UNAUTHORIZED") {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
-  // Le message d'une RPC est informatif pour l'utilisateur (« instantané périmé », « surface
-  // non déclarée ») : il est remonté tel quel, et journalisé pour le reste.
-  console.error(fallback, error);
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ error: message }, { status: 400 });
-}
-
 export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const params = new URL(request.url).searchParams;
-    const repository = getPublicDataRepository();
+    const repository = await getPublicDataRepository();
 
     if (params.get("sources") === "1") {
       return NextResponse.json(
@@ -79,7 +69,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const repository = getPublicDataRepository();
+    const repository = await getPublicDataRepository();
     const command = parsed.data;
 
     switch (command.action) {

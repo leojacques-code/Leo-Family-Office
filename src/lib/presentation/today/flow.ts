@@ -37,6 +37,18 @@ export interface ObservedFlowInput {
   readonly unclassifiedFlows: number;
   /** La fenêtre est-elle intégralement couverte par le ledger déclaré ? */
   readonly fullyCovered: boolean;
+  /** Opérations du mois exclues des totaux : autre devise que la lecture, non convertie. */
+  readonly foreignCurrencyTransactionCount: number;
+  /**
+   * Postes rendus NON CALCULABLES par ces exclusions, décidés par le moteur
+   * (`aggregateBlocked`) et non ici : ce module ne recalcule aucune dépendance.
+   */
+  readonly blocked: {
+    readonly income: boolean;
+    readonly essentialExpenses: boolean;
+    readonly debtServicePaid: boolean;
+    readonly cashFlowAfterDebt: boolean;
+  };
 }
 
 /**
@@ -48,22 +60,27 @@ export interface ObservedFlowInput {
  * quelqu'un qui n'a simplement pas encore importé son relevé.
  */
 export function buildMonthFlow(observed: ObservedFlowInput): MonthFlowView | null {
-  if (observed.transactionCount === 0) return null;
+  // Une opération exclue pour devise reste une opération LUE : le mois n'est pas vide.
+  if (observed.transactionCount + observed.foreignCurrencyTransactionCount === 0) return null;
   const partial = !observed.fullyCovered;
+  const foreign = observed.foreignCurrencyTransactionCount > 0;
   return {
     periodStart: observed.periodStart,
     periodEnd: observed.periodEnd,
-    partial,
-    income: observed.income,
-    essentialExpenses: observed.essentialExpenses,
-    debtService: observed.debtServicePaid,
-    freeCashFlow: observed.cashFlowAfterDebt,
+    partial: partial || foreign,
+    income: observed.blocked.income ? null : observed.income,
+    essentialExpenses: observed.blocked.essentialExpenses ? null : observed.essentialExpenses,
+    debtService: observed.blocked.debtServicePaid ? null : observed.debtServicePaid,
+    freeCashFlow: observed.blocked.cashFlowAfterDebt ? null : observed.cashFlowAfterDebt,
     unclassifiedFlows: observed.unclassifiedFlows,
-    reserve: partial
-      ? "Le mois n’est pas intégralement couvert par l’historique déclaré : le solde porte sur ce qui est connu."
-      : observed.unclassifiedFlows !== 0
-        ? "Des opérations du mois ne sont pas classées : elles ne sont comptées dans aucun poste."
-        : null,
+    // La devise d'abord : c'est la seule réserve qui rend des postes incalculables.
+    reserve: foreign
+      ? "Des opérations du mois sont dans une autre devise que celle de lecture : non converties, les postes qui en dépendent ne sont pas calculables."
+      : partial
+        ? "Le mois n’est pas intégralement couvert par l’historique déclaré : le solde porte sur ce qui est connu."
+        : observed.unclassifiedFlows !== 0
+          ? "Des opérations du mois ne sont pas classées : elles ne sont comptées dans aucun poste."
+          : null,
   };
 }
 

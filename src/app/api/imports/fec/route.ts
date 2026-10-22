@@ -8,6 +8,7 @@ import {
   fecCommandSchema,
   fecUploadTicketSchema,
 } from "@/lib/validation/fec-imports";
+import { routeFailure as failure } from "@/lib/route-failure";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,16 +30,6 @@ export const runtime = "nodejs";
  * dépasse quelques centaines d'octets.
  */
 
-function failure(error: unknown, fallback: string) {
-  const unauthorized = error instanceof Error && error.message === "UNAUTHORIZED";
-  if (unauthorized) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  // Le message d'une RPC d'acquisition est informatif pour l'utilisateur (« couverture de
-  // l'exercice non déclarée ») : il est remonté tel quel, et journalisé pour le reste.
-  console.error(fallback, error);
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ error: message }, { status: 400 });
-}
-
 /** Écritures d'une session comptable. */
 export async function GET(request: Request) {
   try {
@@ -48,7 +39,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Session non précisée" }, { status: 400 });
     }
     return NextResponse.json(
-      { lines: await getFecRepository().getSessionLines(sessionId) },
+      { lines: await (await getFecRepository()).getSessionLines(sessionId) },
       { headers: API_HEADERS },
     );
   } catch (error) {
@@ -77,7 +68,7 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      const ticket = await getFecRepository().issueUploadTicket(parsed.data);
+      const ticket = await (await getFecRepository()).issueUploadTicket(parsed.data);
       return NextResponse.json(ticket, { status: 201 });
     }
 
@@ -89,7 +80,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const preview = await getFecRepository().analyze(parsed.data);
+    const preview = await (await getFecRepository()).analyze(parsed.data);
     return NextResponse.json(preview, { status: 201 });
   } catch (error) {
     return failure(error, "Analyse de FEC impossible");
@@ -116,7 +107,7 @@ export async function PATCH(request: Request) {
         { status: 400 },
       );
     }
-    const repository = getFecRepository();
+    const repository = await getFecRepository();
     if (parsed.data.action === "commit") {
       return NextResponse.json(await repository.commit(parsed.data.sessionId));
     }

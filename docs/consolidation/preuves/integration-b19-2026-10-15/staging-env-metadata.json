@@ -1,0 +1,152 @@
+{
+  "project_ref": "bjxhnwvomoznorijauyl",
+  "production_before": [
+    {
+      "id": "6i5tLkAb3PhQhbti",
+      "key": "NEXT_PUBLIC_SUPABASE_URL",
+      "target": [
+        "production"
+      ],
+      "type": "encrypted"
+    },
+    {
+      "id": "5BULh7GmFYXBdMoL",
+      "key": "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      "target": [
+        "production"
+      ],
+      "type": "encrypted"
+    },
+    {
+      "id": "ebCJuZxvEDqegidN",
+      "key": "SESSION_SECRET",
+      "target": [
+        "production"
+      ],
+      "type": "sensitive"
+    },
+    {
+      "id": "H2X6Ef2I6Ti3Cbyw",
+      "key": "LOCAL_ACCESS_CODE",
+      "target": [
+        "production"
+      ],
+      "type": "sensitive"
+    },
+    {
+      "id": "8YytL8z6tEvxocDR",
+      "key": "DATA_ADAPTER",
+      "target": [
+        "production"
+      ],
+      "type": "sensitive"
+    },
+    {
+      "id": "6fFv8SeOL4oPcJzf",
+      "key": "SUPABASE_URL",
+      "target": [
+        "production"
+      ],
+      "type": "sensitive"
+    },
+    {
+      "id": "HYSkAEtkJYHQOHya",
+      "key": "SUPABASE_SECRET_KEY",
+      "target": [
+        "production"
+      ],
+      "type": "sensitive"
+    },
+    {
+      "id": "QGcEdQozDCTunmIt",
+      "key": "OWNER_USER_ID",
+      "target": [
+        "production"
+      ],
+      "type": "sensitive"
+    },
+    {
+      "id": "Dxe2yjesNlJiDSUn",
+      "key": "SUPABASE_DOCUMENTS_BUCKET",
+      "target": [
+        "production"
+      ],
+      "type": "sensitive"
+    }
+  ],
+  "created": [
+    {
+      "id": "RFwgMIhF74liJiZr",
+      "key": "LFO_STAGING_SUPABASE_PROJECT_REF",
+      "target": [
+        "preview"
+      ],
+      "gitBranch": "codex/astra-b19-hosted-integration-20261015",
+      "type": "plain"
+    },
+    {
+      "id": "9WH1tbQudlKyHjbA",
+      "key": "SUPABASE_URL",
+      "target": [
+        "preview"
+      ],
+      "gitBranch": "codex/astra-b19-hosted-integration-20261015",
+      "type": "plain"
+    },
+    {
+      "id": "QZv2roewY3jO7kx3",
+      "key": "SUPABASE_PUBLISHABLE_KEY",
+      "target": [
+        "preview"
+      ],
+      "gitBranch": "codex/astra-b19-hosted-integration-20261015",
+      "type": "plain"
+    },
+    {
+      "id": "E2AnALAXyWDEX2qS",
+      "key": "SUPABASE_SECRET_KEY",
+      "target": [
+        "preview"
+      ],
+      "gitBranch": "codex/astra-b19-hosted-integration-20261015",
+      "type": "sensitive"
+    },
+    {
+      "id": "AuhjOdmDKmzODc4U",
+      "key": "NEXT_PUBLIC_SUPABASE_URL",
+      "target": [
+        "preview"
+      ],
+      "gitBranch": "codex/astra-b19-hosted-integration-20261015",
+      "type": "plain"
+    },
+    {
+      "id": "WaUlPFwWVbPQLGMg",
+      "key": "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      "target": [
+        "preview"
+      ],
+      "gitBranch": "codex/astra-b19-hosted-integration-20261015",
+      "type": "plain"
+    },
+    {
+      "id": "5jOnbzubfyBJSwJf",
+      "key": "SUPABASE_DOCUMENTS_BUCKET",
+      "target": [
+        "preview"
+      ],
+      "gitBranch": "codex/astra-b19-hosted-integration-20261015",
+      "type": "plain"
+    },
+    {
+      "id": "qTbCvgHOC5pdPmEO",
+      "key": "SUPABASE_IMPORT_STAGING_BUCKET",
+      "target": [
+        "preview"
+      ],
+      "gitBranch": "codex/astra-b19-hosted-integration-20261015",
+      "type": "plain"
+    }
+  ],
+  "failed": 0
+}

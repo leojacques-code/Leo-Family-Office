@@ -1,0 +1,267 @@
+{
+  "date": "2026-09-23",
+  "meaning": "Journaux historiques de contrôles, y compris leurs échecs intermédiaires ; pas de nouveaux tests exécutés.",
+  "files": [
+    {
+      "path": "work/b12-check.log",
+      "bytes": 2983,
+      "sha256": "d9745d9b75c3625d3f54994adea04a4e4a23c0d925c22af6c26319312472aeb3"
+    },
+    {
+      "path": "work/b12-sql-reset.log",
+      "bytes": 894,
+      "sha256": "cbd19d4d0d8b52d0f4ea63ded908fefa5799b2a7ee83687df0fc6c028b3098f4"
+    },
+    {
+      "path": "work/b12-sql-schema.log",
+      "bytes": 855,
+      "sha256": "d8c9a2e91a81486ea7f0e8d9f8477b9c5e1c897a8d94add0da741118ee5287e2"
+    },
+    {
+      "path": "work/b12-sql-session.log",
+      "bytes": 723,
+      "sha256": "8bda8767a36e6108ce366b310930d45b9c2de0e4d26ea494c2616644f70ee475"
+    },
+    {
+      "path": "work/b12-targeted.log",
+      "bytes": 946,
+      "sha256": "7e9fbfd32cd1763c465c9eb5831fd2be88554f57c5d1b8468d3f85b6d2d58b98"
+    },
+    {
+      "path": "work/b12-tests-first.log",
+      "bytes": 1930,
+      "sha256": "63e6093718d62bd6cb3307ece02e5c9c126c9f6e8b9f09be95a20fdec1d44675"
+    },
+    {
+      "path": "work/b12-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "work/b13-isolation-after.log",
+      "bytes": 751,
+      "sha256": "78e53f832c1bf608b6055f0bd921d01b753c284fbf41fcf1e92a4a40cee74931"
+    },
+    {
+      "path": "work/b13-isolation-first.log",
+      "bytes": 1380,
+      "sha256": "914f642f4880008858a272f6a07a22f4dd949b0bf8a5bba2cddd965a3a236d18"
+    },
+    {
+      "path": "work/b13-lint.log",
+      "bytes": 44,
+      "sha256": "9cea98fa465245176faa68ddf9e085b53d3087274b3971895b751c6a3ba79892"
+    },
+    {
+      "path": "work/b13-sql-reset.log",
+      "bytes": 894,
+      "sha256": "ee23f1081e25063720314a4446c33793fe94df9874bb410866bd1b7c0ddd1094"
+    },
+    {
+      "path": "work/b13-sql-schema.log",
+      "bytes": 855,
+      "sha256": "6accd90407ed432de13d279328176e58c016912ef9e6ce5d78c5bb48c5de689e"
+    },
+    {
+      "path": "work/b13-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "work/b14-build.log",
+      "bytes": 1289,
+      "sha256": "3963d578fbe7794f21d1896f4caf3b14ad32975bdb8297659a703dcd5ae8d849"
+    },
+    {
+      "path": "work/b14-lint.log",
+      "bytes": 44,
+      "sha256": "9cea98fa465245176faa68ddf9e085b53d3087274b3971895b751c6a3ba79892"
+    },
+    {
+      "path": "work/b14-sql-reset.log",
+      "bytes": 894,
+      "sha256": "bc29e35c6ffeeef052e89e85bcc4065c08c12795bf293608afe71fbfd7a3b9fb"
+    },
+    {
+      "path": "work/b14-sql-schema.log",
+      "bytes": 855,
+      "sha256": "fa73c80de41bff5eec429ebcac807f607423a38ab57e495d72c7060b693d9b0b"
+    },
+    {
+      "path": "work/b14-targeted.log",
+      "bytes": 1095,
+      "sha256": "274f94e62de760f6abe4a1804b4b77d537debdb513b90e0bc5f6136f295b3d3b"
+    },
+    {
+      "path": "work/b14-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "work/build-pr51-final.log",
+      "bytes": 1248,
+      "sha256": "5a1dc84e2902517a5854cc8b9731596c1ebb28437ed018c5217850cf00b6a06b"
+    },
+    {
+      "path": "work/build-trust.log",
+      "bytes": 1204,
+      "sha256": "35b55f3d291f77a231daa5365b0c4d85d7d7264c2d6befadf396534e83c89730"
+    },
+    {
+      "path": "work/check-debt-delivery.log",
+      "bytes": 2985,
+      "sha256": "d0b121dbb3c717323e98f051a4790b7b8f7b0cd725de8e6cf777976b9bb1324d"
+    },
+    {
+      "path": "work/check-debt-read-final.log",
+      "bytes": 2985,
+      "sha256": "1a5983bdc368959264a336b6c09e8e54eb7a38183e348de17286b502934b0b8e"
+    },
+    {
+      "path": "work/check-debt-read.log",
+      "bytes": 2981,
+      "sha256": "22bb98ae963348037ac64643df088ce060073536a75f4ef1e6b030f5bba551e5"
+    },
+    {
+      "path": "work/check-fields-sources-final.log",
+      "bytes": 2968,
+      "sha256": "cc0db0aeb86757fe1d3b4d0fad8170932de61b1f7c3854b6dd762fc18d2214a3"
+    },
+    {
+      "path": "work/check-fields-sources.log",
+      "bytes": 2964,
+      "sha256": "d98b8fb4bed7fef836498190f182a0e4b88db33ffdd4ea4d206d937cca3e770a"
+    },
+    {
+      "path": "work/check-pr50-final.log",
+      "bytes": 2983,
+      "sha256": "92086f7939311ae2fdf8c1165c38360be53b422d0ad8b816c2426a949bb750dc"
+    },
+    {
+      "path": "work/check-pr50.log",
+      "bytes": 2985,
+      "sha256": "35c013443ea2c180d24057110e610ff8d9d03e307bcd60567c15dc39da6e0f56"
+    },
+    {
+      "path": "work/check-pr51-delivery.log",
+      "bytes": 2985,
+      "sha256": "fc33f89110813969187120d2547bfd2d2d74e4a739bbc9c5bcc1647421972508"
+    },
+    {
+      "path": "work/check-pr51-final.log",
+      "bytes": 2615,
+      "sha256": "3b921a2f7f58998992e215ac43be6ec80bfc2e5e4a7b6a65f8aa006e3b61435f"
+    },
+    {
+      "path": "work/check-pr51-reviewed.log",
+      "bytes": 2985,
+      "sha256": "785fe1a006af3ccc9848b7f5197d1fcb873f95d2f9a13f589ca1ac24f03e7d91"
+    },
+    {
+      "path": "work/check-pr51.log",
+      "bytes": 2344,
+      "sha256": "33d6a13c0e3b31dcd28532ae58939045747371aae21f055d1f9380e2c0c2f969"
+    },
+    {
+      "path": "work/check-trust-final.log",
+      "bytes": 2966,
+      "sha256": "00c519e247a255ee80962abab42abeea68f6d74e615123b80b9545b53a173601"
+    },
+    {
+      "path": "work/db-reset.log",
+      "bytes": 1103,
+      "sha256": "fa8a17b9c7ab83eb0731d1ac217c2b3f40b286c7f7adf6c2899b15c20ed70082"
+    },
+    {
+      "path": "work/debt-coverage-tests.log",
+      "bytes": 671,
+      "sha256": "2ee5f3cc4ada3787df3314c0b2a8a24c07cbbf10a8defd85b3c07aaf55eef2ba"
+    },
+    {
+      "path": "work/debt-model-test.log",
+      "bytes": 667,
+      "sha256": "479f9e9d8aad022c6c0365818f8250cac8af20795e24e85a048618ae523314c6"
+    },
+    {
+      "path": "work/debt-recovery-tests.log",
+      "bytes": 672,
+      "sha256": "10ff97c42708b8a0e80b03032ec9b13d363a87c917b0d31a907de13e147401c0"
+    },
+    {
+      "path": "work/debt-stale-tests.log",
+      "bytes": 672,
+      "sha256": "75cc870ef390d9c7dafdf1a729e84ae2062a86134b7c495246062e2a0ab14ecf"
+    },
+    {
+      "path": "work/debt-targeted.log",
+      "bytes": 2114,
+      "sha256": "16537676d00ee91252a61ccd5d7eef6ff0931b0f16ebab650bcaa660afce44d9"
+    },
+    {
+      "path": "work/debt-tests.log",
+      "bytes": 669,
+      "sha256": "1c49fcd75d851b34b8c04f14e05bd7c7d0fc3ebbe97b7fed7070669e2cb4c43f"
+    },
+    {
+      "path": "work/debt-ts.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "work/fields-sources-tests.log",
+      "bytes": 674,
+      "sha256": "e4809829e9b1fa44fd4519a47691d09d741542f1bf6d2f75d218edd01079468b"
+    },
+    {
+      "path": "work/full-trust.log",
+      "bytes": 730,
+      "sha256": "84639415d4a7b3927c31d8a2f7da3f163e53771d1fa988dcd660c045b5779500"
+    },
+    {
+      "path": "work/initdb.log",
+      "bytes": 943,
+      "sha256": "1d4e7ae92242c344c6e010eaff74184c60d655ee1541d6925b3fdb94040a1430"
+    },
+    {
+      "path": "work/lint-trust.log",
+      "bytes": 44,
+      "sha256": "9cea98fa465245176faa68ddf9e085b53d3087274b3971895b751c6a3ba79892"
+    },
+    {
+      "path": "work/pr51-dates.log",
+      "bytes": 4718,
+      "sha256": "b07af3c9611dc55a4795fb85c71bcb1867d858d676977654b04c521c7bf10a26"
+    },
+    {
+      "path": "work/pr51-last-targeted.log",
+      "bytes": 674,
+      "sha256": "f6d7ada51937b580529efc678b01d0684a4988ecf2ea07c8a135cfc35a49f657"
+    },
+    {
+      "path": "work/pr51-review-fixes.log",
+      "bytes": 674,
+      "sha256": "95cf9ca8d2301ab9b661aeeec5ec903ee659a011be51a19174b03a368d8fe683"
+    },
+    {
+      "path": "work/pr51-targeted.log",
+      "bytes": 674,
+      "sha256": "24d53bb060679955ab725c00814e06cb307d1952f49b2662f6b5927fcf068f17"
+    },
+    {
+      "path": "work/targeted-trust.log",
+      "bytes": 968,
+      "sha256": "fd1406cc9017affb743b3fd12421532fd52d6038230fda2da3ccc005353466a1"
+    },
+    {
+      "path": "work/trust-db-evidence.log",
+      "bytes": 667,
+      "sha256": "9ddda2e1611f022423e2b009bfbef9eb0e6f4e63823d54d6ab666ac4a7ace8b8"
+    },
+    {
+      "path": "work/tsc-trust.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "archiveSHA256": "a72fe770cdab858cc846b2ef4ec52b4ccc15cdfe092c50c6963c9443e4e16d97"
+}

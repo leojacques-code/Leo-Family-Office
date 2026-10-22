@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import { openZip } from "@/lib/acquisition/xlsx/zip";
 import {
@@ -32,6 +33,53 @@ describe("archive ZIP", () => {
 });
 
 describe("lecture d'un classeur", () => {
+  it("lit les exports réels aux éléments OOXML préfixés, sans perdre les formules en cache", () => {
+    const fixtureRoot = new URL(
+      "../../../../../docs/consolidation/preuves/visual-b19-2026-10-21/fixtures/",
+      import.meta.url,
+    );
+    for (const [file, rows] of [
+      ["echeancier-partiel", 2],
+      ["echeancier-dates-anormales", 6],
+      ["echeancier-formules", 3],
+    ] as const) {
+      const result = readWorkbook(readFileSync(new URL(`${file}.xlsx`, fixtureRoot)));
+      expect(result.ok).toBe(true);
+      if (!result.ok) continue;
+      expect(result.sheets[0].name).toBe("Échéancier synthétique");
+      expect(result.sheets[0].rowCount).toBe(rows);
+      expect(result.sheets[0].rows[0]).toEqual([
+        "date",
+        "ouverture",
+        "principal",
+        "interet",
+        "assurance",
+        "frais",
+        "cloture",
+        "total",
+      ]);
+      expect(result.sheets[0].rows[1][0]).toMatch(/^2026-/);
+      if (file === "echeancier-formules") {
+        expect(result.sheets[0].formulaCells).toEqual(["H2", "H3"]);
+        expect(result.sheets[0].rows[1][7]).toBe("1005");
+      }
+    }
+  });
+
+  it("ne traite pas un préfixe XML étranger comme SpreadsheetML", () => {
+    const result = readWorkbook(
+      buildZip([
+        {
+          name: "xl/workbook.xml",
+          content:
+            '<foreign:workbook xmlns:foreign="urn:foreign"><foreign:sheets><foreign:sheet name="Fausse" sheetId="1" r:id="rId1"/></foreign:sheets></foreign:workbook>',
+        },
+        { name: "xl/_rels/workbook.xml.rels", content: "<Relationships/>" },
+      ]),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("NO_SHEET");
+  });
   it("lit des chaînes partagées, du texte en ligne et des nombres", () => {
     const result = readWorkbook(
       buildWorkbook({
@@ -53,6 +101,17 @@ describe("lecture d'un classeur", () => {
       expect(result.sheets[0].rows[0]).toEqual(["ISIN", "Quantité"]);
       expect(result.sheets[0].rows[1]).toEqual(["FR0000120271", "12.5"]);
     }
+  });
+
+  it("conserve le numéro Excel des lignes quand des lignes vides sont absentes du XML", () => {
+    const result = readWorkbook(
+      buildWorkbook({
+        rows: [[{ ref: "A1", type: "inlineStr", value: "Date" }], [{ ref: "A4", value: "1" }]],
+        rowNumbers: [1, 4],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.sheets[0].rowNumbers).toEqual([1, 4]);
   });
 
   it("N'ÉVALUE PAS une formule : elle lit la valeur en cache et le SIGNALE", () => {

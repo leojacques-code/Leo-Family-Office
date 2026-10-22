@@ -59,8 +59,11 @@ export default function TimelinePage({ state, mutate, busy }: SectionProps) {
         actions={
           <button
             className="button primary"
-            disabled={busy}
-            onClick={() => mutate({ action: "create_monthly_close", closeDate: state.asOfDate })}
+            disabled={busy || !state.dates?.today}
+            onClick={() =>
+              state.dates?.today &&
+              mutate({ action: "create_monthly_close", closeDate: state.dates.today })
+            }
           >
             <CalendarCheck size={15} />
             Clôturer

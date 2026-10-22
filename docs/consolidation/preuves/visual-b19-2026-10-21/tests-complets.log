@@ -1,0 +1,35 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 test
+> vitest run --maxWorkers=4 --testTimeout=20000
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+ ❯ |node| src/lib/engine/__tests__/monte-carlo.test.ts (6 tests | 1 failed) 35817ms
+     × is exactly reproducible with a seed 31963ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |node| src/lib/engine/__tests__/monte-carlo.test.ts > Monte Carlo engine > is exactly reproducible with a seed
+Error: Test timed out in 20000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/lib/engine/__tests__/monte-carlo.test.ts:40:3
+     38|
+     39| describe("Monte Carlo engine", () => {
+     40|   it("is exactly reproducible with a seed", () => {
+       |   ^
+     41|     const input = {
+     42|       scenario,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 186 passed (187)
+      Tests  1 failed | 2601 passed (2602)
+   Start at  12:06:14
+   Duration  276.10s (transform 51.27s, setup 44.17s, import 208.06s, tests 377.26s, environment 141.23s)
+

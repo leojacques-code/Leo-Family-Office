@@ -1,0 +1,35 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 test
+> vitest run
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+ ❯ |dom| src/components/pages/net-worth/__tests__/account-form.test.tsx (5 tests | 1 failed) 8516ms
+     × garde montant et date vides ; refuse vide, invalide et date absente 5322ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |dom| src/components/pages/net-worth/__tests__/account-form.test.tsx > premier compte : montant et date explicitement déclarés > garde montant et date vides ; refuse vide, invalide et date absente
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/components/pages/net-worth/__tests__/account-form.test.tsx:45:3
+     43|
+     44| describe("premier compte : montant et date explicitement déclarés", ()…
+     45|   it("garde montant et date vides ; refuse vide, invalide et date abse…
+       |   ^
+     46|     const { user, mutate } = setup();
+     47|     await openCreation(user);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 185 passed (186)
+      Tests  1 failed | 2588 passed (2589)
+   Start at  18:17:51
+   Duration  81.40s (transform 51.59s, setup 27.69s, import 148.62s, tests 183.70s, environment 77.96s)
+

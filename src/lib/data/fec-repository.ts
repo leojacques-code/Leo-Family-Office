@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -31,12 +32,8 @@ import { MAX_FEC_FILE_BYTES, MAX_RETAINED_FEC_FILE_BYTES } from "@/lib/validatio
 import type { ImportFileInput } from "@/lib/data/import-repository";
 import { LEDGER_PAGE_SIZE, pagesFor, readAllPages } from "@/lib/data/pagination";
 import { finiteNumber, nullableFiniteNumber } from "@/lib/data/row-validation";
-import {
-  DOCUMENTS_BUCKET,
-  IMPORT_STAGING_BUCKET,
-  ownerId,
-  supabaseAdmin,
-} from "@/lib/data/supabase-client";
+import { DOCUMENTS_BUCKET, IMPORT_STAGING_BUCKET, supabaseAdmin } from "@/lib/data/supabase-client";
+import { SupabaseOperationError } from "@/lib/data/supabase-errors";
 
 type Row = Record<string, unknown>;
 
@@ -87,7 +84,7 @@ function observationDate(): string {
 }
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
-  if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
+  if (result.error) throw new SupabaseOperationError(context, result.error);
   if (result.data === null) throw new Error(`Supabase ${context} : réponse vide`);
   return result.data;
 }
@@ -169,9 +166,8 @@ export interface FecRepository {
   getSessionLines(sessionId: string, limit?: number): Promise<FecPreviewLine[]>;
 }
 
-export function createFecRepository(): FecRepository {
+export function createFecRepository(user: string): FecRepository {
   const db = supabaseAdmin();
-  const user = ownerId();
 
   async function businessOf(businessId: string): Promise<{ id: string; name: string }> {
     const rows = unwrap(
@@ -733,10 +729,11 @@ export function createFecRepository(): FecRepository {
           documentStatus = "STORED";
         } catch (error) {
           documentStatus = "FAILED";
+          // Le texte de l'erreur de stockage n'est ni affiché ni conservé (CLAUDE.md §3) : il
+          // reste dans le journal serveur.
+          console.error("Conservation du FEC en échec", error);
           warnings.push(
-            `L'instantané financier est bien écrit, mais la conservation du fichier a échoué : ${
-              error instanceof Error ? error.message : String(error)
-            }. Le fait canonique n'est pas remis en cause ; seule la copie d'archive manque.`,
+            "L'instantané financier est bien écrit, mais la conservation du fichier a échoué. Le fait canonique n'est pas remis en cause ; seule la copie d'archive manque.",
           );
         }
       } else if (session.document_id === null) {
@@ -877,9 +874,7 @@ export function createFecRepository(): FecRepository {
   return { adapter: "supabase", issueUploadTicket, analyze, commit, discard, getSessionLines };
 }
 
-let cached: FecRepository | undefined;
-
-export function getFecRepository(): FecRepository {
-  if (!cached) cached = createFecRepository();
-  return cached;
+export async function getFecRepository(): Promise<FecRepository> {
+  const actor = await requireActor();
+  return createFecRepository(actor.userId);
 }

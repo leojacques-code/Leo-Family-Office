@@ -1,0 +1,91 @@
+{
+  "date": "2026-10-21",
+  "environment": "staging",
+  "project": "bjxhnwvomoznorijauyl",
+  "liability_id": "12a42d5b-92c1-4c4f-8d6c-693f4d495fe7",
+  "operation": "SELECT uniquement ; aucune mutation SQL",
+  "state": [
+    {
+      "canonical_rows": 0,
+      "outstanding": "2000.000000",
+      "readings": [
+        {
+          "id": "53d2d98f-f4be-40c1-a8d2-b479a7677b91",
+          "file": "echeancier-complet.csv",
+          "format": "CSV",
+          "status": "VALIDATED"
+        },
+        {
+          "id": "0cead24b-2922-4148-9782-29dfea7b059a",
+          "file": "echeancier-complet.xlsx",
+          "format": "XLSX",
+          "status": "VALIDATED"
+        },
+        {
+          "id": "0f5bb898-4217-4410-b506-6f3a71705c52",
+          "file": "echeancier-partiel.xlsx",
+          "format": "XLSX",
+          "status": "VALIDATED"
+        },
+        {
+          "id": "f1bbd914-83ac-4fb4-bd29-3943458536f3",
+          "file": "echeancier-dates-anormales.xlsx",
+          "format": "XLSX",
+          "status": "REJECTED"
+        },
+        {
+          "id": "806b9173-4cf0-4ba8-b52c-8345ed59577d",
+          "file": "echeancier-formules.xlsx",
+          "format": "XLSX",
+          "status": "REJECTED"
+        }
+      ]
+    }
+  ],
+  "audit_residual": [
+    {
+      "decision_rank": 1,
+      "action": "CORRECT",
+      "before_status": "EXTRACTED",
+      "before_value": "0.000000",
+      "after_status": "CORRECTED",
+      "after_value": "1.000000",
+      "normalized_value": "0.000000",
+      "user_value": null,
+      "validation_status": "REVIEWED"
+    },
+    {
+      "decision_rank": 2,
+      "action": "CORRECT",
+      "before_status": "CORRECTED",
+      "before_value": "1.000000",
+      "after_status": "CORRECTED",
+      "after_value": "0.000000",
+      "normalized_value": "0.000000",
+      "user_value": null,
+      "validation_status": "REVIEWED"
+    },
+    {
+      "decision_rank": 3,
+      "action": "REJECT",
+      "before_status": "CORRECTED",
+      "before_value": "0.000000",
+      "after_status": "REJECTED",
+      "after_value": null,
+      "normalized_value": "0.000000",
+      "user_value": null,
+      "validation_status": "REVIEWED"
+    },
+    {
+      "decision_rank": 4,
+      "action": "REVIEW",
+      "before_status": "REJECTED",
+      "before_value": "0.000000",
+      "after_status": "REVIEWED",
+      "after_value": null,
+      "normalized_value": "0.000000",
+      "user_value": null,
+      "validation_status": "REVIEWED"
+    }
+  ]
+}

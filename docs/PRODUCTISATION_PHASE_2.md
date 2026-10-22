@@ -507,6 +507,10 @@ faits dans le domaine, les moteurs n'émettent rien à son sujet.
    classes concernées sont partagées avec les treize autres pages.
 8. **`today-cockpit.ts` porte un nom trompeur** : il est de fait un module partagé par Beyonder,
    le reporting et l'Activité. Son renommage appartient à une phase qui possède ces domaines.
-9. **L'alignement avec la production n'est pas établi.** Le dépôt porte 45 migrations, la
-   production 33 au dernier état communiqué. Le push distant et `npm run db:verify` restent des
-   étapes humaines.
+9. **L'alignement avec la production n'est pas établi par ce document.** Le dépôt porte 45
+   migrations. Le chiffre de production annoncé ici, 33, était déjà périmé à la rédaction :
+   `CLAUDE.md` porte 45 depuis la réparation de #48, contrôlée par le connecteur Supabase le
+   9 septembre 2026. Le compte de production se lit à sa SOURCE, `CLAUDE.md` §5 et
+   `supabase_migrations.schema_migrations`, et non dans les limites d'un rapport de phase :
+   c'est la dérive que la constitution décrit et que celle-ci a reproduite. Le push distant et
+   `npm run db:verify` restent des étapes humaines.

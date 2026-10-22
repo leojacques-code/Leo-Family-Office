@@ -1,5 +1,19 @@
 "use client";
 
-export default function ErrorPage({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
-  return <main className="not-found"><span>Erreur</span><h1>Le cockpit n’a pas pu se charger</h1><p>Vos données n’ont pas été modifiées. Réessayez ou consultez les logs du serveur.</p><button className="button primary" onClick={reset}>Réessayer</button></main>;
+export default function ErrorPage({
+  retry,
+}: {
+  error: Error & { digest?: string };
+  retry: () => void;
+}) {
+  return (
+    <main className="not-found">
+      <span>Erreur de chargement</span>
+      <h1>Le cockpit n’a pas pu se charger</h1>
+      <p>Relancez le chargement pour consulter vos données.</p>
+      <button type="button" className="button primary" onClick={retry}>
+        Réessayer
+      </button>
+    </main>
+  );
 }

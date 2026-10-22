@@ -1,0 +1,17 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 build
+> next build
+
+▲ Next.js 16.3.3 (Turbopack)
+✓ Running next.config.ts took 360ms
+- Experiments (use with caution):
+  · serverActions
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 41s
+  Running TypeScript ...
+src/lib/presentation/debt/__tests__/schedule-review.test.ts(35,32): error TS2322: Type 'string' is not assignable to type '"PDF_UNREADABLE" | "PDF_ENCRYPTED" | "PDF_NO_TEXT_LAYER" | "PDF_PARTIAL_TEXT_LAYER" | "PDF_EMPTY" | "FORM_NOT_RECOGNISED" | "FORM_VARIANT_NOT_RECOGNISED" | "FISCAL_YEAR_NOT_FOUND" | ... 35 more ... | "SCHEDULE_CHECK_COLUMNS_MISSING"'.
+src/lib/presentation/debt/__tests__/schedule-review.test.ts(39,32): error TS2322: Type '"HEADER_FOUND"' is not assignable to type '"PDF_UNREADABLE" | "PDF_ENCRYPTED" | "PDF_NO_TEXT_LAYER" | "PDF_PARTIAL_TEXT_LAYER" | "PDF_EMPTY" | "FORM_NOT_RECOGNISED" | "FORM_VARIANT_NOT_RECOGNISED" | "FISCAL_YEAR_NOT_FOUND" | ... 35 more ... | "SCHEDULE_CHECK_COLUMNS_MISSING"'.
+Failed to type check.
+

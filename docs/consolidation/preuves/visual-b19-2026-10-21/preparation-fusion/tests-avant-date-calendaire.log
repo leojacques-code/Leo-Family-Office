@@ -1,0 +1,45 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 test
+> vitest run --maxWorkers=4 --testTimeout=60000
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+ ❯ |node| src/lib/data/__tests__/debt-read-model.test.ts (13 tests | 1 failed) 118ms
+     × reconnaît une pièce explicitement liée sans la présenter comme un échéancier appliqué 17ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |node| src/lib/data/__tests__/debt-read-model.test.ts > B09 — lecture des seules dépendances des dettes > reconnaît une pièce explicitement liée sans la présenter comme un échéancier appliqué
+AssertionError: expected { id: 'provided-schedule', …(4) } to match object { status: 'DOCUMENT_AVAILABLE', …(1) }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "latestDate": "2026-10-21T12:00:00Z",
++   "latestDate": "2026-10-21",
+    "status": "DOCUMENT_AVAILABLE",
+  }
+
+ ❯ src/lib/data/__tests__/debt-read-model.test.ts:413:83
+    411|     install(rows);
+    412|     const model = await createSupabaseRepository("owner").getDebtReadM…
+    413|     expect(model.railSources.find((source) => source.id === "provided-…
+       |                                                                                   ^
+    414|       status: "DOCUMENT_AVAILABLE",
+    415|       latestDate: "2026-10-21T12:00:00Z",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 186 passed (187)
+      Tests  1 failed | 2623 passed (2624)
+   Start at  19:29:36
+   Duration  108.89s (transform 21.39s, setup 20.17s, import 80.33s, tests 159.01s, environment 53.46s)
+

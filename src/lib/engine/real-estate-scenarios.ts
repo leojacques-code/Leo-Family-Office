@@ -472,6 +472,11 @@ const SYNTHETIC_PROVENANCE: Provenance = {
  * `monthlyPayment: 0` est volontaire : le Debt Engine dérive alors la mensualité théorique
  * du contrat. Écrire ici une PMT recalculée localement rétablirait un second moteur.
  */
+function dayBefore(iso: string): string {
+  const time = Date.parse(`${iso}T00:00:00Z`);
+  return Number.isNaN(time) ? iso : new Date(time - 86_400_000).toISOString().slice(0, 10);
+}
+
 export function syntheticLoan(terms: SyntheticLoanTerms, id = "scenario-loan"): Liability {
   const maturity = addMonths(terms.firstPaymentDate, Math.max(0, terms.termMonths - 1));
   return {
@@ -482,7 +487,10 @@ export function syntheticLoan(terms: SyntheticLoanTerms, id = "scenario-loan"): 
     principal: terms.principal,
     currentBalance: terms.principal,
     currency: terms.currency,
-    balanceDate: terms.firstPaymentDate,
+    // L'encours simulé est le capital AVANT la première échéance : le dater du jour même
+    // le ferait lire après ce prélèvement (convention du Debt Engine pour une date
+    // d'exigibilité), et la première échéance disparaîtrait de la projection.
+    balanceDate: dayBefore(terms.firstPaymentDate),
     annualRate: terms.annualRate,
     monthlyPayment: 0,
     paymentCount: Math.max(0, terms.termMonths),

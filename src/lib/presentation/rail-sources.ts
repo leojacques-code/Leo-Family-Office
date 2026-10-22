@@ -4,6 +4,7 @@ import type {
   SourceEvidence,
 } from "@/lib/presentation/registry/contracts";
 import type { DashboardState } from "@/lib/types";
+import { operationalToday } from "@/lib/financial-date";
 
 /**
  * Zone B, côté données : ce que la page DÉCLARE devient ce que le rail MONTRE.
@@ -24,7 +25,7 @@ import type { DashboardState } from "@/lib/types";
  */
 
 /** Ce que le rail sait rendre. Repris de `SourceStatus` du composant, sans le dupliquer. */
-export type RailSourceStatus = "ACTIVE" | "ABSENTE";
+export type RailSourceStatus = "ACTIVE" | "DOCUMENT_AVAILABLE" | "ABSENTE";
 
 export interface DerivedRailSource {
   readonly id: string;
@@ -33,6 +34,14 @@ export interface DerivedRailSource {
   readonly status: RailSourceStatus;
   /** Date la plus récente portée par les faits de cette source. `null` si aucune. */
   readonly latestDate: string | null;
+}
+
+/** Pièce explicitement liée à une dette ; elle ne prouve aucun échéancier appliqué. */
+export interface ScheduleDocumentEvidence {
+  readonly liabilityId: string;
+  readonly documentId: string | null;
+  readonly status: string;
+  readonly extractedAt: string | null;
 }
 
 /**
@@ -87,7 +96,7 @@ function maxDate(values: readonly (string | null | undefined)[]): string | null 
  */
 function readEvidence(
   evidence: SourceEvidence,
-  state: DashboardState,
+  state: Partial<DashboardState>,
 ): { count: number; latestDate: string | null } {
   switch (evidence) {
     case "BANK_ACCOUNTS":
@@ -101,10 +110,24 @@ function readEvidence(
         latestDate: maxDate(listOf(state.transactions).map((t) => t.date)),
       };
     case "LIABILITIES":
+      // Des CONTRATS seulement : une dette connue par son seul encours ne prouve aucun
+      // contrat détenu, et le rail de Dette nomme cette source « Contrat ».
       return {
         count: listOf(state.liabilities).length,
         latestDate: maxDate(listOf(state.liabilities).map((l) => l.balanceDate)),
       };
+    case "OUTSTANDING_DEBTS": {
+      // La promotion conserve l'observation : le contrat ne rend pas son encours absent.
+      // Seuls les contrats portant une date d'observation prouvent cette source.
+      const observed = [
+        ...listOf(state.outstandingDebts),
+        ...listOf(state.liabilities).filter((debt) => Boolean(debt.balanceDate)),
+      ];
+      return {
+        count: observed.length,
+        latestDate: maxDate(observed.map((debt) => debt.balanceDate)),
+      };
+    }
     case "LIABILITY_PROVIDED_SCHEDULE": {
       // La dette porte son échéancier fourni : la source existe dès qu'UNE dette en a un.
       // Compter les dettes plutôt que les lignes dirait « À jour » pour un échéancier vide.
@@ -202,18 +225,53 @@ function readEvidence(
  */
 export function railSourcesFor(
   manifest: PageManifest | null,
-  state: DashboardState,
+  state: Partial<DashboardState>,
+  evidenceSummaries: Partial<
+    Record<SourceEvidence, { count: number; latestDate: string | null }>
+  > = {},
+  scheduleDocuments: readonly ScheduleDocumentEvidence[] = [],
 ): DerivedRailSource[] {
   if (!manifest) return [];
   if (!manifest.zones.includes("SOURCE_RAIL")) return [];
+  const debtIds = new Set([
+    ...listOf(state.liabilities).map((debt) => debt.id),
+    ...listOf(state.outstandingDebts).map((debt) => debt.id),
+  ]);
+  const schedulePieces = scheduleDocuments.filter(
+    (piece) =>
+      piece.documentId &&
+      debtIds.has(piece.liabilityId) &&
+      ["EXTRACTED", "REVIEWED", "VALIDATED", "LINKED"].includes(piece.status),
+  );
+  const latestScheduleDocument = maxDate(
+    schedulePieces.map((piece) => {
+      if (!piece.extractedAt) return null;
+      const instant = new Date(piece.extractedAt);
+      return Number.isNaN(instant.getTime()) ? null : operationalToday(instant);
+    }),
+  );
   return listOf(manifest.sources).map((declaration) => {
-    const { count, latestDate } = readEvidence(declaration.evidence, state);
+    const { count, latestDate } =
+      evidenceSummaries[declaration.evidence] ?? readEvidence(declaration.evidence, state);
+    const documentOnly =
+      count === 0 &&
+      declaration.evidence === "LIABILITY_PROVIDED_SCHEDULE" &&
+      schedulePieces.length > 0;
     return {
       id: declaration.id,
       category: declaration.category,
       name: declaration.name,
-      status: count > 0 ? "ACTIVE" : "ABSENTE",
-      latestDate,
+      // Un fait ou un tableau saisi ne prouve ni la détention d'une pièce ni sa fraîcheur.
+      // Seul le catalogue documentaire prouve ici la présence d'un document ; aucune
+      // liaison document/objet n'est inférée depuis un libellé ou une catégorie.
+      status: documentOnly
+        ? "DOCUMENT_AVAILABLE"
+        : count === 0
+          ? "ABSENTE"
+          : declaration.evidence === "DOCUMENTS"
+            ? "DOCUMENT_AVAILABLE"
+            : "ACTIVE",
+      latestDate: documentOnly ? latestScheduleDocument : latestDate,
     };
   });
 }

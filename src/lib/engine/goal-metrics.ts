@@ -1,7 +1,8 @@
-import type {
-  CanonicalAggregate,
-  CanonicalBalanceSheet,
-  ConvertedBalanceSheetLine,
+import {
+  OUTSTANDING_DEBT_CATEGORY,
+  type CanonicalAggregate,
+  type CanonicalBalanceSheet,
+  type ConvertedBalanceSheetLine,
 } from "@/lib/engine/balance-sheet";
 import type { ScenarioPathMetric } from "@/lib/engine/scenario-contracts";
 import type {
@@ -182,7 +183,13 @@ function aggregateObservation(
 function sumAggregates(left: CanonicalAggregate, right: CanonicalAggregate): CanonicalAggregate {
   const blockers = [...new Set([...left.blockers, ...right.blockers])];
   if (left.value !== null && right.value !== null) {
-    return { value: left.value + right.value, knownValue: left.knownValue + right.knownValue, status: "COMPLETE", coverage: 1, blockers: [] };
+    return {
+      value: left.value + right.value,
+      knownValue: left.knownValue + right.knownValue,
+      status: "COMPLETE",
+      coverage: 1,
+      blockers: [],
+    };
   }
   return {
     value: null,
@@ -213,7 +220,9 @@ function contributionObservation(
       currency: context.reportingCurrency,
       observedAt: context.asOfDate,
       status: "NOT_COMPUTABLE",
-      blockers: [blocker("ENTITY_NOT_FOUND", `Entité ${target.entityId} absente du bilan canonique`)],
+      blockers: [
+        blocker("ENTITY_NOT_FOUND", `Entité ${target.entityId} absente du bilan canonique`),
+      ],
       provenance: {
         source: definition.source,
         methodologyVersion: "CANONICAL_BALANCE_SHEET_V2",
@@ -230,7 +239,11 @@ function contributionObservation(
     value,
     currency: context.reportingCurrency,
     observedAt: context.asOfDate,
-    status: missing.length ? (filtered.length === missing.length ? "NOT_COMPUTABLE" : "PARTIAL") : "COMPLETE",
+    status: missing.length
+      ? filtered.length === missing.length
+        ? "NOT_COMPUTABLE"
+        : "PARTIAL"
+      : "COMPLETE",
     blockers: [
       ...new Set(missing.flatMap((line) => [...line.fx.flags, ...(line.valuationBlockers ?? [])])),
     ].map((code) => blocker(code, code, definition.source)),
@@ -271,7 +284,12 @@ function targetPreconditions(
 ): GoalMetricObservation | null {
   const definition = GOAL_METRIC_REGISTRY[target.metric];
   if (!definition)
-    return unavailable(target, observedAt, "METRIC_NOT_SUPPORTED", `Métrique ${target.metric} inconnue`);
+    return unavailable(
+      target,
+      observedAt,
+      "METRIC_NOT_SUPPORTED",
+      `Métrique ${target.metric} inconnue`,
+    );
   if (!definition.allowedOperators.includes(target.operator)) {
     return unavailable(
       target,
@@ -281,7 +299,12 @@ function targetPreconditions(
     );
   }
   if (definition.entityRequirement === "REQUIRED" && target.entityId === null) {
-    return unavailable(target, observedAt, "MISSING_ENTITY_TARGET", "Cette métrique exige une entité cible");
+    return unavailable(
+      target,
+      observedAt,
+      "MISSING_ENTITY_TARGET",
+      "Cette métrique exige une entité cible",
+    );
   }
   if (target.currency === null)
     return unavailable(target, observedAt, "MISSING_CURRENCY", "Devise cible absente");
@@ -329,9 +352,19 @@ export function resolveCurrentGoalMetric(
         definition.source,
       );
     case "TOTAL_LIABILITIES":
-      return aggregateObservation(target.metric, sheet.totalLiabilities, context, definition.source);
+      return aggregateObservation(
+        target.metric,
+        sheet.totalLiabilities,
+        context,
+        definition.source,
+      );
     case "CONTRACTUAL_DEBT":
-      return aggregateObservation(target.metric, sheet.contractualDebt, context, definition.source);
+      return aggregateObservation(
+        target.metric,
+        contractualDebtForGoal(sheet),
+        context,
+        definition.source,
+      );
     case "SPECIFIC_DEBT_BALANCE":
       return contributionObservation(
         target.metric,
@@ -345,7 +378,8 @@ export function resolveCurrentGoalMetric(
       return contributionObservation(
         target.metric,
         sheet.contributions.filter(
-          (line) => line.domain === "REAL_ESTATE" && line.side === "ASSET" && line.isAccountingPrimary,
+          (line) =>
+            line.domain === "REAL_ESTATE" && line.side === "ASSET" && line.isAccountingPrimary,
         ),
         context,
         target,
@@ -354,7 +388,8 @@ export function resolveCurrentGoalMetric(
       return contributionObservation(
         target.metric,
         sheet.contributions.filter(
-          (line) => line.domain === "BUSINESS_EQUITY" && line.side === "ASSET" && line.isAccountingPrimary,
+          (line) =>
+            line.domain === "BUSINESS_EQUITY" && line.side === "ASSET" && line.isAccountingPrimary,
         ),
         context,
         target,
@@ -417,3 +452,26 @@ export function resolveProjectedGoalMetric(
   };
 }
 
+/**
+ * « Dette contractuelle » pour un objectif : une dette connue par son seul encours n'est pas un
+ * contrat, mais elle peut en être un non décrit (un crédit auto saisi par son encours). Tant
+ * qu'une telle dette est active, lire l'agrégat contractuel comme complet ferait paraître
+ * atteint un objectif « aucune dette contractuelle » alors qu'une dette est due : la mesure
+ * devient PARTIELLE. L'agrégat du bilan, lui, n'est pas modifié (le modèle mensuel l'amortit).
+ */
+function contractualDebtForGoal(sheet: CanonicalBalanceSheet): CanonicalAggregate {
+  const unscheduled = sheet.contributions.some(
+    (line) =>
+      line.side === "LIABILITY" &&
+      line.isAccountingPrimary &&
+      line.category === OUTSTANDING_DEBT_CATEGORY &&
+      (line.nativeValue ?? 0) > 0,
+  );
+  if (!unscheduled) return sheet.contractualDebt;
+  return {
+    ...sheet.contractualDebt,
+    value: null,
+    status: "PARTIAL",
+    blockers: [...new Set([...sheet.contractualDebt.blockers, "DEBT_TERMS_UNDECLARED"])],
+  };
+}

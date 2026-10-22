@@ -1,0 +1,773 @@
+{
+  "audit_date": "2026-10-15",
+  "scope": "Read-only production audit; no credentials or personal records exported",
+  "production_ref": "zwgrcznzymbfdiybeuvv",
+  "prechecks": [
+    {
+      "prechecks": {
+        "P0": [
+          {
+            "version": "20260909190841"
+          },
+          {
+            "version": "20260905090000"
+          },
+          {
+            "version": "20260904093000"
+          }
+        ],
+        "P1": [
+          {
+            "ref": "account_balances.account_id",
+            "count": 0
+          },
+          {
+            "ref": "asset_classes.parent_id",
+            "count": 0
+          },
+          {
+            "ref": "bank_institutions.institution_id",
+            "count": 0
+          },
+          {
+            "ref": "budgets.category_id",
+            "count": 0
+          },
+          {
+            "ref": "business_dcf_periods.dcf_id",
+            "count": 0
+          },
+          {
+            "ref": "document_metadata.document_id",
+            "count": 0
+          },
+          {
+            "ref": "financial_accounts.institution_id",
+            "count": 0
+          },
+          {
+            "ref": "liability_balance_observations.liability_id",
+            "count": 0
+          },
+          {
+            "ref": "loan_charges.liability_id",
+            "count": 0
+          },
+          {
+            "ref": "loan_early_repayments.liability_id",
+            "count": 0
+          },
+          {
+            "ref": "loan_payment_changes.liability_id",
+            "count": 0
+          },
+          {
+            "ref": "loan_rate_changes.liability_id",
+            "count": 0
+          },
+          {
+            "ref": "loan_schedules.liability_id",
+            "count": 0
+          },
+          {
+            "ref": "market_assumptions.asset_class_id",
+            "count": 0
+          },
+          {
+            "ref": "mortgages.property_id",
+            "count": 0
+          },
+          {
+            "ref": "position_snapshots.position_id",
+            "count": 0
+          },
+          {
+            "ref": "positions.account_id",
+            "count": 0
+          },
+          {
+            "ref": "positions.security_id",
+            "count": 0
+          },
+          {
+            "ref": "real_estate_cashflows.property_id",
+            "count": 0
+          },
+          {
+            "ref": "recurring_cash_flow_rules.account_id",
+            "count": 0
+          },
+          {
+            "ref": "recurring_cash_flow_rules.category_id",
+            "count": 0
+          },
+          {
+            "ref": "securities.asset_class_id",
+            "count": 0
+          },
+          {
+            "ref": "transactions.account_id",
+            "count": 0
+          },
+          {
+            "ref": "transactions.category_id",
+            "count": 0
+          }
+        ],
+        "P2": [
+          {
+            "conname": "account_balances_account_id_fkey",
+            "conrelid": "account_balances",
+            "pg_get_constraintdef": "FOREIGN KEY (account_id) REFERENCES financial_accounts(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "asset_classes_parent_id_fkey",
+            "conrelid": "asset_classes",
+            "pg_get_constraintdef": "FOREIGN KEY (parent_id) REFERENCES asset_classes(id)"
+          },
+          {
+            "conname": "bank_institutions_institution_fk",
+            "conrelid": "bank_institutions",
+            "pg_get_constraintdef": "FOREIGN KEY (institution_id) REFERENCES institutions(id) ON DELETE SET NULL"
+          },
+          {
+            "conname": "budgets_category_id_fkey",
+            "conrelid": "budgets",
+            "pg_get_constraintdef": "FOREIGN KEY (category_id) REFERENCES expense_categories(id)"
+          },
+          {
+            "conname": "business_dcf_periods_dcf_id_fkey",
+            "conrelid": "business_dcf_periods",
+            "pg_get_constraintdef": "FOREIGN KEY (dcf_id) REFERENCES business_dcf_assumptions(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "document_metadata_document_id_fkey",
+            "conrelid": "document_metadata",
+            "pg_get_constraintdef": "FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "financial_accounts_institution_id_fkey",
+            "conrelid": "financial_accounts",
+            "pg_get_constraintdef": "FOREIGN KEY (institution_id) REFERENCES institutions(id)"
+          },
+          {
+            "conname": "liability_balance_observations_liability_id_fkey",
+            "conrelid": "liability_balance_observations",
+            "pg_get_constraintdef": "FOREIGN KEY (liability_id) REFERENCES liabilities(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "loan_charges_liability_id_fkey",
+            "conrelid": "loan_charges",
+            "pg_get_constraintdef": "FOREIGN KEY (liability_id) REFERENCES liabilities(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "loan_early_repayments_liability_id_fkey",
+            "conrelid": "loan_early_repayments",
+            "pg_get_constraintdef": "FOREIGN KEY (liability_id) REFERENCES liabilities(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "loan_payment_changes_liability_id_fkey",
+            "conrelid": "loan_payment_changes",
+            "pg_get_constraintdef": "FOREIGN KEY (liability_id) REFERENCES liabilities(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "loan_rate_changes_liability_id_fkey",
+            "conrelid": "loan_rate_changes",
+            "pg_get_constraintdef": "FOREIGN KEY (liability_id) REFERENCES liabilities(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "loan_schedules_liability_id_fkey",
+            "conrelid": "loan_schedules",
+            "pg_get_constraintdef": "FOREIGN KEY (liability_id) REFERENCES liabilities(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "market_assumptions_asset_class_id_fkey",
+            "conrelid": "market_assumptions",
+            "pg_get_constraintdef": "FOREIGN KEY (asset_class_id) REFERENCES asset_classes(id)"
+          },
+          {
+            "conname": "mortgages_property_id_fkey",
+            "conrelid": "mortgages",
+            "pg_get_constraintdef": "FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "position_snapshots_position_id_fkey",
+            "conrelid": "position_snapshots",
+            "pg_get_constraintdef": "FOREIGN KEY (position_id) REFERENCES positions(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "positions_account_id_fkey",
+            "conrelid": "positions",
+            "pg_get_constraintdef": "FOREIGN KEY (account_id) REFERENCES financial_accounts(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "positions_security_id_fkey",
+            "conrelid": "positions",
+            "pg_get_constraintdef": "FOREIGN KEY (security_id) REFERENCES securities(id)"
+          },
+          {
+            "conname": "real_estate_cashflows_property_id_fkey",
+            "conrelid": "real_estate_cashflows",
+            "pg_get_constraintdef": "FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE"
+          },
+          {
+            "conname": "recurring_cash_flow_rules_account_id_fkey",
+            "conrelid": "recurring_cash_flow_rules",
+            "pg_get_constraintdef": "FOREIGN KEY (account_id) REFERENCES financial_accounts(id)"
+          },
+          {
+            "conname": "recurring_cash_flow_rules_category_id_fkey",
+            "conrelid": "recurring_cash_flow_rules",
+            "pg_get_constraintdef": "FOREIGN KEY (category_id) REFERENCES expense_categories(id)"
+          },
+          {
+            "conname": "securities_asset_class_id_fkey",
+            "conrelid": "securities",
+            "pg_get_constraintdef": "FOREIGN KEY (asset_class_id) REFERENCES asset_classes(id)"
+          },
+          {
+            "conname": "transactions_account_id_fkey",
+            "conrelid": "transactions",
+            "pg_get_constraintdef": "FOREIGN KEY (account_id) REFERENCES financial_accounts(id)"
+          },
+          {
+            "conname": "transactions_category_id_fkey",
+            "conrelid": "transactions",
+            "pg_get_constraintdef": "FOREIGN KEY (category_id) REFERENCES expense_categories(id)"
+          }
+        ],
+        "P3": [
+          {
+            "indexname": "documents_id_user_uidx"
+          },
+          {
+            "indexname": "financial_accounts_id_user_uidx"
+          },
+          {
+            "indexname": "liabilities_id_user_uidx"
+          },
+          {
+            "indexname": "positions_id_user_uidx"
+          },
+          {
+            "indexname": "properties_id_user_uidx"
+          },
+          {
+            "indexname": "securities_id_user_uidx"
+          }
+        ],
+        "P4": [
+          {
+            "dates_ko": 0,
+            "completude_ko": 0,
+            "payment_count_ko": 0
+          }
+        ],
+        "P5": [
+          {
+            "count": 0,
+            "?column?": "transactions"
+          },
+          {
+            "count": 0,
+            "?column?": "account_balances"
+          },
+          {
+            "count": 0,
+            "?column?": "liability_balance_observations"
+          }
+        ],
+        "P6": [
+          {
+            "executor": "postgres",
+            "auth_usage": true,
+            "users_select": true,
+            "sessions_select": true
+          }
+        ],
+        "P7": [
+          {
+            "table_name": "users",
+            "column_name": "banned_until"
+          },
+          {
+            "table_name": "users",
+            "column_name": "deleted_at"
+          },
+          {
+            "table_name": "sessions",
+            "column_name": "id"
+          },
+          {
+            "table_name": "sessions",
+            "column_name": "user_id"
+          },
+          {
+            "table_name": "sessions",
+            "column_name": "not_after"
+          }
+        ],
+        "P8": [],
+        "P9": [
+          {
+            "form_drafts": null,
+            "liability_events": null,
+            "loan_insurance_policies": null,
+            "transaction_corrections": null,
+            "liability_contract_versions": null,
+            "liability_terms_transitions": null
+          }
+        ],
+        "P10": [],
+        "P11": []
+      }
+    }
+  ],
+  "object_storage_audit": [
+    {
+      "audit": {
+        "buckets": [
+          {
+            "id": "family-office-documents",
+            "public": false,
+            "file_size_limit": 8388608,
+            "allowed_mime_types": [
+              "application/pdf",
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              "image/jpeg",
+              "image/png",
+              "text/csv",
+              "text/plain",
+              "text/tab-separated-values"
+            ]
+          },
+          {
+            "id": "family-office-import-staging",
+            "public": false,
+            "file_size_limit": 33554432,
+            "allowed_mime_types": [
+              "application/octet-stream",
+              "application/pdf",
+              "application/vnd.ms-excel",
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              "text/csv",
+              "text/plain",
+              "text/tab-separated-values"
+            ]
+          }
+        ],
+        "new_objects": [
+          "business_capital_events",
+          "portfolio_events",
+          "real_estate_capital_events",
+          "career_events",
+          "bank_sync_events"
+        ],
+        "rls_disabled": null,
+        "verify_session": null,
+        "storage_policies": [
+          {
+            "cmd": "DELETE",
+            "name": "documents_owner_delete",
+            "qual": "((bucket_id = 'family-office-documents'::text) AND ((storage.foldername(name))[1] = (( SELECT auth.uid() AS uid))::text))",
+            "check": null,
+            "roles": [
+              "authenticated"
+            ]
+          },
+          {
+            "cmd": "INSERT",
+            "name": "documents_owner_insert",
+            "qual": null,
+            "check": "((bucket_id = 'family-office-documents'::text) AND ((storage.foldername(name))[1] = (( SELECT auth.uid() AS uid))::text))",
+            "roles": [
+              "authenticated"
+            ]
+          },
+          {
+            "cmd": "SELECT",
+            "name": "documents_owner_select",
+            "qual": "((bucket_id = 'family-office-documents'::text) AND ((storage.foldername(name))[1] = (( SELECT auth.uid() AS uid))::text))",
+            "check": null,
+            "roles": [
+              "authenticated"
+            ]
+          },
+          {
+            "cmd": "UPDATE",
+            "name": "documents_owner_update",
+            "qual": "((bucket_id = 'family-office-documents'::text) AND ((storage.foldername(name))[1] = (( SELECT auth.uid() AS uid))::text))",
+            "check": "((bucket_id = 'family-office-documents'::text) AND ((storage.foldername(name))[1] = (( SELECT auth.uid() AS uid))::text))",
+            "roles": [
+              "authenticated"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "migration_history": [
+    {
+      "audit": {
+        "drafts": null,
+        "history": [
+          {
+            "name": "initial_family_office",
+            "version": "202608190001"
+          },
+          {
+            "name": "scenario_parameters",
+            "version": "202608190002"
+          },
+          {
+            "name": "scenario_investment_allocation",
+            "version": "202608240001"
+          },
+          {
+            "name": "cash_flow_engine_v2",
+            "version": "202608240002"
+          },
+          {
+            "name": "debt_engine_v2",
+            "version": "202608240003"
+          },
+          {
+            "name": "debt_engine_v2_1",
+            "version": "202608240004"
+          },
+          {
+            "name": "supabase_only_runtime",
+            "version": "202608240005"
+          },
+          {
+            "name": "debt_contract_input",
+            "version": "20260824230233"
+          },
+          {
+            "name": "debt_schedule_actual_priority",
+            "version": "20260824231522"
+          },
+          {
+            "name": "debt_observation_user_index",
+            "version": "20260825012954"
+          },
+          {
+            "name": "canonical_balance_sheet_v2",
+            "version": "20260825020545"
+          },
+          {
+            "name": "liability_currency_balance_sheet_v2",
+            "version": "20260825021127"
+          },
+          {
+            "name": "snapshot_item_owner_integrity",
+            "version": "20260825021742"
+          },
+          {
+            "name": "snapshot_item_owner_fk_index",
+            "version": "20260825063626"
+          },
+          {
+            "name": "snapshot_item_fk_covering_index",
+            "version": "20260825063831"
+          },
+          {
+            "name": "portfolio_data_foundation",
+            "version": "20260825193427"
+          },
+          {
+            "name": "portfolio_fk_covering_indexes",
+            "version": "20260825193606"
+          },
+          {
+            "name": "real_estate_v2",
+            "version": "20260826090117"
+          },
+          {
+            "name": "real_estate_fk_covering_indexes",
+            "version": "20260826090347"
+          },
+          {
+            "name": "business_equity_v2",
+            "version": "20260826145426"
+          },
+          {
+            "name": "business_equity_effective_truth",
+            "version": "20260826145803"
+          },
+          {
+            "name": "business_equity_v2_1",
+            "version": "20260826194551"
+          },
+          {
+            "name": "business_equity_v2_1_indexes",
+            "version": "20260826194605"
+          },
+          {
+            "name": "business_equity_v2_1_blocking_invariants",
+            "version": "20260826194644"
+          },
+          {
+            "name": "data_acquisition_foundation",
+            "version": "20260827155134"
+          },
+          {
+            "name": "career_tax_v2",
+            "version": "20260827215014"
+          },
+          {
+            "name": "career_tax_v2_fk_indexes",
+            "version": "20260827215600"
+          },
+          {
+            "name": "fec_corporate_acquisition",
+            "version": "20260828131216"
+          },
+          {
+            "name": "fec_corporate_acquisition_fk_indexes",
+            "version": "20260828131433"
+          },
+          {
+            "name": "scenarios_v2",
+            "version": "20260829234017"
+          },
+          {
+            "name": "goals_v2",
+            "version": "20260829234053"
+          },
+          {
+            "name": "scenarios_goals_fk_indexes",
+            "version": "20260829234259"
+          },
+          {
+            "name": "decision_lab_v2",
+            "version": "20260830154315"
+          },
+          {
+            "name": "company_registry_acquisition",
+            "version": "20260831101500"
+          },
+          {
+            "name": "document_intelligence_foundation",
+            "version": "20260831154500"
+          },
+          {
+            "name": "real_estate_public_data",
+            "version": "20260831171500"
+          },
+          {
+            "name": "portfolio_import_acquisition",
+            "version": "20260902093000"
+          },
+          {
+            "name": "import_raw_freeze_hardening",
+            "version": "20260903090000"
+          },
+          {
+            "name": "open_banking_ais",
+            "version": "20260903120000"
+          },
+          {
+            "name": "open_banking_ais_fk_indexes",
+            "version": "20260903120500"
+          },
+          {
+            "name": "acquisition_integration_reconciliation",
+            "version": "20260903190000"
+          },
+          {
+            "name": "portfolio_findings_no_silent_upsert",
+            "version": "20260903200000"
+          },
+          {
+            "name": "portfolio_correction_audit",
+            "version": "20260904093000"
+          },
+          {
+            "name": "portfolio_correction_actor_and_expected",
+            "version": "20260905090000"
+          },
+          {
+            "name": "user_domain_declarations",
+            "version": "20260909190841"
+          }
+        ],
+        "debt_events": null,
+        "lfo_private": null,
+        "history_count": 45,
+        "document_decisions": null,
+        "b19_version_present": 0
+      }
+    }
+  ],
+  "rls_and_grants": [
+    {
+      "security_audit": {
+        "policies": 107,
+        "rls_disabled": [],
+        "public_tables": 107,
+        "public_definers": [
+          {
+            "signature": "import_session_freeze_state(uuid,uuid)",
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "anon_execute": false,
+            "authenticated_execute": false
+          },
+          {
+            "signature": "bank_sync_freeze_state(uuid,uuid)",
+            "search_path": [
+              "search_path=\"\""
+            ],
+            "anon_execute": false,
+            "authenticated_execute": false
+          }
+        ],
+        "anon_table_grants": [],
+        "sensitive_auth_grants": []
+      }
+    }
+  ],
+  "policy_and_rpc_audit": [
+    {
+      "audit": {
+        "lfo_rpc_count": 118,
+        "lfo_public_execute": [
+          {
+            "anon": true,
+            "function": "lfo_guard_decision_snapshot_immutable()",
+            "authenticated": true
+          },
+          {
+            "anon": true,
+            "function": "lfo_guard_goal_v2_update()",
+            "authenticated": true
+          },
+          {
+            "anon": true,
+            "function": "lfo_guard_goal_version_update()",
+            "authenticated": true
+          }
+        ],
+        "policy_role_summary": [
+          {
+            "cmd": "ALL",
+            "count": 106,
+            "roles": [
+              "authenticated"
+            ]
+          },
+          {
+            "cmd": "SELECT",
+            "count": 1,
+            "roles": [
+              "authenticated"
+            ]
+          }
+        ],
+        "policies_without_owner": [],
+        "unvalidated_constraints": []
+      }
+    }
+  ],
+  "wrapper_query_mapping": {
+    "P0": "source P0",
+    "P1": "source P1",
+    "P2": "source P2",
+    "P3": "source P3",
+    "P4": "source P4",
+    "P5": "source P5",
+    "P6": "source P6 privileges",
+    "P7": "source P6 Auth columns",
+    "P8": "source P7 schema",
+    "P9": "source P7 tables",
+    "P10": "source P7 columns",
+    "P11": "source P7 constraints"
+  },
+  "vercel": {
+    "project_id": "prj_4YJeECIQaqDOEE8KodN6PotWaQfd",
+    "team_id": "team_imid03bTUOHeFNRs7h5Hu81R",
+    "env_metadata_only": [
+      {
+        "key": "NEXT_PUBLIC_SUPABASE_URL",
+        "target": [
+          "production"
+        ]
+      },
+      {
+        "key": "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "target": [
+          "production"
+        ]
+      },
+      {
+        "key": "SESSION_SECRET",
+        "target": [
+          "production"
+        ]
+      },
+      {
+        "key": "LOCAL_ACCESS_CODE",
+        "target": [
+          "production"
+        ]
+      },
+      {
+        "key": "DATA_ADAPTER",
+        "target": [
+          "production"
+        ]
+      },
+      {
+        "key": "SUPABASE_URL",
+        "target": [
+          "production"
+        ]
+      },
+      {
+        "key": "SUPABASE_SECRET_KEY",
+        "target": [
+          "production"
+        ]
+      },
+      {
+        "key": "OWNER_USER_ID",
+        "target": [
+          "production"
+        ]
+      },
+      {
+        "key": "SUPABASE_DOCUMENTS_BUCKET",
+        "target": [
+          "production"
+        ]
+      }
+    ],
+    "missing_required_for_new_branch": [
+      "SUPABASE_PUBLISHABLE_KEY"
+    ],
+    "sso_protection": "all_except_custom_domains",
+    "observed_b19_deployment": {
+      "id": "dpl_222QYRcPiPijM8J2NbtJCVVrBrYp",
+      "sha": "0f7ad7369f219f7fdd26ee963386e9800b53a99e",
+      "url": "https://leo-family-office-79w8wft0s-lech1.vercel.app",
+      "state": "READY",
+      "functional_recipe": "NOT_RUN"
+    }
+  },
+  "staging": {
+    "organization_id": "wniscyevfmnmtzbmjwlx",
+    "plan": "free",
+    "existing_projects": [
+      "Leo Family Office",
+      "leo-leaning"
+    ],
+    "lfo_branches": [
+      "main"
+    ],
+    "usable_staging_identified": false,
+    "changes_applied": 0,
+    "cost_quote_tool": "UNAVAILABLE: MCP tool get_cost was not returned by tools/list"
+  }
+}

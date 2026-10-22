@@ -5,6 +5,7 @@ import { requireAuthenticated } from "@/lib/auth";
 import { getOpenBankingRepository } from "@/lib/data/open-banking-repository";
 import { sandboxScenario, type SandboxScenarioName } from "@/lib/data/open-banking-scenarios";
 import { openBankingCommandSchema } from "@/lib/validation/open-banking";
+import { routeFailure as failure } from "@/lib/route-failure";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -20,22 +21,13 @@ export const runtime = "nodejs";
  * champ où un jeton pourrait entrer, et les objets rendus au navigateur ne portent qu'un nom
  * de coffre, jamais une clé ni une valeur.
  */
-function failure(error: unknown, fallback: string) {
-  const unauthorized = error instanceof Error && error.message === "UNAUTHORIZED";
-  if (unauthorized) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  // Le message d'une RPC est informatif pour l'utilisateur (« consentement expiré ») : il
-  // est remonté tel quel, et journalisé pour le reste.
-  console.error(fallback, error);
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ error: message }, { status: 400 });
-}
 
 /** Vue complète, ou preview d'une exécution donnée. */
 export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const runId = new URL(request.url).searchParams.get("run");
-    const repository = getOpenBankingRepository();
+    const repository = await getOpenBankingRepository();
     if (runId) {
       return NextResponse.json(
         { preview: await repository.preview(runId) },
@@ -60,7 +52,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const repository = getOpenBankingRepository();
+    const repository = await getOpenBankingRepository();
     const command = parsed.data;
 
     switch (command.action) {

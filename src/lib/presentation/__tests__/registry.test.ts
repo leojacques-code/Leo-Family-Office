@@ -370,7 +370,13 @@ describe("gate : zone B, les sources déclarées d'une page", () => {
       question: "Question ?",
       zones: ["OPERATIONAL_HEADER", "SOURCE_RAIL", "FINANCIAL_CANVAS"],
       sources: [
-        { id: "bank", category: "BANQUE", name: "Banque", evidence: "BANK_ACCOUNTS", planRef: "§17" },
+        {
+          id: "bank",
+          category: "BANQUE",
+          name: "Banque",
+          evidence: "BANK_ACCOUNTS",
+          planRef: "§17",
+        },
       ],
       primaryAction: null,
       essentialKpis: ["net_worth"],
@@ -399,17 +405,29 @@ describe("gate : zone B, les sources déclarées d'une page", () => {
   });
 
   it("refuse des sources sans la zone qui les affiche", () => {
-    expect(
-      violationsOf({ zones: ["OPERATIONAL_HEADER", "FINANCIAL_CANVAS"] }).join(" "),
-    ).toContain("sans la zone SOURCE_RAIL");
+    expect(violationsOf({ zones: ["OPERATIONAL_HEADER", "FINANCIAL_CANVAS"] }).join(" ")).toContain(
+      "sans la zone SOURCE_RAIL",
+    );
   });
 
   it("refuse deux sources de même identifiant", () => {
     expect(
       violationsOf({
         sources: [
-          { id: "x", category: "BANQUE", name: "Banque", evidence: "BANK_ACCOUNTS", planRef: "§17" },
-          { id: "x", category: "CONTRAT", name: "Contrat", evidence: "LIABILITIES", planRef: "§17" },
+          {
+            id: "x",
+            category: "BANQUE",
+            name: "Banque",
+            evidence: "BANK_ACCOUNTS",
+            planRef: "§17",
+          },
+          {
+            id: "x",
+            category: "CONTRAT",
+            name: "Contrat",
+            evidence: "LIABILITIES",
+            planRef: "§17",
+          },
         ],
       }).join(" "),
     ).toContain("portent l’identifiant");
@@ -421,8 +439,20 @@ describe("gate : zone B, les sources déclarées d'une page", () => {
     expect(
       violationsOf({
         sources: [
-          { id: "a", category: "BANQUE", name: "Banque", evidence: "BANK_ACCOUNTS", planRef: "§17" },
-          { id: "b", category: "DOCUMENT", name: "Relevé", evidence: "BANK_ACCOUNTS", planRef: "§17" },
+          {
+            id: "a",
+            category: "BANQUE",
+            name: "Banque",
+            evidence: "BANK_ACCOUNTS",
+            planRef: "§17",
+          },
+          {
+            id: "b",
+            category: "DOCUMENT",
+            name: "Relevé",
+            evidence: "BANK_ACCOUNTS",
+            planRef: "§17",
+          },
         ],
       }).join(" "),
     ).toContain("s’appuient sur la preuve");

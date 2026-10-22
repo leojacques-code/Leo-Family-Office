@@ -8,6 +8,7 @@ import {
   documentCommandSchema,
   documentTicketSchema,
 } from "@/lib/validation/documents";
+import { routeFailure as failure } from "@/lib/route-failure";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -33,22 +34,11 @@ export const runtime = "nodejs";
  * Aucun corps de requête de cette route ne dépasse quelques centaines d'octets.
  */
 
-function failure(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message === "UNAUTHORIZED") {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
-  // Le message d'une RPC d'acquisition est informatif pour l'utilisateur (« deux contrôles
-  // bloquants en échec ») : il est remonté tel quel, et journalisé pour le reste.
-  console.error(fallback, error);
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ error: message }, { status: 400 });
-}
-
 export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const params = new URL(request.url).searchParams;
-    const repository = getDocumentRepository();
+    const repository = await getDocumentRepository();
 
     const runId = params.get("run");
     if (runId) {
@@ -76,7 +66,7 @@ export async function POST(request: Request) {
     await requireAuthenticated();
     const wantsTicket = new URL(request.url).searchParams.get("ticket") === "1";
     const body = await request.json().catch(() => null);
-    const repository = getDocumentRepository();
+    const repository = await getDocumentRepository();
 
     if (wantsTicket) {
       const parsed = documentTicketSchema.safeParse(body);
@@ -117,7 +107,7 @@ export async function PATCH(request: Request) {
         { status: 400 },
       );
     }
-    const repository = getDocumentRepository();
+    const repository = await getDocumentRepository();
     const command = parsed.data;
 
     switch (command.action) {
@@ -128,6 +118,7 @@ export async function PATCH(request: Request) {
           await repository.correct({
             fieldId: command.fieldId,
             action: command.action,
+            expectedRevision: command.expectedRevision,
             userValue: command.userValue ?? null,
             reason: command.reason ?? null,
           }),

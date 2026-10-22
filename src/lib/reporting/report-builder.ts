@@ -143,7 +143,11 @@ function currentSections(state: DashboardState): ReportSection[] {
           "Canonical Balance Sheet",
         ),
       ],
-      state.liabilities.map((x) => x.name),
+      [
+        ...state.liabilities.map((x) => x.name),
+        // Le total inclut les dettes connues par leur seul encours : la liste aussi.
+        ...(state.outstandingDebts ?? []).map((x) => `${x.name} (encours seul)`),
+      ],
       [],
       "/debt",
     ),

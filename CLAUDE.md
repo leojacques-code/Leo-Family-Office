@@ -15,6 +15,12 @@ Le succès ne se mesure pas au nombre d'écrans, mais à la possibilité de conf
 système une décision financière importante. Cinq exigences : fidélité, automatisation,
 explicabilité, adaptabilité, intelligence de décision.
 
+Les décisions produit d'expérience et d'interface (intitulés des métriques, aide « ? », emprise
+des Sources, formulaires progressifs, refontes Objectifs et Décisions, modèle documentaire
+commun) sont consignées dans `docs/produit/`, registre versionné par date. Une interface qui
+les contredit est un défaut ; une décision qui toucherait une convention financière de ce
+document ne s'applique pas sans nouvel arbitrage.
+
 ## 2. Architecture en couches
 
 ```text
@@ -36,9 +42,14 @@ couche amont**. Un domaine possède sa vérité, les autres la consomment.
 - `src/components/` : affichage. Aucune formule financière dans un composant. Si un
   chiffre manque, il vient d'un moteur ou il n'est pas affiché.
 
-Une seule vérité par domaine. `deriveMetrics()` (legacy) coexiste encore avec le bilan
-canonique dans `supabase-repository.ts` : c'est une dette connue, à réduire à chaque PR
-qui touche un périmètre concerné, jamais à étendre.
+Une seule vérité par domaine. La fonction que le §10.3 du plan de refonte nomme
+`deriveMetrics()` N'EXISTE PLUS : ce qui subsiste est `state.metrics`, produit par
+`composeDashboardMetrics()` dans `src/lib/data/shared.ts`, qui lit le bilan canonique champ
+par champ. Ce n'est donc plus un second CALCUL, mais une seconde SURFACE du même calcul, et
+la règle vaut toujours pour elle : un modèle de lecture prend ses agrégats du bilan
+canonique, jamais de `state.metrics`, et aucun KPI nouveau n'en est dérivé. L'ancienne
+formulation situait la dette dans `supabase-repository.ts` et y envoyait chercher une fonction
+absente : un nom de dette se relit dans le code avant d'être recopié.
 
 ## 3. Invariants financiers
 
@@ -121,6 +132,42 @@ Corollaires appliqués dans le code existant, à préserver :
   mesure, un corps se lit de façon incrémentale sous un plafond déclaré, seul du JSON est parsé,
   et un diagnostic d'échec ne reprend JAMAIS `error.message` — un `fetch` y cite l'URL demandée,
   jetons de requête compris, et ce message est persisté puis affiché ;
+- une erreur de saisie n'est pas un flux : un revenu net SAISI se corrige en place par
+  `lfo_correct_net_income`, sous verrou et sur état attendu complet, avec une piste immuable
+  (`transaction_corrections`, `RESTRICT`), jamais par une opération de régularisation. Une
+  opération IMPORTÉE se corrige par sa chaîne d'acquisition ;
+- une dette connue par son seul encours devient contractuelle sur la MÊME ligne, par décision
+  explicite (`promote_outstanding: true` de `lfo_save_debt_contract`) tracée dans
+  `liability_terms_transitions` : aucun second passif, encours courant et historique
+  d'observations conservés ; l'observé reste l'observé et le Debt Engine le confronte au
+  contrat sans recalculer l'un pour coller à l'autre ;
+- le moteur Flux n'additionne jamais deux devises : une opération dans une autre devise que
+  celle de lecture est exclue des totaux, comptée et nommée ; seuls les agrégats qui dépendent
+  de SA nature deviennent non calculables (`aggregateBlocked`), et un mois qui en contient ne
+  se clôture pas, tant que la conversion des flux (phase Flux) n'existe pas ;
+- DATE D'OBSERVATION ≠ DATE D'EFFET ≠ ÉCHÉANCE CONTRACTUELLE ≠ DATE DE PAIEMENT : un fait
+  observé (opération, revenu, solde de compte, encours de dette, remboursement effectué) n'est
+  jamais daté après aujourd'hui (Europe/Paris), refus `LF425` en base sur toutes les tables
+  d'observation ; une prévision, une échéance, un remboursement PRÉVU ou une hypothèse
+  peuvent l'être. Une échéance passée au calendrier est ÉCHUE, pas PAYÉE, tant qu'aucune
+  opération ne la rapproche ;
+- BROUILLON ≠ OBSERVATION ≠ CONTRAT : `form_drafts` garde une saisie même incomplète, sous
+  version attendue ; aucun moteur ni aucune table canonique ne le lit, et valider le
+  formulaire le consomme ;
+- ÉVÉNEMENT ≠ CORRECTION ≠ SIMULATION : un changement réel d'un prêt (révision, palier,
+  report, avenant, remboursement) est un événement daté du journal immuable
+  `liability_events`, qui s'annule par une trace motivée et ne s'efface jamais ; corriger
+  une saisie crée une version de contrat ; une simulation n'est jamais écrite. Un terme issu
+  d'un événement porte son `eventId` et n'est jamais réabsorbé dans les listes du contrat ;
+  un remboursement effectué sans encours constaté laisse le bilan à l'encours observé, et
+  l'écart est signalé, jamais recalculé ;
+- une projection de dette part de l'encours OBSERVÉ, à la plus tardive de la date de lecture et
+  de la date de cet encours : un encours daté d'un jour d'échéance est lu APRÈS ce prélèvement
+  (même convention que la date de lecture), et rien de ce qu'il contient déjà (échéance,
+  remboursement constaté, frais financé) n'est rejoué ; sa convention, elle, reste en vigueur
+  (« mensualité réduite »). Un remboursement PRÉVU n'est jamais « dans » l'encours : dépassé,
+  il est signalé. Un remboursement se déclare par le journal d'événements, jamais dans les
+  listes du contrat, où il serait compté deux fois ;
 - les flux immobiliers observés sont convertis par le FX Engine à la date de chaque transaction ;
   une dette future dans une autre devise reste non calculable sans courbe FX future explicite, le
   dernier spot n'étant jamais prolongé silencieusement.
@@ -158,9 +205,65 @@ Une divergence de schéma se documente dans le registre de `docs/SUPABASE_SETUP.
 ne se comble jamais par du SQL reconstitué : le contenu réel s'extrait de
 `supabase_migrations.schema_migrations`.
 
-Le DÉPÔT porte **45 migrations**, rejouables depuis une base vide (`npm run db:local:reset` :
-45 appliquées, 107 tables publiques). La dernière est la déclaration d'applicabilité de
-domaine, ajoutée par la phase 2 de productisation ; les onze précédentes sont les cinq
+Le DÉPÔT porte **64 migrations** sur la branche de travail du 12 octobre 2026 (gate local sans
+credential : 64 appliquées depuis zéro, 117 tables publiques, 492 contraintes, 124 RPC ; décompte
+relu dans `supabase/migrations/`).
+La branche Astra du 15 octobre en porte **65** : une migration additive explicite les
+grants `service_role` absents sur un projet neuf avec exposition automatique désactivée.
+Elle conserve les restrictions d'audit Goals/Décisions ; aucun grant client supplémentaire.
+La production reste hors du périmètre d'application de cette reprise.
+La reprise B19 du 21 octobre porte **66 migrations** :
+`20261021153711_document_field_confirmation_audit` consigne les valeurs effectives avant/après
+confirmation et l'absence de valeur d'une case écartée. Appliquée uniquement au staging.
+Son fichier a été aligné sur la version réellement inscrite par le connecteur (création
+locale initiale `20261021153408`), sans changer son SQL ni l'historique distant.
+La consolidation #52 en portait 62 au gate du 25 septembre (116 tables publiques, 478
+contraintes relevées par le vérificateur, 123 RPC). Les dix-neuf dernières ne sont PAS en
+production (dernier relevé connu de la production : 45, le 9 septembre 2026) :
+
+- `20260914191901_verified_personal_session` : `lfo_verify_session` (B12) ;
+- `20260915064740_personal_reference_isolation` : références composites par propriétaire (B13) ;
+- `20260915180426_personal_first_intent` et `20260917071520_personal_context` : accueil (B14) ;
+- `20260924081000_debt_outstanding_only` : dette connue par son seul encours (B14) ;
+- `20260924091000_net_income_observation` : premier revenu net observé (B14) ;
+- `20260924120000_net_income_correction` : correction auditée d'un revenu net saisi (B14) ;
+- `20260924150000_debt_outstanding_to_contract` : passage d'un encours seul à un contrat (B16) ;
+- `20260924160000_income_correction_hardening` : correction de revenu durcie, écritures
+  directes sur `transactions` retirées (B14) ;
+- `20260924170000_debt_adaptive_contract` : contrat adaptatif, mensualité OU durée OU
+  maturité (B16) ;
+- `20260924180000_debt_separate_insurance` : assurance emprunteur séparée (B17) ;
+- `20260925090000_debt_insurance_policy_details` : couverture, base assurée, compte débité (B17) ;
+- `20260925100000_debt_review_hardening` : écritures directes retirées sur les tables de
+  dette, périodes de prime sans chevauchement (relecture B16/B17) ;
+- `20260925110000_observation_dates_and_balance_rights` : date d'observation jamais future
+  pour un fait, écritures directes retirées sur `account_balances` ;
+- `20260925120000_form_drafts` : brouillons persistants de formulaire (Dette) ;
+- `20260925130000_debt_events` : journal d'événements de dette, annulations, versions de
+  contrat (B18) ;
+- `20260925140000_debt_review_versions_and_guards` : version `BASELINE` des termes en vigueur
+  avant la première correction d'un contrat antérieur au versionnement, gardes de forme
+  séquentielles de `lfo_record_debt_event` (relecture B18). Elle remplace la contrainte
+  `liability_contract_versions_kind_ck` par `liability_contract_versions_kind_v2_ck`.
+- `20261012090000_debt_contract_declared_deferral_and_actor` : lot A, reprise de la dernière
+  `lfo_save_debt_contract` ; une clé `deferral` absente ou un différé incomplet sont refusés
+  (le JSON `null` reste « aucun différé »), une clé d'acteur dans la charge est refusée.
+- `20261012140000_document_schedule_review` : B19, revue d'un échéancier dans Document
+  Intelligence (lecture visant une dette, format tabulaire `NOT_PDF`, localisation de case,
+  unités MONEY et DATE, méthode `TABULAR_CELL`) et piste immuable `document_field_decisions`
+  commune à toutes les familles ; révision attendue obligatoire sur toute décision, liasse
+  comprise. Une case illisible ne se confirme pas, une lecture tronquée ou jamais contrôlée ne
+  se valide pas, la complétude est relue après chaque décision, et un fichier encore en revue
+  n'est pas relu.
+
+Avant tout push de `20260924170000` vers une base PARTAGÉE : ses contraintes
+`liabilities_payment_count_ck` et `liabilities_contract_dates_ck` sont ajoutées sans `NOT VALID`.
+Une ligne existante avec `payment_count = 0` ou une maturité antérieure à la première échéance
+ferait échouer le push : la compter d'abord, et documenter toute ligne trouvée au lieu de la
+corriger en silence.
+
+Les 45 précédentes s'arrêtent à la déclaration d'applicabilité de domaine, ajoutée par la
+phase 2 de productisation ; les onze qui la précèdent sont les cinq
 verticales d'acquisition, leur réconciliation et les deux tours de correction des findings de
 revue :
 
@@ -198,7 +301,8 @@ dit l'état réel, et le contenu de référence s'extrait de
 `supabase_migrations.schema_migrations`.
 
 La production porte **45 migrations**, contrôlées par le connecteur Supabase le 9 septembre
-2026 après le merge de #48. La dernière est `20260909190841_user_domain_declarations`,
+2026 après le merge de #48 (dernier relevé connu ; aucun connecteur Supabase dans la session
+du 24 septembre, donc aucun contrôle plus récent). La dernière est `20260909190841_user_domain_declarations`,
 appliquée depuis le SQL de la phase 2. La plateforme a attribué son identifiant ; le fichier
 local a été renommé sans changer le SQL ni réécrire l’historique distant. Les onze migrations
 précédentes étaient déjà appliquées avant cette réparation. Les anciens chiffres de 33 sont
@@ -303,10 +407,13 @@ canonique, jamais ce que la source a écrit, et une transaction importée n'est 
 supprimable en laissant sa provenance orpheline. SESSION ABSENTE ≠ SESSION INVISIBLE : un
 garde-fou qui décide à partir d'une lecture filtrée par la RLS de l'appelant conclut
 « déjà supprimé » sur une simple absence de droit, et autorise. La question « cet objet
-existe-t-il ? » se lit donc indépendamment de la visibilité de l'appelant, et le seul
-`SECURITY DEFINER` du schéma applicatif existe pour cela : `search_path` vide, objets
+existe-t-il ? » se lit donc indépendamment de la visibilité de l'appelant, et les deux seuls
+`SECURITY DEFINER` du schéma `public` existent pour cela (`import_session_freeze_state`,
+`bank_sync_freeze_state`) ; le troisième et dernier de la base, `lfo_private.verify_session`
+(B12), lit `auth.sessions` pour vérifier une session. Tous trois : `search_path` vide, objets
 qualifiés, aucune écriture, aucun `execute` pour `public`, `anon` ni `authenticated`, et un
-nom hors du contrat `lfo_*`, qui reste sans aucune RPC `SECURITY DEFINER`. UN FAIT ÉCRIT
+nom hors du contrat `lfo_*`, qui reste sans aucune RPC `SECURITY DEFINER`. Ce décompte se
+relit dans les migrations (`grep -i "security definer"`), il ne se recopie pas. UN FAIT ÉCRIT
 GÈLE TOUT LE BRUT DE SA SESSION : l'autorisation s'appuie sur la PREUVE qu'un fait existe,
 jamais sur le statut affiché, sans quoi un statut remis en arrière rouvrirait la suppression
 de sa propre provenance. Et SUPPRIMER LE BRUT D'UNE SESSION VIVANTE N'EST PAS UN ABANDON :
@@ -537,7 +644,7 @@ manque.
 
 # This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing code. Heed deprecation notices.
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 

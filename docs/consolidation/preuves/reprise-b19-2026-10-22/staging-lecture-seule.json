@@ -1,0 +1,22 @@
+{
+  "project": "bjxhnwvomoznorijauyl",
+  "date": "2026-10-22",
+  "mode": "read-only",
+  "rows": [
+    {
+      "acceptance_snapshot": {
+        "synthetic_debt": {
+          "terms_status": "CONTRACT",
+          "current_balance": 2000,
+          "document_status_counts": {
+            "REJECTED": 2,
+            "VALIDATED": 3
+          },
+          "canonical_schedule_rows": 0
+        },
+        "migration_count": 66,
+        "latest_migration": "20261021153711"
+      }
+    }
+  ]
+}

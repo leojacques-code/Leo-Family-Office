@@ -1,3 +1,4 @@
+import { requireActor } from "@/lib/auth";
 import "server-only";
 
 import type { PostgrestError } from "@supabase/supabase-js";
@@ -22,6 +23,7 @@ import type {
   SandboxScenario,
 } from "@/lib/acquisition/banking";
 import { civilDateIn, resolveTimeZone } from "@/lib/acquisition/clock";
+import { operationalToday } from "@/lib/financial-date";
 import type { ExistingIdentity, ExistingTransactionFact } from "@/lib/acquisition/types";
 import type {
   BankSyncCommitResult,
@@ -31,7 +33,8 @@ import type {
 } from "@/lib/data/open-banking-contracts";
 import { readAllPages } from "@/lib/data/pagination";
 import { nullableFiniteNumber } from "@/lib/data/row-validation";
-import { ownerId, supabaseAdmin } from "@/lib/data/supabase-client";
+import { supabaseAdmin } from "@/lib/data/supabase-client";
+import { SupabaseOperationError } from "@/lib/data/supabase-errors";
 
 type Row = Record<string, unknown>;
 
@@ -50,7 +53,7 @@ const nullableStr = (value: unknown): string | null =>
   value === null || value === undefined ? null : String(value);
 
 function unwrap<T>(result: { data: T | null; error: PostgrestError | null }, context: string): T {
-  if (result.error) throw new Error(`Supabase ${context} : ${result.error.message}`);
+  if (result.error) throw new SupabaseOperationError(context, result.error);
   if (result.data === null) throw new Error(`Supabase ${context} : réponse vide`);
   return result.data;
 }
@@ -99,7 +102,7 @@ export function resolveProvider(adapterId: string, scenario: SandboxScenario): B
 
 export class OpenBankingRepository {
   private readonly client = supabaseAdmin();
-  private readonly userId = ownerId();
+  constructor(private readonly userId: string) {}
 
   /** Vue complète : fournisseurs, consentements, comptes, exécutions, soldes, observations. */
   async overview(): Promise<OpenBankingOverview> {
@@ -520,12 +523,17 @@ export class OpenBankingRepository {
     } catch (error) {
       // Un échec NOMME sa cause et CONSERVE son curseur : la reprise ne relit pas ce qui a
       // déjà été écrit, et le diagnostic reste possible.
+      console.error("Synchronisation bancaire en échec", error);
       await this.client.rpc("lfo_fail_bank_sync_run", {
         p_user_id: this.userId,
         p_payload: {
           run_id: runId,
           failure_code: "SERVER_ERROR",
-          failure_message: error instanceof Error ? error.message : String(error),
+          // Message FIXE : `error.message` peut citer une URL de fournisseur, jetons compris,
+          // ou un texte de la base ; il serait persisté puis affiché (CLAUDE.md §3). Le détail
+          // reste dans le journal serveur ci-dessous.
+          failure_message:
+            "Erreur interne pendant la synchronisation ; le détail est journalisé côté serveur.",
         },
       });
       throw error;
@@ -601,6 +609,7 @@ export class OpenBankingRepository {
           accountCurrency: nullableStr(account.currency),
           mappedAccountId: canonicalAccountId,
           accountAmbiguous: false,
+          today: operationalToday(),
         }),
       );
       const identities = await this.existingIdentities(normalized);
@@ -1044,9 +1053,7 @@ export class OpenBankingRepository {
   }
 }
 
-let repository: OpenBankingRepository | undefined;
-
-export function getOpenBankingRepository(): OpenBankingRepository {
-  if (!repository) repository = new OpenBankingRepository();
-  return repository;
+export async function getOpenBankingRepository(): Promise<OpenBankingRepository> {
+  const actor = await requireActor();
+  return new OpenBankingRepository(actor.userId);
 }

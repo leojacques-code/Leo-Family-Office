@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { FileText, Search, UploadCloud } from "lucide-react";
 
 import { Callout, EmptyState } from "@/components/ui";
+import { DocumentFieldDecisionHistory } from "@/components/documents/field-decision-history";
 import { NOT_COMPUTABLE, formatDate } from "@/components/pages/shared";
 import { uploadToSignedStoragePath } from "@/lib/data/supabase-storage-browser";
 import type {
@@ -14,6 +15,7 @@ import type {
 import type {
   DocumentCheckView,
   DocumentExtractionPreview,
+  DocumentFieldDecisionView,
   DocumentFieldView,
   DocumentUploadTicket,
 } from "@/lib/data/document-contracts";
@@ -286,6 +288,18 @@ export default function LiasseSection({ businesses, refresh }: LiasseSectionProp
     (check) => check.severity === "BLOCKING" && check.status === "FAILED",
   ).length;
 
+  const historyDecisions = preview?.decisions;
+  const decisionHistory = useMemo(() => {
+    if (historyDecisions === undefined) return null;
+    const byField = new Map<string, DocumentFieldDecisionView[]>();
+    for (const decision of historyDecisions) {
+      const history = byField.get(decision.fieldId) ?? [];
+      history.push(decision);
+      byField.set(decision.fieldId, history);
+    }
+    return byField;
+  }, [historyDecisions]);
+
   return (
     <div className="page-stack">
       {error ? (
@@ -548,6 +562,7 @@ export default function LiasseSection({ businesses, refresh }: LiasseSectionProp
                               void command({
                                 action: "correct",
                                 fieldId: field.fieldId,
+                                expectedRevision: field.decisionRevision,
                                 userValue: Number(
                                   (correction[field.fieldId] ?? "").replace(",", "."),
                                 ),
@@ -562,7 +577,11 @@ export default function LiasseSection({ businesses, refresh }: LiasseSectionProp
                             className="button secondary"
                             disabled={busy}
                             onClick={() =>
-                              void command({ action: "reject", fieldId: field.fieldId })
+                              void command({
+                                action: "reject",
+                                fieldId: field.fieldId,
+                                expectedRevision: field.decisionRevision,
+                              })
                             }
                           >
                             Écarter
@@ -570,6 +589,40 @@ export default function LiasseSection({ businesses, refresh }: LiasseSectionProp
                         </>
                       )}
                       <IssueList issues={field.issues} />
+                      <DocumentFieldDecisionHistory
+                        history={
+                          decisionHistory === null
+                            ? undefined
+                            : (decisionHistory.get(field.fieldId) ?? [])
+                        }
+                        renderChange={(decision) =>
+                          decision.action === "REVIEW" &&
+                          decision.afterValue === null &&
+                          field.normalizedValue !== null ? (
+                            <span> : valeur après non consignée dans cette trace ancienne</span>
+                          ) : (
+                            <span>
+                              {" : "}
+                              {decision.beforeStatus === "REJECTED" || decision.beforeValue === null
+                                ? "aucune"
+                                : amount(decision.beforeValue)}
+                              {" → "}
+                              {decision.afterValue === null
+                                ? "aucune"
+                                : amount(decision.afterValue)}{" "}
+                              {field.unit === "EUR"
+                                ? "EUR"
+                                : field.unit === "PCT"
+                                  ? "%"
+                                  : field.unit === "DAYS"
+                                    ? "jours"
+                                    : field.unit === "COUNT"
+                                      ? "unités"
+                                      : field.unit}
+                            </span>
+                          )
+                        }
+                      />
                     </span>
                   </div>
                 ))}

@@ -16,6 +16,7 @@ import {
   formatDate,
 } from "@/components/pages/shared";
 import { TechnicalDetails } from "@/components/primitives/technical-details";
+import styles from "./decision-lab.module.css";
 
 const METRICS: Array<[keyof Omit<DecisionMetricSnapshot, "date">, string]> = [
   ["netWorth", "Patrimoine net"],
@@ -40,11 +41,11 @@ const STATUS_LABEL: Record<string, string> = {
   INCOMPARABLE: "Trajectoires incomparables",
 };
 
-function metricValue(value: number | null) {
+function metricValue(value: number | null, currency: string | null) {
   return value === null ? (
     <span className="warning-text">{NOT_COMPUTABLE}</span>
   ) : (
-    <Currency value={value} />
+    <Currency value={value} currency={currency} />
   );
 }
 
@@ -62,8 +63,15 @@ function GoalCell({
           NOT_COMPUTABLE
         ) : (
           <>
-            <Currency value={evaluation.projectedValueAtTargetDate} /> · gap{" "}
-            <OptionalCurrency value={evaluation.projectedGapAtTargetDate?.shortfall ?? null} />
+            <Currency
+              value={evaluation.projectedValueAtTargetDate}
+              currency={evaluation.observation?.currency ?? null}
+            />{" "}
+            · gap{" "}
+            <OptionalCurrency
+              value={evaluation.projectedGapAtTargetDate?.shortfall ?? null}
+              currency={evaluation.observation?.currency ?? null}
+            />
           </>
         )}
         {evaluation.firstProjectedAttainmentDate
@@ -323,13 +331,16 @@ export default function DecisionLabPage({ state, mutate, busy }: SectionProps) {
               : "Les arbitrages sont présentés sans choisir à votre place."}
           </Callout>
 
-          <section className="panel table-wrap">
+          <section className={`panel ${styles.tablePanel}`}>
             <div className="panel-header">
               <div>
                 <span className="eyebrow">Comparison</span>
                 <h2>Métriques à l’horizon</h2>
               </div>
-              <span className="muted-copy">{formatDate(result.baseline.date)}</span>
+              <span className="muted-copy">
+                {formatDate(result.baseline.date)} · devise{" "}
+                {result.reportingCurrency ?? "non renseignée"}
+              </span>
             </div>
             <table>
               <thead>
@@ -348,12 +359,17 @@ export default function DecisionLabPage({ state, mutate, busy }: SectionProps) {
                 {METRICS.map(([key, label]) => (
                   <tr key={key}>
                     <td>{label}</td>
-                    <td>{metricValue(result.baseline[key])}</td>
+                    <td>{metricValue(result.baseline[key], result.reportingCurrency ?? null)}</td>
                     {result.options.map((item) => (
                       <td key={item.option.id}>
-                        {metricValue(item.terminal[key])}
+                        {metricValue(item.terminal[key], result.reportingCurrency ?? null)}
                         <small>
-                          Δ <OptionalCurrency value={item.deltaVsBaseline[key]} sign />
+                          Δ{" "}
+                          <OptionalCurrency
+                            value={item.deltaVsBaseline[key]}
+                            currency={result.reportingCurrency ?? null}
+                            sign
+                          />
                         </small>
                       </td>
                     ))}
@@ -364,7 +380,7 @@ export default function DecisionLabPage({ state, mutate, busy }: SectionProps) {
           </section>
 
           {result.caseVersion.selectedGoals.length ? (
-            <section className="panel table-wrap">
+            <section className={`panel ${styles.tablePanel}`}>
               <div className="panel-header">
                 <div>
                   <span className="eyebrow">Goal impact</span>

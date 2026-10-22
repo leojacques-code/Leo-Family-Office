@@ -1,0 +1,17 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 build
+> next build
+
+▲ Next.js 16.3.3 (Turbopack)
+✓ Running next.config.ts took 61ms
+- Experiments (use with caution):
+  · serverActions
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 8.6s
+  Running TypeScript ...
+src/lib/data/__tests__/document-field-decisions.test.ts(43,73): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ id: string; user_id: string; run_id: string; field_id: string; decision_rank: number; action: string; before_status: string; before_value: string; before_date: null; after_status: string; after_value: string; after_date: null; reason: string; decided_at: string; actor_user_id: string; }'.
+  No index signature with a parameter of type 'string' was found on type '{ id: string; user_id: string; run_id: string; field_id: string; decision_rank: number; action: string; before_status: string; before_value: string; before_date: null; after_status: string; after_value: string; after_date: null; reason: string; decided_at: string; actor_user_id: string; }'.
+Failed to type check.
+

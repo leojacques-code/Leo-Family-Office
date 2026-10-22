@@ -30,6 +30,8 @@ import {
   BUSINESS_TYPE_LABELS,
 } from "@/lib/engine/business-equity-explain";
 import { fundingRoundOutcome } from "@/lib/engine/business-ownership";
+import { known, multiply } from "@/lib/engine/business-equity-facts";
+import { equityFromEnterprise } from "@/lib/engine/business-valuation";
 import { formatMoney } from "@/components/pages/business-equity/display";
 import { parseNumberInput } from "@/lib/presentation/input-parse";
 
@@ -132,9 +134,11 @@ export function QuickStartForm({
   const [ebitda, setEbitda] = useState("");
   const [cash, setCash] = useState("");
   const [grossDebt, setGrossDebt] = useState("");
-  const [ownershipRate, setOwnershipRate] = useState("100");
+  // Lot A : quote-part et multiple se DÉCLARENT. « 100 % » et « 6 × » préremplis étaient des
+  // hypothèses que personne n'avait fournies (CLAUDE.md §3 et §8, D-UX-04).
+  const [ownershipRate, setOwnershipRate] = useState("");
   const [method, setMethod] = useState<"EBITDA_MULTIPLE" | "REVENUE_MULTIPLE">("EBITDA_MULTIPLE");
-  const [multiple, setMultiple] = useState("6");
+  const [multiple, setMultiple] = useState("");
   const [multipleLow, setMultipleLow] = useState("");
   const [multipleHigh, setMultipleHigh] = useState("");
   const [bridgeDeclaredNone, setBridgeDeclaredNone] = useState(false);
@@ -148,12 +152,20 @@ export function QuickStartForm({
   const grossDebtValue = optionalNumber(grossDebt);
   const ownershipValue = optionalRate(ownershipRate);
   const ownershipValid = ownershipValue !== null && ownershipValue > 0 && ownershipValue <= 1;
+  // Aperçu par les primitives et le pont du MOTEUR, jamais par une formule locale. Les
+  // autres éléments du pont ne valent zéro que si leur absence est DÉCLARÉE : sans cette
+  // déclaration, aucune Equity Value n'est montrée (CLAUDE.md §7, EV ≠ EQUITY VALUE).
   const preview =
     metricValue !== null &&
     centralMultiple !== null &&
     cashValue !== null &&
-    grossDebtValue !== null
-      ? metricValue * centralMultiple - grossDebtValue + cashValue
+    grossDebtValue !== null &&
+    bridgeDeclaredNone
+      ? equityFromEnterprise(multiply(known(metricValue), known(centralMultiple)), {
+          grossDebt: known(grossDebtValue),
+          cash: known(cashValue),
+          bridgeItemsTotal: known(0),
+        }).value
       : null;
 
   return (
@@ -412,8 +424,9 @@ export function QuickStartForm({
         </p>
       ) : (
         <p className="form-notice">
-          La valeur sera dérivée dès que l’agrégat retenu, la trésorerie et la dette brute seront
-          déclarés. Aucune Enterprise Value ne vous sera jamais demandée.
+          La valeur sera dérivée dès que l’agrégat retenu, le multiple, la trésorerie et la dette
+          brute seront déclarés, et l’absence d’autres éléments du pont confirmée. Aucune Enterprise
+          Value ne vous sera jamais demandée.
         </p>
       )}
       <FormActions
@@ -638,7 +651,7 @@ export function OwnershipForm({
   onDone: () => void;
 }) {
   const [effectiveDate, setEffectiveDate] = useState(asOfDate);
-  const [legalRate, setLegalRate] = useState("100");
+  const [legalRate, setLegalRate] = useState("");
   const [differentEconomic, setDifferentEconomic] = useState(false);
   const [economicRate, setEconomicRate] = useState("");
   const [votingRate, setVotingRate] = useState("");
@@ -1121,7 +1134,7 @@ export function ValuationBasisForm({
 }) {
   const [method, setMethod] = useState<ValuationMethodChoice>("EBITDA_MULTIPLE");
   const [valuationDate, setValuationDate] = useState(asOfDate);
-  const [multiple, setMultiple] = useState("6");
+  const [multiple, setMultiple] = useState("");
   const [multipleLow, setMultipleLow] = useState("");
   const [multipleHigh, setMultipleHigh] = useState("");
   const [metricPeriodEnd, setMetricPeriodEnd] = useState(periods.at(-1)?.periodEnd ?? "");
@@ -1354,7 +1367,13 @@ export function ValuationBasisForm({
           onChange={(event) => setNotes(event.target.value)}
         />
       </label>
-      <FormActions busy={busy} label="Enregistrer la base" onCancel={onDone} />
+      <FormActions
+        busy={busy}
+        label="Enregistrer la base"
+        // Un multiple central non déclaré ne part pas au serveur.
+        disabled={isMultiple && optionalNumber(multiple) === null}
+        onCancel={onDone}
+      />
     </form>
   );
 }
@@ -1633,12 +1652,13 @@ export function DcfForm({
   onDone: () => void;
 }) {
   const [valuationDate, setValuationDate] = useState(asOfDate);
-  const [wacc, setWacc] = useState("10");
-  const [taxRate, setTaxRate] = useState("25");
+  // Lot A : « LFO ne fournit ni WACC, ni croissance » ; ni taux d'impôt. Ils se déclarent.
+  const [wacc, setWacc] = useState("");
+  const [taxRate, setTaxRate] = useState("");
   const [terminalMethod, setTerminalMethod] = useState<"PERPETUAL_GROWTH" | "EXIT_MULTIPLE">(
     "PERPETUAL_GROWTH",
   );
-  const [terminalGrowth, setTerminalGrowth] = useState("2");
+  const [terminalGrowth, setTerminalGrowth] = useState("");
   const [terminalExitMultiple, setTerminalExitMultiple] = useState("");
   const [terminalExitMetric, setTerminalExitMetric] = useState<"EBITDA" | "EBIT">("EBITDA");
   const [discountConvention, setDiscountConvention] = useState<"YEAR_END" | "MID_YEAR">("YEAR_END");
@@ -1893,7 +1913,13 @@ export function DcfForm({
       <FormActions
         busy={busy}
         label="Enregistrer les hypothèses"
-        disabled={growthInvalid || waccValue === null || taxRateValue === null}
+        disabled={
+          growthInvalid ||
+          waccValue === null ||
+          taxRateValue === null ||
+          (terminalMethod === "PERPETUAL_GROWTH" && growthValue === null) ||
+          (terminalMethod === "EXIT_MULTIPLE" && optionalNumber(terminalExitMultiple) === null)
+        }
         onCancel={onDone}
       />
     </form>
@@ -2091,7 +2117,8 @@ export function HoldingLinkForm({
 }) {
   const [childBusinessId, setChildBusinessId] = useState(candidates[0]?.id ?? "");
   const [effectiveDate, setEffectiveDate] = useState(asOfDate);
-  const [ownershipRate, setOwnershipRate] = useState("100");
+  // Une filiale détenue à 100 % n'est pas une valeur de départ : la quote-part se déclare.
+  const [ownershipRate, setOwnershipRate] = useState("");
 
   const rate = optionalRate(ownershipRate);
   return (

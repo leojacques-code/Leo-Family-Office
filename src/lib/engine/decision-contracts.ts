@@ -180,6 +180,8 @@ export interface DecisionTradeOff {
 }
 
 export interface DecisionEvaluation {
+  /** Unité des métriques du résultat ; absente dans les snapshots historiques. */
+  reportingCurrency?: string | null;
   caseVersion: DecisionCaseVersion;
   run: DecisionRun;
   completeness: DecisionCompleteness;

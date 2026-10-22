@@ -16,12 +16,14 @@ export async function GET(request: Request) {
   const format = new URL(request.url).searchParams.get("format") ?? "json";
   if (format === "csv") {
     const rows = [
-      ["type", "institution", "nom", "valeur_eur", "date", "provenance"],
+      // Montants en devise NATIVE, sans conversion : la colonne le dit, et la devise suit.
+      ["type", "institution", "nom", "valeur_native", "devise", "date", "provenance"],
       ...state.accounts.map((account) => [
         "actif",
         account.institution,
         account.name,
         account.balance,
+        account.currency,
         account.balanceDate,
         account.provenance.kind,
       ]),
@@ -30,8 +32,19 @@ export async function GET(request: Request) {
         liability.lender,
         liability.name,
         -liability.currentBalance,
-        state.asOfDate,
+        liability.currency ?? "",
+        liability.balanceDate ?? "",
         liability.provenance.kind,
+      ]),
+      // Encours seul : la date est celle de l'observation, jamais la date d'arrêté.
+      ...(state.outstandingDebts ?? []).map((debt) => [
+        "passif",
+        debt.lender ?? "",
+        debt.name,
+        -debt.currentBalance,
+        debt.currency,
+        debt.balanceDate ?? "",
+        debt.provenance.kind,
       ]),
     ];
     const csv = rows.map((row) => row.map(csvEscape).join(",")).join("\r\n");

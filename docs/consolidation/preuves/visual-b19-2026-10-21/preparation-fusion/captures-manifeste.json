@@ -1,0 +1,89 @@
+{
+  "browser_viewport": {
+    "width": 1363,
+    "height": 936
+  },
+  "requested_formats_certified": false,
+  "captures": [
+    {
+      "file": "aujourdhui-sources-detail-final.jpg",
+      "width": 1348,
+      "height": 926,
+      "sha256": "75d6d3af557624450c9346e2dc83fccd46d14239071aed7939173468b55c2bb9",
+      "code_sha": "ae8ba7c69245c7e116e05958ca753ab5a89ff4bc",
+      "resized": false
+    },
+    {
+      "file": "aujourdhui-sources-document-present.jpg",
+      "width": 1348,
+      "height": 926,
+      "sha256": "14d06d8d8afcb98c2fa4758350c25551969ca3bcd75107656efb71ba5616caf8",
+      "code_sha": "eca591474e63cd60e49c40909f9a89990cc03d76",
+      "resized": false
+    },
+    {
+      "file": "aujourdhui-sources-version-finale.jpg",
+      "width": 1348,
+      "height": 926,
+      "sha256": "4e03f29f6982005395659e1e6f11a9a6b0023b49d5f9111045708fe60e1d0c54",
+      "code_sha": "ae8ba7c69245c7e116e05958ca753ab5a89ff4bc",
+      "resized": false
+    },
+    {
+      "file": "calendrier-echeances-distinctes.jpg",
+      "width": 1348,
+      "height": 926,
+      "sha256": "99c0acd3f3fcc76a1b23f4b6255ff362a8555637502ef5e2a7668bb037dba662",
+      "code_sha": "eca591474e63cd60e49c40909f9a89990cc03d76",
+      "resized": false
+    },
+    {
+      "file": "formulaire-import-sombre-cibles-v10.jpg",
+      "width": 1348,
+      "height": 926,
+      "sha256": "a0ec2639245f00a432e47103801bec368d2a536b02f8cb5a51c8fef6aa04fb11",
+      "code_sha": "756c31bf71065f95acb374c7ff3fe3576b1b8305",
+      "resized": false
+    },
+    {
+      "file": "import-lisible-macros-refusees.jpg",
+      "width": 1348,
+      "height": 926,
+      "sha256": "c094fa67989be56fdf3c33736fec9026e12c07eda861f219bd1b22d35f27ab95",
+      "code_sha": "eca591474e63cd60e49c40909f9a89990cc03d76",
+      "resized": false
+    },
+    {
+      "file": "macros-contenu-refuse.jpg",
+      "width": 1348,
+      "height": 926,
+      "sha256": "150b6597a6a4b4d407d8689b95ce439eafbaf80294841d6ed9678444faecb32d",
+      "code_sha": "e79b09175d84dda4f01dd835bdd98134528440db",
+      "resized": false
+    },
+    {
+      "file": "observation-future-clavier-final.jpg",
+      "width": 1348,
+      "height": 926,
+      "sha256": "c48c85496dc83af9c761ac0fdd2e65e1b0879771e43258d602662ddf0fb192fa",
+      "code_sha": "756c31bf71065f95acb374c7ff3fe3576b1b8305",
+      "resized": false
+    },
+    {
+      "file": "observation-future-refusee.jpg",
+      "width": 1348,
+      "height": 926,
+      "sha256": "67da885796133ce56fd4ac8fdbc18d7fcc9ef80a4fc786c2eb6c585073b54230",
+      "code_sha": "e79b09175d84dda4f01dd835bdd98134528440db",
+      "resized": false
+    },
+    {
+      "file": "theme-sombre-persistant-apres-rechargement.jpg",
+      "width": 1348,
+      "height": 926,
+      "sha256": "785d2da221d6b3dc2a2db3e9abe0209d9840011928882441fa0ec1a5518c5075",
+      "code_sha": "ae8ba7c69245c7e116e05958ca753ab5a89ff4bc",
+      "resized": false
+    }
+  ]
+}

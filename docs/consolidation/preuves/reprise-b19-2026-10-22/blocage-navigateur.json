@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-22",
+  "requested_origin": "https://leo-family-office-git-codex-astra-b19-hosted-integ-ce3b7b-lech1.vercel.app",
+  "blocked_redirect_origin": "https://vercel.com",
+  "decision": "AUTO_REVIEW_DENIED",
+  "manual_user_rejection": false,
+  "reason": "Cloud browser could not acquire authority to observe page content. The origin approval gate did not grant access for https://vercel.com. Opening the authenticated Vercel origin was judged outside the explicitly authorized staging-preview validation and could expose private account/dashboard content.",
+  "circumvention_attempted": false,
+  "new_hosted_visual_verification": false,
+  "new_screenshots": 0
+}

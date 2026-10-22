@@ -1,16 +1,20 @@
 "use client";
 
+import { useId, useState } from "react";
 import type { SourceCategory } from "@/lib/presentation/registry/contracts";
 import {
   Banknote,
   Building,
   Briefcase,
   Database,
+  Check,
+  ChevronDown,
   FileCheck,
   FileText,
   Landmark,
   Plus,
   Receipt,
+  RefreshCw,
   Shield,
   TrendingUp,
   type LucideIcon,
@@ -87,12 +91,20 @@ const CATEGORY_ICONS: Readonly<Record<SourceCategory, LucideIcon>> = {
  * `ABSENTE` n'est pas une erreur : c'est une pièce qu'il n'a pas encore fournie, et le rail
  * lui propose de le faire.
  */
-export type SourceStatus = "ACTIVE" | "A_RENOUVELER" | "ABSENTE";
+export type SourceStatus = "ACTIVE" | "DOCUMENT_AVAILABLE" | "A_RENOUVELER" | "ABSENTE";
 
 const STATUS_HINTS: Readonly<Record<SourceStatus, string>> = {
-  ACTIVE: "À jour",
+  ACTIVE: "Données présentes",
+  DOCUMENT_AVAILABLE: "Document présent",
   A_RENOUVELER: "À actualiser",
   ABSENTE: "À fournir",
+};
+
+const STATUS_ICONS: Readonly<Record<SourceStatus, LucideIcon>> = {
+  ACTIVE: Check,
+  DOCUMENT_AVAILABLE: FileCheck,
+  A_RENOUVELER: RefreshCw,
+  ABSENTE: Plus,
 };
 
 export interface RailSource {
@@ -122,18 +134,37 @@ export interface SourceRailProps {
  * exactement la carte vide que le §6 de V10 refuse.
  */
 export function SourceRail({ sources, selectedId, onSelect, onProvide }: SourceRailProps) {
+  const [expanded, setExpanded] = useState(false);
+  const listId = useId();
   if (sources.length === 0) return null;
   return (
-    <aside aria-label="Sources du domaine" className="source-rail">
-      <h2 className="source-rail-title">Sources</h2>
-      <ul className="source-rail-list">
+    <aside aria-label="Sources du domaine" className="source-rail" data-expanded={expanded}>
+      <h2 className="source-rail-title">
+        <button
+          aria-controls={listId}
+          aria-expanded={expanded}
+          aria-label={expanded ? "Réduire le détail des sources" : "Afficher le détail des sources"}
+          className="source-rail-toggle"
+          onClick={() => setExpanded((value) => !value)}
+          type="button"
+        >
+          Sources <ChevronDown aria-hidden="true" size={15} />
+        </button>
+      </h2>
+      <ul className="source-rail-list" id={listId}>
         {sources.map((source) => {
           const Icon = CATEGORY_ICONS[source.category];
+          const StatusIcon = STATUS_ICONS[source.status];
           const selected = source.id === selectedId;
+          const hint = source.hint ?? CATEGORY_LABELS[source.category];
+          const showHint = expanded && hint !== source.name;
+          const hintId = `${listId}-${source.id}-hint`;
           return (
             <li key={source.id}>
               <button
                 aria-current={selected ? "true" : undefined}
+                aria-describedby={showHint ? hintId : undefined}
+                aria-label={`${source.name} · ${STATUS_HINTS[source.status]}`}
                 className="source-row"
                 data-status={source.status}
                 onClick={() => onSelect?.(source.id)}
@@ -144,9 +175,18 @@ export function SourceRail({ sources, selectedId, onSelect, onProvide }: SourceR
                 </span>
                 <span className="source-text">
                   <strong>{source.name}</strong>
-                  <small>{source.hint ?? CATEGORY_LABELS[source.category]}</small>
+                  {showHint ? <small id={hintId}>{hint}</small> : null}
                 </span>
-                <span className="source-status">{STATUS_HINTS[source.status]}</span>
+                <span className="source-status">
+                  <StatusIcon aria-hidden="true" size={15} />
+                  <span
+                    className={
+                      expanded || source.status === "A_RENOUVELER" ? undefined : "visually-hidden"
+                    }
+                  >
+                    {STATUS_HINTS[source.status]}
+                  </span>
+                </span>
               </button>
               {source.status === "ABSENTE" && onProvide ? (
                 <button

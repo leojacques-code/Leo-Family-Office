@@ -106,3 +106,44 @@ describe("Goals V2 persistence contracts", () => {
     }
   });
 });
+
+describe("B04 — type d'objectif persistant", () => {
+  const definition = createGoalVersion({
+    purpose: "SAFETY_RESERVE",
+    goalId: row.id,
+    name: "Réserve",
+    target: {
+      metric: "IMMEDIATE_CASH",
+      operator: "AT_LEAST",
+      value: 5130,
+      currency: "EUR",
+      entityId: null,
+    },
+  });
+  it("préserve le type et la métrique après sérialisation et relecture du snapshot", () => {
+    expect(
+      mapGoal(row, JSON.parse(JSON.stringify({ ...definition, version: 3 })), "EUR").definition,
+    ).toMatchObject({
+      purpose: "SAFETY_RESERVE",
+      target: { metric: "IMMEDIATE_CASH", value: 5130 },
+    });
+  });
+  it("refuse une création ou version sans choix explicite, et une réserve patrimoniale", () => {
+    for (const invalid of [
+      { ...definition, purpose: undefined },
+      { ...definition, target: { ...definition.target, metric: "NET_WORTH" } },
+    ]) {
+      expect(
+        mutationSchema.safeParse({ action: "create_goal_v2", definition: invalid }).success,
+      ).toBe(false);
+      expect(
+        mutationSchema.safeParse({
+          action: "save_goal_version_v2",
+          goalId: row.id,
+          expectedVersion: 3,
+          definition: invalid,
+        }).success,
+      ).toBe(false);
+    }
+  });
+});

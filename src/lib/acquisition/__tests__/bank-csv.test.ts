@@ -84,13 +84,14 @@ describe("format français signé", () => {
     expect(analysis.counts).toEqual({
       total: 3,
       ready: 2,
-      warning: 1,
-      blocked: 0,
+      warning: 0,
+      blocked: 1,
       duplicate: 0,
       ignored: 0,
     });
-    // La ligne du 29 août est postérieure à la date d'observation : signalée, pas bloquée.
-    expect(analysis.rows[2].status).toBe("WARNING");
+    // La ligne du 29 août est postérieure à la date d'observation : un fait observé n'est
+    // pas daté dans le futur, la base la refuserait ; elle est donc bloquée à l'analyse.
+    expect(analysis.rows[2].status).toBe("BLOCKED");
     expect(analysis.rows[2].issues.map((entry) => entry.code)).toContain("DATE_IN_FUTURE");
     expect(analysis.observedPeriod).toEqual({ start: "2026-08-13", end: "2026-08-29" });
   });
@@ -295,7 +296,8 @@ describe("idempotence", () => {
     // Le réimport du fichier identique est refusé en amont par l'empreinte du fichier
     // (invariant de base). Même si on force la relecture, aucune ligne n'est prête : les
     // trois sont reconnues comme probablement déjà présentes et attendent une décision.
-    const first = analyze(utf8(FR_SIGNED));
+    // Import daté après toutes les lignes : l'objet du test est l'idempotence, pas la date.
+    const first = analyze(utf8(FR_SIGNED), { observationDate: "2026-09-30" });
     expect(first.counts.ready + first.counts.warning).toBe(3);
 
     const existing = first.rows
@@ -309,7 +311,7 @@ describe("idempotence", () => {
         currency: row.currency!,
       }));
 
-    const second = analyze(utf8(FR_SIGNED), { existing });
+    const second = analyze(utf8(FR_SIGNED), { existing, observationDate: "2026-09-30" });
     expect(second.counts.ready).toBe(0);
     expect(second.verdicts.probableDuplicate).toBe(3);
     // Aucune ligne n'est déclarée doublon d'identité : rien ne le prouve.
@@ -377,15 +379,15 @@ describe("date d'observation de l'import ≠ date d'arrêté du reporting", () =
     const byRow = new Map(analysis.rows.map((row) => [row.rowNumber, row]));
     expect(byRow.get(2)!.status).toBe("READY");
     expect(byRow.get(3)!.status).toBe("READY");
-    expect(byRow.get(4)!.status).toBe("WARNING");
+    expect(byRow.get(4)!.status).toBe("BLOCKED");
     expect(byRow.get(4)!.issues.map((entry) => entry.code)).toContain("DATE_IN_FUTURE");
   });
 
   it("ne signale une date future que par rapport au jour de l'import", () => {
     const earlier = analyze(statement, { observationDate: "2026-08-19" });
-    // Au 19/08, les trois lignes sont bien postérieures : le signalement est cohérent avec
-    // la date d'observation réelle, quelle qu'elle soit.
-    expect(earlier.rows.filter((row) => row.status === "WARNING")).toHaveLength(3);
+    // Au 19/08, les trois lignes sont bien postérieures : elles sont bloquées au regard de la
+    // date d'observation réelle, quelle qu'elle soit.
+    expect(earlier.rows.filter((row) => row.status === "BLOCKED")).toHaveLength(3);
     expect(earlier.counts.ready).toBe(0);
   });
 });
@@ -461,7 +463,7 @@ describe("passe de déduplication rejouable", () => {
   });
 
   it("ne dépend pas d'un premier appel à vide pour attribuer les empreintes", () => {
-    const analysis = analyze(utf8(FR_SIGNED));
+    const analysis = analyze(utf8(FR_SIGNED), { observationDate: "2026-09-30" });
     expect(analysis.rows.every((row) => row.verdict !== null)).toBe(true);
     expect(analysis.rows.every((row) => row.matchKey !== null)).toBe(true);
   });
@@ -469,7 +471,8 @@ describe("passe de déduplication rejouable", () => {
 
 describe("volume", () => {
   it("traite un historique bancaire complet sans tronquer", () => {
-    const analysis = analyze(utf8(largeStatement(5_000)));
+    // Relevé de toute l'année 2026 : l'import est daté après sa dernière opération.
+    const analysis = analyze(utf8(largeStatement(5_000)), { observationDate: "2026-12-31" });
     expect(analysis.counts.total).toBe(5_000);
     expect(analysis.counts.blocked).toBe(0);
     expect(analysis.counts.ready + analysis.counts.warning).toBe(5_000);

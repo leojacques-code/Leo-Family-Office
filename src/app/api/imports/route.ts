@@ -9,26 +9,17 @@ import {
   importCommandSchema,
   MAX_IMPORT_FILE_BYTES,
 } from "@/lib/validation/imports";
+import { routeFailure as failure } from "@/lib/route-failure";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-function failure(error: unknown, fallback: string) {
-  const unauthorized = error instanceof Error && error.message === "UNAUTHORIZED";
-  if (unauthorized) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  // Le message d'une RPC d'acquisition est informatif pour l'utilisateur (« ce fichier a
-  // déjà été importé ») : il est remonté tel quel, et journalisé pour le reste.
-  console.error(fallback, error);
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ error: message }, { status: 400 });
-}
 
 /** Historique des imports, ou lignes d'une session donnée. */
 export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const sessionId = new URL(request.url).searchParams.get("session");
-    const repository = getImportRepository();
+    const repository = await getImportRepository();
     if (sessionId) {
       return NextResponse.json(
         { rows: await repository.getSessionRows(sessionId) },
@@ -83,7 +74,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const repository = getImportRepository();
+    const repository = await getImportRepository();
     const preview = await repository.analyze(parsed.data, {
       name: file.name,
       // Les navigateurs annoncent un CSV sous plusieurs types. Le contenu a été découpé
@@ -139,7 +130,7 @@ export async function PATCH(request: Request) {
         { status: 400 },
       );
     }
-    const repository = getImportRepository();
+    const repository = await getImportRepository();
     if (parsed.data.action === "commit") {
       return NextResponse.json(
         await repository.commit(parsed.data.sessionId, parsed.data.includeRecordIds, file),

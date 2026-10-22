@@ -54,7 +54,9 @@ function ScenariosPage({
   setExplanation,
 }: SectionProps) {
   const [selectedId, setSelectedId] = useState(
-    state.scenarios.find((scenario) => scenario.name === "Central")?.id ?? state.scenarios[0].id,
+    state.scenarios.find((scenario) => scenario.name === "Central")?.id ??
+      state.scenarios[0]?.id ??
+      "",
   );
   const [editing, setEditing] = useState<Scenario | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -301,15 +303,20 @@ function ScenariosPage({
   // surplus modifie immédiatement le bilan projeté, sans relancer le Monte-Carlo.
   const selected =
     state.scenarios.find((scenario) => scenario.id === selectedId) ?? state.scenarios[0];
-  const cutOff = scenarioCutOffStatus(selected, state.asOfDate);
-  const displayedProjection = displayedScenarioProjection(projection, selectedId, cutOff);
+  const cutOff = selected
+    ? scenarioCutOffStatus(selected, state.asOfDate)
+    : { computable: false, scenarioDate: null, canonicalDate: state.asOfDate };
+  const displayedProjection = selected
+    ? displayedScenarioProjection(projection, selected.id, cutOff)
+    : null;
   const finalPoint = displayedProjection?.points.at(-1);
   const opening = buildOpeningBalanceSheet(state);
-  const legacyMonthly = !selected.definition
-    ? runDeterministicModel(opening, state.liabilities, scenarioAssumptions(selected), 30 * 12)
-    : null;
+  const legacyMonthly =
+    selected && !selected.definition
+      ? runDeterministicModel(opening, state.liabilities, scenarioAssumptions(selected), 30 * 12)
+      : null;
   const comparison =
-    selected.definition && cutOff.computable
+    selected?.definition && cutOff.computable
       ? evaluateGlobalScenario(state, selected.definition).comparison
       : null;
   const deterministic =
@@ -325,9 +332,9 @@ function ScenariosPage({
   return (
     <div className="page-stack">
       <SectionHeader
-        eyebrow="Scenario engine"
-        title="Scenarios"
-        description="Les scénarios remplacent uniquement les hypothèses futures. Ils ne modifient jamais l’historique ACTUAL."
+        eyebrow="Hypothèses futures"
+        title="Scénarios"
+        description="Les scénarios remplacent uniquement les hypothèses futures. Ils ne modifient jamais les faits déjà observés."
         actions={
           <>
             <button className="button secondary" onClick={() => setCreating(true)}>
@@ -335,7 +342,11 @@ function ScenariosPage({
             </button>
             <button
               className="button secondary"
-              onClick={() => mutate({ action: "duplicate_scenario", scenarioId: selectedId })}
+              disabled={busy || !selected}
+              onClick={() => {
+                if (selected)
+                  void mutate({ action: "duplicate_scenario", scenarioId: selected.id });
+              }}
             >
               <Copy size={15} />
               Dupliquer
@@ -343,282 +354,176 @@ function ScenariosPage({
           </>
         }
       />
-      <div className="scenario-grid">
-        {state.scenarios.map((scenario) => (
-          <article
-            key={scenario.id}
-            className={`scenario-card ${selectedId === scenario.id ? "selected" : ""}`}
-            onClick={() => setSelectedId(scenario.id)}
-          >
-            <div className="scenario-top">
-              <span className="scenario-color" style={{ background: scenario.color }} />
-              <span>
-                <strong>{scenario.name}</strong>
-                <small>Version {scenario.version}</small>
-              </span>
-              <DataBadge kind={scenario.provenance.kind} />
-            </div>
-            <p>{scenario.description}</p>
-            {scenario.definition ? (
-              <p className="muted-copy">
-                {scenario.definition.overrides.length} changement(s) ·{" "}
-                {scenario.definition.assumptions.length} hypothèse(s) ·{" "}
-                {scenario.lifecycleStatus ?? scenario.definition.lifecycleStatus}
-              </p>
-            ) : null}
-            <div className="scenario-stats">
-              <div>
-                <span>Rendement</span>
-                <strong>
-                  <Percent value={scenario.annualReturn} />
-                </strong>
-              </div>
-              <div>
-                <span>Volatilité</span>
-                <strong>
-                  <Percent value={scenario.annualVolatility} />
-                </strong>
-              </div>
-              <div>
-                <span>Surplus avant dette</span>
-                <strong>
-                  <Currency value={scenario.monthlySavings} />
-                </strong>
-              </div>
-              <div>
-                <span>Part investie</span>
-                <strong>
-                  <Percent value={scenario.investmentAllocationRate} />
-                </strong>
-              </div>
-            </div>
-            <button
-              className="link-button"
-              onClick={(event) => {
-                event.stopPropagation();
-                editScenario(scenario);
-              }}
-            >
-              Modifier les hypothèses
-            </button>
-          </article>
-        ))}
-      </div>
-      {!cutOff.computable ? (
-        <Callout tone="warning" title="NOT_COMPUTABLE · version à rebaser">
-          Cette version est datée du {cutOff.scenarioDate}, alors que la date canonique actuelle est
-          le {cutOff.canonicalDate}. Elle est conservée sans modification : créez une nouvelle
-          version depuis « Modifier les hypothèses » pour la rebaser explicitement.
-        </Callout>
-      ) : null}
-      {comparison ? (
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Diff vs trajectoire actuelle</span>
-              <h2>
-                {comparison.completeness} · {comparison.humanDiff.length} changement(s)
-              </h2>
-            </div>
-            <button
-              className="link-button"
-              disabled={busy}
-              onClick={() => mutate({ action: "archive_scenario_v2", scenarioId: selected.id })}
-            >
-              <Archive size={14} /> Archiver
-            </button>
+      {selected ? (
+        <>
+          <div className="scenario-grid">
+            {state.scenarios.map((scenario) => (
+              <article
+                key={scenario.id}
+                className={`scenario-card ${selected.id === scenario.id ? "selected" : ""}`}
+                onClick={() => setSelectedId(scenario.id)}
+              >
+                <div className="scenario-top">
+                  <span className="scenario-color" style={{ background: scenario.color }} />
+                  <span>
+                    <strong>{scenario.name}</strong>
+                    <small>Version {scenario.version}</small>
+                  </span>
+                  <DataBadge kind={scenario.provenance.kind} />
+                </div>
+                <p>{scenario.description}</p>
+                {scenario.definition ? (
+                  <p className="muted-copy">
+                    {scenario.definition.overrides.length} changement(s) ·{" "}
+                    {scenario.definition.assumptions.length} hypothèse(s) ·{" "}
+                    {scenario.lifecycleStatus ?? scenario.definition.lifecycleStatus}
+                  </p>
+                ) : null}
+                <div className="scenario-stats">
+                  <div>
+                    <span>Rendement</span>
+                    <strong>
+                      <Percent value={scenario.annualReturn} />
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Volatilité</span>
+                    <strong>
+                      <Percent value={scenario.annualVolatility} />
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Surplus avant dette</span>
+                    <strong>
+                      <Currency value={scenario.monthlySavings} />
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Part investie</span>
+                    <strong>
+                      <Percent value={scenario.investmentAllocationRate} />
+                    </strong>
+                  </div>
+                </div>
+                <button
+                  className="link-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    editScenario(scenario);
+                  }}
+                >
+                  Modifier les hypothèses
+                </button>
+              </article>
+            ))}
           </div>
-          {comparison.humanDiff.length ? (
-            <div className="event-list">
-              {comparison.humanDiff.map((item, index) => (
-                <p key={`${item}-${index}`}>{item}</p>
-              ))}
-            </div>
-          ) : (
-            <p className="muted-copy">
-              Aucun changement d’événement : seules les hypothèses de marché diffèrent.
-            </p>
-          )}
-          {comparison.blockers.length ? (
-            <Callout tone="warning" title={`${comparison.blockers.length} point(s) à compléter`}>
-              {comparison.blockers.map((item) => item.message).join(" · ")}
+          {!cutOff.computable ? (
+            <Callout tone="warning" title="NOT_COMPUTABLE · version à rebaser">
+              Cette version est datée du {cutOff.scenarioDate}, alors que la date canonique actuelle
+              est le {cutOff.canonicalDate}. Elle est conservée sans modification : créez une
+              nouvelle version depuis « Modifier les hypothèses » pour la rebaser explicitement.
             </Callout>
           ) : null}
-          <div className="percentile-cards">
-            <div>
-              <span>Δ patrimoine net</span>
-              <strong>
-                <Currency value={comparison.points.at(-1)?.delta.netWorth ?? null} sign compact />
-              </strong>
-            </div>
-            <div>
-              <span>Δ liquidité</span>
-              <strong>
-                <Currency
-                  value={comparison.points.at(-1)?.delta.liquidNetWorth ?? null}
-                  sign
-                  compact
-                />
-              </strong>
-            </div>
-            <div>
-              <span>Funding gap max</span>
-              <strong>
-                <Currency value={peakFundingGap} compact />
-              </strong>
-            </div>
-          </div>
-        </section>
-      ) : null}
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <span className="eyebrow">Bilan projeté déterministe · {selected.name}</span>
-            <h2>
-              Trajectoire mensuelle sur{" "}
-              {selected.definition ? Math.ceil(selected.definition.horizonMonths / 12) : 30} ans
-            </h2>
-          </div>
-          {availability.canExplainDeterministic ? (
-            <button
-              className="link-button"
-              onClick={() =>
-                setExplanation(
-                  projectionExplanation(
-                    state,
-                    selected,
-                    opening,
-                    deterministic[1] ?? deterministic[0]!,
-                    deterministic[0]!,
-                  ),
-                )
-              }
-            >
-              Explain calculation
-            </button>
+          {comparison ? (
+            <section className="panel">
+              <div className="panel-header">
+                <div>
+                  <span className="eyebrow">Diff vs trajectoire actuelle</span>
+                  <h2>
+                    {comparison.completeness} · {comparison.humanDiff.length} changement(s)
+                  </h2>
+                </div>
+                <button
+                  className="link-button"
+                  disabled={busy}
+                  onClick={() => mutate({ action: "archive_scenario_v2", scenarioId: selected.id })}
+                >
+                  <Archive size={14} /> Archiver
+                </button>
+              </div>
+              {comparison.humanDiff.length ? (
+                <div className="event-list">
+                  {comparison.humanDiff.map((item, index) => (
+                    <p key={`${item}-${index}`}>{item}</p>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted-copy">
+                  Aucun changement d’événement : seules les hypothèses de marché diffèrent.
+                </p>
+              )}
+              {comparison.blockers.length ? (
+                <Callout
+                  tone="warning"
+                  title={`${comparison.blockers.length} point(s) à compléter`}
+                >
+                  {comparison.blockers.map((item) => item.message).join(" · ")}
+                </Callout>
+              ) : null}
+              <div className="percentile-cards">
+                <div>
+                  <span>Δ patrimoine net</span>
+                  <strong>
+                    <Currency
+                      value={comparison.points.at(-1)?.delta.netWorth ?? null}
+                      sign
+                      compact
+                    />
+                  </strong>
+                </div>
+                <div>
+                  <span>Δ liquidité</span>
+                  <strong>
+                    <Currency
+                      value={comparison.points.at(-1)?.delta.liquidNetWorth ?? null}
+                      sign
+                      compact
+                    />
+                  </strong>
+                </div>
+                <div>
+                  <span>Funding gap max</span>
+                  <strong>
+                    <Currency value={peakFundingGap} compact />
+                  </strong>
+                </div>
+              </div>
+            </section>
           ) : null}
-        </div>
-        <div className="medium-chart">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={deterministic}>
-              <defs>
-                <linearGradient id="netWorthArea" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stopColor="#39747a" stopOpacity={0.24} />
-                  <stop offset="1" stopColor="#39747a" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid vertical={false} stroke="var(--border-soft)" />
-              <XAxis dataKey="year" axisLine={false} tickLine={false} />
-              <YAxis tickFormatter={chartCurrency} axisLine={false} tickLine={false} />
-              <Tooltip
-                formatter={(value) => formatEur(Number(value))}
-                labelFormatter={(label) => `Année ${label}`}
-              />
-              <Area
-                type="monotone"
-                dataKey="netWorth"
-                name="Patrimoine net"
-                stroke="#39747a"
-                strokeWidth={2.2}
-                fill="url(#netWorthArea)"
-              />
-              <Line
-                type="monotone"
-                dataKey="marketInvestedAssets"
-                name="Actifs de marché"
-                stroke="#c0a66a"
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="bankCash"
-                name="Cash bancaire"
-                stroke="#89a7a2"
-                strokeDasharray="4 3"
-                dot={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="percentile-cards">
-          <div>
-            <span>Patrimoine net</span>
-            <strong>
-              <Currency value={horizon?.netWorth ?? null} compact />
-            </strong>
-            <small>À l’horizon, périmètre financier</small>
-          </div>
-          <div>
-            <span>Actifs financiers</span>
-            <strong>
-              <Currency value={horizon?.grossFinancialAssets ?? null} compact />
-            </strong>
-            <small>
-              dont marché <Currency value={horizon?.marketInvestedAssets ?? null} compact /> · dont
-              cash <Currency value={horizon?.bankCash ?? null} compact />
-            </small>
-          </div>
-          <div>
-            <span>Dette restante</span>
-            <strong>
-              <Currency value={horizon?.debt ?? null} compact />
-            </strong>
-            <small>
-              Coûts de dette cumulés{" "}
-              <Currency value={horizon?.cumulativeEconomicDebtCosts ?? null} compact />
-            </small>
-          </div>
-        </div>
-        {horizon?.financingCostMissing ? (
-          <Callout tone="warning" title="Projection partielle : coût de financement manquant">
-            Le surplus mensuel ne couvre pas toujours le service de dette : un besoin de financement
-            atteint <Currency value={peakFundingGap} /> avant d’être résorbé par les surplus
-            suivants. Aucun taux ne lui est appliqué, faute de conditions de financement connues,
-            donc la trajectoire est optimiste de ce coût. Tant qu’il subsiste, aucun euro n’est
-            investi.
-          </Callout>
-        ) : null}
-        <p className="muted-copy">
-          Surplus mensuel <Currency value={selected.monthlySavings} /> avant service de dette, dont{" "}
-          <Percent value={selected.investmentAllocationRate} /> du solde après dette dirigé vers les
-          actifs de marché. Le service de dette est retranché explicitement chaque mois.
-        </p>
-      </section>
-      <section className="panel simulation-panel">
-        <div className="panel-header">
-          <div>
-            <span className="eyebrow">Monte-Carlo · patrimoine net financier simulé</span>
-            <h2>Distribution projetée</h2>
-          </div>
-          <div className="simulation-actions">
-            <label>
-              Seed
-              <input
-                type="number"
-                value={seed}
-                onChange={(event) => setSeed(Number(event.target.value))}
-              />
-            </label>
-            <button
-              className="button primary"
-              disabled={busy || !availability.canRunProjection}
-              onClick={() => {
-                if (availability.canRunProjection) void runProjection(selectedId, 30, 3000, seed);
-              }}
-            >
-              <Sparkles size={15} />
-              Lancer 3 000 simulations
-            </button>
-          </div>
-        </div>
-        {displayedProjection ? (
-          <>
-            <div className="simulation-chart">
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <span className="eyebrow">Bilan projeté déterministe · {selected.name}</span>
+                <h2>
+                  Trajectoire mensuelle sur{" "}
+                  {selected.definition ? Math.ceil(selected.definition.horizonMonths / 12) : 30} ans
+                </h2>
+              </div>
+              {availability.canExplainDeterministic ? (
+                <button
+                  className="link-button"
+                  onClick={() =>
+                    setExplanation(
+                      projectionExplanation(
+                        state,
+                        selected,
+                        opening,
+                        deterministic[1] ?? deterministic[0]!,
+                        deterministic[0]!,
+                      ),
+                    )
+                  }
+                >
+                  Explain calculation
+                </button>
+              ) : null}
+            </div>
+            <div className="medium-chart">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={displayedProjection.points}>
+                <AreaChart data={deterministic}>
                   <defs>
-                    <linearGradient id="band90" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stopColor="#39747a" stopOpacity={0.2} />
+                    <linearGradient id="netWorthArea" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stopColor="#39747a" stopOpacity={0.24} />
                       <stop offset="1" stopColor="#39747a" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
@@ -626,123 +531,248 @@ function ScenariosPage({
                   <XAxis dataKey="year" axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={chartCurrency} axisLine={false} tickLine={false} />
                   <Tooltip
-                    formatter={(value) =>
-                      new Intl.NumberFormat("fr-FR", {
-                        style: "currency",
-                        currency: "EUR",
-                        maximumFractionDigits: 0,
-                      }).format(Number(value))
-                    }
+                    formatter={(value) => formatEur(Number(value))}
+                    labelFormatter={(label) => `Année ${label}`}
                   />
                   <Area
                     type="monotone"
-                    dataKey="p90"
-                    stackId="band"
-                    stroke="none"
-                    fill="url(#band90)"
-                    name="P90"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="p10"
-                    stroke="#9b8555"
-                    fill="transparent"
-                    strokeDasharray="3 3"
-                    name="P10"
+                    dataKey="netWorth"
+                    name="Patrimoine net"
+                    stroke="#39747a"
+                    strokeWidth={2.2}
+                    fill="url(#netWorthArea)"
                   />
                   <Line
                     type="monotone"
-                    dataKey="p50"
-                    stroke="#2f6c72"
-                    strokeWidth={2.4}
+                    dataKey="marketInvestedAssets"
+                    name="Actifs de marché"
+                    stroke="#c0a66a"
                     dot={false}
-                    name="P50"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="bankCash"
+                    name="Cash bancaire"
+                    stroke="#89a7a2"
+                    strokeDasharray="4 3"
+                    dot={false}
                   />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
             <div className="percentile-cards">
               <div>
-                <span>P10</span>
+                <span>Patrimoine net</span>
                 <strong>
-                  <Currency value={finalPoint?.p10 ?? null} compact />
+                  <Currency value={horizon?.netWorth ?? null} compact />
                 </strong>
-                <small>Patrimoine net dépassé dans ~90 % des simulations</small>
+                <small>À l’horizon, périmètre financier</small>
               </div>
               <div>
-                <span>P50</span>
+                <span>Actifs financiers</span>
                 <strong>
-                  <Currency value={finalPoint?.p50 ?? null} compact />
+                  <Currency value={horizon?.grossFinancialAssets ?? null} compact />
                 </strong>
-                <small>Patrimoine net médian des simulations</small>
+                <small>
+                  dont marché <Currency value={horizon?.marketInvestedAssets ?? null} compact /> ·
+                  dont cash <Currency value={horizon?.bankCash ?? null} compact />
+                </small>
               </div>
               <div>
-                <span>P90</span>
+                <span>Dette restante</span>
                 <strong>
-                  <Currency value={finalPoint?.p90 ?? null} compact />
+                  <Currency value={horizon?.debt ?? null} compact />
                 </strong>
-                <small>Patrimoine net atteint ou dépassé dans ~10 % des simulations</small>
+                <small>
+                  Coûts de dette cumulés{" "}
+                  <Currency value={horizon?.cumulativeEconomicDebtCosts ?? null} compact />
+                </small>
               </div>
             </div>
-            <button
-              className="link-button explain-link"
-              onClick={() =>
-                setExplanation({
-                  title: "Monte-Carlo",
-                  formula:
-                    "Transition mensuelle du bilan : surplus − service de dette → allocation cash/marché → performance sur le capital d’ouverture",
-                  inputs: [
-                    {
-                      label: "Simulations",
-                      value: String(displayedProjection.simulations),
-                      kind: "MODEL_ASSUMPTION",
-                    },
-                    {
-                      label: "Seed",
-                      value: String(displayedProjection.seed),
-                      kind: "MODEL_ASSUMPTION",
-                    },
-                    {
-                      label: "Capital initial simulé",
-                      // Un actif brut non calculable ne devient pas zéro dans une explication.
-                      value: formatEur(state.metrics.grossAssets),
-                      kind: "DERIVED",
-                      date: state.asOfDate,
-                    },
-                    {
-                      label: "Scénario",
-                      value:
-                        state.scenarios.find(
-                          (scenario) => scenario.id === displayedProjection.scenarioId,
-                        )?.name ?? displayedProjection.scenarioId,
-                      kind: "USER_ASSUMPTION",
-                    },
-                  ],
-                  note: displayedProjection.methodology,
-                })
-              }
-            >
-              Explain calculation
-            </button>
-          </>
-        ) : (
-          <EmptyState
-            title="Projection non lancée"
-            detail="Le Monte-Carlo rejoue la transition mensuelle de la projection déterministe : seul le rendement de marché est tiré au sort, avec des queues épaisses, des stress rares et un seed reproductible. Immobilier, business equity, carrière et fiscalité future n’y sont pas intégrés."
-            action={
-              <button
-                className="button primary"
-                disabled={!availability.canRunProjection}
-                onClick={() => {
-                  if (availability.canRunProjection) void runProjection(selectedId, 30, 3000, seed);
-                }}
-              >
-                Lancer la projection
-              </button>
-            }
-          />
-        )}
-      </section>
+            {horizon?.financingCostMissing ? (
+              <Callout tone="warning" title="Projection partielle : coût de financement manquant">
+                Le surplus mensuel ne couvre pas toujours le service de dette : un besoin de
+                financement atteint <Currency value={peakFundingGap} /> avant d’être résorbé par les
+                surplus suivants. Aucun taux ne lui est appliqué, faute de conditions de financement
+                connues, donc la trajectoire est optimiste de ce coût. Tant qu’il subsiste, aucun
+                euro n’est investi.
+              </Callout>
+            ) : null}
+            <p className="muted-copy">
+              Surplus mensuel <Currency value={selected.monthlySavings} /> avant service de dette,
+              dont <Percent value={selected.investmentAllocationRate} /> du solde après dette dirigé
+              vers les actifs de marché. Le service de dette est retranché explicitement chaque
+              mois.
+            </p>
+          </section>
+          <section className="panel simulation-panel">
+            <div className="panel-header">
+              <div>
+                <span className="eyebrow">Monte-Carlo · patrimoine net financier simulé</span>
+                <h2>Distribution projetée</h2>
+              </div>
+              <div className="simulation-actions">
+                <label>
+                  Seed
+                  <input
+                    type="number"
+                    value={seed}
+                    onChange={(event) => setSeed(Number(event.target.value))}
+                  />
+                </label>
+                <button
+                  className="button primary"
+                  disabled={busy || !availability.canRunProjection}
+                  onClick={() => {
+                    if (availability.canRunProjection)
+                      void runProjection(selected.id, 30, 3000, seed);
+                  }}
+                >
+                  <Sparkles size={15} />
+                  Lancer 3 000 simulations
+                </button>
+              </div>
+            </div>
+            {displayedProjection ? (
+              <>
+                <div className="simulation-chart">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={displayedProjection.points}>
+                      <defs>
+                        <linearGradient id="band90" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" stopColor="#39747a" stopOpacity={0.2} />
+                          <stop offset="1" stopColor="#39747a" stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid vertical={false} stroke="var(--border-soft)" />
+                      <XAxis dataKey="year" axisLine={false} tickLine={false} />
+                      <YAxis tickFormatter={chartCurrency} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        formatter={(value) =>
+                          new Intl.NumberFormat("fr-FR", {
+                            style: "currency",
+                            currency: "EUR",
+                            maximumFractionDigits: 0,
+                          }).format(Number(value))
+                        }
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="p90"
+                        stackId="band"
+                        stroke="none"
+                        fill="url(#band90)"
+                        name="P90"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="p10"
+                        stroke="#9b8555"
+                        fill="transparent"
+                        strokeDasharray="3 3"
+                        name="P10"
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="p50"
+                        stroke="#2f6c72"
+                        strokeWidth={2.4}
+                        dot={false}
+                        name="P50"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="percentile-cards">
+                  <div>
+                    <span>P10</span>
+                    <strong>
+                      <Currency value={finalPoint?.p10 ?? null} compact />
+                    </strong>
+                    <small>Patrimoine net dépassé dans ~90 % des simulations</small>
+                  </div>
+                  <div>
+                    <span>P50</span>
+                    <strong>
+                      <Currency value={finalPoint?.p50 ?? null} compact />
+                    </strong>
+                    <small>Patrimoine net médian des simulations</small>
+                  </div>
+                  <div>
+                    <span>P90</span>
+                    <strong>
+                      <Currency value={finalPoint?.p90 ?? null} compact />
+                    </strong>
+                    <small>Patrimoine net atteint ou dépassé dans ~10 % des simulations</small>
+                  </div>
+                </div>
+                <button
+                  className="link-button explain-link"
+                  onClick={() =>
+                    setExplanation({
+                      title: "Monte-Carlo",
+                      formula:
+                        "Transition mensuelle du bilan : surplus − service de dette → allocation cash/marché → performance sur le capital d’ouverture",
+                      inputs: [
+                        {
+                          label: "Simulations",
+                          value: String(displayedProjection.simulations),
+                          kind: "MODEL_ASSUMPTION",
+                        },
+                        {
+                          label: "Seed",
+                          value: String(displayedProjection.seed),
+                          kind: "MODEL_ASSUMPTION",
+                        },
+                        {
+                          label: "Capital initial simulé",
+                          // Un actif brut non calculable ne devient pas zéro dans une explication.
+                          value: formatEur(state.metrics.grossAssets),
+                          kind: "DERIVED",
+                          date: state.asOfDate,
+                        },
+                        {
+                          label: "Scénario",
+                          value:
+                            state.scenarios.find(
+                              (scenario) => scenario.id === displayedProjection.scenarioId,
+                            )?.name ?? displayedProjection.scenarioId,
+                          kind: "USER_ASSUMPTION",
+                        },
+                      ],
+                      note: displayedProjection.methodology,
+                    })
+                  }
+                >
+                  Explain calculation
+                </button>
+              </>
+            ) : (
+              <EmptyState
+                title="Projection non lancée"
+                detail="Le Monte-Carlo rejoue la transition mensuelle de la projection déterministe : seul le rendement de marché est tiré au sort, avec des queues épaisses, des stress rares et un seed reproductible. Immobilier, business equity, carrière et fiscalité future n’y sont pas intégrés."
+                action={
+                  <button
+                    className="button primary"
+                    disabled={!availability.canRunProjection}
+                    onClick={() => {
+                      if (availability.canRunProjection)
+                        void runProjection(selected.id, 30, 3000, seed);
+                    }}
+                  >
+                    Lancer la projection
+                  </button>
+                }
+              />
+            )}
+          </section>
+        </>
+      ) : (
+        <EmptyState
+          title="Aucun scénario enregistré"
+          detail="Créez un scénario pour explorer vos hypothèses futures. Aucune trajectoire n’est calculée avant cette création."
+        />
+      )}
       <Modal
         open={Boolean(editing)}
         onClose={() => setEditing(null)}

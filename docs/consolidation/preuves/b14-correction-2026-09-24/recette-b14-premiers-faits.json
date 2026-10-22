@@ -1,0 +1,335 @@
+{
+  "date": "2026-09-24T14:58:31.215Z",
+  "app": "http://localhost:3120",
+  "utilisateur": "recette-b14-1790261886253@lfo.invalid",
+  "environnement": "pile Supabase auto-hébergée locale ; build de production",
+  "checks": [
+    {
+      "id": "P1",
+      "label": "connexion d'un compte neuf : accueil personnel",
+      "ok": true
+    },
+    {
+      "id": "D1",
+      "label": "la devise proposée est visible et modifiable, jamais implicite",
+      "ok": true,
+      "currency": "EUR"
+    },
+    {
+      "id": "D2",
+      "label": "dette affichée avec son encours, sa devise et sa date",
+      "ok": true,
+      "panelText": "nt inconnus. Prêt familial Créancier non renseigné 1 500,50 € Au 20 septembre 2026 Corriger l’encours Décrire le contrat"
+    },
+    {
+      "id": "D3",
+      "label": "persistée en base : OUTSTANDING_ONLY, 1 500,50 EUR, tous les termes NULL",
+      "ok": true,
+      "terms_status": "OUTSTANDING_ONLY",
+      "balance": "1500.500000"
+    },
+    {
+      "id": "D4",
+      "label": "bilan canonique : passif 1 500,50, patrimoine net −1 500,50, hors encours contractuel",
+      "ok": true,
+      "netWorth": -1500.5
+    },
+    {
+      "id": "D5",
+      "label": "service de dette à 30 jours partiel, jamais nul",
+      "ok": true,
+      "value": null,
+      "status": "PARTIAL",
+      "blockers": [
+        "DEBT_TERMS_UNDECLARED"
+      ],
+      "scope": "exact due entries in 30 days"
+    },
+    {
+      "id": "D6",
+      "label": "cash-flow libre inconnu (service de la dette inconnu)",
+      "ok": true
+    },
+    {
+      "id": "D7",
+      "label": "Patrimoine affiche le passif et le patrimoine net négatif",
+      "ok": true
+    },
+    {
+      "id": "D9",
+      "label": "Patrimoine range la dette dans « Dettes sans contrat détaillé », pas parmi les contrats",
+      "ok": true
+    },
+    {
+      "id": "D8",
+      "label": "Aujourd'hui : le domaine Dettes est reconnu comme renseigné",
+      "ok": true,
+      "domaine": {
+        "domain": "DETTE",
+        "label": "Dettes",
+        "applicability": "UNDECLARED",
+        "declaredOn": null,
+        "note": null,
+        "hasFacts": true,
+        "sourceHref": "/imports",
+        "manualHref": "/debt",
+        "sourceCategory": "ECHEANCIER"
+      }
+    },
+    {
+      "id": "C1",
+      "label": "la correction reprend l'encours et la date enregistrés",
+      "ok": true,
+      "valeur": "1500,5"
+    },
+    {
+      "id": "C2",
+      "label": "après rechargement : 1 400 € au 24 septembre 2026",
+      "ok": true,
+      "reloaded": "Créancier non renseigné 1 400 € Au 24 septembre 2026 Corriger l’encours Décrire le contrat"
+    },
+    {
+      "id": "C3",
+      "label": "historique conservé : deux observations, aucune écrasée",
+      "ok": true,
+      "history": [
+        {
+          "balance": "1500.500000",
+          "observed_at": "2026-09-20"
+        },
+        {
+          "balance": "1400.000000",
+          "observed_at": "2026-09-24"
+        }
+      ]
+    },
+    {
+      "id": "C4",
+      "label": "la correction ne fabrique aucun terme",
+      "ok": true
+    },
+    {
+      "id": "C5",
+      "label": "compte de 3 000 € ajouté : patrimoine net 1 600 €",
+      "ok": true,
+      "netWorth": 1600
+    },
+    {
+      "id": "R1",
+      "label": "Flux sans opération : « Non observé », jamais « 0 € »",
+      "ok": true,
+      "tuiles": "Revenus observés Non observé Mois en cours · aucune opération saisie Dépenses de consommation Non observé Hors transferts, investissements e"
+    },
+    {
+      "id": "R0",
+      "label": "prévision Flux : service de dette et point bas « Non calculable » avec la raison",
+      "ok": true
+    },
+    {
+      "id": "R2",
+      "label": "après rechargement : revenus 2 450,35 €, dépenses « Non observé » (aucune saisie), pas « 0 € »",
+      "ok": true,
+      "tuiles": "Revenus observés 2 450,35 € Mois en cours · Incomplet Dépenses de consommation Non observé Hors transferts, investissements et service de de"
+    },
+    {
+      "id": "R3",
+      "label": "persistance : une transaction ACTUAL INCOME en EUR, sans catégorie ni solde dérivé",
+      "ok": true,
+      "transaction": {
+        "amount": "2450.350000",
+        "currency": "EUR",
+        "category_id": null,
+        "kind_override": "INCOME",
+        "data_kind": "ACTUAL",
+        "transaction_date": "2026-09-23"
+      },
+      "soldes": "1"
+    },
+    {
+      "id": "R4",
+      "label": "aucun double comptage : le patrimoine net reste 1 600 €",
+      "ok": true,
+      "netWorth": 1600
+    },
+    {
+      "id": "R5",
+      "label": "Aujourd'hui : le flux du mois porte ce revenu observé",
+      "ok": true,
+      "monthFlow": {
+        "periodStart": "2026-09-01",
+        "periodEnd": "2026-09-30",
+        "partial": true,
+        "income": 2450.35,
+        "essentialExpenses": 0,
+        "debtService": 0,
+        "freeCashFlow": 2450.35,
+        "unclassifiedFlows": 0,
+        "reserve": "Le mois n’est pas intégralement couvert par l’historique déclaré : le solde porte sur ce qui est connu."
+      }
+    },
+    {
+      "id": "R6",
+      "label": "aucun brut, impôt ni rôle de carrière fabriqué",
+      "ok": true
+    },
+    {
+      "id": "K1",
+      "label": "le tiroir de correction reprend le montant enregistré",
+      "ok": true,
+      "prefilled": "2450,35"
+    },
+    {
+      "id": "K2",
+      "label": "après rechargement : revenus 2 405,35 €, ligne marquée corrigée",
+      "ok": true,
+      "tuiles": "Revenus observés 2 405,35 € Mois en cours · Incomplet Dépenses de consommation Non observé Hors transferts, investisseme"
+    },
+    {
+      "id": "K3",
+      "label": "base : une seule transaction corrigée en place, aucune régularisation fabriquée",
+      "ok": true,
+      "transactions": 1
+    },
+    {
+      "id": "K4",
+      "label": "piste : avant, après, motif, champ modifié, acteur = propriétaire, rôle constaté",
+      "ok": true,
+      "piste": {
+        "actor_user_id": "63710c42-8f25-4fba-b01a-1b6779c1895f",
+        "executed_by": "service_role",
+        "reason": "Montant saisi avant retenue à la source",
+        "before_values": {
+          "label": "Salaire septembre",
+          "amount": "2450.350000",
+          "transaction_date": "2026-09-23"
+        },
+        "after_values": {
+          "label": "Salaire septembre",
+          "amount": "2405.350000",
+          "transaction_date": "2026-09-23"
+        },
+        "changed_fields": [
+          "amount"
+        ]
+      }
+    },
+    {
+      "id": "K5",
+      "label": "seconde décision sur état périmé : 409, message fixe, rien d'écrasé",
+      "ok": true,
+      "status": 409,
+      "body": {
+        "error": "Ce revenu a changé depuis son affichage : rechargez la page avant de le corriger.",
+        "code": "CONFLICT"
+      }
+    },
+    {
+      "id": "K6",
+      "label": "l'historique de correction est lisible dans le tiroir",
+      "ok": true,
+      "extrait": "e compte et la devise ne se corrigent pas ici. Corrections précédentes 24 septembre 2026 · montant : 2 450,35 € → 2 405,35 € (Montant saisi avant retenue à la source) Annuler Enregistrer la correction"
+    },
+    {
+      "id": "K7",
+      "label": "propagation : Aujourd'hui porte 2405.35 (plus 2450.35), patrimoine net inchangé à 1 600 €",
+      "ok": true,
+      "monthFlow": {
+        "periodStart": "2026-09-01",
+        "periodEnd": "2026-09-30",
+        "partial": true,
+        "income": 2405.35,
+        "essentialExpenses": 0,
+        "debtService": 0,
+        "freeCashFlow": 2405.35,
+        "unclassifiedFlows": 0,
+        "reserve": "Le mois n’est pas intégralement couvert par l’historique déclaré : le solde porte sur ce qui est connu."
+      }
+    },
+    {
+      "id": "T1",
+      "label": "opération enregistrée NON CLASSÉE (aucune catégorie supposée), en EUR, affichée −45,20 €",
+      "ok": true,
+      "ligne": "22 septembre 2026 Courses marché Sans catégorie À classer −45,20 € Nature de la catégorie Revenu Dépense Transfert interne Investissement Épargne Service de dette Impôt Remboursement Autre entrée Autre sortie À classer",
+      "base": {
+        "category_id": null,
+        "currency": "EUR",
+        "amount": "-45.200000"
+      }
+    },
+    {
+      "id": "T2",
+      "label": "structure des dépenses : « aucune dépense observée », jamais une grille de 0 €",
+      "ok": true,
+      "structure": "STRUCTURE DES DÉPENSES Mois en cours Aucune dépense de consommation observée ce mois-ci."
+    },
+    {
+      "id": "X1",
+      "label": "opération sur un compte CHF : devise du compte (CHF), pas la devise de lecture",
+      "ok": true,
+      "devise": "CHF"
+    },
+    {
+      "id": "X2",
+      "label": "opération CHF NON CLASSÉE : nommée et exclue, mais aucun total n'en dépend (revenu intact)",
+      "ok": true,
+      "tuiles": "Revenus observés 2 405,35 € Mois en cours · Incomplet Dépenses de consommation Non observé Hors transferts, investissements et service de dette Surplus avant se"
+    },
+    {
+      "id": "X6",
+      "label": "opération CHF classée en dépense : consommation et surplus « Non calculable », revenu 2 405,35 € conservé",
+      "ok": true,
+      "tuiles": "Revenus observés 2 405,35 € Mois en cours · Incomplet Dépenses de consommation Non calculable Hors transferts, investissements et service de dette Surplus avant service de dette Non calculable Surplus"
+    },
+    {
+      "id": "X5",
+      "label": "l'encadré qualité NOMME la devise non convertie, et la série touchée n'a pas de barre",
+      "ok": true,
+      "encadre": "Qualité des données : Incomplet profondeur d’historique non déclarée par la source : aucun mois ne peut être certifié complet · 1 transaction(s) non classifiée(s) · 1 opération(s) dans une autre devise que EUR : non converties, elles sont exclues des totaux. Les agrégats portent sur ce qui est réellement classifié, sans substitution."
+    },
+    {
+      "id": "X3",
+      "label": "clôture d'un mois avec opération non convertie refusée (422), aucune clôture écrite",
+      "ok": true,
+      "status": 422,
+      "body": {
+        "error": "Ce mois contient 1 opération(s) dans une autre devise que EUR, non converties : il ne peut pas être clôturé.",
+        "code": "REJECTED"
+      }
+    },
+    {
+      "id": "X4",
+      "label": "formulaire : une opération sur compte CHF est refusée avec la raison, sans écriture",
+      "ok": true,
+      "message": "Ce compte est en CHF et votre lecture en EUR : les flux dans plusieurs devises ne sont pas encore convertis, cette opération serait exclue des totaux."
+    },
+    {
+      "id": "M3",
+      "label": "tiroir de correction utilisable sur mobile (dans la largeur de l'écran)",
+      "ok": true,
+      "box": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "id": "M2",
+      "label": "Flux sur mobile sans débordement horizontal",
+      "ok": true,
+      "scrollWidth": 390
+    },
+    {
+      "id": "M1",
+      "label": "Dettes sur mobile sans débordement horizontal",
+      "ok": true,
+      "scrollWidth": 390
+    },
+    {
+      "id": "E1",
+      "label": "aucune erreur JavaScript",
+      "ok": true,
+      "errors": []
+    }
+  ]
+}

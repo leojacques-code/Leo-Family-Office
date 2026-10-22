@@ -329,8 +329,14 @@ function bridgeContext(
   };
 }
 
-/** EV → Equity : − dette brute + cash ± éléments déclarés. Jamais EV × détention. */
-function equityFromEnterprise(enterprise: BusinessAmount, context: BridgeContext): BusinessAmount {
+/**
+ * EV → Equity : − dette brute + cash ± éléments déclarés. Jamais EV × détention.
+ * Exporté pour que les vues (sensibilités) consomment CE pont au lieu de le recoder.
+ */
+export function equityFromEnterprise(
+  enterprise: BusinessAmount,
+  context: Pick<BridgeContext, "grossDebt" | "cash" | "bridgeItemsTotal">,
+): BusinessAmount {
   return sumAll([
     enterprise,
     {

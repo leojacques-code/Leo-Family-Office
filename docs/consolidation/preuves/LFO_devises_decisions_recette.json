@@ -1,0 +1,77 @@
+{
+  "date": "2026-09-23",
+  "scope": "Decision Lab : conservation et rendu des devises ; calculs non vérifiés",
+  "baseline": "49835c503df3cc1f7c92800fe45f7c7bf9fb88e2",
+  "environment": {
+    "database": "lfo_decision_currency_20260923",
+    "localOnly": true,
+    "migrations": 49,
+    "publicTables": 107,
+    "auth": "local-fixture"
+  },
+  "save": {
+    "via": "Navigateur : Lancer et enregistrer",
+    "acknowledged": true,
+    "caseId": "5bfc1386-a00d-42ee-a4ad-fc19b53871f6",
+    "runId": "b1a9560a-62ee-4849-9377-74ea82abac40",
+    "sqlCurrency": "USD",
+    "sqlSnapshotRunMatches": true,
+    "apiStatus": 200,
+    "apiSnapshotCurrency": "USD",
+    "snapshotBlockers": []
+  },
+  "reload": {
+    "via": "rechargement /decision-lab puis GET /api/state",
+    "profileCurrency": "CHF",
+    "savedResultCurrency": "USD",
+    "runId": "b1a9560a-62ee-4849-9377-74ea82abac40",
+    "snapshotBlockers": [],
+    "limitation": "Le résultat persiste dans API/repository ; l’écran courant se réinitialise, sans sélection de cas sauvegardé."
+  },
+  "rejection": {
+    "currency": "usd",
+    "httpStatus": 400,
+    "message": "Résultat Decision Lab V2 invalide",
+    "sqlRunCountAfter": 1
+  },
+  "visual": {
+    "desktop": [
+      1280,
+      900
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "globalDocumentWidths": [
+      1280,
+      390
+    ],
+    "mobileTable": {
+      "clientWidth": 324,
+      "scrollWidth": 433,
+      "overflowX": "auto"
+    },
+    "wideWindowNoticePreserved": true,
+    "browserErrorsBeforeIntentional400": [],
+    "inspectedBy": "author",
+    "mobileCapture": "nouvelle exécution USD affichée sans sauvegarde, menu fermé et stabilisé"
+  },
+  "checks": {
+    "targetedTests": 14,
+    "files": 2,
+    "independentReview": "favorable, 14 tests séparés ; complément CSS relu statiquement",
+    "lint": "passed",
+    "typescript": "passed",
+    "build": "passed",
+    "financialTestsRun": false
+  },
+  "cleanup": {
+    "temporaryDatabaseRemaining": 0,
+    "productionModified": false
+  },
+  "screenshots": {
+    "LFO_devises_decisions_bureau.png": "e8aff9ca56b797c49a9f3f6729f623689e8096484f5c599b09e98a0c99a02aad",
+    "LFO_devises_decisions_mobile.png": "72e9ee6078527c889f2af90150b14f834cea497ac30a7b3a25547f7379551b3d"
+  }
+}

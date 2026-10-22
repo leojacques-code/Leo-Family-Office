@@ -9,6 +9,7 @@ import {
   registrySearchSchema,
   registryStateSchema,
 } from "@/lib/validation/registry";
+import { routeFailure as failure } from "@/lib/route-failure";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -36,20 +37,11 @@ export const runtime = "nodejs";
  * traverse cette route.
  */
 
-function failure(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message === "UNAUTHORIZED") {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
-  console.error(fallback, error);
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ error: message }, { status: 400 });
-}
-
 export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const params = new URL(request.url).searchParams;
-    const repository = getRegistryRepository();
+    const repository = await getRegistryRepository();
 
     if (params.get("connections") === "1") {
       return NextResponse.json(
@@ -79,7 +71,7 @@ export async function POST(request: Request) {
   try {
     await requireAuthenticated();
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-    const repository = getRegistryRepository();
+    const repository = await getRegistryRepository();
 
     if (body && "lookup" in body) {
       const parsed = registryLookupSchema.safeParse(body.lookup);
@@ -128,7 +120,7 @@ export async function PATCH(request: Request) {
         { status: 400 },
       );
     }
-    const repository = getRegistryRepository();
+    const repository = await getRegistryRepository();
 
     switch (parsed.data.action) {
       case "link":

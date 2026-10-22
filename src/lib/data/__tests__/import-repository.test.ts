@@ -103,7 +103,7 @@ describe("acquisition — cloisonnement du compte cible", () => {
     // La lecture est filtrée par user_id : le compte d'un autre propriétaire revient vide,
     // même en connaissant son UUID.
     withTables({ financial_accounts: { data: [], error: null } });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await expect(
       repository.analyze({ ...analyzeRequest, accountId: FOREIGN_ACCOUNT }, file),
     ).rejects.toThrow(/Compte cible introuvable/);
@@ -117,14 +117,14 @@ describe("acquisition — cloisonnement du compte cible", () => {
         error: null,
       },
     });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await expect(repository.analyze(analyzeRequest, file)).rejects.toThrow(/inactif/);
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it("filtre la lecture du compte par propriétaire ET par identifiant", async () => {
     const builders = withTables({ financial_accounts: { data: [], error: null } });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(analyzeRequest, file).catch(() => undefined);
     const calls = (builders.get("financial_accounts")!.calls as Array<[string, unknown[]]>).filter(
       ([method]) => method === "eq",
@@ -151,7 +151,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
   });
 
   it("n'appelle QUE la RPC d'analyse", async () => {
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(analyzeRequest, file);
     const called = mocks.rpc.mock.calls.map(([name]) => name);
     expect(called).toEqual(["lfo_analyze_import_session"]);
@@ -159,13 +159,13 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
   });
 
   it("ne dépose aucun fichier au coffre quand la conservation n'est pas demandée", async () => {
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(analyzeRequest, file);
     expect(mocks.storageFrom).not.toHaveBeenCalled();
   });
 
   it("persiste les lignes BRUTES telles quelles, pas une reconstitution", async () => {
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(analyzeRequest, file);
     const raw = analysisPayload().raw as Array<{
       row_number: number;
@@ -179,7 +179,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
   });
 
   it("transmet le mapping et les conventions réellement appliqués", async () => {
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(analyzeRequest, file);
     const session = analysisPayload().session as Record<string, unknown>;
     expect(session.mapping).toEqual({ transactionDate: 0, label: 1, amount: 2, currency: 3 });
@@ -193,7 +193,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
   });
 
   it("transmet une clé de rapprochement par ligne, distincte à chaque ligne", async () => {
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(analyzeRequest, file);
     const normalized = analysisPayload().normalized as Array<Record<string, unknown>>;
     const keys = normalized.map((row) => row.match_key);
@@ -202,7 +202,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
   });
 
   it("ne transmet aucune catégorie de flux", async () => {
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(analyzeRequest, file);
     const serialised = JSON.stringify(analysisPayload());
     expect(serialised).not.toContain("category");
@@ -212,7 +212,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-27T12:00:00.000Z"));
     try {
-      const repository = createImportRepository();
+      const repository = createImportRepository(OWNER);
       await repository.analyze(analyzeRequest, file);
       const session = analysisPayload().session as Record<string, unknown>;
       expect(session.observation_date).toBe("2026-08-27");
@@ -224,7 +224,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
   });
 
   it("transmet la déclaration de stabilité, fausse par défaut", async () => {
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(analyzeRequest, file);
     expect(
       (analysisPayload().session as Record<string, unknown>).stable_transaction_id_declared,
@@ -245,7 +245,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
       import_sessions: { data: [{ source_id: "source-1" }], error: null },
       import_normalized_records: { data: [], error: null },
     });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze({ ...analyzeRequest, stableTransactionIdDeclared: true }, file);
 
     const identityCalls = builders.get("import_normalized_records")!.calls as Array<
@@ -269,7 +269,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
       import_sessions: { data: [{ source_id: "source-1" }], error: null },
       import_normalized_records: { data: [], error: null },
     });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(analyzeRequest, file);
     const calls = builders.get("import_normalized_records")!.calls as Array<[string, unknown[]]>;
     // La seule lecture de cette table reste celle des identifiants de staging du preview.
@@ -285,7 +285,7 @@ describe("acquisition — le dry-run n'écrit aucun fait", () => {
       import_sessions: { data: [{ source_id: "source-1" }], error: null },
       import_normalized_records: { data: [], error: null },
     });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(analyzeRequest, file);
     const calls = builders.get("transactions")!.calls as Array<[string, unknown[]]>;
     expect(calls.filter(([method]) => method === "eq")).toEqual([
@@ -322,7 +322,7 @@ describe("acquisition — conservation du fichier à la validation seulement", (
       import_sessions: { data: [{ source_id: "source-1" }], error: null },
       import_normalized_records: { data: [], error: null },
     });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.analyze(retaining, file);
     expect(mocks.storageFrom).not.toHaveBeenCalled();
     // L'INTENTION est enregistrée ; elle sera honorée à la validation.
@@ -337,7 +337,7 @@ describe("acquisition — conservation du fichier à la validation seulement", (
         error: null,
       },
     });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await expect(repository.analyze(retaining, file)).rejects.toThrow(/déjà été importé/);
     expect(mocks.storageFrom).not.toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalled();
@@ -355,7 +355,7 @@ describe("acquisition — conservation du fichier à la validation seulement", (
       },
       import_normalized_records: { data: [], error: null },
     });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await expect(repository.analyze(analyzeRequest, file)).resolves.toBeTruthy();
   });
 });
@@ -390,7 +390,7 @@ describe("acquisition — conservation adressée par le contenu", () => {
       import_sessions: sessionAfterCommit(),
       documents: { data: [{ id: "doc-1" }], error: null },
     });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.commit("session-1", [], file);
     expect(upload).toHaveBeenCalledWith(
       `${OWNER}/imports/${"a".repeat(64)}.csv`,
@@ -404,7 +404,7 @@ describe("acquisition — conservation adressée par le contenu", () => {
       import_sessions: sessionAfterCommit(),
       documents: { data: [{ id: "doc-1" }], error: null },
     });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.commit("session-1", [], file);
     expect(mocks.rpc).toHaveBeenCalledWith("lfo_attach_import_document", {
       p_user_id: OWNER,
@@ -418,21 +418,21 @@ describe("acquisition — conservation adressée par le contenu", () => {
 
   it("ne conserve rien quand la session ne l'a pas demandé", async () => {
     withTables({ import_sessions: sessionAfterCommit({ retain_file_requested: false }) });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.commit("session-1", [], file);
     expect(upload).not.toHaveBeenCalled();
   });
 
   it("ne conserve rien quand la session porte déjà un document", async () => {
     withTables({ import_sessions: sessionAfterCommit({ document_id: "doc-deja-la" }) });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.commit("session-1", [], file);
     expect(upload).not.toHaveBeenCalled();
   });
 
   it("ne conserve rien si le fichier n'accompagne pas la validation", async () => {
     withTables({ import_sessions: sessionAfterCommit() });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await repository.commit("session-1", []);
     expect(upload).not.toHaveBeenCalled();
   });
@@ -446,7 +446,7 @@ describe("acquisition — validation et abandon", () => {
 
   it("transmet les inclusions nommées à la RPC de validation", async () => {
     mocks.rpc.mockResolvedValue({ data: "session-1", error: null });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     const result = await repository.commit("session-1", ["record-1"]);
     expect(mocks.rpc).toHaveBeenCalledWith("lfo_commit_import_session", {
       p_user_id: OWNER,
@@ -457,13 +457,13 @@ describe("acquisition — validation et abandon", () => {
 
   it("propage l'échec d'une validation au lieu de la déclarer réussie", async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: "déjà été importé" } });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await expect(repository.commit("session-1", [])).rejects.toThrow(/déjà été importé/);
   });
 
   it("abandonne par la RPC dédiée, sans écriture de table", async () => {
     mocks.rpc.mockResolvedValue({ data: "session-1", error: null });
-    const repository = createImportRepository();
+    const repository = createImportRepository(OWNER);
     await expect(repository.discard("session-1")).resolves.toBe("session-1");
     expect(mocks.rpc).toHaveBeenCalledWith("lfo_discard_import_session", {
       p_user_id: OWNER,

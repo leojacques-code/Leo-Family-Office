@@ -99,11 +99,7 @@
 }
 
 /*
- * La question du §3, au-dessus de sa réponse.
- *
- * Elle est la seule PHRASE permanente de chaque bloc : le §3 de V10 interdit le paragraphe
- * explicatif sous un visuel, et le critère 1 du gate visuel fait échouer une page dont « plus
- * d'un paragraphe se trouve au-dessus de la ligne de flottaison ».
+ * D-UX-01/02 : libellé financier permanent, question et explication dans l'aide partagée.
  */
 .today-question {
   margin: 0 0 10px;
@@ -112,6 +108,32 @@
   font-weight: 650;
   letter-spacing: 0.01em;
   text-transform: none;
+}
+
+.today-metric-label {
+  display: block;
+}
+
+.today-metric-label .metric-help {
+  display: inline;
+  position: static;
+}
+
+.today-metric-label .metric-help-button {
+  margin-left: 6px;
+}
+
+/* L'aide ouverte prend sa place dans le flux : elle ne recouvre jamais le montant. */
+.today-metric-label .metric-help-panel {
+  position: static;
+  display: block;
+  width: min(360px, 100%);
+  margin-top: 6px;
+  transform: none;
+}
+
+.today-metric-label .metric-help-panel[hidden] {
+  display: none;
 }
 
 /* §26 de V10 : chiffres majeurs 22-32 px. Tabular nums, §10.2. */
@@ -183,6 +205,8 @@
 }
 
 .today-label {
+  max-width: 100%;
+  min-width: 0;
   color: var(--text-muted);
   font-size: 12px;
 }

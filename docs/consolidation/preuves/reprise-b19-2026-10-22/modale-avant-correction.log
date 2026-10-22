@@ -1,0 +1,44 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+ ❯ |dom| src/components/__tests__/modal-focus.test.tsx (3 tests | 1 failed) 261ms
+     × ne piège pas le clavier sur une action native exclue de la tabulation 221ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |dom| src/components/__tests__/modal-focus.test.tsx > Modal : focus d'un dialogue modal > ne piège pas le clavier sur une action native exclue de la tabulation
+Error: expect(element).toHaveFocus()
+
+Expected element with focus:
+  <button
+  type="button"
+>
+  Dernier accessible
+</button>
+Received element with focus:
+  <button
+  tabindex="-1"
+  type="button"
+>
+  Action hors tabulation
+</button>
+ ❯ src/components/__tests__/modal-focus.test.tsx:31:72
+     29|     screen.getByRole("button", { name: "Fermer" }).focus();
+     30|     fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+     31|     expect(screen.getByRole("button", { name: "Dernier accessible" }))…
+       |                                                                        ^
+     32|   });
+     33|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  17:59:28
+   Duration  1.55s (transform 166ms, setup 167ms, import 273ms, tests 261ms, environment 558ms)
+

@@ -1,5 +1,9 @@
+import { formatCurrency } from "@/lib/presentation/currency";
 import { MONTHS_PER_PERIOD } from "@/lib/types";
 import type {
+  DebtTermResolution,
+  DebtTermsResolution,
+  DeclaredDebtTerms,
   DataKind,
   EarlyRepayment,
   InterestConvention,
@@ -51,7 +55,6 @@ import type {
 
 const DAY = 86_400_000;
 const CENT = 0.005;
-const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const DATE_FR = new Intl.DateTimeFormat("fr-FR", {
   day: "numeric",
   month: "long",
@@ -108,6 +111,16 @@ export type LoanFlagCode =
   | "EARLY_PAYOFF"
   | "BALANCE_MISMATCH"
   | "PAYMENT_EXCEEDS_AMORTISATION"
+  | "INCLUDED_INSURANCE_UNKNOWN"
+  | "DEFERRAL_TERM_EFFECT_UNKNOWN"
+  | "EARLY_REPAYMENT_PLANNED"
+  | "RATE_REVISION_PAYMENT_KEPT"
+  | "BALANCE_PREDATES_REPAYMENT"
+  | "AMENDMENT_MATURITY_NOT_ON_SCHEDULE"
+  | "EVENTS_NOT_APPLIED_TO_PROVIDED_SCHEDULE"
+  | "PLANNED_REPAYMENT_OVERDUE"
+  | "CONTRACT_STEP_AFTER_AMENDMENT"
+  | "TERM_ENDED_WITH_BALANCE"
   | "INSURANCE_TREATMENT_UNKNOWN"
   | "DEFERRAL_INTEREST_UNKNOWN"
   | "DEFERRAL_CONTRADICTORY"
@@ -117,7 +130,10 @@ export type LoanFlagCode =
   | "PROVIDED_SCHEDULE_USED"
   | "VARIABLE_RATE_UNPROJECTABLE"
   | "RATE_ASSUMPTION_APPLIED"
-  | "BALLOON_AMOUNT_MISSING";
+  | "BALLOON_AMOUNT_MISSING"
+  | "TERMS_DERIVED"
+  | "TERMS_UNRESOLVED"
+  | "INSURANCE_PERIOD_UNBOUNDED";
 
 export interface LoanScheduleFlag {
   code: LoanFlagCode;
@@ -161,12 +177,17 @@ function summarise(
   flags: LoanScheduleFlag[] = [],
 ): LoanSchedule {
   const sorted = [...entries].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  // Les bornes sont celles des ÉCHÉANCES du prêt : un débit d'assurance à sa propre date ou
+  // un frais ponctuel ne déplace ni la première ni la dernière échéance.
+  const dated = sorted.filter(
+    (entry) => entry.entryKind !== "INSURANCE" && entry.entryKind !== "CHARGE",
+  );
   return {
     liabilityId,
     entries: sorted,
     kind,
-    firstDueDate: sorted[0]?.dueDate ?? null,
-    lastDueDate: sorted.at(-1)?.dueDate ?? null,
+    firstDueDate: dated[0]?.dueDate ?? null,
+    lastDueDate: dated.at(-1)?.dueDate ?? null,
     totalInterest: sorted.reduce((sum, entry) => sum + entry.interest, 0),
     totalCashOut: sorted.reduce((sum, entry) => sum + entry.totalCashOut, 0),
     flags,
@@ -305,7 +326,37 @@ function periodInterest(
 
 /** Assurance par échéance, 0 quand la donnée n'existe pas (l'absence n'est pas une valeur). */
 function insurancePerPayment(liability: Liability): number {
+  // Une assurance séparée a son propre calendrier : la compter aussi par échéance la
+  // compterait deux fois. Absente ou inconnue : aucune prime par échéance.
+  const mode = liability.insuranceMode;
+  if (mode === "SEPARATE" || mode === "NONE" || mode === "UNKNOWN") return 0;
   return liability.monthlyInsurance ?? 0;
+}
+
+/** L'assurance future est-elle connue, y compris déclarée nulle ? */
+/**
+ * Deux périodes de prime d'une même police qui se recouvrent feraient compter deux primes
+ * pour le même débit. Une période ouverte (sans dernier débit) court jusqu'à la fin du prêt :
+ * seule la DERNIÈRE période peut l'être.
+ */
+export function insurancePeriodsOverlap(
+  periods: ReadonlyArray<{ firstDebitDate: string; lastDebitDate: string | null }>,
+): boolean {
+  const sorted = [...periods].sort((a, b) => a.firstDebitDate.localeCompare(b.firstDebitDate));
+  return sorted.some((period, index) => {
+    const next = sorted[index + 1];
+    return (
+      next !== undefined &&
+      (period.lastDebitDate === null || period.lastDebitDate >= next.firstDebitDate)
+    );
+  });
+}
+
+export function insuranceKnown(liability: Liability): boolean {
+  const mode = liability.insuranceMode;
+  if (mode === "NONE" || mode === "SEPARATE") return true;
+  if (mode === "UNKNOWN") return false;
+  return liability.monthlyInsurance !== null;
 }
 
 function feesPerPayment(liability: Liability): number {
@@ -337,6 +388,16 @@ export function totalContractualPayment(liability: Liability): number {
  */
 export function amortisingPayment(liability: Liability, atDate?: string): number {
   const declared = declaredPaymentAt(liability, atDate);
+  // Assurance INCLUSE de montant inconnu : le paiement mêle capital, intérêts et prime sans
+  // dire dans quelle proportion. La part qui amortit est celle du contrat (capital, taux,
+  // durée déclarés), jamais le paiement entier, qui ferait passer la prime pour du capital.
+  if (
+    declared > 0 &&
+    liability.paymentIncludesInsurance === true &&
+    liability.monthlyInsurance === null &&
+    Math.trunc(liability.paymentCount) > 0
+  )
+    return theoreticalPayment(liability);
   if (declared > 0) {
     // `null` = convention inconnue. On retient l'hypothèse la moins déformante : ne rien
     // retrancher, ce qui laisse l'amortissement identique à la donnée déclarée. Le drapeau
@@ -426,6 +487,153 @@ function deferralOf(liability: Liability): {
   return { kind: declared.kind, months };
 }
 
+// ─── Contrat adaptatif : résolution des termes (B16) ──────────────────────────────────
+
+/** Plafond de la recherche d'une durée : cent ans d'échéances mensuelles. */
+const MAX_DERIVED_PAYMENTS = 1200;
+
+/**
+ * Résout les termes d'un contrat dont la mensualité, la durée ou la maturité ne sont pas
+ * toutes déclarées (document 04, étape C).
+ *
+ *   * durée déclarée : retenue telle quelle ;
+ *   * sinon maturité déclarée : la durée est le rang de l'échéance qui tombe à cette date ;
+ *     une maturité hors du calendrier des échéances n'est PAS arrondie, elle bloque ;
+ *   * sinon, pour un prêt amortissable, mensualité déclarée : la durée est celle que CE
+ *     MOTEUR met à rembourser le capital avec cette mensualité. Aucune seconde formule : la
+ *     boucle d'amortissement, qui ajuste la dernière échéance, est le seul producteur. Une
+ *     mensualité qui ne rembourse pas le capital dans le plafond bloque ;
+ *   * la maturité non déclarée est la date de la dernière échéance résolue ;
+ *   * la mensualité non déclarée reste celle que le moteur dérive du contrat.
+ *
+ * Un contrat non résoluble garde une durée de 0 : son échéancier est MISSING, et les métriques
+ * disent « non projetable », jamais zéro. Fonction pure.
+ */
+export function resolveContractTerms(liability: Liability, declared: DeclaredDebtTerms): Liability {
+  const payment =
+    declared.monthlyPayment !== null && declared.monthlyPayment > 0
+      ? declared.monthlyPayment
+      : null;
+  const base: Liability = {
+    ...liability,
+    monthlyPayment: payment ?? 0,
+    paymentCount: declared.paymentCount ?? 0,
+    maturityDate: declared.maturityDate ?? "",
+    declaredTerms: { ...declared, monthlyPayment: payment },
+  };
+  const profile = base.amortisationProfile ?? "AMORTIZING";
+  const unresolved = (blocker: NonNullable<DebtTermsResolution["blocker"]>): Liability => ({
+    ...base,
+    paymentCount: 0,
+    termsResolution: {
+      monthlyPayment: payment !== null ? "DECLARED" : "UNRESOLVED",
+      paymentCount: "UNRESOLVED",
+      maturityDate: declared.maturityDate !== null ? "DECLARED" : "UNRESOLVED",
+      blocker,
+    },
+  });
+  if (parseIsoDate(base.firstPaymentDate) === null) return unresolved("TERMS_INSUFFICIENT");
+
+  let count: number;
+  let countResolution: DebtTermResolution;
+  if (declared.paymentCount !== null && declared.paymentCount >= 1) {
+    count = Math.trunc(declared.paymentCount);
+    countResolution = "DECLARED";
+  } else if (declared.maturityDate !== null) {
+    let found = 0;
+    for (let rank = 1; rank <= MAX_DERIVED_PAYMENTS; rank += 1) {
+      const due = dueDateOf(base, rank);
+      if (due === declared.maturityDate) {
+        found = rank;
+        break;
+      }
+      if (due > declared.maturityDate) break;
+    }
+    if (found === 0) return unresolved("MATURITY_NOT_ON_SCHEDULE");
+    count = found;
+    countResolution = "DERIVED_FROM_MATURITY";
+  } else if (payment !== null && profile === "AMORTIZING" && base.principal > 0) {
+    // Assurance INCLUSE de montant inconnu : la part de la mensualité qui rembourse capital
+    // et intérêts est inconnue. En déduire une durée compterait la prime comme du capital.
+    if (base.paymentIncludesInsurance === true && base.monthlyInsurance === null)
+      return unresolved("INCLUDED_INSURANCE_UNKNOWN");
+    const probe = amortise({
+      liability: { ...base, paymentCount: MAX_DERIVED_PAYMENTS },
+      openingBalance: base.principal,
+      firstPaymentNumber: 1,
+      paymentsToProduce: MAX_DERIVED_PAYMENTS,
+      events: [],
+    });
+    const payments = probe.entries.filter((row) => row.entryKind === "PAYMENT");
+    const last = payments.at(-1);
+    if (!last || last.closingBalance > CENT || payments.length >= MAX_DERIVED_PAYMENTS)
+      return unresolved("PAYMENT_DOES_NOT_AMORTISE");
+    count = payments.length;
+    countResolution = "DERIVED_FROM_PAYMENT";
+  } else {
+    return unresolved("TERMS_INSUFFICIENT");
+  }
+
+  const resolved: Liability = { ...base, paymentCount: count };
+  return {
+    ...resolved,
+    maturityDate: declared.maturityDate ?? dueDateOf(resolved, count),
+    termsResolution: {
+      monthlyPayment: payment !== null ? "DECLARED" : "DERIVED_FROM_COUNT",
+      paymentCount: countResolution,
+      maturityDate: declared.maturityDate !== null ? "DECLARED" : "DERIVED_FROM_COUNT",
+      blocker: null,
+    },
+  };
+}
+
+/**
+ * Raison pour laquelle des termes DÉCLARÉS ne permettent aucun échéancier, ou `null`.
+ * Sert à refuser un contrat avant écriture : la base contrôle la forme, jamais la finance.
+ */
+export function contractTermsBlocker(input: {
+  principal: number;
+  annualRate: number;
+  amortisationProfile: Liability["amortisationProfile"];
+  balloonAmount: number | null;
+  paymentFrequency: Liability["paymentFrequency"];
+  interestConvention: Liability["interestConvention"];
+  firstPaymentDate: string;
+  monthlyInsurance: number | null;
+  paymentIncludesInsurance: boolean | null;
+  /** Différé et paliers changent la durée qu'une mensualité met à rembourser le capital :
+   *  la validation doit résoudre les MÊMES termes que la lecture. */
+  deferral?: Liability["deferral"];
+  rateSchedule?: Liability["rateSchedule"];
+  paymentSchedule?: Liability["paymentSchedule"];
+  declared: DeclaredDebtTerms;
+}): DebtTermsResolution["blocker"] {
+  const draft: Liability = {
+    ...UNDECLARED_LOAN_TERMS,
+    id: "draft",
+    name: "",
+    lender: "",
+    principal: input.principal,
+    currentBalance: input.principal,
+    annualRate: input.annualRate,
+    monthlyPayment: 0,
+    paymentCount: 0,
+    firstPaymentDate: input.firstPaymentDate,
+    maturityDate: "",
+    amortisationProfile: input.amortisationProfile,
+    balloonAmount: input.balloonAmount,
+    paymentFrequency: input.paymentFrequency,
+    interestConvention: input.interestConvention,
+    monthlyInsurance: input.monthlyInsurance,
+    paymentIncludesInsurance: input.paymentIncludesInsurance,
+    ...(input.deferral ? { deferral: input.deferral } : {}),
+    ...(input.rateSchedule ? { rateSchedule: input.rateSchedule } : {}),
+    ...(input.paymentSchedule ? { paymentSchedule: input.paymentSchedule } : {}),
+    provenance: { kind: "USER_ASSUMPTION", confidence: "HIGH" },
+  };
+  return resolveContractTerms(draft, input.declared).termsResolution?.blocker ?? null;
+}
+
 // ─── Cœur d'amortissement ─────────────────────────────────────────────────────────────
 
 type LoanEvent =
@@ -441,6 +649,12 @@ interface AmortiseInput {
   paymentsToProduce: number;
   /** Événements datés à appliquer. Vide pour l'échéancier purement contractuel. */
   events: LoanEvent[];
+  /**
+   * Projection depuis un encours observé : les remboursements « mensualité réduite », même
+   * déjà compris dans cet encours, fixent la mensualité en vigueur. L'échéancier purement
+   * contractuel les ignore, comme il ignore les remboursements eux-mêmes.
+   */
+  projection?: boolean;
 }
 
 interface AmortiseResult {
@@ -473,7 +687,17 @@ function amortise(input: AmortiseInput): AmortiseResult {
   const months = monthsPerPeriod(liability);
   const convention = liability.interestConvention ?? "PROPORTIONAL";
   const profile = liability.amortisationProfile ?? "AMORTIZING";
-  const insurance = insurancePerPayment(liability);
+  // Assurance INCLUSE de montant inconnu : la mensualité déclarée reste la sortie réelle.
+  // Sa part au-delà de l'échéance contractuelle (capital, taux, durée) est celle que
+  // l'utilisateur dit incluse ; elle est portée en assurance, jamais en capital.
+  const includedUnknown =
+    liability.monthlyPayment > 0 &&
+    liability.paymentIncludesInsurance === true &&
+    liability.monthlyInsurance === null &&
+    Math.trunc(liability.paymentCount) > 0;
+  const insurance = includedUnknown
+    ? Math.max(0, liability.monthlyPayment - amortisingPayment(liability))
+    : insurancePerPayment(liability);
   const fees = feesPerPayment(liability);
   const deferral = deferralOf(liability);
   const declaredTreatment = liability.deferral?.interestTreatment ?? "UNKNOWN";
@@ -537,7 +761,15 @@ function amortise(input: AmortiseInput): AmortiseResult {
   ) {
     flags.push({
       code: "INSURANCE_TREATMENT_UNKNOWN",
-      detail: `Assurance de ${EUR.format(insurance)} par échéance déclarée sans préciser si la mensualité ${EUR.format(liability.monthlyPayment)} la contient. Supposée en sus : si elle était incluse, l'amortissement serait plus lent et le coût du crédit plus élevé.`,
+      detail: `Assurance de ${formatCurrency(insurance, liability.currency ?? null)} par échéance déclarée sans préciser si la mensualité ${formatCurrency(liability.monthlyPayment, liability.currency ?? null)} la contient. Supposée en sus : si elle était incluse, l'amortissement serait plus lent et le coût du crédit plus élevé.`,
+    });
+    assumed = true;
+  }
+
+  if (includedUnknown) {
+    flags.push({
+      code: "INCLUDED_INSURANCE_UNKNOWN",
+      detail: `La mensualité ${formatCurrency(liability.monthlyPayment, liability.currency ?? null)} contient une assurance de montant non déclaré : l'amortissement suit le contrat (capital, taux, durée), et la part restante, ${formatCurrency(insurance, liability.currency ?? null)} par échéance, est lue comme l'assurance incluse. À confirmer par le contrat.`,
     });
     assumed = true;
   }
@@ -595,9 +827,21 @@ function amortise(input: AmortiseInput): AmortiseResult {
         insurance: 0,
         fees: repayment.penalty ?? 0,
         closingBalance: balance - repaid,
-        kind: repayment.penalty === null ? "MODEL_ASSUMPTION" : "ACTUAL",
+        // Un remboursement PRÉVU est une intention déclarée, jamais un fait constaté.
+        kind: repayment.planned
+          ? "USER_ASSUMPTION"
+          : repayment.penalty === null
+            ? "MODEL_ASSUMPTION"
+            : "ACTUAL",
       }),
     );
+    if (repayment.planned) {
+      assumed = true;
+      flags.push({
+        code: "EARLY_REPAYMENT_PLANNED",
+        detail: `Remboursement anticipé prévu le ${frDate(event.date)} : intégré à la projection comme intention, non constaté.`,
+      });
+    }
     balance -= repaid;
 
     const remaining = firstPaymentNumber + paymentsToProduce - 1 - paymentNumber;
@@ -616,7 +860,102 @@ function amortise(input: AmortiseInput): AmortiseResult {
 
   const lastPaymentNumber = firstPaymentNumber + paymentsToProduce - 1;
   const totalPayments = Math.trunc(liability.paymentCount);
+
+  // B18 : reports d'échéances en cours de vie. Chaque report couvre les `months` échéances
+  // dont la date tombe à partir de sa date d'effet ; son effet sur la durée est DÉCLARÉ.
+  const windows = (liability.deferralPeriods ?? []).map((period) => {
+    let first = 1;
+    while (first <= MAX_DERIVED_PAYMENTS && dueDateOf(liability, first) < period.startDate)
+      first += 1;
+    return { ...period, first, end: first + period.months - 1 };
+  });
+  for (const window of windows) {
+    if (window.termEffect === "UNKNOWN") {
+      flags.push({
+        code: "DEFERRAL_TERM_EFFECT_UNKNOWN",
+        detail: `Report du ${frDate(window.startDate)} sans effet déclaré sur la durée : mensualité et durée maintenues par hypothèse ; un solde peut rester dû à la dernière échéance.`,
+      });
+      assumed = true;
+    }
+    if (window.kind === "TOTAL" && window.interestTreatment === "UNKNOWN") {
+      flags.push({
+        code: "DEFERRAL_INTEREST_UNKNOWN",
+        detail: `Report total du ${frDate(window.startDate)} sans convention d'intérêts : intérêts supposés capitalisés.`,
+      });
+      assumed = true;
+    }
+  }
   let previousDueDate = dueDateOf(liability, firstPaymentNumber - 1);
+
+  const remainingFrom = (rank: number) =>
+    Math.max(1, Math.min(lastPaymentNumber, totalPayments) - rank + 1);
+  const firstRankOnOrAfter = (date: string) => {
+    let rank = 1;
+    while (rank <= MAX_DERIVED_PAYMENTS && dueDateOf(liability, rank) < date) rank += 1;
+    return rank;
+  };
+  const firstRankAfter = (date: string) => {
+    let rank = 1;
+    while (rank <= MAX_DERIVED_PAYMENTS && dueDateOf(liability, rank) <= date) rank += 1;
+    return rank;
+  };
+  const stepDeduction =
+    liability.paymentIncludesInsurance === true ? insurancePerPayment(liability) : 0;
+  // Points de mensualité, dans l'ORDRE CHRONOLOGIQUE de leur date d'effet : à un même rang,
+  // un palier déclaré après un recalcul l'emporte, et réciproquement. À date égale, une
+  // clause du contrat passe avant un événement (order), puis le tri stable garde l'ordre
+  // déclaré.
+  const paymentPoints = [
+    ...(liability.paymentSchedule ?? []).map((step) => ({
+      rank: firstRankOnOrAfter(step.effectiveFrom),
+      date: step.effectiveFrom,
+      order: step.eventId ? 1 : 0,
+      kind: "STEP" as const,
+      amount: Math.max(0, step.amount - stepDeduction),
+    })),
+    ...(liability.paymentRecalculations ?? []).map((point) => ({
+      rank: firstRankOnOrAfter(point.date),
+      date: point.date,
+      order: 1,
+      kind: "RECALCULATE" as const,
+      amount: 0,
+    })),
+    ...windows
+      .filter((window) => window.termEffect === "RECALCULATE_PAYMENT")
+      .map((window) => ({
+        rank: window.end + 1,
+        date: dueDateOf(liability, window.end),
+        order: 1,
+        kind: "RECALCULATE" as const,
+        amount: 0,
+      })),
+    // Un remboursement « mensualité réduite » recalcule la mensualité à l'échéance qui le
+    // suit. Déjà compris dans l'encours observé, il n'est plus rejoué : sans ce point, la
+    // projection repartirait de la mensualité du contrat et raccourcirait la durée au lieu
+    // de réduire la mensualité déclarée.
+    ...(input.projection ? (liability.earlyRepayments ?? []) : [])
+      .filter((repayment) => repayment.outcome === "REDUCE_PAYMENT")
+      .map((repayment) => ({
+        rank: firstRankAfter(repayment.date),
+        date: repayment.date,
+        order: 1,
+        kind: "RECALCULATE" as const,
+        amount: 0,
+      })),
+  ].sort((a, b) => a.rank - b.rank || a.date.localeCompare(b.date) || a.order - b.order);
+  // Une projection qui démarre après un palier ou un recalcul en hérite : la mensualité en
+  // vigueur est celle du DERNIER point antérieur, recalculée sur l'encours de départ.
+  const inherited = paymentPoints.filter((point) => point.rank < firstPaymentNumber).at(-1);
+  if (inherited)
+    payment =
+      inherited.kind === "STEP"
+        ? inherited.amount
+        : pmt(
+            liability,
+            input.openingBalance,
+            annualRateAt(liability, dueDateOf(liability, firstPaymentNumber)),
+            remainingFrom(firstPaymentNumber),
+          );
 
   for (let offset = 0; offset < paymentsToProduce; offset += 1) {
     const paymentNumber = firstPaymentNumber + offset;
@@ -640,22 +979,33 @@ function amortise(input: AmortiseInput): AmortiseResult {
       previousDueDate,
       dueDate,
     );
-    // Un palier daté remplace le paiement à sa date d'effet, sans toucher au passé. En
-    // l'absence de palier, le paiement courant est conservé : il a pu être recalculé.
-    const stepped = steppedPaymentAt(liability, dueDate);
-    if (stepped !== null) {
-      const deduction =
-        liability.paymentIncludesInsurance === true ? insurancePerPayment(liability) : 0;
-      payment = Math.max(0, stepped - deduction);
-    }
+    // Paliers et recalculs de mensualité : appliqués UNE fois, à leur rang d'échéance.
+    // Réappliquer un palier à chaque échéance écraserait une mensualité recalculée depuis
+    // (remboursement anticipé, avenant de durée, fin de report).
+    for (const point of paymentPoints.filter((candidate) => candidate.rank === paymentNumber))
+      payment =
+        point.kind === "STEP"
+          ? point.amount
+          : pmt(liability, balance, annualRate, remainingFrom(paymentNumber));
 
-    const inDeferral = paymentNumber <= deferral.months;
+    const window = windows.find(
+      (candidate) => paymentNumber >= candidate.first && paymentNumber <= candidate.end,
+    );
+    const eventDeferralCapitalises =
+      window !== undefined && window.kind === "TOTAL" && window.interestTreatment !== "PAID";
+    const inDeferral = paymentNumber <= deferral.months || window !== undefined;
     const isFinalPayment = paymentNumber >= Math.min(lastPaymentNumber, totalPayments);
     let interestPaid = 0;
     let capitalised = 0;
     let principal = 0;
 
-    if (inDeferral && deferral.kind === "TOTAL" && totalDeferralCapitalises) {
+    if (
+      (window === undefined &&
+        inDeferral &&
+        deferral.kind === "TOTAL" &&
+        totalDeferralCapitalises) ||
+      eventDeferralCapitalises
+    ) {
       capitalised = accrued;
     } else if (inDeferral) {
       // Différé de principal : les intérêts, l'assurance et les frais restent dus.
@@ -673,7 +1023,7 @@ function amortise(input: AmortiseInput): AmortiseResult {
       if (capitalised > CENT && !negativeAmortisationFlagged) {
         flags.push({
           code: "NEGATIVE_AMORTISATION",
-          detail: `À la ${paymentNumber}e échéance, le paiement amortissant ${EUR.format(payment)} ne couvre pas l'intérêt ${EUR.format(accrued)} : l'encours augmente au lieu de diminuer.`,
+          detail: `À la ${paymentNumber}e échéance, le paiement amortissant ${formatCurrency(payment, liability.currency ?? null)} ne couvre pas l'intérêt ${formatCurrency(accrued, liability.currency ?? null)} : l'encours augmente au lieu de diminuer.`,
         });
         negativeAmortisationFlagged = true;
       }
@@ -766,7 +1116,7 @@ function repaymentEvents(liability: Liability): LoanEvent[] {
  *
  * C. Si un échéancier bancaire est fourni, il tient lieu de contrat et prime sans recalcul.
  */
-export function buildContractualSchedule(liability: Liability): LoanSchedule {
+function contractualScheduleCore(liability: Liability): LoanSchedule {
   if (hasProvidedSchedule(liability)) {
     return summarise(liability.id, fromProvided(liability, liability.providedSchedule), "ACTUAL");
   }
@@ -788,6 +1138,18 @@ export function buildContractualSchedule(liability: Liability): LoanSchedule {
   );
 }
 
+/**
+ * A. Échéancier contractuel, assurance séparée comprise sur son propre calendrier (B17).
+ * Un échéancier MISSING le reste : des débits d'assurance seuls ne le rendraient pas projetable.
+ */
+export function buildContractualSchedule(liability: Liability): LoanSchedule {
+  const core = contractualScheduleCore(liability);
+  if (core.kind === "MISSING") return core;
+  const opening = core.entries[0]?.openingBalance ?? liability.principal;
+  const merged = withSeparateInsurance(liability, core.entries, opening, null);
+  return summarise(liability.id, merged.entries, core.kind, [...core.flags, ...merged.flags]);
+}
+
 /** Nombre d'échéances contractuelles dont la date d'exigibilité est passée à `asOfDate`. */
 export function elapsedPaymentsAt(liability: Liability, asOfDate: string): number {
   if (hasProvidedSchedule(liability)) {
@@ -803,6 +1165,82 @@ export function elapsedPaymentsAt(liability: Liability, asOfDate: string): numbe
   return elapsed;
 }
 
+/** B. Échéancier forward, assurance séparée comprise, débits postérieurs à `asOfDate`. */
+export function buildForwardSchedule(liability: Liability, asOfDate: string): LoanSchedule {
+  const core = forwardScheduleCore(liability, asOfDate);
+  if (core.kind === "MISSING") return core;
+  const merged = withSeparateInsurance(liability, core.entries, liability.currentBalance, asOfDate);
+  return summarise(liability.id, merged.entries, core.kind, [...core.flags, ...merged.flags]);
+}
+
+// ─── Assurance séparée (B17) ─────────────────────────────────────────────────────────
+
+/** Dernière date contractuelle du prêt : borne des périodes « jusqu'à la fin du prêt ». */
+function loanEndDate(liability: Liability): string | null {
+  if (hasProvidedSchedule(liability))
+    return (
+      [...liability.providedSchedule].sort((a, b) => a.dueDate.localeCompare(b.dueDate)).at(-1)
+        ?.dueDate ?? null
+    );
+  if (!isUsable(liability)) return null;
+  return dueDateOf(liability, Math.trunc(liability.paymentCount));
+}
+
+/**
+ * Débits d'une assurance SÉPARÉE, à leurs propres dates. Chaque ligne ne porte que
+ * l'assurance : elle ne rembourse rien et ne change pas l'encours, qu'elle reprend de la
+ * ligne d'amortissement qui la précède pour que le solde tracé reste juste.
+ */
+function withSeparateInsurance(
+  liability: Liability,
+  entries: LoanScheduleEntry[],
+  startingBalance: number,
+  after: string | null,
+): { entries: LoanScheduleEntry[]; flags: LoanScheduleFlag[] } {
+  if (liability.insuranceMode !== "SEPARATE") return { entries, flags: [] };
+  const flags: LoanScheduleFlag[] = [];
+  const end = loanEndDate(liability);
+  const debits: Array<{ date: string; amount: number }> = [];
+  for (const policy of liability.insurancePolicies ?? []) {
+    for (const period of policy.periods) {
+      const last = period.lastDebitDate ?? end;
+      if (last === null) {
+        flags.push({
+          code: "INSURANCE_PERIOD_UNBOUNDED",
+          detail:
+            "Période d'assurance « jusqu'à la fin du prêt » alors que la fin du prêt n'est pas calculable : ses débits ne sont pas projetés.",
+        });
+        continue;
+      }
+      const step = MONTHS_PER_PERIOD[period.frequency];
+      for (let index = 0; index < 1200; index += 1) {
+        const date = addMonths(period.firstDebitDate, index * step);
+        if (date > last) break;
+        if (after === null || date > after) debits.push({ date, amount: period.premiumAmount });
+      }
+    }
+  }
+  if (debits.length === 0) return { entries, flags };
+  const amortisation = [...entries].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const balanceAt = (date: string) =>
+    amortisation.filter((row) => row.dueDate <= date).at(-1)?.closingBalance ?? startingBalance;
+  const insurance = debits.map((debit) =>
+    entry(liability, {
+      paymentNumber: 0,
+      entryKind: "INSURANCE",
+      dueDate: debit.date,
+      openingBalance: balanceAt(debit.date),
+      interest: 0,
+      capitalisedInterest: 0,
+      principal: 0,
+      insurance: debit.amount,
+      fees: 0,
+      kind: "DERIVED",
+    }),
+  );
+  return { entries: [...entries, ...insurance], flags };
+}
+
 /**
  * B. Échéancier forward : projection depuis l'encours réellement observé à `asOfDate`,
  * sur les seules échéances restantes. Les mensualités déjà passées ne sont jamais rejouées
@@ -815,14 +1253,51 @@ export function elapsedPaymentsAt(liability: Liability, asOfDate: string): numbe
  * C. Un échéancier bancaire fourni prime : ses lignes futures sont ce que la banque
  * prélèvera, quelle que soit la projection que nous aurions faite.
  */
-export function buildForwardSchedule(liability: Liability, asOfDate: string): LoanSchedule {
+/**
+ * Un événement qui modifie l'encours (remboursement, frais financé) et qui est daté au plus
+ * tard à la date de l'encours OBSERVÉ y est déjà : le rejouer depuis cet encours le
+ * compterait deux fois. Un frais payé comptant ne touche pas l'encours et reste une sortie.
+ */
+function includedInObservedBalance(liability: Liability, event: LoanEvent): boolean {
+  if (!liability.balanceDate || event.date > liability.balanceDate) return false;
+  // Un remboursement PRÉVU n'a jamais été constaté : il n'est pas « dans » l'encours. Daté
+  // avant le départ de la projection, il en sort et il est signalé dépassé, jamais rejoué.
+  if (event.type === "EARLY_REPAYMENT") return !event.repayment.planned;
+  return event.financed;
+}
+
+/**
+ * Date de départ de la projection : l'encours observé a pu être relevé APRÈS la date de
+ * lecture (lecture arrêtée à une clôture, encours du 10 du mois suivant). Les échéances
+ * exigibles jusqu'à cette observation y sont déjà : les rejouer contre elle compterait deux
+ * fois un mois de service de dette.
+ */
+function projectionStart(liability: Liability, asOfDate: string): string {
+  return liability.balanceDate && liability.balanceDate > asOfDate
+    ? liability.balanceDate
+    : asOfDate;
+}
+
+/** Événements à rejouer depuis l'encours observé. */
+function forwardEvents(liability: Liability, asOfDate: string): LoanEvent[] {
+  const start = projectionStart(liability, asOfDate);
+  return [...repaymentEvents(liability), ...chargeEvents(liability)]
+    .filter(
+      (event) =>
+        event.date > asOfDate &&
+        !includedInObservedBalance(liability, event) &&
+        !(event.type === "EARLY_REPAYMENT" && event.repayment.planned && event.date <= start),
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function forwardScheduleCore(liability: Liability, asOfDate: string): LoanSchedule {
   if (hasProvidedSchedule(liability)) {
+    const start = projectionStart(liability, asOfDate);
     const future = fromProvided(liability, liability.providedSchedule).filter(
-      (row) => row.dueDate > asOfDate,
+      (row) => row.dueDate > start,
     );
-    const events = [...repaymentEvents(liability), ...chargeEvents(liability)]
-      .filter((event) => event.date > asOfDate)
-      .sort((a, b) => a.date.localeCompare(b.date));
+    const events = forwardEvents(liability, asOfDate);
     // Les événements ne réécrivent pas un échéancier bancaire : ils s'y ajoutent comme
     // lignes de trésorerie distinctes, l'échéancier restant la source de vérité.
     const extra = events.map((event) =>
@@ -879,11 +1354,9 @@ export function buildForwardSchedule(liability: Liability, asOfDate: string): Lo
   }
 
   if (!isUsable(liability)) return EMPTY_SCHEDULE(liability.id, "MISSING");
-  const elapsed = elapsedPaymentsAt(liability, asOfDate);
+  const elapsed = elapsedPaymentsAt(liability, projectionStart(liability, asOfDate));
   const remaining = Math.trunc(liability.paymentCount) - elapsed;
-  const events = [...repaymentEvents(liability), ...chargeEvents(liability)].filter(
-    (event) => event.date > asOfDate,
-  );
+  const events = forwardEvents(liability, asOfDate);
   if (liability.currentBalance <= 0) {
     // Dette éteinte : plus aucune échéance, mais un frais ponctuel futur reste exigible.
     const only = amortise({
@@ -892,6 +1365,7 @@ export function buildForwardSchedule(liability: Liability, asOfDate: string): Lo
       firstPaymentNumber: elapsed + 1,
       paymentsToProduce: Math.max(0, remaining),
       events,
+      projection: true,
     });
     return summarise(
       liability.id,
@@ -907,6 +1381,7 @@ export function buildForwardSchedule(liability: Liability, asOfDate: string): Lo
     firstPaymentNumber: elapsed + 1,
     paymentsToProduce: Math.max(0, remaining),
     events,
+    projection: true,
   });
   return summarise(
     liability.id,
@@ -989,6 +1464,123 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
         "Première échéance non datée : aucune échéance ne peut être positionnée dans le temps.",
     });
   }
+  // B18 : un échéancier bancaire fourni prime sur toute reconstruction ; seuls les
+  // remboursements s'y ajoutent. Les autres événements sont conservés dans l'historique mais
+  // ne changent pas les prélèvements du document : c'est dit, jamais tu.
+  if (hasProvidedSchedule(liability)) {
+    const ignored =
+      (liability.rateSchedule ?? []).some((item) => item.eventId) ||
+      (liability.paymentSchedule ?? []).some((item) => item.eventId) ||
+      (liability.deferralPeriods ?? []).length > 0 ||
+      (liability.paymentRecalculations ?? []).length > 0;
+    if (ignored)
+      flags.push({
+        code: "EVENTS_NOT_APPLIED_TO_PROVIDED_SCHEDULE",
+        detail:
+          "L'échéancier bancaire fourni prime : les révisions, paliers, reports et avenants enregistrés restent dans l'historique mais ne modifient pas ses prélèvements. Importez l'échéancier mis à jour.",
+      });
+  }
+  // Un remboursement PRÉVU dont la date est passée n'est ni un fait ni encore une intention.
+  // « Passée » se juge au départ de la projection, qui peut suivre la date de lecture.
+  const start = projectionStart(liability, asOfDate);
+  for (const repayment of liability.earlyRepayments ?? [])
+    if (repayment.planned && repayment.date <= start)
+      flags.push({
+        code: "PLANNED_REPAYMENT_OVERDUE",
+        detail: `Remboursement prévu le ${frDate(repayment.date)}, date passée, non constaté : enregistrez-le comme effectué ou annulez-le.`,
+      });
+  // Un palier du contrat signé, postérieur à un avenant qui recalcule la mensualité, est
+  // appliqué tel que déclaré : l'avenant l'a peut-être remplacé, ce que rien ne dit.
+  const amendmentDates = (liability.paymentRecalculations ?? []).map((point) => point.date);
+  for (const step of liability.paymentSchedule ?? []) {
+    if (step.eventId) continue;
+    const amendment = amendmentDates
+      .filter((date) => date < step.effectiveFrom)
+      .sort()
+      .at(-1);
+    if (amendment)
+      flags.push({
+        code: "CONTRACT_STEP_AFTER_AMENDMENT",
+        detail: `Le palier du contrat au ${frDate(step.effectiveFrom)} est postérieur à l'avenant du ${frDate(amendment)} qui a recalculé la mensualité : il est appliqué tel que déclaré. Si l'avenant l'a remplacé, corrigez le contrat.`,
+      });
+  }
+  // Terme échu avec un capital restant : la projection est vide, ce qui ne veut pas dire
+  // « plus rien à payer ».
+  if (
+    !hasProvidedSchedule(liability) &&
+    isUsable(liability) &&
+    liability.currentBalance > CENT &&
+    dueDateOf(liability, Math.trunc(liability.paymentCount)) < start
+  )
+    flags.push({
+      code: "TERM_ENDED_WITH_BALANCE",
+      detail: `La dernière échéance contractuelle (${frDate(dueDateOf(liability, Math.trunc(liability.paymentCount)))}) précède ${liability.balanceDate ? `l'encours observé du ${frDate(liability.balanceDate)}` : "la date de lecture"}, encore positif : aucune échéance future n'est projetée. Vérifiez la durée ou l'avenant.`,
+    });
+  for (const amendment of liability.unresolvedAmendments ?? [])
+    flags.push({
+      code: "AMENDMENT_MATURITY_NOT_ON_SCHEDULE",
+      detail: `Avenant du ${frDate(amendment.date)} : la nouvelle dernière échéance du ${frDate(amendment.maturityDate)} ne tombe sur aucune échéance du calendrier ; la durée n'est pas modifiée, rien n'est arrondi.`,
+    });
+  // B18 : un remboursement EFFECTUÉ postérieur au dernier encours observé, sans encours
+  // constaté. Le bilan garde l'encours observé (l'observé fait foi) et la projection ne
+  // rejoue pas un événement passé : l'écart est dit, jamais comblé par un calcul.
+  for (const repayment of liability.earlyRepayments ?? []) {
+    if (!repayment.eventId || repayment.planned || repayment.date > asOfDate) continue;
+    if (!liability.balanceDate || liability.balanceDate < repayment.date)
+      flags.push({
+        code: "BALANCE_PREDATES_REPAYMENT",
+        detail: `Remboursement anticipé du ${frDate(repayment.date)} postérieur au dernier encours observé${liability.balanceDate ? ` (${frDate(liability.balanceDate)})` : ""} : le patrimoine garde cet encours tant que le capital restant dû constaté n'est pas renseigné.`,
+      });
+  }
+  // Contrat adaptatif : un terme déduit n'est pas un terme déclaré, et un contrat non
+  // résoluble le dit au lieu de produire un échéancier vide lu comme « rien à payer ».
+  const resolution = liability.termsResolution;
+  if (resolution?.blocker) {
+    flags.push({
+      code: "TERMS_UNRESOLVED",
+      detail:
+        resolution.blocker === "MATURITY_NOT_ON_SCHEDULE"
+          ? "La maturité déclarée ne tombe sur aucune échéance du calendrier : la durée n'est pas déductible, aucune n'est supposée."
+          : resolution.blocker === "PAYMENT_DOES_NOT_AMORTISE"
+            ? "La mensualité déclarée ne rembourse pas le capital : la durée n'est pas déductible, aucune n'est supposée."
+            : resolution.blocker === "INCLUDED_INSURANCE_UNKNOWN"
+              ? "La mensualité contient une assurance de montant inconnu : la part qui rembourse le capital est inconnue, la durée n'en est pas déduite."
+              : "Ni durée, ni maturité, ni mensualité exploitable : l'échéancier n'est pas calculable.",
+    });
+  } else if (resolution) {
+    const derived = [
+      resolution.paymentCount === "DERIVED_FROM_PAYMENT"
+        ? "la durée, déduite de la mensualité"
+        : null,
+      resolution.paymentCount === "DERIVED_FROM_MATURITY"
+        ? "la durée, déduite de la maturité"
+        : null,
+      resolution.maturityDate === "DERIVED_FROM_COUNT"
+        ? "la maturité, date de la dernière échéance"
+        : null,
+      resolution.monthlyPayment === "DERIVED_FROM_COUNT"
+        ? "la mensualité, dérivée du capital, du taux et de la durée"
+        : null,
+    ].filter((item): item is string => item !== null);
+    if (derived.length > 0)
+      flags.push({
+        code: "TERMS_DERIVED",
+        detail: `Termes non déclarés, calculés par le moteur : ${derived.join(" ; ")}.`,
+      });
+  }
+  // B18 : une révision de taux notifiée sans nouvelle mensualité. Le moteur garde la
+  // mensualité et laisse la durée absorber la révision : c'est une hypothèse, dite.
+  if ((liability.amortisationProfile ?? "AMORTIZING") === "AMORTIZING")
+    for (const change of (liability.rateSchedule ?? []).filter((item) => item.eventId)) {
+      const paired = (liability.paymentSchedule ?? []).some(
+        (item) => item.effectiveFrom === change.effectiveFrom,
+      );
+      if (!paired)
+        flags.push({
+          code: "RATE_REVISION_PAYMENT_KEPT",
+          detail: `Révision de taux du ${frDate(change.effectiveFrom)} sans nouvelle mensualité déclarée : mensualité maintenue par hypothèse, la durée absorbe la révision.`,
+        });
+    }
   if (hasProvidedSchedule(liability)) {
     flags.push({
       code: "PROVIDED_SCHEDULE_USED",
@@ -1052,27 +1644,38 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
   if (Math.abs(difference) > 0.01) {
     flags.push({
       code: "BALANCE_MISMATCH",
-      detail: `Encours observé ${EUR.format(liability.currentBalance)} contre ${EUR.format(contractualBalanceAtAsOf)} attendus après ${elapsed} échéance${elapsed > 1 ? "s" : ""}. L'encours observé fait foi pour la projection.`,
+      detail: `Encours observé ${formatCurrency(liability.currentBalance, liability.currency ?? null)} contre ${formatCurrency(contractualBalanceAtAsOf, liability.currency ?? null)} attendus après ${elapsed} échéance${elapsed > 1 ? "s" : ""}. L'encours observé fait foi pour la projection.`,
     });
   }
 
   const forwardResidual =
-    forward.entries.filter((row) => row.entryKind !== "CHARGE").at(-1)?.closingBalance ?? 0;
+    forward.entries
+      .filter((row) => row.entryKind !== "CHARGE" && row.entryKind !== "INSURANCE")
+      .at(-1)?.closingBalance ?? 0;
   if (forwardResidual > 0.01) {
     flags.push({
       code: "RECONCILIATION_REQUIRED",
-      detail: `Les ${remaining} échéances restantes ne soldent pas l'encours observé : ${EUR.format(forwardResidual)} subsisteraient à la dernière échéance annoncée.`,
+      detail: `Les ${remaining} échéances restantes ne soldent pas l'encours observé : ${formatCurrency(forwardResidual, liability.currency ?? null)} subsisteraient à la dernière échéance annoncée.`,
     });
   }
 
   const amortising = amortisingPayment(liability);
-  const contractualGap = comparablePayments
+  // L'écart n'a de sens que si mensualité ET durée sont DÉCLARÉES : un terme déduit boucle
+  // par construction, et la dernière échéance ajustée ferait lire les intérêts comme des
+  // frais non déclarés.
+  const resolutionForGap = liability.termsResolution;
+  const gapComparable =
+    comparablePayments &&
+    (!resolutionForGap ||
+      (resolutionForGap.monthlyPayment === "DECLARED" &&
+        resolutionForGap.paymentCount === "DECLARED"));
+  const contractualGap = gapComparable
     ? amortising * Math.trunc(liability.paymentCount) - liability.principal
     : 0;
   let impliedChargePerPayment: number | null = null;
   const theoretical = theoreticalPayment(liability);
   if (
-    comparablePayments &&
+    gapComparable &&
     Math.trunc(liability.paymentCount) > 0 &&
     liability.monthlyPayment > 0 &&
     amortising - theoretical > 0.005
@@ -1083,7 +1686,7 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
     impliedChargePerPayment = amortising - theoretical;
     flags.push({
       code: "PAYMENT_EXCEEDS_AMORTISATION",
-      detail: `Mensualité déclarée ${EUR.format(liability.monthlyPayment)} contre ${EUR.format(theoretical)} nécessaires pour amortir ${EUR.format(liability.principal)} sur ${Math.trunc(liability.paymentCount)} échéances à ${(liability.annualRate * 100).toFixed(2)} %. Écart de ${EUR.format(impliedChargePerPayment)} par échéance, soit ${EUR.format(contractualGap)} au total : profil d'une assurance ou de frais non déclarés, à confirmer auprès du prêteur.`,
+      detail: `Mensualité déclarée ${formatCurrency(liability.monthlyPayment, liability.currency ?? null)} contre ${formatCurrency(theoretical, liability.currency ?? null)} nécessaires pour amortir ${formatCurrency(liability.principal, liability.currency ?? null)} sur ${Math.trunc(liability.paymentCount)} échéances à ${(liability.annualRate * 100).toFixed(2)} %. Écart de ${formatCurrency(impliedChargePerPayment, liability.currency ?? null)} par échéance, soit ${formatCurrency(contractualGap, liability.currency ?? null)} au total : profil d'une assurance ou de frais non déclarés, à confirmer auprès du prêteur.`,
     });
   }
 
@@ -1112,6 +1715,88 @@ export function buildLoanTimeline(liability: Liability, asOfDate: string): LoanT
     contractualGap,
     impliedChargePerPayment,
     flags: merged,
+  };
+}
+
+// ─── Synthèse d'un contrat (document 04, étape F) ────────────────────────────────────
+
+/** Un total qui porte un terme inconnu n'est pas complet : il le dit, il ne vaut pas zéro. */
+export interface PartialTotal {
+  /** Somme des composants connus. `null` quand aucun composant n'est connu. */
+  value: number | null;
+  complete: boolean;
+}
+
+/**
+ * Ce que la synthèse d'un contrat doit afficher séparément avant validation : principal
+ * d'origine, encours observé, prochaine sortie, premier remboursement de capital, dernière
+ * échéance, nombres de prélèvements et d'amortissements, capital futur, intérêts, assurance,
+ * frais, total des sorties, et ce qui reste inconnu. AUCUN chiffre n'est calculé ailleurs :
+ * tout vient de l'échéancier forward du moteur.
+ */
+export interface ContractSynthesis {
+  kind: DataKind;
+  resolution: DebtTermsResolution | null;
+  principal: number;
+  observedBalance: number;
+  observedBalanceDate: string | null;
+  nextCashOut: { date: string; amount: number } | null;
+  firstPrincipalDate: string | null;
+  lastDueDate: string | null;
+  paymentCount: number;
+  amortisingPaymentCount: number;
+  futurePrincipal: number;
+  futureInterest: number;
+  /** `null` : assurance non renseignée ; 0 seulement si DÉCLARÉE nulle. */
+  futureInsurance: number | null;
+  /** `null` : frais récurrents non renseignés et aucun frais ponctuel déclaré. */
+  futureFees: number | null;
+  futureCashOut: PartialTotal;
+  unknowns: string[];
+  flags: LoanScheduleFlag[];
+}
+
+export function summariseContract(liability: Liability, asOfDate: string): ContractSynthesis {
+  const timeline = buildLoanTimeline(liability, asOfDate);
+  const rows = timeline.forward.entries;
+  const payments = rows.filter((row) => row.entryKind === "PAYMENT");
+  const sum = (pick: (row: LoanScheduleEntry) => number) =>
+    rows.reduce((total, row) => total + pick(row), 0);
+  const insuranceIsKnown = insuranceKnown(liability);
+  const feesKnown = liability.recurringFees !== null;
+  const futurePrincipal = sum((row) => row.principal);
+  const futureInterest = sum((row) => row.interest);
+  const futureInsurance = insuranceIsKnown ? sum((row) => row.insurance) : null;
+  const futureFees =
+    feesKnown || liability.oneOffCharges.length > 0 ? sum((row) => row.fees) : null;
+  const unknowns = [
+    ...(insuranceIsKnown ? [] : ["assurance"]),
+    ...(feesKnown ? [] : ["frais récurrents"]),
+    ...(timeline.forward.kind === "MISSING" ? ["échéancier"] : []),
+  ];
+  const next = rows.find((row) => row.totalCashOut > 0);
+  const firstPrincipal = rows.find((row) => row.principal > 0);
+  return {
+    kind: timeline.forward.kind,
+    resolution: liability.termsResolution ?? null,
+    principal: liability.principal,
+    observedBalance: liability.currentBalance,
+    observedBalanceDate: liability.balanceDate ?? null,
+    nextCashOut: next ? { date: next.dueDate, amount: next.totalCashOut } : null,
+    firstPrincipalDate: firstPrincipal?.dueDate ?? null,
+    lastDueDate: timeline.forward.lastDueDate,
+    paymentCount: payments.length,
+    amortisingPaymentCount: payments.filter((row) => row.principal > 0).length,
+    futurePrincipal,
+    futureInterest,
+    futureInsurance,
+    futureFees,
+    futureCashOut: {
+      value: timeline.forward.kind === "MISSING" ? null : sum((row) => row.totalCashOut),
+      complete: unknowns.length === 0,
+    },
+    unknowns,
+    flags: timeline.flags,
   };
 }
 
@@ -1306,6 +1991,25 @@ export function debtServiceBreakdownForPeriod(
       timeline.forward.kind,
     ]),
   });
+}
+
+/**
+ * Service de dette des DOUZE prochains mois : [asOf, asOf + 12 mois[, soit exactement douze
+ * mois. Une borne de fin incluse compterait deux fois la même échéance annuelle quand la
+ * date de lecture tombe un jour d'échéance (treize mensualités pour « douze mois »).
+ */
+export function debtServiceNextTwelveMonths(
+  liabilities: Liability[],
+  asOfDate: string,
+): DebtServiceBreakdown {
+  const end = new Date(`${addMonths(asOfDate, 12)}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() - 1);
+  return debtServiceBreakdownForPeriod(
+    liabilities,
+    asOfDate,
+    asOfDate,
+    end.toISOString().slice(0, 10),
+  );
 }
 
 /** Σ des cash-outs exigibles dans [startDate, endDate], bornes incluses. */

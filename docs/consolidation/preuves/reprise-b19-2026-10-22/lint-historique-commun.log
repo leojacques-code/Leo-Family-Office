@@ -1,0 +1,40 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 lint
+> eslint .
+
+
+/workspace/scratch/1b59cbc42178/lfo/src/components/pages/imports/liasse-section.tsx
+  291:35  error  Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `preview.decisions`, but the source dependencies were [preview?.decisions]. Inferred different dependency than source.
+
+/workspace/scratch/1b59cbc42178/lfo/src/components/pages/imports/liasse-section.tsx:291:35
+  289 |   ).length;
+  290 |
+> 291 |   const decisionHistory = useMemo(() => {
+      |                                   ^^^^^^^
+> 292 |     if (preview?.decisions === undefined) return null;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 293 |     const byField = new Map<string, DocumentFieldDecisionView[]>();
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 294 |     for (const decision of preview.decisions) {
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 295 |       const history = byField.get(decision.fieldId) ?? [];
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 296 |       history.push(decision);
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 297 |       byField.set(decision.fieldId, history);
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 298 |     }
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 299 |     return byField;
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 300 |   }, [preview?.decisions]);
+      | ^^^^ Could not preserve existing manual memoization
+  301 |
+  302 |   return (
+  303 |     <div className="page-stack">  react-hooks/preserve-manual-memoization
+
+✖ 1 problem (1 error, 0 warnings)
+

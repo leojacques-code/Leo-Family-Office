@@ -1,0 +1,41 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+ ❯ |dom| src/components/pages/scenarios/page.test.tsx (2 tests | 2 failed) 29ms
+     × affiche un état vide sans inventer de trajectoire ni lancer de mutation 23ms
+     × permet d'ouvrir et d'annuler la création au clavier en conservant la saisie 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |dom| src/components/pages/scenarios/page.test.tsx > Scénarios — compte sans scénario > affiche un état vide sans inventer de trajectoire ni lancer de mutation
+ FAIL  |dom| src/components/pages/scenarios/page.test.tsx > Scénarios — compte sans scénario > permet d'ouvrir et d'annuler la création au clavier en conservant la saisie
+TypeError: Cannot read properties of undefined (reading 'id')
+ ❯ ScenariosPage src/components/pages/scenarios/page.tsx:57:95
+     55| }: SectionProps) {
+     56|   const [selectedId, setSelectedId] = useState(
+     57|     state.scenarios.find((scenario) => scenario.name === "Central")?.i…
+       |                                                                                               ^
+     58|   );
+     59|   const [editing, setEditing] = useState<Scenario | null>(null);
+ ❯ Object.react_stack_bottom_frame node_modules/react-dom/cjs/react-dom-client.development.js:25904:20
+ ❯ renderWithHooks node_modules/react-dom/cjs/react-dom-client.development.js:7662:22
+ ❯ updateFunctionComponent node_modules/react-dom/cjs/react-dom-client.development.js:10166:19
+ ❯ beginWork node_modules/react-dom/cjs/react-dom-client.development.js:11778:18
+ ❯ runWithFiberInDEV node_modules/react-dom/cjs/react-dom-client.development.js:874:13
+ ❯ performUnitOfWork node_modules/react-dom/cjs/react-dom-client.development.js:17641:22
+ ❯ workLoopSync node_modules/react-dom/cjs/react-dom-client.development.js:17469:41
+ ❯ renderRootSync node_modules/react-dom/cjs/react-dom-client.development.js:17450:11
+ ❯ performWorkOnRoot node_modules/react-dom/cjs/react-dom-client.development.js:16583:35
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  19:38:55
+   Duration  2.05s (transform 531ms, setup 177ms, import 984ms, tests 29ms, environment 536ms)
+

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { getDemoTodayReadModel } from "@/lib/data/read-models/today-demo";
 import { buildTodayView, type TodayViewInput } from "@/lib/presentation/today/view";
 import { DOMAIN_IDS } from "@/lib/presentation/today/domains";
+import { KPI_REGISTRY } from "@/lib/presentation/registry/kpis";
 import TodayPage from "@/components/pages/today/page";
 
 /**
@@ -35,6 +36,13 @@ const EMPTY_INPUT: TodayViewInput = {
     cashFlowAfterDebt: 0,
     unclassifiedFlows: 0,
     fullyCovered: false,
+    foreignCurrencyTransactionCount: 0,
+    blocked: {
+      income: false,
+      essentialExpenses: false,
+      debtServicePaid: false,
+      cashFlowAfterDebt: false,
+    },
   },
   goal: null,
   events: [],
@@ -92,20 +100,33 @@ describe("contrôle de texte — §12.2", () => {
     expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   });
 
-  it("pose les six questions du §3 en français", () => {
-    const { container } = render(
-      <TodayPage model={getDemoTodayReadModel("2026-09-09")} onModelChange={noop} />,
-    );
-    for (const question of [
-      "Combien est-ce que je possède réellement ?",
-      "Combien est disponible maintenant ?",
-      "Est-ce que ma situation s’améliore ou se dégrade ?",
-      "Suis-je en sécurité par rapport à mes engagements et objectifs ?",
-      "Où vais-je si je ne change rien ?",
-      "Quelle décision mérite mon attention aujourd’hui ?",
+  it("nomme les mesures financières et réserve les questions à leur aide", async () => {
+    const user = userEvent.setup();
+    render(<TodayPage model={getDemoTodayReadModel("2026-09-09")} onModelChange={noop} />);
+    for (const [id, label] of [
+      ["net_worth", "Patrimoine net"],
+      ["immediate_cash", "Liquidité immédiate"],
+      ["net_worth_change_since_close", "Évolution depuis la clôture"],
+      ["free_cash_flow_after_debt", "Solde libre du mois"],
+      ["goal_progress", "Progression de l’objectif"],
+      ["upcoming_obligations_30d", "Échéances à 30 jours"],
+      ["pending_review_count", "Éléments à vérifier"],
     ]) {
-      expect(container.textContent, question).toContain(question);
+      const help = screen.getByRole("button", { name: `Aide : ${label}` });
+      const explanation = screen.getByText(KPI_REGISTRY[id!]!.question);
+      expect(explanation).not.toBeVisible();
+      help.focus();
+      await user.keyboard("{Enter}");
+      expect(help).toHaveAttribute("aria-expanded", "true");
+      expect(explanation).toBeVisible();
+      expect(screen.getByText(KPI_REGISTRY[id!]!.userExplanation, { exact: false })).toBeVisible();
+      await user.keyboard("{Escape}");
+      expect(explanation).not.toBeVisible();
+      expect(help).toHaveFocus();
     }
+    expect(screen.queryByText("Où vais-je si je ne change rien ?")).toBeNull();
+    expect(screen.queryByText("Capacité d’épargne")).toBeNull();
+    expect(screen.getByRole("region", { name: "Progression de l’objectif" })).toBeVisible();
   });
 });
 

@@ -16,6 +16,7 @@ const BASE = {
   accountCurrency: "EUR",
   mappedAccountId: "acct-1",
   accountAmbiguous: false,
+  today: "2026-09-25",
 };
 
 function observed(overrides: Parameters<typeof transaction>[0] = {}): NormalizedObservation {

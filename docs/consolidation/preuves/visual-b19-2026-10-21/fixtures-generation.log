@@ -1,0 +1,9 @@
+echeancier-partiel {"kind":"table","sheet":"Échéancier synthétique","address":"A1:H2","rows":2,"cols":8,"values":[["date","ouverture","principal","interet","assurance","frais","cloture","total"],["2026-12-05T00:00:00.000Z",1000,1000,0,5,0,0,1005]]}
+{"kind":"notice","message":"Cell search matched 0 entries."}
+Inspect result written to file: /workspace/scratch/1b59cbc42178/lfo/docs/consolidation/preuves/visual-b19-2026-10-21/fixtures/echeancier-partiel.xlsx.inspect.ndjson
+echeancier-dates-anormales {"kind":"table","sheet":"Échéancier synthétique","address":"A1:H6","rows":6,"cols":8,"values":[["date","ouverture","principal","interet","assurance","frais","cloture","total"],["2026-11-05T00:00:00.000Z",2000,400,0,5,0,1600,405],["2026-12-05T00:00:00.000Z",1600,400,0,5,0,1200,405],["2026-12-05T00:00:00.000Z",1200,400,0,5,0,800,405],["2027-01-05T00:00:00.000Z",800,400,0,5,0,400,405],["2027-03-05T00:00:00.000Z",400,400,0,5,0,0,405]]}
+{"kind":"notice","message":"Cell search matched 0 entries."}
+Inspect result written to file: /workspace/scratch/1b59cbc42178/lfo/docs/consolidation/preuves/visual-b19-2026-10-21/fixtures/echeancier-dates-anormales.xlsx.inspect.ndjson
+echeancier-formules {"kind":"table","sheet":"Échéancier synthétique","address":"A1:H3","rows":3,"cols":8,"values":[["date","ouverture","principal","interet","assurance","frais","cloture","total"],["2026-11-05T00:00:00.000Z",2000,1000,0,5,0,1000,1005],["2026-12-05T00:00:00.000Z",1000,1000,0,5,0,0,1005]]}
+{"kind":"notice","message":"Cell search matched 0 entries."}
+Inspect result written to file: /workspace/scratch/1b59cbc42178/lfo/docs/consolidation/preuves/visual-b19-2026-10-21/fixtures/echeancier-formules.xlsx.inspect.ndjson

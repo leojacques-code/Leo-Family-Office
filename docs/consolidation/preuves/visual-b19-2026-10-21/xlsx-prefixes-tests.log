@@ -1,0 +1,17 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 test
+> vitest run src/lib/acquisition/xlsx/__tests__/workbook.test.ts src/lib/acquisition/documents/schedule/__tests__/read.test.ts src/components/pages/debt/__tests__/schedule-review.test.tsx --maxWorkers=2 --testTimeout=20000
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+
+ Test Files  3 passed (3)
+      Tests  64 passed (64)
+   Start at  12:21:37
+   Duration  9.43s (transform 2.18s, setup 569ms, import 3.18s, tests 7.80s, environment 2.05s)
+

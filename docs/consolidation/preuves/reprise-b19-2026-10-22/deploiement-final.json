@@ -1,0 +1,17 @@
+{
+  "verifiedAt": "2026-10-22T18:04:30.869Z",
+  "deploymentId": "dpl_BvcggrTeCoPASgz3crvDtcBZRPmo",
+  "url": "https://leo-family-office-gcsu38rzc-lech1.vercel.app",
+  "state": "READY",
+  "target": null,
+  "aliases": [
+    "leo-family-office-git-codex-astra-b19-hosted-integ-ce3b7b-lech1.vercel.app"
+  ],
+  "codeSha": "8d7ce426173d2be94d5c925da512ee2da84bb49c",
+  "hostedVisualVerification": "verified_on_branch_alias_after_reload",
+  "verifiedBehaviors": [
+    "CSV history authors, Paris timestamps and both prior values",
+    "controlled 2000 typing retains focus",
+    "Escape returns focus without creating another debt"
+  ]
+}

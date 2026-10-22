@@ -1,0 +1,116 @@
+{
+  "staging_ref": "bjxhnwvomoznorijauyl",
+  "preview_origin": "https://leo-family-office-379zofqnf-lech1.vercel.app",
+  "deployment_sha": "c0331a20588428b1a03cd8aad61f9793b7d3cff2",
+  "method": "Real hosted application HTTP, Supabase Auth, PostgreSQL/PostgREST and Storage; NOT a browser UI acceptance",
+  "started_at": "2026-10-15T16:55:01.160Z",
+  "synthetic_only": true,
+  "steps": [
+    {
+      "name": "First account and first observed income through deployed API",
+      "status": "PASS",
+      "observed_balance_unchanged": true,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "A/B account isolation on deployed API and foreign account mutation rejection",
+      "status": "PASS",
+      "foreign_mutation_status": 422,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Adaptive debt contract with payment only and separate insurance persists",
+      "status": "PASS",
+      "debt_persisted": true,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Persistent draft stays outside canonical debt and rejects stale writes",
+      "status": "PASS",
+      "stale_status": 409,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Real CSV upload, private storage and all sixteen cells retained",
+      "status": "PASS",
+      "http_status": 201,
+      "cells": 16,
+      "completeness": "COMPLETE",
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Original CSV downloadable through one-minute signed Storage URL",
+      "status": "PASS",
+      "download_status": 200,
+      "bytes_match": true,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Foreign user cannot read review or original document or upload against A debt",
+      "status": "PASS",
+      "foreign_upload_status": 422,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Motivated correction, stale decision and immutable history",
+      "status": "PASS",
+      "motivated_correction": true,
+      "stale_status": 409,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "In-review redeposit refused without losing previous decisions",
+      "status": "PASS",
+      "http_status": 409,
+      "decisions_preserved": true,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "CSV validation persists, all checks pass, canonical schedule untouched (B20 deferred)",
+      "status": "PASS",
+      "checks": 5,
+      "canonical_schedule_rows": 0,
+      "run_status": "VALIDATED",
+      "reporting_correction": "Result status separated from successfully asserted document run status; no request replayed.",
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Real XLSX ZIP upload and cell source coordinates preserved",
+      "status": "PASS",
+      "cells": 16,
+      "source_format": "XLSX",
+      "resumed_same_sha": true
+    },
+    {
+      "name": "XLSX explicit exclusion and reconsideration keep decision history",
+      "status": "PASS",
+      "decisions": 2,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "XLSX final validation",
+      "status": "PASS",
+      "run_status": "VALIDATED",
+      "reporting_correction": "Result status separated from successfully asserted document run status; no request replayed.",
+      "resumed_same_sha": true
+    },
+    {
+      "name": "B19 unreadable cell cannot be confirmed or validated before correction",
+      "confirmation_refused": 400,
+      "validation_refused": 400,
+      "corrected_then_validated": true,
+      "status": "PASS"
+    },
+    {
+      "name": "B19 partial document cannot be validated and explicit rejection allows retry",
+      "status": "FAIL",
+      "reason": "Partial document validated"
+    }
+  ],
+  "harness_error": {
+    "classification": "incorrect_test_expectation",
+    "cause": "A partial source reading may be validated while remaining explicitly PARTIAL. The test incorrectly expected HTTP 400. The database was independently observed as VALIDATED/PARTIAL.",
+    "product_spec": "docs/consolidation/CAHIER_DES_CHARGES_B19_2026-09-25.md §3.8 and §6",
+    "resolution": "Corrected expectation; no application or SQL rule changed. Final hosted-acceptance.json supersedes this harness failure."
+  }
+}

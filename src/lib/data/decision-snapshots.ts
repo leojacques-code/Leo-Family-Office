@@ -168,6 +168,10 @@ const trajectory = z.object({
   methodologyVersion: text,
 });
 const resultSchema = z.object({
+  reportingCurrency: z
+    .string()
+    .regex(/^[A-Z]{3}$/)
+    .nullish(),
   caseVersion: definitionSchema,
   run: runSchema,
   completeness,

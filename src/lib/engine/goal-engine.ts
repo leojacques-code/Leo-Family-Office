@@ -7,6 +7,7 @@ import {
 import type { ScenarioPath, ScenarioPathMetric } from "@/lib/engine/scenario-contracts";
 import {
   GOAL_METHODOLOGY_VERSION,
+  GOAL_PURPOSES,
   GOAL_V2_SCHEMA_VERSION,
   type GoalAttainmentProbability,
   type GoalBlocker,
@@ -44,7 +45,8 @@ export function isGoalVersionDefinition(value: unknown): value is GoalVersionDef
   const target = item.target;
   const definition = target?.metric ? GOAL_METRIC_REGISTRY[target.metric] : undefined;
   const dateShape =
-    (item.targetDate === null || (typeof item.targetDate === "string" && realDate(item.targetDate))) &&
+    (item.targetDate === null ||
+      (typeof item.targetDate === "string" && realDate(item.targetDate))) &&
     (item.targetWindow === null ||
       (!!item.targetWindow &&
         realDate(item.targetWindow.startDate) &&
@@ -52,6 +54,11 @@ export function isGoalVersionDefinition(value: unknown): value is GoalVersionDef
         item.targetWindow.startDate <= item.targetWindow.endDate));
   return (
     item.schemaVersion === GOAL_V2_SCHEMA_VERSION &&
+    (item.purpose === undefined || GOAL_PURPOSES.includes(item.purpose)) &&
+    (item.purpose !== "SAFETY_RESERVE" ||
+      (target?.metric === "IMMEDIATE_CASH" &&
+        target.operator === "AT_LEAST" &&
+        target.entityId === null)) &&
     item.methodologyVersion === GOAL_METHODOLOGY_VERSION &&
     typeof item.goalId === "string" &&
     Number.isInteger(item.version) &&
@@ -82,6 +89,7 @@ export function isGoalVersionDefinition(value: unknown): value is GoalVersionDef
 }
 
 export function createGoalVersion(input: {
+  purpose?: GoalVersionDefinition["purpose"];
   goalId: string;
   name: string;
   description?: string | null;
@@ -94,6 +102,7 @@ export function createGoalVersion(input: {
   createdAt?: string;
 }): GoalVersionDefinition {
   const definition: GoalVersionDefinition = {
+    purpose: input.purpose ?? "OTHER",
     schemaVersion: GOAL_V2_SCHEMA_VERSION,
     methodologyVersion: GOAL_METHODOLOGY_VERSION,
     goalId: input.goalId,
@@ -150,10 +159,7 @@ export function legacyGoalDefinition(input: {
   };
 }
 
-export function targetSatisfied(
-  value: number,
-  target: GoalVersionDefinition["target"],
-): boolean {
+export function targetSatisfied(value: number, target: GoalVersionDefinition["target"]): boolean {
   if (target.operator === "AT_LEAST") return value >= target.value;
   if (target.operator === "AT_MOST") return value <= target.value;
   return Math.abs(value - target.value) <= 1e-6;
@@ -174,6 +180,28 @@ function inactive(goal: GoalVersionDefinition): GoalBlocker | null {
   return goal.status === "PAUSED" || goal.status === "ARCHIVED"
     ? blocker("GOAL_INACTIVE", `Objectif ${goal.status.toLowerCase()} non évalué`)
     : null;
+}
+
+/** Les anciennes cibles ont reçu NET_WORTH sans choix de métrique : faire confirmer. */
+function purposeBlocker(goal: GoalVersionDefinition): GoalBlocker | null {
+  if (goal.purpose === undefined) {
+    return blocker(
+      "GOAL_PURPOSE_UNCONFIRMED",
+      "Précisez le type d’objectif et sa métrique : cette cible ne précise pas encore son usage.",
+    );
+  }
+  if (
+    goal.purpose === "SAFETY_RESERVE" &&
+    (goal.target.metric !== "IMMEDIATE_CASH" ||
+      goal.target.operator !== "AT_LEAST" ||
+      goal.target.entityId !== null)
+  ) {
+    return blocker(
+      "GOAL_RESERVE_METRIC_INCOMPATIBLE",
+      "Une réserve de sécurité se mesure avec la trésorerie immédiate, pas avec le patrimoine ou les actifs investis.",
+    );
+  }
+  return null;
 }
 
 function nonComputableCurrent(
@@ -202,7 +230,7 @@ export function evaluateGoalCurrent(input: {
   reportingCurrency: string;
   asOfDate: string;
 }): GoalCurrentEvaluation {
-  const dormant = inactive(input.goal);
+  const dormant = inactive(input.goal) ?? purposeBlocker(input.goal);
   if (!input.balanceSheet || dormant) {
     const reason = dormant ?? blocker("MISSING_CURRENT_STATE", "Bilan canonique courant absent");
     const observation: GoalMetricObservation = {
@@ -257,10 +285,18 @@ export function evaluateGoalCurrent(input: {
 function pointsForTarget(
   goal: GoalVersionDefinition,
   trajectory: ScenarioPath,
-): { candidates: ScenarioPathMetric[]; observation: ScenarioPathMetric | null; blockers: GoalBlocker[] } {
+): {
+  candidates: ScenarioPathMetric[];
+  observation: ScenarioPathMetric | null;
+  blockers: GoalBlocker[];
+} {
   const points = [...trajectory.monthly].sort((a, b) => a.date.localeCompare(b.date));
   if (!points.length) {
-    return { candidates: [], observation: null, blockers: [blocker("TRAJECTORY_NOT_COMPUTABLE", "Trajectoire vide")] };
+    return {
+      candidates: [],
+      observation: null,
+      blockers: [blocker("TRAJECTORY_NOT_COMPUTABLE", "Trajectoire vide")],
+    };
   }
   const last = points.at(-1)!;
   if (goal.targetWindow) {
@@ -268,18 +304,26 @@ function pointsForTarget(
       return {
         candidates: [],
         observation: null,
-        blockers: [blocker("HORIZON_BEFORE_DEADLINE", "L’horizon se termine avant la fenêtre cible")],
+        blockers: [
+          blocker("HORIZON_BEFORE_DEADLINE", "L’horizon se termine avant la fenêtre cible"),
+        ],
       };
     }
     const candidates = points.filter(
-      (point) => point.date >= goal.targetWindow!.startDate && point.date <= goal.targetWindow!.endDate,
+      (point) =>
+        point.date >= goal.targetWindow!.startDate && point.date <= goal.targetWindow!.endDate,
     );
     return {
       candidates,
       observation: candidates.at(-1) ?? null,
       blockers: candidates.length
         ? []
-        : [blocker("HISTORICAL_TARGET_VALUE_UNAVAILABLE", "Aucun point mensuel dans la fenêtre cible")],
+        : [
+            blocker(
+              "HISTORICAL_TARGET_VALUE_UNAVAILABLE",
+              "Aucun point mensuel dans la fenêtre cible",
+            ),
+          ],
     };
   }
   if (goal.targetDate) {
@@ -349,7 +393,7 @@ export function evaluateGoalAgainstTrajectory(input: {
   baselineFingerprint?: string | null;
   currentBaselineFingerprint?: string | null;
 }): GoalTrajectoryEvaluation {
-  const dormant = inactive(input.goal);
+  const dormant = inactive(input.goal) ?? purposeBlocker(input.goal);
   const trajectoryBlockers = input.trajectory.blockers.map((item) =>
     blocker(item.code, item.message, { blocking: item.blocking, source: "SCENARIOS_V2" }),
   );
@@ -392,11 +436,10 @@ export function evaluateGoalAgainstTrajectory(input: {
   const attainmentCandidates = input.goal.targetWindow
     ? selected.candidates
     : input.trajectory.monthly.filter((point) => point.date >= input.trajectory.asOfDate);
-  const firstAttainment = attainmentCandidates
-    .find((point) => {
-      const metric = resolveProjectedGoalMetric(input.goal.target, point, input.reportingCurrency);
-      return metric.value !== null && targetSatisfied(metric.value, input.goal.target);
-    });
+  const firstAttainment = attainmentCandidates.find((point) => {
+    const metric = resolveProjectedGoalMetric(input.goal.target, point, input.reportingCurrency);
+    return metric.value !== null && targetSatisfied(metric.value, input.goal.target);
+  });
   const windowSatisfied = selected.candidates.some((point) => {
     const metric = resolveProjectedGoalMetric(input.goal.target, point, input.reportingCurrency);
     return metric.value !== null && targetSatisfied(metric.value, input.goal.target);

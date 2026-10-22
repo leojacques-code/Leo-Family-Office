@@ -104,6 +104,8 @@ export type SourceEvidence =
   | "BANK_ACCOUNTS"
   | "BANK_TRANSACTIONS"
   | "LIABILITIES"
+  /** Dettes connues par leur seul encours : une observation déclarée, pas un contrat. */
+  | "OUTSTANDING_DEBTS"
   | "LIABILITY_PROVIDED_SCHEDULE"
   | "POSITIONS"
   | "PORTFOLIO_EVENTS"

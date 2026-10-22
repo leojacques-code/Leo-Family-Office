@@ -1,0 +1,29 @@
+{
+  "verified_at": "2026-10-15T17:02:05.675Z",
+  "organization": {
+    "id": "wniscyevfmnmtzbmjwlx",
+    "plan": "free",
+    "tier": "tier_free"
+  },
+  "projects": [
+    {
+      "ref": "vsitqibxhgcyrayzwyjb",
+      "name": "leo-leaning",
+      "status": "INACTIVE",
+      "region": "eu-north-1"
+    },
+    {
+      "ref": "zwgrcznzymbfdiybeuvv",
+      "name": "Leo Family Office",
+      "status": "ACTIVE_HEALTHY",
+      "region": "eu-west-1"
+    },
+    {
+      "ref": "bjxhnwvomoznorijauyl",
+      "name": "lfo-staging",
+      "status": "ACTIVE_HEALTHY",
+      "region": "eu-west-1"
+    }
+  ],
+  "mutations": "No production mutation; synthetic staging acceptance only; leo-leaning remains paused."
+}

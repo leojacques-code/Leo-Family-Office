@@ -616,6 +616,7 @@ export function evaluateDecisionCase(input: {
     staleStatus,
   };
   return {
+    reportingCurrency: input.reportingCurrency,
     caseVersion: structuredClone(input.caseVersion),
     run,
     completeness,

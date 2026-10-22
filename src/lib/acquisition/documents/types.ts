@@ -87,10 +87,12 @@ export const EXTRACTION_METHODS = [
   "NATIVE_TEXT_LABEL",
   "OCR",
   "USER_INPUT",
+  // Cellule d'un fichier tabulaire (B19) : ni couche texte de PDF, ni OCR.
+  "TABULAR_CELL",
 ] as const;
 export type ExtractionMethod = (typeof EXTRACTION_METHODS)[number];
 
-export const EXTRACTION_UNITS = ["EUR", "PCT", "COUNT", "DAYS", "TEXT"] as const;
+export const EXTRACTION_UNITS = ["EUR", "PCT", "COUNT", "DAYS", "TEXT", "MONEY", "DATE"] as const;
 export type ExtractionUnit = (typeof EXTRACTION_UNITS)[number];
 
 export type DocumentIssueSeverity = "ERROR" | "WARNING" | "INFO";
@@ -123,6 +125,29 @@ export const DOCUMENT_ISSUE_CODES = [
   // Contrôles
   "CHECK_OPERAND_NOT_FOUND",
   "CHECK_FAILED",
+  // Échéancier tabulaire (B19). Un fichier tabulaire n'a pas de page : ses anomalies portent
+  // la case `L{ligne}.{colonne}` concernée, ou rien quand elles visent le fichier entier.
+  "SCHEDULE_FORMAT_REFUSED",
+  "SCHEDULE_SOURCE_NOTICE",
+  "SCHEDULE_FILE_TOO_LARGE",
+  "SCHEDULE_TOO_MANY_ROWS",
+  "SCHEDULE_TOO_MANY_COLUMNS",
+  "SCHEDULE_HEADER_NOT_FOUND",
+  "SCHEDULE_DATE_COLUMN_MISSING",
+  "SCHEDULE_COLUMN_AMBIGUOUS",
+  "SCHEDULE_COLUMN_DUPLICATE_ROLE",
+  "SCHEDULE_COLUMN_UNRECOGNISED",
+  "SCHEDULE_OTHER_SHEETS_IGNORED",
+  "SCHEDULE_FORMULA_CELL",
+  "SCHEDULE_DATE_SERIAL_DECODED",
+  "SCHEDULE_NEGATIVE_AMOUNT",
+  "SCHEDULE_DUPLICATE_DUE_DATE",
+  "SCHEDULE_DATES_NOT_INCREASING",
+  "SCHEDULE_PERIOD_GAP",
+  "SCHEDULE_PARTIAL_EXTRACT",
+  "SCHEDULE_CURRENCY_UNDECLARED",
+  "SCHEDULE_CURRENCY_CONFLICT",
+  "SCHEDULE_CHECK_COLUMNS_MISSING",
 ] as const;
 export type DocumentIssueCode = (typeof DOCUMENT_ISSUE_CODES)[number];
 

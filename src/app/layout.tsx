@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { themeBootstrapScript } from "@/lib/presentation/theme";
 import "./globals.css";
 // CSS des primitives financières, séparé de `globals.css` : premier fichier du découpage
 // « par primitives et workspaces » demandé par la section 10.2 du plan de refonte.
@@ -9,6 +10,12 @@ import "./workstation.css";
 // découpage CSS du §10.2. La phase 2 solde la dette typographique de SON périmètre, pas celle
 // des treize autres pages.
 import "./today.css";
+// Canvas du bilan de la phase 4A : géométrie `ACTIFS − DETTES = PATRIMOINE NET`, répartition et
+// zones détourées d'un montant inconnu. Quatrième fichier du découpage CSS du §10.2.
+import "./net-worth.css";
+import "./personal-setup.css";
+// Revue d'un échéancier déposé et section « Documents » de la fiche Dette (B19).
+import "./schedule-review.css";
 
 export const metadata: Metadata = {
   title: "Léo Family Office",
@@ -19,6 +26,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="fr" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );

@@ -132,6 +132,33 @@ const positions: Position[] = [
 ];
 
 const AS_OF = "2030-01-15";
+/** Les seules dépenses dont le montant est déclaré : le cash-flow libre est alors calculable. */
+const knownExpenses = expenses.filter((expense) => expense.monthlyAmount !== null);
+
+describe("deriveFlowMetrics avec une dette connue par son seul encours", () => {
+  it("rend le cash-flow libre inconnu : le service de cette dette n'est pas nul", () => {
+    const debt = {
+      id: "d",
+      name: "Prêt familial",
+      lender: null,
+      currentBalance: 1000,
+      currency: "EUR",
+      balanceDate: AS_OF,
+      notes: null,
+      provenance: { kind: "ACTUAL" as const, confidence: "HIGH" as const },
+    };
+    const known = deriveFlowMetrics(liabilities, incomes, knownExpenses, [], AS_OF);
+    const withDebt = deriveFlowMetrics(liabilities, incomes, knownExpenses, [], AS_OF, [debt]);
+    expect(known.freeCashFlow).not.toBeNull();
+    expect(withDebt.freeCashFlow).toBeNull();
+    // Le service contractuel reste celui des contrats, sans rien inventer pour la dette seule.
+    expect(withDebt.monthlyDebtService).toBe(known.monthlyDebtService);
+    const extinguished = deriveFlowMetrics(liabilities, incomes, knownExpenses, [], AS_OF, [
+      { ...debt, currentBalance: 0 },
+    ]);
+    expect(extinguished.freeCashFlow).toBe(known.freeCashFlow);
+  });
+});
 
 describe("deriveFlowMetrics", () => {
   const metrics = deriveFlowMetrics(liabilities, incomes, expenses, [], AS_OF);
@@ -169,13 +196,24 @@ describe("deriveFlowMetrics", () => {
 
   it("n'exige aucun service de dette avant la première échéance", () => {
     // Première échéance après la date d'observation : aucune ligne exigible.
+    const known = deriveFlowMetrics(liabilities, incomes, knownExpenses, [], AS_OF);
     expect(metrics.monthlyDebtService).toBe(0);
-    expect(metrics.freeCashFlow).toBeCloseTo(1200, 2);
+    // Oracle : 2 000 de revenus − 800 de loyer − 0 de service = 1 200.
+    expect(known.freeCashFlow).toBeCloseTo(1200, 2);
+  });
+
+  it("rend le cash-flow libre inconnu quand une dépense déclarée n'a pas de montant", () => {
+    // Lot A du 12 octobre 2026 : l'électricité déclarée sans montant n'est pas une dépense
+    // nulle. L'ancien calcul rendait 1 200, surestimé du montant inconnu, sans réserve.
+    expect(metrics.monthlyExpenses).toBeCloseTo(800, 2);
+    expect(metrics.dataCompleteness).toBe(0.5);
+    expect(metrics.freeCashFlow).toBeNull();
   });
 
   it("exige la mensualité pendant la période de remboursement", () => {
-    const active = deriveFlowMetrics(liabilities, incomes, expenses, [], "2030-05-15");
+    const active = deriveFlowMetrics(liabilities, incomes, knownExpenses, [], "2030-05-15");
     expect(active.monthlyDebtService).toBeCloseTo(100, 2);
+    // Oracle : 2 000 − 800 − 100 = 1 100, sur les seules dépenses de montant déclaré.
     expect(active.freeCashFlow).toBeCloseTo(1100, 2);
   });
 

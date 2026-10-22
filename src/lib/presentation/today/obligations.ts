@@ -57,6 +57,8 @@ const ADMITTED_DATA_KINDS = new Set<CanonicalEvent["dataKind"]>(["OBSERVED", "CO
 const OBLIGATION_EVENT_TYPES = new Set<CanonicalEvent["type"]>([
   // Dette : ce que le contrat impose, et les dates auxquelles il change.
   "LOAN_PAYMENT",
+  "LOAN_INSURANCE_DEBIT",
+  "LOAN_CHARGE",
   "RATE_CHANGE",
   "PAYMENT_CHANGE",
   "DEFERRAL_START",

@@ -1,0 +1,90 @@
+{
+  "main": "bd1782cae6b5f7141c3cc2765bd30c6a11a325fe",
+  "head": "75c0a18413b289687bf0c7538aaf75bf22b044fa",
+  "migrations": [
+    {
+      "file": "supabase/migrations/20260914191901_verified_personal_session.sql",
+      "sha256": "5770e7b48e146cf889eb60fd2322debfe54cc3beff56d365c539e2423b121385"
+    },
+    {
+      "file": "supabase/migrations/20260915064740_personal_reference_isolation.sql",
+      "sha256": "87432e5ac94e08f9afdec8c7acd01aef6466dc1e42c2568e6915e4ddb6f7f11d"
+    },
+    {
+      "file": "supabase/migrations/20260915180426_personal_first_intent.sql",
+      "sha256": "054b70a4656d439b440b9443be8e9a8f51e6857b7875529dfc6f4da22858f72a"
+    },
+    {
+      "file": "supabase/migrations/20260917071520_personal_context.sql",
+      "sha256": "46e4dcc087e41e813a3bc028d4f329e7c1828656cdde1446a835da9a9d39b1be"
+    },
+    {
+      "file": "supabase/migrations/20260924081000_debt_outstanding_only.sql",
+      "sha256": "a58830e0622c2e878bc389973cd718b0d7ea8329151deda7c00878b40c133492"
+    },
+    {
+      "file": "supabase/migrations/20260924091000_net_income_observation.sql",
+      "sha256": "a5900db462951dcbfc182bfd64e9fb05ad9fcc4496fb13f89218c01bfe2ae2ba"
+    },
+    {
+      "file": "supabase/migrations/20260924120000_net_income_correction.sql",
+      "sha256": "4ade91380bbcf467220719fc11744a91fa7206c961c6822aed245163897a96a2"
+    },
+    {
+      "file": "supabase/migrations/20260924150000_debt_outstanding_to_contract.sql",
+      "sha256": "3f07fb91f2acc230de7d7edc4fa58a12ac18ea2a30ed2b56f75720d797bbdc84"
+    },
+    {
+      "file": "supabase/migrations/20260924160000_income_correction_hardening.sql",
+      "sha256": "876ea082790a98e76fe4a831c957a92ec241075507641ade24eb570409f09cfe"
+    },
+    {
+      "file": "supabase/migrations/20260924170000_debt_adaptive_contract.sql",
+      "sha256": "161b1d9fb9806b561d5eb536697447aff96702b86f6c0c8cd7e68cdd67fdc155"
+    },
+    {
+      "file": "supabase/migrations/20260924180000_debt_separate_insurance.sql",
+      "sha256": "56abc8bac4aeb765c58489ccc5af806fbc6248576a1b8327a3f1fee034254cd4"
+    },
+    {
+      "file": "supabase/migrations/20260925090000_debt_insurance_policy_details.sql",
+      "sha256": "4cf98100cfee46145db6c977b6f6c6aa015e37a3046d9df4dd99e431b3514c34"
+    },
+    {
+      "file": "supabase/migrations/20260925100000_debt_review_hardening.sql",
+      "sha256": "eb2293e9a87cbc2dee9efeebe074e0eaa8c97b3e2d41e8208e425691aeee54b7"
+    },
+    {
+      "file": "supabase/migrations/20260925110000_observation_dates_and_balance_rights.sql",
+      "sha256": "c70962eb8dd4c0e5d1fd8bd6764bc426f1858b67a4c4d27677074b623cfcc175"
+    },
+    {
+      "file": "supabase/migrations/20260925120000_form_drafts.sql",
+      "sha256": "f4596b0495c0238d74a5411bc64b40ba4d33e739b18f1b643a9cd80afa6f9a48"
+    },
+    {
+      "file": "supabase/migrations/20260925130000_debt_events.sql",
+      "sha256": "e3725d631c40e99b4bd1f25be49e7d32a7b96d26bcb1114d6722d259b7205c38"
+    },
+    {
+      "file": "supabase/migrations/20260925140000_debt_review_versions_and_guards.sql",
+      "sha256": "3bcc7d4342d2d13a3c8ac36de63921909997da313d5a6a687f270da49499994f"
+    },
+    {
+      "file": "supabase/migrations/20261012090000_debt_contract_declared_deferral_and_actor.sql",
+      "sha256": "0ac316fe632011e750185cbc71a656347132c9445a8496e1ce799f1c67df9dc8"
+    },
+    {
+      "file": "supabase/migrations/20261012140000_document_schedule_review.sql",
+      "sha256": "4796ddf240dd703665c0042e21f8598bd0bd61cc8df9b8ce8252b71bbbf1b7e3"
+    },
+    {
+      "file": "supabase/migrations/20261015130044_explicit_server_role_grants.sql",
+      "sha256": "e31f71a07a142d2f74d914daa9187c0bad2ba90796374b6b23c3f4d5c60100bd"
+    },
+    {
+      "file": "supabase/migrations/20261021153711_document_field_confirmation_audit.sql",
+      "sha256": "b739afff4618fb2e1bd4a283a205f8fa38085f3937bf31dfa55b064493856beb"
+    }
+  ]
+}

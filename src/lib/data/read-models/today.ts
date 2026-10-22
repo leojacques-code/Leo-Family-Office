@@ -1,8 +1,9 @@
+import { hasImmediateCashScope } from "@/lib/presentation/cash-scope";
 import "server-only";
 
-import { computeObservedCashFlow, monthPeriod } from "@/lib/engine/cash-flow";
+import { aggregateBlocked, computeObservedCashFlow, monthPeriod } from "@/lib/engine/cash-flow";
 import { buildGlobalFinancialContext } from "@/lib/engine/global-financial-model";
-import { railSourcesFor } from "@/lib/presentation/rail-sources";
+import { railSourcesFor, type ScheduleDocumentEvidence } from "@/lib/presentation/rail-sources";
 import { PAGE_REGISTRY } from "@/lib/presentation/registry/pages";
 import { DOMAIN_REGISTRY } from "@/lib/presentation/today/domains";
 import { buildTodayView, type TodayViewInput } from "@/lib/presentation/today/view";
@@ -90,7 +91,7 @@ function domainFacts(state: DashboardState) {
         })),
       },
       state,
-    ).some((source) => source.status === "ACTIVE"),
+    ).some((source) => source.status !== "ABSENTE"),
   }));
 }
 
@@ -104,7 +105,10 @@ function domainFacts(state: DashboardState) {
 export function todayViewInputFrom(
   state: DashboardState,
   declarations: readonly DomainDeclaration[],
-  options: { readonly readOnlyDemo?: boolean } = {},
+  options: {
+    readonly readOnlyDemo?: boolean;
+    readonly scheduleDocuments?: readonly ScheduleDocumentEvidence[];
+  } = {},
 ): TodayViewInput {
   // UN SEUL contexte partagé, et le bilan et la timeline en sont LUS.
   //
@@ -118,6 +122,9 @@ export function todayViewInputFrom(
   // viennent donc du bilan canonique lui-même.
   const context = buildGlobalFinancialContext(state, HORIZON_MONTHS);
   const balanceSheet = context.balanceSheet;
+  // La somme canonique d'un périmètre vide vaut zéro. Elle ne prouve pas que la banque
+  // a été renseignée : seule une ligne de compte ou une déclaration explicite le permet.
+  const cashScopeKnown = hasImmediateCashScope(balanceSheet, declarations);
 
   const month = monthPeriod(state.asOfDate);
   const observed = computeObservedCashFlow(
@@ -125,7 +132,11 @@ export function todayViewInputFrom(
     state.expenseCategories ?? [],
     month.start,
     month.end,
-    { ledgerCoverageStart: state.ledgerCoverageStart, asOfDate: state.asOfDate },
+    {
+      ledgerCoverageStart: state.ledgerCoverageStart,
+      asOfDate: state.asOfDate,
+      reportingCurrency: state.reportingCurrency,
+    },
   );
   const ranked = rankGoals(
     (state.goals ?? []).filter((goal) => goal.status === "ACTIVE"),
@@ -152,18 +163,21 @@ export function todayViewInputFrom(
     href: reserveHref(blocker.source),
   }));
 
-  const railSources: RailSourceView[] = railSourcesFor(PAGE_REGISTRY.today!, state).map(
-    (source) => ({
-      id: source.id,
-      category: source.category,
-      name: source.name,
-      status: source.status,
-      // La date est AFFICHÉE et l'utilisateur juge : aucun seuil de fraîcheur n'est déclaré
-      // dans le produit, et en poser un ici serait décider « si une anomalie est assez
-      // importante pour alerter », ce que le §16 refuse.
-      hint: source.latestDate,
-    }),
-  );
+  const railSources: RailSourceView[] = railSourcesFor(
+    PAGE_REGISTRY.today!,
+    state,
+    {},
+    options.scheduleDocuments,
+  ).map((source) => ({
+    id: source.id,
+    category: source.category,
+    name: source.name,
+    status: source.status,
+    // La date est AFFICHÉE et l'utilisateur juge : aucun seuil de fraîcheur n'est déclaré
+    // dans le produit, et en poser un ici serait décider « si une anomalie est assez
+    // importante pour alerter », ce que le §16 refuse.
+    hint: source.latestDate,
+  }));
 
   return {
     asOfDate: state.asOfDate,
@@ -173,7 +187,7 @@ export function todayViewInputFrom(
       blockers: balanceSheet.netWorth.blockers,
     },
     immediateCash: {
-      value: balanceSheet.immediateCash.value,
+      value: cashScopeKnown ? balanceSheet.immediateCash.value : null,
       blockers: balanceSheet.immediateCash.blockers,
     },
     closes: state.monthlyCloses ?? [],
@@ -190,6 +204,13 @@ export function todayViewInputFrom(
       // d'opérations : un mois avec trois opérations n'est pas un mois couvert, et une absence
       // d'historique n'est pas un mois à zéro.
       fullyCovered: observed.coverage.status === "COMPLETE",
+      foreignCurrencyTransactionCount: observed.dataQuality.foreignCurrencyTransactionCount,
+      blocked: {
+        income: aggregateBlocked(observed.dataQuality, "income"),
+        essentialExpenses: aggregateBlocked(observed.dataQuality, "consumerExpenses"),
+        debtServicePaid: aggregateBlocked(observed.dataQuality, "debtServicePaid"),
+        cashFlowAfterDebt: aggregateBlocked(observed.dataQuality, "cashFlowAfterDebt"),
+      },
     },
     goal,
     events: context.timeline.events,
@@ -204,15 +225,16 @@ export function todayViewInputFrom(
 /**
  * Le modèle de lecture servi à la route.
  *
- * Les deux lectures — état canonique et déclarations — sont faites EN PARALLÈLE : elles ne
- * dépendent pas l'une de l'autre, et les enchaîner doublerait la latence de la page d'accueil
- * du produit sans rien garantir de plus.
+ * L'état canonique transporte désormais les déclarations d'affichage, lues en parallèle de
+ * ses autres dépendances. Les preuves documentaires restent une lecture indépendante.
  */
 export async function getTodayReadModel(): Promise<TodayReadModel> {
   const repository = await getRepository();
-  const [state, declarations] = await Promise.all([
+  const [state, scheduleDocuments] = await Promise.all([
     repository.getDashboardState(),
-    repository.getDomainDeclarations(),
+    repository.getScheduleDocumentEvidence(),
   ]);
-  return buildTodayView(todayViewInputFrom(state, declarations));
+  // Compatibilité d'un ancien fournisseur d'état : absence du champ ≠ liste vide.
+  const declarations = state.domainDeclarations ?? (await repository.getDomainDeclarations());
+  return buildTodayView(todayViewInputFrom(state, declarations, { scheduleDocuments }));
 }

@@ -69,7 +69,7 @@ export const DOMAIN_REGISTRY: readonly DomainDefinition[] = [
     id: "DETTE",
     label: "Dettes",
     reason: "Un échéancier fourni remplace un échéancier reconstruit et fixe les sorties réelles.",
-    evidence: ["LIABILITIES", "LIABILITY_PROVIDED_SCHEDULE"],
+    evidence: ["LIABILITIES", "OUTSTANDING_DEBTS", "LIABILITY_PROVIDED_SCHEDULE"],
     sourceHref: "/imports",
     manualHref: "/debt",
     sourceCategory: "ECHEANCIER",

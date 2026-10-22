@@ -5,6 +5,7 @@ import { AlertTriangle, Ban, Check, Copy, Info, MinusCircle, UploadCloud } from 
 
 import { Callout, EmptyState } from "@/components/ui";
 import { formatDate, NOT_COMPUTABLE } from "@/components/pages/shared";
+import { formatCurrency } from "@/lib/presentation/currency";
 import { uploadToSignedStoragePath } from "@/lib/data/supabase-storage-browser";
 import type {
   ImportRowStatus,
@@ -67,13 +68,10 @@ const SESSION_STATUS_LABELS: Record<PortfolioSessionSummary["status"], string> =
   FAILED: "Échouée",
 };
 
+/** Formateur partagé : une devise absente reste « devise non renseignée », jamais l'euro. */
 function amount(value: number | null, currency: string | null): string {
   if (value === null) return NOT_COMPUTABLE;
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: currency ?? "EUR",
-    maximumFractionDigits: 2,
-  }).format(value);
+  return formatCurrency(value, currency);
 }
 
 function PortfolioSection({ accounts, refresh }: Props) {

@@ -4,6 +4,7 @@ import { API_HEADERS } from "@/lib/http";
 import { requireAuthenticated } from "@/lib/auth";
 import { getPortfolioImportRepository } from "@/lib/data/portfolio-import-repository";
 import { portfolioImportCommandSchema } from "@/lib/validation/portfolio-imports";
+import { routeFailure as failure } from "@/lib/route-failure";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,22 +32,11 @@ export const runtime = "nodejs";
  * Aucun corps de requête de cette route ne dépasse quelques kilooctets.
  */
 
-function failure(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message === "UNAUTHORIZED") {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
-  }
-  // Le message d'une RPC d'acquisition est informatif pour l'utilisateur (« ce fichier a
-  // déjà été validé », « lignes non committables désignées ») : il est remonté tel quel.
-  console.error(fallback, error);
-  const message = error instanceof Error ? error.message : fallback;
-  return NextResponse.json({ error: message }, { status: 400 });
-}
-
 export async function GET(request: Request) {
   try {
     await requireAuthenticated();
     const params = new URL(request.url).searchParams;
-    const repository = getPortfolioImportRepository();
+    const repository = await getPortfolioImportRepository();
 
     const sessionId = params.get("session");
     if (sessionId) {
@@ -83,7 +73,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const repository = getPortfolioImportRepository();
+    const repository = await getPortfolioImportRepository();
     const command = parsed.data;
 
     switch (command.action) {

@@ -1,0 +1,350 @@
+{
+  "date": "2026-09-23",
+  "sourceCommit": "2e55013bf17d2a778ec7e995ba4e0ab7f1b01da7",
+  "files": [
+    {
+      "path": "work/account-desktop.png",
+      "bytes": 186550,
+      "sha256": "2fd6e0135b99299c4d576f88d9b81d4f94354d5764e644c4d3696c6fd6b3100a"
+    },
+    {
+      "path": "work/account-historical-create.png",
+      "bytes": 150285,
+      "sha256": "0de4ff39622e930314102397f987e81849df6736235fd062f3642007fa76695c"
+    },
+    {
+      "path": "work/account-mobile.png",
+      "bytes": 83489,
+      "sha256": "355e14d7a0ba5baddc50e1ae9a607fa099e46ad211396316b0a073156e39107b"
+    },
+    {
+      "path": "work/b13-index-inventory.json",
+      "bytes": 63793,
+      "sha256": "25b1d45f4e931ec2944b19262e6391144112c518ded562a1f075b20ba5e0fea6"
+    },
+    {
+      "path": "work/b13-reference-inventory.json",
+      "bytes": 6278,
+      "sha256": "fdc8f4bcb5c88642546f0776cd044438ca250fdc35b6234467d429dc85145dd5"
+    },
+    {
+      "path": "work/b14-browser-sql-proof.json",
+      "bytes": 239,
+      "sha256": "0d8c18771529decd6ffa2b2bd0a473daccb68b03629ecef4943dc19d9bc9d32e"
+    },
+    {
+      "path": "work/create-debt-browser.js",
+      "bytes": 1068,
+      "sha256": "ab6a4ee628eaa12e3d7f6e65feb473916e7c4bd0530ed17a0f55876d8522e2a4"
+    },
+    {
+      "path": "work/debt-currency-fixture.json",
+      "bytes": 45,
+      "sha256": "8cdcf450598017483cebe9c71036affdf179ce59f826fdbf68d847e1e81181b9"
+    },
+    {
+      "path": "work/debt-currency-recipe.cjs",
+      "bytes": 1769,
+      "sha256": "c29f40c61e5a9d904e8c01bc5db2c84f74e709ba5801ad109a2e1effada604a6"
+    },
+    {
+      "path": "work/debt-debug.png",
+      "bytes": 230358,
+      "sha256": "f8ea68b9cd136394f2dec859f2a880991012c404738b6497a29f14d3c27bc6b8"
+    },
+    {
+      "path": "work/debt-final.png",
+      "bytes": 123807,
+      "sha256": "405cd48051e6b0054e0519917d3c5797c0181b7a97b03cdb3b68937abb8b29d1"
+    },
+    {
+      "path": "work/debt-read-evidence.json",
+      "bytes": 1495,
+      "sha256": "fde61317191775c596bcc3c430e1ed53c96a7d531abe388c664bed88d1e7ba39"
+    },
+    {
+      "path": "work/debt-reloaded.png",
+      "bytes": 123980,
+      "sha256": "c1da4f71ac7c4e2b8bd7ba1403092a388c22ec6bbd0c52885e6698b67f5952d6"
+    },
+    {
+      "path": "work/debt-write-read-failure.png",
+      "bytes": 121020,
+      "sha256": "69b941e44f33ea7985278a72fda4ec592d79f97e738dab1661e2aacbffa5f528"
+    },
+    {
+      "path": "work/decision-currency-recipe.cjs",
+      "bytes": 1864,
+      "sha256": "48dd5649bad0ba5b51841413fc87d9722fcae65945b0d81f42d5b12711c4a288"
+    },
+    {
+      "path": "work/extract-debt-read.py",
+      "bytes": 5437,
+      "sha256": "81a74be35ce637a5011d5792bb77ef494f5a3cf79b50bec9b8e0d4e7503f76b4"
+    },
+    {
+      "path": "work/goal-currency-recipe.cjs",
+      "bytes": 1532,
+      "sha256": "e66c8fa366eaaa823ec1c57167daf6a6ea15c54bfdb84d6878fd4f22668aa4b8"
+    },
+    {
+      "path": "work/goal-recipe-gateway.cjs",
+      "bytes": 1380,
+      "sha256": "2a09f1b8168c1bba2f1160e03a29ccf0afbc15657f960393649b219182a83392"
+    },
+    {
+      "path": "work/goals-before-recipe.png",
+      "bytes": 96596,
+      "sha256": "33717ee2bfdf9cbd8ebdb1c8426fa9b2116711ad5cc58fd9cc01eafc134c1ca6"
+    },
+    {
+      "path": "work/implement-goals.cjs",
+      "bytes": 3405,
+      "sha256": "a249d3df25636dbaf071432ddff1f32644ee45b74afa7b511996f044ba0fd3d7"
+    },
+    {
+      "path": "work/implement-trust.cjs",
+      "bytes": 1208,
+      "sha256": "a66921afa18c66ad7eecae010c0a96680e944d06e022e0f74328189133e5800b"
+    },
+    {
+      "path": "work/login-recipe.png",
+      "bytes": 218642,
+      "sha256": "7930b8cab683e3542b5b9fd590c67992e81d0eee95cb5e28c5377c0d35f0b002"
+    },
+    {
+      "path": "work/personal-recipe-gateway.cjs",
+      "bytes": 1380,
+      "sha256": "2462010cc806b6b69009d437eed34c4b25c35f4f28f49751365cdd05a13c5df2"
+    },
+    {
+      "path": "work/postgrest.conf",
+      "bytes": 192,
+      "sha256": "f020c640438c479a93865d94e73cf1be17d7b4191d56d0d81099d839d2556f70"
+    },
+    {
+      "path": "work/pr50-mobile.png",
+      "bytes": 73708,
+      "sha256": "83635131e08e6b097f03f7bf01c8acc6a371bc2649de527b5e1c8f496a5a39ca"
+    },
+    {
+      "path": "work/pr50-preview.png",
+      "bytes": 141842,
+      "sha256": "d7503037bf3f833f23c18b6dee16b2fb97250ce8494c18a7d87bb0b37ab320db"
+    },
+    {
+      "path": "work/pr51-create.png",
+      "bytes": 110136,
+      "sha256": "6a21b279b96f5821a4d7bbdaf15e4a40dd9199b294f966c5b7e73100d6eb6b8d"
+    },
+    {
+      "path": "work/pr51-desktop.png",
+      "bytes": 140212,
+      "sha256": "0efb4966acdbcff6ea11a4befb40e54711387555b932c58687a129484b6f72fd"
+    },
+    {
+      "path": "work/pr51-mobile.png",
+      "bytes": 56185,
+      "sha256": "77d8793ca393263a32bf0d20682c0ab4e6109dd64dfa37952041dcd2d193948a"
+    },
+    {
+      "path": "work/read-error.png",
+      "bytes": 29626,
+      "sha256": "0a5df461ad91b702f6cfe6e545f6ad7cb7c0f422649555baa5dc47ed578d42fc"
+    },
+    {
+      "path": "work/read-recovered.png",
+      "bytes": 139124,
+      "sha256": "c66ee65f6d16c34114c970194a6abc76aac93d6b1d77a886b6ae0fac6f779496"
+    },
+    {
+      "path": "work/recipe-gateway.cjs",
+      "bytes": 1380,
+      "sha256": "f1175c7840c7f12bfd6fa89fec9676c478c488630de3d553963cdfb92dfb4ed3"
+    },
+    {
+      "path": "work/refine-debt-read.py",
+      "bytes": 4732,
+      "sha256": "6d5d162c72b1bff57d2640140771f4b599d6df1d316386c30e65bc18b8bc0247"
+    },
+    {
+      "path": "work/reserve-reloaded.png",
+      "bytes": 103377,
+      "sha256": "495d03c31254787c8edbe9c1134af7a6a27b1407d3c6978b2cdb235b87063cb2"
+    },
+    {
+      "path": "work/scope-repositories.py",
+      "bytes": 3070,
+      "sha256": "70113daf079c6fe9bb51904e10df7be3edcc67f6ede6664b65dee63176f9f241"
+    },
+    {
+      "path": "work/start-context-recipe.cjs",
+      "bytes": 777,
+      "sha256": "dc65ba63db9b9585e722fd032ce9ab705a5343ab62db07f497d980574d5694b2"
+    },
+    {
+      "path": "work/start-goal-recipe.cjs",
+      "bytes": 777,
+      "sha256": "a6c46cd69b23a230406fedd1c66d52df6f64f52f486fd5231d7e07d0fac15ab0"
+    },
+    {
+      "path": "work/start-personal-recipe.cjs",
+      "bytes": 777,
+      "sha256": "f88b2054c6822de19fe5407d8a340f0deb29c78ebc905745c55aa0fc2ce20b35"
+    },
+    {
+      "path": "work/verify-close-browser.js",
+      "bytes": 309,
+      "sha256": "55d303460c3a0ca0ae6ba020f9cd9f71e1d39961457d3b7199193436522f71e1"
+    },
+    {
+      "path": "work/verify-debt-browser.js",
+      "bytes": 459,
+      "sha256": "225593b355876e4df42e68fb8ea1b5654b9cd4a4a074cafae19c3e2100cf2d69"
+    },
+    {
+      "path": "work/verify-pr51-close.cjs",
+      "bytes": 678,
+      "sha256": "6e5c10cf5e899da28149f608c22c85a6668e8e8c005b7890c11985d49fde6d67"
+    },
+    {
+      "path": "work/verify-schedule-browser.js",
+      "bytes": 397,
+      "sha256": "0304c25760eb14de66d9c30cbcbb54405735fbc553ccd69d5d013b71ed85ca75"
+    },
+    {
+      "path": "work/verify-trust-db.cjs",
+      "bytes": 1402,
+      "sha256": "2639c39f8d8d14b2fb7692b20bffcd2685b018e9865db4988ce63b69d77e2fa9"
+    },
+    {
+      "path": "outputs/LFO_accueil_personnel_bureau.png",
+      "bytes": 52723,
+      "sha256": "41510a94577b010b8c23c49c91836b8e3975e48fa8be99c2596a48bf6e5f1b9d"
+    },
+    {
+      "path": "outputs/LFO_accueil_personnel_mobile.png",
+      "bytes": 44820,
+      "sha256": "6f483679c5239dba5f57456fe86901c24b853917a0348a06b5871aac5413d5d5"
+    },
+    {
+      "path": "outputs/LFO_compte_date_bureau.png",
+      "bytes": 186550,
+      "sha256": "2fd6e0135b99299c4d576f88d9b81d4f94354d5764e644c4d3696c6fd6b3100a"
+    },
+    {
+      "path": "outputs/LFO_compte_date_creation.png",
+      "bytes": 150285,
+      "sha256": "0de4ff39622e930314102397f987e81849df6736235fd062f3642007fa76695c"
+    },
+    {
+      "path": "outputs/LFO_compte_date_mobile.png",
+      "bytes": 83489,
+      "sha256": "355e14d7a0ba5baddc50e1ae9a607fa099e46ad211396316b0a073156e39107b"
+    },
+    {
+      "path": "outputs/LFO_confiance_63820c1.patch",
+      "bytes": 58619,
+      "sha256": "43d7c3e833bb5ed88b0e7ae6650b41b0f2d59438242a1c34a73eec13011f0fe9"
+    },
+    {
+      "path": "outputs/LFO_connexion_personnelle.png",
+      "bytes": 221250,
+      "sha256": "c3bd40d310cfa7b06e90e00e8f3586ba131fe9b254520dbe868dca41562d2e13"
+    },
+    {
+      "path": "outputs/LFO_consolidation_2b9bacf.patch",
+      "bytes": 327731,
+      "sha256": "0127670773b0009e1e9d7fcbb603aedd01f2cd25b075c1f2112e5b96240d97fe"
+    },
+    {
+      "path": "outputs/LFO_consolidation_a7c2de1.patch",
+      "bytes": 428868,
+      "sha256": "5b2a86a5d9e415d84a4e743c0aa6b0430578c92b7d2ce02d71fdba2ec46ec2cc"
+    },
+    {
+      "path": "outputs/LFO_contexte_sauvegarde_verification_2026-09-22.json",
+      "bytes": 494,
+      "sha256": "7eb504c9eb23a4b188dcfedb618d9a6f0360f46937cc230c89026d04527c1e6e"
+    },
+    {
+      "path": "outputs/LFO_correctifs_63820c1_f2ad138.patch",
+      "bytes": 82271,
+      "sha256": "44f8342dda6cc6cdc18910f52bbc841de9545bd83b90f68b38b132aba47492cb"
+    },
+    {
+      "path": "outputs/LFO_creation_personnelle_mobile.png",
+      "bytes": 92975,
+      "sha256": "e4ed13d8ebd10fbf17ce28d9cb84d2800d37784770be62ba8ce5e083f8af1702"
+    },
+    {
+      "path": "outputs/LFO_decisions_sauvegarde_GitHub_verification_2026-09-23.json",
+      "bytes": 1217,
+      "sha256": "a1bca50c8d4e088fb041c285daa73e31373db795cc82246581f21d8b2926ae9f"
+    },
+    {
+      "path": "outputs/LFO_dette_import_mobile.png",
+      "bytes": 73708,
+      "sha256": "83635131e08e6b097f03f7bf01c8acc6a371bc2649de527b5e1c8f496a5a39ca"
+    },
+    {
+      "path": "outputs/LFO_devises_dettes_sauvegarde_verification_2026-09-22.json",
+      "bytes": 813,
+      "sha256": "ca78096c9da57c56d9643430250e16b1c8191796f4c86a237ed106293f546955"
+    },
+    {
+      "path": "outputs/LFO_objectifs_sauvegarde_GitHub_verification_2026-09-23.json",
+      "bytes": 969,
+      "sha256": "7c4c67a9a6af0c450e436c191b5f8f9a889a1fdef991db2d31d0ec6e6a8444eb"
+    },
+    {
+      "path": "outputs/LFO_objectifs_sauvegarde_locale_verification_2026-09-23.json",
+      "bytes": 554,
+      "sha256": "fa9cc9c5596857c197d60c586cc1c74de353f0a19fc5d63198aeb60c7db76d59"
+    },
+    {
+      "path": "outputs/LFO_patrimoine_bureau.png",
+      "bytes": 140212,
+      "sha256": "0efb4966acdbcff6ea11a4befb40e54711387555b932c58687a129484b6f72fd"
+    },
+    {
+      "path": "outputs/LFO_patrimoine_mobile.png",
+      "bytes": 56185,
+      "sha256": "77d8793ca393263a32bf0d20682c0ab4e6109dd64dfa37952041dcd2d193948a"
+    },
+    {
+      "path": "outputs/LFO_reprise_2026-09-13.md",
+      "bytes": 11355,
+      "sha256": "215a2ed6a5aa58ae52fad8ab10844d2cff7e4b64c355d054c0a681736b37d385"
+    },
+    {
+      "path": "outputs/LFO_reprise_2026-09-14.md",
+      "bytes": 20802,
+      "sha256": "6b50915a749f75d410bf50dbcd8f8b7cee2a2f867289ce4abcc416b66ec69cfc"
+    },
+    {
+      "path": "outputs/LFO_reprise_2026-09-15.md",
+      "bytes": 27759,
+      "sha256": "b81fd02779a1bb029cf6f476890f66e5770840cec1831fe41debd636ed8a8257"
+    },
+    {
+      "path": "outputs/LFO_reprise_2026-09-16.md",
+      "bytes": 2554,
+      "sha256": "cd8e2964447d83a10286b2da928d5d1f9443f417580ddf0876b09b0d23d52a91"
+    },
+    {
+      "path": "outputs/LFO_sauvegarde_GitHub_verification_2026-09-16.json",
+      "bytes": 646,
+      "sha256": "d4a5783ca0e41e11d6e0feb1e69f2f14446080ee83d6ff16ee26081eca33c4de"
+    }
+  ],
+  "excluded": [
+    ".env.local et secrets",
+    "node_modules, .next, caches et binaires installés",
+    "pgdata : base de recette, pas de sauvegarde de données personnelles",
+    "journaux runtime actifs postgres.log et recipe-reads.log ; journaux statiques conservés dans inventaire-journaux.json",
+    "manifestes/base64 de transport GitHub et archives Git déjà sauvegardées",
+    "changelogs fournisseurs téléchargés et documents source fournis (empreintes dans REPRISE.md)"
+  ],
+  "archiveSHA256": "2248413b58d60f6e41ca7bab6c3f775b9cc0f01aef19ed0d2998c51a7431873f"
+}

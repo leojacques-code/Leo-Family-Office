@@ -34,6 +34,13 @@ const EMPTY_FLOW: TodayViewInput["observedFlow"] = {
   cashFlowAfterDebt: 0,
   unclassifiedFlows: 0,
   fullyCovered: false,
+  foreignCurrencyTransactionCount: 0,
+  blocked: {
+    income: false,
+    essentialExpenses: false,
+    debtServicePaid: false,
+    cashFlowAfterDebt: false,
+  },
 };
 
 function input(overrides: Partial<TodayViewInput> = {}): TodayViewInput {
@@ -256,6 +263,13 @@ describe("état COMPLET — les six réponses et leur évolution", () => {
       cashFlowAfterDebt: 1_800,
       unclassifiedFlows: 0,
       fullyCovered: true,
+      foreignCurrencyTransactionCount: 0,
+      blocked: {
+        income: false,
+        essentialExpenses: false,
+        debtServicePaid: false,
+        cashFlowAfterDebt: false,
+      },
     },
     goal: {
       goalId: "g1",

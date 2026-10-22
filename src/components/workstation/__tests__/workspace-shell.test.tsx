@@ -132,12 +132,13 @@ describe("sélecteur Réel / Simulation", () => {
 
   it("transforme la racine et affiche le filigrane en simulation", async () => {
     const onModeChange = vi.fn();
-    expect(scenarios.realityModes).toContain("SIMULATION");
+    // La primitive reste testée sur un contrat explicite de future surface isolée.
+    const isolatedManifest = { ...scenarios, realityModes: ["REAL", "SIMULATION"] as const };
     const { container, rerender } = render(
       <WorkspaceShell
         dateLabel="8 septembre 2026"
         fallbackTitle="Section"
-        manifest={scenarios}
+        manifest={isolatedManifest}
         mode="REAL"
         onModeChange={onModeChange}
       >
@@ -155,7 +156,7 @@ describe("sélecteur Réel / Simulation", () => {
       <WorkspaceShell
         dateLabel="8 septembre 2026"
         fallbackTitle="Section"
-        manifest={scenarios}
+        manifest={isolatedManifest}
         mode="SIMULATION"
         onModeChange={onModeChange}
       >

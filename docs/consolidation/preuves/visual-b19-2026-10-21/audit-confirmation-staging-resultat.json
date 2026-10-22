@@ -1,0 +1,15 @@
+{
+  "project": "bjxhnwvomoznorijauyl",
+  "scope": "staging uniquement",
+  "result": [
+    {
+      "result": "PASS: correction/review et reject/review, MONEY zéro et DATE ; transaction annulée",
+      "restored_run_status": "VALIDATED",
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "server_execute": true
+    }
+  ],
+  "first_attempt": "Test SQL interrompu avant toute décision : alias de table f en conflit avec variable record f ; alias corrigé puis reprise réussie.",
+  "security_advisor": "WARN préexistant : protection contre les mots de passe compromis désactivée ; aucun nouveau constat."
+}

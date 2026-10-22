@@ -110,15 +110,18 @@ beforeEach(() => {
 describe("repository Decision Lab rechargeable", () => {
   it("sauvegarde puis recharge une nouvelle instance du repository, sans cache client", async () => {
     const { definition, evaluation } = decisionFixture();
-    await createSupabaseRepository().mutateState({ action: "create_decision_case_v2", definition });
-    await createSupabaseRepository().mutateState({
+    await createSupabaseRepository(mocks.user).mutateState({
+      action: "create_decision_case_v2",
+      definition,
+    });
+    await createSupabaseRepository(mocks.user).mutateState({
       action: "save_decision_run_v2",
       caseId: definition.caseId,
       caseVersion: 1,
       run: evaluation.run,
       result: evaluation,
     });
-    const state = await createSupabaseRepository().getDashboardState();
+    const state = await createSupabaseRepository(mocks.user).getDashboardState();
     expect(state.decisionCases).toHaveLength(1);
     expect(state.decisionCases![0]).toMatchObject({
       definition,
@@ -129,7 +132,9 @@ describe("repository Decision Lab rechargeable", () => {
     for (const table of ["decision_cases", "decision_case_versions", "decision_runs"])
       expect(queries).toContainEqual({ table, field: "user_id", value: "owner" });
     mocks.user = "other";
-    expect((await createSupabaseRepository().getDashboardState()).decisionCases).toEqual([]);
+    expect((await createSupabaseRepository(mocks.user).getDashboardState()).decisionCases).toEqual(
+      [],
+    );
   });
   it("rejette les associations inter-utilisateurs même si une lecture privilégiée renvoie des lignes étrangères", () => {
     const { definition, evaluation } = decisionFixture();
@@ -231,7 +236,9 @@ describe("repository Decision Lab rechargeable", () => {
         created_at: "2026-08-01T00:00:00Z",
       },
     ];
-    expect((await createSupabaseRepository().getDashboardState()).monthlyCloses[0]).toMatchObject({
+    expect(
+      (await createSupabaseRepository(mocks.user).getDashboardState()).monthlyCloses[0],
+    ).toMatchObject({
       version: 3,
       reportingCurrency: "USD",
       completenessStatus: "PARTIAL",
@@ -262,6 +269,21 @@ it("conserve les déclarations après la première page PostgREST", async () => 
     revision: 1,
     note: null,
   });
-  const declarations = await createSupabaseRepository().getDomainDeclarations();
+  const declarations = await createSupabaseRepository(mocks.user).getDomainDeclarations();
   expect(declarations.find((row) => row.domain === "DETTE")?.applicability).toBe("DECLARED_NONE");
+});
+
+it("transporte la déclaration courante de banque dans l'état global, sous le même propriétaire", async () => {
+  tables.user_domain_declarations = [
+    { id: "ancienne", user_id: "owner", domain: "BANQUE", applicability: "APPLICABLE", declared_on: "2026-10-21", revision: 1, note: null },
+    { id: "courante", user_id: "owner", domain: "BANQUE", applicability: "DECLARED_NONE", declared_on: "2026-10-22", revision: 2, note: "Absence explicite" },
+    { id: "autre", user_id: "other", domain: "BANQUE", applicability: "APPLICABLE", declared_on: "2026-10-23", revision: 1, note: null },
+  ];
+  const state = await createSupabaseRepository("owner").getDashboardState();
+  expect(state.domainDeclarations).toEqual([{
+    domain: "BANQUE",
+    applicability: "DECLARED_NONE",
+    declaredOn: "2026-10-22",
+    note: "Absence explicite",
+  }]);
 });

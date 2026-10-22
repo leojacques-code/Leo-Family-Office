@@ -106,7 +106,7 @@ describe("lecture paginée — colonnes de tri réellement présentes", () => {
     emitted.length = 0;
     mocks.from.mockImplementation((table: string) => builder(table));
 
-    const repository = createSupabaseRepository();
+    const repository = createSupabaseRepository("11111111-1111-4111-8111-111111111111");
     // Avant le correctif, cet appel rejetait sur
     // « column currency_rates.created_at does not exist ».
     await expect(repository.getDashboardState()).resolves.toMatchObject({
@@ -121,7 +121,7 @@ describe("lecture paginée — colonnes de tri réellement présentes", () => {
   it("départage chaque table paginée sur une colonne UNIQUE", async () => {
     emitted.length = 0;
     mocks.from.mockImplementation((table: string) => builder(table));
-    await createSupabaseRepository().getDashboardState();
+    await createSupabaseRepository("11111111-1111-4111-8111-111111111111").getDashboardState();
 
     // Une pagination par `range` n'est déterministe que sur un ordre TOTAL. `created_at`
     // n'étant pas unique, il ne suffisait pas à le garantir, même là où il existe.

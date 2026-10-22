@@ -1,0 +1,268 @@
+{
+  "migrations": [
+    {
+      "version": "202608190001",
+      "name": "initial_family_office"
+    },
+    {
+      "version": "202608190002",
+      "name": "scenario_parameters"
+    },
+    {
+      "version": "202608240001",
+      "name": "scenario_investment_allocation"
+    },
+    {
+      "version": "202608240002",
+      "name": "cash_flow_engine_v2"
+    },
+    {
+      "version": "202608240003",
+      "name": "debt_engine_v2"
+    },
+    {
+      "version": "202608240004",
+      "name": "debt_engine_v2_1"
+    },
+    {
+      "version": "202608240005",
+      "name": "supabase_only_runtime"
+    },
+    {
+      "version": "20260824230233",
+      "name": "debt_contract_input"
+    },
+    {
+      "version": "20260824231522",
+      "name": "debt_schedule_actual_priority"
+    },
+    {
+      "version": "20260825012954",
+      "name": "debt_observation_user_index"
+    },
+    {
+      "version": "20260825020545",
+      "name": "canonical_balance_sheet_v2"
+    },
+    {
+      "version": "20260825021127",
+      "name": "liability_currency_balance_sheet_v2"
+    },
+    {
+      "version": "20260825021742",
+      "name": "snapshot_item_owner_integrity"
+    },
+    {
+      "version": "20260825063626",
+      "name": "snapshot_item_owner_fk_index"
+    },
+    {
+      "version": "20260825063831",
+      "name": "snapshot_item_fk_covering_index"
+    },
+    {
+      "version": "20260825193427",
+      "name": "portfolio_data_foundation"
+    },
+    {
+      "version": "20260825193606",
+      "name": "portfolio_fk_covering_indexes"
+    },
+    {
+      "version": "20260826090117",
+      "name": "real_estate_v2"
+    },
+    {
+      "version": "20260826090347",
+      "name": "real_estate_fk_covering_indexes"
+    },
+    {
+      "version": "20260826145426",
+      "name": "business_equity_v2"
+    },
+    {
+      "version": "20260826145803",
+      "name": "business_equity_effective_truth"
+    },
+    {
+      "version": "20260826194551",
+      "name": "business_equity_v2_1"
+    },
+    {
+      "version": "20260826194605",
+      "name": "business_equity_v2_1_indexes"
+    },
+    {
+      "version": "20260826194644",
+      "name": "business_equity_v2_1_blocking_invariants"
+    },
+    {
+      "version": "20260827155134",
+      "name": "data_acquisition_foundation"
+    },
+    {
+      "version": "20260827215014",
+      "name": "career_tax_v2"
+    },
+    {
+      "version": "20260827215600",
+      "name": "career_tax_v2_fk_indexes"
+    },
+    {
+      "version": "20260828131216",
+      "name": "fec_corporate_acquisition"
+    },
+    {
+      "version": "20260828131433",
+      "name": "fec_corporate_acquisition_fk_indexes"
+    },
+    {
+      "version": "20260829234017",
+      "name": "scenarios_v2"
+    },
+    {
+      "version": "20260829234053",
+      "name": "goals_v2"
+    },
+    {
+      "version": "20260829234259",
+      "name": "scenarios_goals_fk_indexes"
+    },
+    {
+      "version": "20260830154315",
+      "name": "decision_lab_v2"
+    },
+    {
+      "version": "20260831101500",
+      "name": "company_registry_acquisition"
+    },
+    {
+      "version": "20260831154500",
+      "name": "document_intelligence_foundation"
+    },
+    {
+      "version": "20260831171500",
+      "name": "real_estate_public_data"
+    },
+    {
+      "version": "20260902093000",
+      "name": "portfolio_import_acquisition"
+    },
+    {
+      "version": "20260903090000",
+      "name": "import_raw_freeze_hardening"
+    },
+    {
+      "version": "20260903120000",
+      "name": "open_banking_ais"
+    },
+    {
+      "version": "20260903120500",
+      "name": "open_banking_ais_fk_indexes"
+    },
+    {
+      "version": "20260903190000",
+      "name": "acquisition_integration_reconciliation"
+    },
+    {
+      "version": "20260903200000",
+      "name": "portfolio_findings_no_silent_upsert"
+    },
+    {
+      "version": "20260904093000",
+      "name": "portfolio_correction_audit"
+    },
+    {
+      "version": "20260905090000",
+      "name": "portfolio_correction_actor_and_expected"
+    },
+    {
+      "version": "20260909190841",
+      "name": "user_domain_declarations"
+    },
+    {
+      "version": "20260914191901",
+      "name": "verified_personal_session"
+    },
+    {
+      "version": "20260915064740",
+      "name": "personal_reference_isolation"
+    },
+    {
+      "version": "20260915180426",
+      "name": "personal_first_intent"
+    },
+    {
+      "version": "20260917071520",
+      "name": "personal_context"
+    },
+    {
+      "version": "20260924081000",
+      "name": "debt_outstanding_only"
+    },
+    {
+      "version": "20260924091000",
+      "name": "net_income_observation"
+    },
+    {
+      "version": "20260924120000",
+      "name": "net_income_correction"
+    },
+    {
+      "version": "20260924150000",
+      "name": "debt_outstanding_to_contract"
+    },
+    {
+      "version": "20260924160000",
+      "name": "income_correction_hardening"
+    },
+    {
+      "version": "20260924170000",
+      "name": "debt_adaptive_contract"
+    },
+    {
+      "version": "20260924180000",
+      "name": "debt_separate_insurance"
+    },
+    {
+      "version": "20260925090000",
+      "name": "debt_insurance_policy_details"
+    },
+    {
+      "version": "20260925100000",
+      "name": "debt_review_hardening"
+    },
+    {
+      "version": "20260925110000",
+      "name": "observation_dates_and_balance_rights"
+    },
+    {
+      "version": "20260925120000",
+      "name": "form_drafts"
+    },
+    {
+      "version": "20260925130000",
+      "name": "debt_events"
+    },
+    {
+      "version": "20260925140000",
+      "name": "debt_review_versions_and_guards"
+    },
+    {
+      "version": "20261012090000",
+      "name": "debt_contract_declared_deferral_and_actor"
+    },
+    {
+      "version": "20261012140000",
+      "name": "document_schedule_review"
+    },
+    {
+      "version": "20261015130044",
+      "name": "explicit_server_role_grants"
+    },
+    {
+      "version": "20261021153711",
+      "name": "document_field_confirmation_audit"
+    }
+  ]
+}

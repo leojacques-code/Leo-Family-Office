@@ -1,0 +1,12 @@
+[
+  {
+    "signatures": {
+      "b19_open": null,
+      "debt_event": null,
+      "save_draft": null,
+      "verify_session": null,
+      "b19_field_decision": "lfo_correct_document_extraction_field(uuid,jsonb)",
+      "document_validation": "lfo_validate_document_extraction(uuid,uuid)"
+    }
+  }
+]

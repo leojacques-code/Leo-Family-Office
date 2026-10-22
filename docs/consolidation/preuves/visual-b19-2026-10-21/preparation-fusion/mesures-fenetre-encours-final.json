@@ -1,0 +1,71 @@
+{
+  "fields": [
+    {
+      "font": "12px",
+      "height": 40,
+      "tag": "BUTTON",
+      "text": "Fermer",
+      "width": 40
+    },
+    {
+      "font": "12px",
+      "height": 63,
+      "tag": "LABEL",
+      "text": "Encours",
+      "width": 228
+    },
+    {
+      "font": "14px",
+      "height": 40,
+      "tag": "INPUT",
+      "text": "number",
+      "width": 228
+    },
+    {
+      "font": "12px",
+      "height": 63,
+      "tag": "LABEL",
+      "text": "Date d’observation",
+      "width": 228
+    },
+    {
+      "font": "14px",
+      "height": 40,
+      "tag": "INPUT",
+      "text": "date",
+      "width": 228
+    },
+    {
+      "font": "12px",
+      "height": 63,
+      "tag": "LABEL",
+      "text": "Note (optionnelle)",
+      "width": 468
+    },
+    {
+      "font": "14px",
+      "height": 40,
+      "tag": "INPUT",
+      "text": "text",
+      "width": 468
+    },
+    {
+      "font": "12px",
+      "height": 40,
+      "tag": "BUTTON",
+      "text": "Annuler",
+      "width": 73
+    },
+    {
+      "font": "12px",
+      "height": 40,
+      "tag": "BUTTON",
+      "text": "Enregistrer l’observation",
+      "width": 192
+    }
+  ],
+  "viewport": {
+    "height": 936,
+    "width": 1363
+  }
+}

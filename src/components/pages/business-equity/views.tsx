@@ -8,14 +8,18 @@ import type {
   BusinessEquityPosition,
   BusinessEquityPortfolio,
 } from "@/lib/engine/business-equity";
-import { computeDcf, multipleSensitivity } from "@/lib/engine/business-valuation";
+import {
+  computeDcf,
+  equityFromEnterprise,
+  multipleSensitivity,
+} from "@/lib/engine/business-valuation";
 import {
   projectBusinessHold,
   projectBusinessRaise,
   projectBusinessSale,
   BUSINESS_SALE_TAX_BASE_CONVENTION,
 } from "@/lib/engine/business-equity-scenarios";
-import { blocker, known, sumAll, unknown } from "@/lib/engine/business-equity-facts";
+import { blocker, known, unknown } from "@/lib/engine/business-equity-facts";
 import {
   BUSINESS_ADJUSTMENT_CATEGORY_LABELS,
   BUSINESS_AMOUNT_SCOPE_LABELS,
@@ -43,6 +47,8 @@ import {
   RatioValue,
   SensitivityTable,
   flagList,
+  formatDeclaredRate,
+  formatMultiple,
 } from "@/components/pages/business-equity/display";
 import {
   DeleteButton,
@@ -342,28 +348,25 @@ export function ValuationTab({ position, state, context, currency, busy, mutate,
     [dcf, position.business, currency, state.currencyRates],
   );
 
-  const toEquity = (enterprise: BusinessAmount) =>
-    sumAll([
-      enterprise,
-      {
-        value: valuation.grossDebt.value === null ? null : -valuation.grossDebt.value,
-        blockers: valuation.grossDebt.blockers,
-        flags: valuation.grossDebt.flags,
-      },
-      valuation.cash,
-      valuation.bridgeItemsTotal,
-    ]);
+  // Le pont EV → Equity est celui du moteur, pas une copie locale.
+  const toEquity = (enterprise: BusinessAmount) => equityFromEnterprise(enterprise, valuation);
 
   const central = valuation.multiple?.central ?? null;
+  // Seuls les multiples DÉCLARÉS forment des colonnes. Un bas ou un haut absent n'est pas
+  // remplacé par central ± 15 % : cette fourchette serait une convention que personne n'a
+  // fournie (CLAUDE.md §8), affichée comme une hypothèse de l'utilisateur.
+  const declaredMultiples =
+    central === null
+      ? []
+      : [valuation.multiple?.low ?? null, central, valuation.multiple?.high ?? null].filter(
+          (value): value is number => value !== null && Number.isFinite(value),
+        );
+  const boundsMissing = central !== null && declaredMultiples.length < 3;
   const sensitivity =
     valuation.adjustedMetric && central !== null
       ? multipleSensitivity({
           adjustedMetric: valuation.adjustedMetric,
-          multiples: [
-            valuation.multiple?.low ?? central * 0.85,
-            central,
-            valuation.multiple?.high ?? central * 1.15,
-          ],
+          multiples: declaredMultiples,
           metricShocks: [-0.1, 0, 0.1],
           toEquity,
           economicRate: position.ownership.economicRate,
@@ -413,7 +416,7 @@ export function ValuationTab({ position, state, context, currency, busy, mutate,
                 label="Multiple bas / central / haut"
                 value={
                   valuation.multiple
-                    ? `${(valuation.multiple.low ?? 0).toFixed(2)} × / ${(valuation.multiple.central ?? 0).toFixed(2)} × / ${(valuation.multiple.high ?? 0).toFixed(2)} ×`
+                    ? `${formatMultiple(valuation.multiple.low)} / ${formatMultiple(valuation.multiple.central)} / ${formatMultiple(valuation.multiple.high)}`
                     : "Sans objet"
                 }
               />
@@ -596,8 +599,8 @@ export function ValuationTab({ position, state, context, currency, busy, mutate,
                 label="Valeur terminale"
                 value={
                   dcf.terminalMethod === "PERPETUAL_GROWTH"
-                    ? `Croissance perpétuelle ${(100 * (dcf.terminalGrowth ?? 0)).toFixed(2)} %`
-                    : `Multiple de sortie ${(dcf.terminalExitMultiple ?? 0).toFixed(2)} × ${dcf.terminalExitMetric ?? ""}`
+                    ? `Croissance perpétuelle ${formatDeclaredRate(dcf.terminalGrowth)}`
+                    : `Multiple de sortie ${formatMultiple(dcf.terminalExitMultiple)} ${dcf.terminalExitMetric ?? ""}`
                 }
               />
               <FactRow
@@ -689,8 +692,13 @@ export function ValuationTab({ position, state, context, currency, busy, mutate,
             formatRow={(value) =>
               value === 0 ? "Central" : `${value > 0 ? "+" : ""}${(value * 100).toFixed(0)} %`
             }
-            formatColumn={(value) => `${value.toFixed(1)} ×`}
+            formatColumn={(value) => formatMultiple(value)}
           />
+          {boundsMissing ? (
+            <p className="muted-copy">
+              Multiples bas ou haut non déclarés : seules les colonnes déclarées sont calculées.
+            </p>
+          ) : null}
         </article>
       ) : null}
 

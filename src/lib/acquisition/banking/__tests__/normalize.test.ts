@@ -16,6 +16,7 @@ const BASE = {
   accountCurrency: "EUR",
   mappedAccountId: "acct-1",
   accountAmbiguous: false,
+  today: "2026-09-25",
 };
 
 function codes(issues: readonly { code: string }[]): string[] {
@@ -276,5 +277,28 @@ describe("normalisation d'un solde observé", () => {
     );
     expect(balance.balanceType).toBe("EXPECTED");
     expect(codes(balance.issues)).toContain("BANK_BALANCE_TYPE_NOT_SERVED");
+  });
+});
+
+describe("date d'opération future (arbitrage du 25 septembre 2026)", () => {
+  it("bloque une opération observée datée après aujourd'hui, sans la redater", () => {
+    const observation = normalizeObservation({
+      ...BASE,
+      today: "2026-08-18",
+      transaction: transaction({ operationDate: "2026-08-19" }),
+    });
+    expect(observation.status).toBe("BLOCKED");
+    expect(observation.operationDate).toBe("2026-08-19");
+    expect(codes(observation.issues)).toContain("BANK_OPERATION_DATE_IN_FUTURE");
+  });
+
+  it("accepte une opération datée d'aujourd'hui", () => {
+    const observation = normalizeObservation({
+      ...BASE,
+      today: "2026-08-19",
+      transaction: transaction({ operationDate: "2026-08-19" }),
+    });
+    expect(codes(observation.issues)).not.toContain("BANK_OPERATION_DATE_IN_FUTURE");
+    expect(observation.status).not.toBe("BLOCKED");
   });
 });

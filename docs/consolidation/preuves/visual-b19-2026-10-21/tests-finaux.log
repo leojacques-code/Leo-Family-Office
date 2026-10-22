@@ -1,0 +1,43 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> leo-family-office@1.0.0 test
+> vitest run --maxWorkers=4 --testTimeout=60000
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /workspace/scratch/1b59cbc42178/lfo
+
+ ❯ |node| src/lib/acquisition/documents/schedule/__tests__/read.test.ts (27 tests | 1 failed) 164ms
+     × lit echeancier-formules et garde ses réserves 35ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |node| src/lib/acquisition/documents/schedule/__tests__/read.test.ts > B19 — classeurs réellement déposés en recette > lit echeancier-formules et garde ses réserves
+AssertionError: expected [] to deeply equal ArrayContaining{…}
+
+- Expected
++ Received
+
+- ArrayContaining [
+-   "SCHEDULE_FORMULA_CELL",
+- ]
++ []
+
+ ❯ src/lib/acquisition/documents/schedule/__tests__/read.test.ts:53:27
+     51|     });
+     52|     expect(result.status).toBe("EXTRACTED");
+     53|     expect(codes(result)).toEqual(expect.arrayContaining(expectedCodes…
+       |                           ^
+     54|     expect(result.firstDueDate).toMatch(/^2026-/);
+     55|     if (name === "echeancier-partiel") expect(result.completeness).toB…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 186 passed (187)
+      Tests  1 failed | 2606 passed (2607)
+   Start at  12:22:47
+   Duration  216.80s (transform 50.56s, setup 59.51s, import 162.05s, tests 343.32s, environment 144.05s)
+

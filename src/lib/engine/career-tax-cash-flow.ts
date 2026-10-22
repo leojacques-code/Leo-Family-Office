@@ -18,6 +18,12 @@ export function toCareerTaxCashFlow(input: {
   tax: TaxMonthlyConsequence[];
   transactions: Transaction[];
   categories: ExpenseCategory[];
+  /**
+   * Devise du modèle mensuel. Un revenu observé dans une autre devise n'est jamais additionné
+   * sans conversion (FX ABSENT ≠ FX ÉGAL À 1) : le mois devient NOT_COMPUTABLE, et ses
+   * revenus restent retirés de la timeline pour ne pas être comptés une seconde fois.
+   */
+  reportingCurrency?: string;
 }): CareerTaxMonthlyConsequence[] {
   const categories = categoryIndex(input.categories);
   return input.tax.map((month) => {
@@ -27,6 +33,19 @@ export function toCareerTaxCashFlow(input: {
         transaction.provenance.kind === "ACTUAL" &&
         effectiveCashFlowKind(transaction, categories) === "INCOME",
     );
+    const reportingCurrency = input.reportingCurrency;
+    if (
+      reportingCurrency !== undefined &&
+      observed.some((transaction) => transaction.currency !== reportingCurrency)
+    ) {
+      return {
+        ...month,
+        cashFlowAmount: null,
+        cashFlowStatus: "NOT_COMPUTABLE",
+        observedTransactionIds: observed.map((transaction) => transaction.id),
+        flags: [...new Set([...month.flags, "OBSERVED_INCOME_FOREIGN_CURRENCY"])],
+      };
+    }
     if (observed.length > 0) {
       return {
         ...month,

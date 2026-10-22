@@ -35,6 +35,32 @@ function renderShell(section: string) {
 }
 
 describe("navigation du shell", () => {
+  it("affiche le contexte personnel déclaré sans France ou initiales fictives", () => {
+    render(
+      <AppShell
+        source={{ kind: "SECTION", state }}
+        section="today"
+        personalSetup={{
+          displayName: "Famille test",
+          firstIntent: null,
+          reportingCurrency: "EUR",
+          residenceCountry: "Suisse",
+          contextDate: "2026-09-01",
+        }}
+      />,
+    );
+    const profile = screen.getByRole("button", { name: /Famille test/ });
+    expect(profile).toHaveTextContent("EUR");
+    expect(profile).toHaveTextContent("Résidence déclarée : Suisse");
+    expect(profile).toHaveTextContent("01/09/2026");
+    expect(profile).not.toHaveTextContent("France");
+  });
+  it("ne remplace pas une résidence inconnue par France", () => {
+    renderShell("today");
+    expect(screen.getByRole("button", { name: /Mon espace/ })).toHaveTextContent(
+      "Résidence non renseignée",
+    );
+  });
   it("n'affiche que six entrées de premier niveau", () => {
     renderShell("today");
     const nav = screen.getByRole("navigation", { name: "Navigation principale" });
@@ -81,7 +107,7 @@ describe("sections sorties de la navigation principale", () => {
   it("place Paramètres dans le menu du profil, replié par défaut", async () => {
     const user = userEvent.setup();
     renderShell("today");
-    const trigger = screen.getByRole("button", { name: /Patrimoine personnel/ });
+    const trigger = screen.getByRole("button", { name: /Mon espace/ });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("link", { name: "Paramètres" })).toBeNull();
 
@@ -114,5 +140,25 @@ describe("sections sorties de la navigation principale", () => {
     // casser son URL en ferait une page perdue, ce que la section 7 ne demande pas.
     expect(screen.getByText("Canvas de advisor")).toBeVisible();
     expect(screen.getByText("Analyse Beyonder")).toBeVisible();
+  });
+});
+
+describe("B03 — aucune promesse d'isolation sans contexte de mutation", () => {
+  it.each([
+    "debt",
+    "cash-flow",
+    "investments",
+    "career",
+    "tax",
+    "business-equity",
+    "real-estate",
+    "goals",
+    "scenarios",
+    "decision-lab",
+  ])("%s reste dans le réel sans bascule trompeuse", (section) => {
+    const { container } = renderShell(section);
+    expect(screen.queryByRole("radiogroup", { name: "Mode d’affichage" })).toBeNull();
+    expect(screen.queryByText("Simulation isolée")).toBeNull();
+    expect(container.querySelector(".workstation")).toHaveAttribute("data-reality-mode", "REAL");
   });
 });

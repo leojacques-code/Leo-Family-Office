@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { assertPreviewSupabaseConfiguration } from "@/lib/preview-supabase-config";
 
 /**
  * Client serveur uniquement. La secret key (service role) contourne RLS ; elle ne doit
@@ -33,6 +34,7 @@ function required(name: string): string {
 let client: SupabaseClient | undefined;
 
 export function supabaseAdmin(): SupabaseClient {
+  assertPreviewSupabaseConfiguration();
   if (client) return client;
   const url = required("SUPABASE_URL");
   const key = required("SUPABASE_SECRET_KEY");
@@ -41,13 +43,4 @@ export function supabaseAdmin(): SupabaseClient {
     global: { headers: { "X-Client-Info": "leo-family-office" } },
   });
   return client;
-}
-
-/** UUID de l'utilisateur auth propriétaire des données (FK references auth.users(id)). */
-export function ownerId(): string {
-  const value = required("OWNER_USER_ID");
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
-    throw new Error("OWNER_USER_ID doit être l'UUID d'un utilisateur Supabase Auth.");
-  }
-  return value;
 }

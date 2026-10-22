@@ -1,0 +1,143 @@
+{
+  "staging_ref": "bjxhnwvomoznorijauyl",
+  "preview_origin": "https://leo-family-office-379zofqnf-lech1.vercel.app",
+  "deployment_sha": "c0331a20588428b1a03cd8aad61f9793b7d3cff2",
+  "method": "Real hosted application HTTP, Supabase Auth, PostgreSQL/PostgREST and Storage; NOT a browser UI acceptance",
+  "started_at": "2026-10-15T16:59:55.703Z",
+  "synthetic_only": true,
+  "steps": [
+    {
+      "name": "First account and first observed income through deployed API",
+      "status": "PASS",
+      "observed_balance_unchanged": true,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "A/B account isolation on deployed API and foreign account mutation rejection",
+      "status": "PASS",
+      "foreign_mutation_status": 422,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Adaptive debt contract with payment only and separate insurance persists",
+      "status": "PASS",
+      "debt_persisted": true,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Persistent draft stays outside canonical debt and rejects stale writes",
+      "status": "PASS",
+      "stale_status": 409,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Real CSV upload, private storage and all sixteen cells retained",
+      "status": "PASS",
+      "http_status": 201,
+      "cells": 16,
+      "completeness": "COMPLETE",
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Original CSV downloadable through one-minute signed Storage URL",
+      "status": "PASS",
+      "download_status": 200,
+      "bytes_match": true,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Foreign user cannot read review or original document or upload against A debt",
+      "status": "PASS",
+      "foreign_upload_status": 422,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Motivated correction, stale decision and immutable history",
+      "status": "PASS",
+      "motivated_correction": true,
+      "stale_status": 409,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "In-review redeposit refused without losing previous decisions",
+      "status": "PASS",
+      "http_status": 409,
+      "decisions_preserved": true,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "CSV validation persists, all checks pass, canonical schedule untouched (B20 deferred)",
+      "status": "PASS",
+      "checks": 5,
+      "canonical_schedule_rows": 0,
+      "run_status": "VALIDATED",
+      "reporting_correction": "Result status separated from successfully asserted document run status; no request replayed.",
+      "resumed_same_sha": true
+    },
+    {
+      "name": "Real XLSX ZIP upload and cell source coordinates preserved",
+      "status": "PASS",
+      "cells": 16,
+      "source_format": "XLSX",
+      "resumed_same_sha": true
+    },
+    {
+      "name": "XLSX explicit exclusion and reconsideration keep decision history",
+      "status": "PASS",
+      "decisions": 2,
+      "resumed_same_sha": true
+    },
+    {
+      "name": "XLSX final validation",
+      "status": "PASS",
+      "run_status": "VALIDATED",
+      "reporting_correction": "Result status separated from successfully asserted document run status; no request replayed.",
+      "resumed_same_sha": true
+    },
+    {
+      "name": "B19 unreadable cell cannot be confirmed or validated before correction",
+      "confirmation_refused": 400,
+      "validation_refused": 400,
+      "corrected_then_validated": true,
+      "status": "PASS",
+      "resumed_same_sha": true
+    },
+    {
+      "name": "B19 partial reading stays explicitly partial; separate explicit rejection allows retry",
+      "validated_reading_stays_partial": true,
+      "retry_allowed": true,
+      "history_preserved": true,
+      "status": "PASS"
+    },
+    {
+      "name": "B19 rejects unsupported PDF and invalid XLSX without inventing cells",
+      "pdf_status": 400,
+      "invalid_xlsx_status": 422,
+      "status": "PASS"
+    },
+    {
+      "name": "Debt event, amendment and reasoned cancellation persist without changing observed balance",
+      "amendment_persisted": true,
+      "cancellation_persisted": true,
+      "status": "PASS"
+    },
+    {
+      "name": "Today, Wealth and Cash Flow use the same persisted facts",
+      "observed_cash": 3000,
+      "observed_debt": 2000,
+      "canonical_net_worth": 1000,
+      "today_status": 200,
+      "html_pages": 3,
+      "browser_visual_certification": false,
+      "status": "PASS"
+    },
+    {
+      "name": "Logout invalidates replayed cookies and new login preserves reviews/drafts",
+      "replayed_cookie_status": 401,
+      "reviews_persist": true,
+      "drafts_persist": true,
+      "status": "PASS"
+    }
+  ],
+  "completed_at": "2026-10-15T17:03:14.084Z"
+}
